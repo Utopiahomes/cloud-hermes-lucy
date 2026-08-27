@@ -2,6 +2,6 @@
 repository=https://github.com/NousResearch/hermes-agent.git
 release=v2026.8.19
 version=0.20.5
-commit=b05e680e63d39d5a8e3ec0f5842a41d1c4209c03
+tag_object=b05e680e63d39d5a8e3ec0f5842a41d1c4209c03
+commit=fcbd1076a93841fa88855acce810e342a5b78101
 verified_at=2026-08-26
-

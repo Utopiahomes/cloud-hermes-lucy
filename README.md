@@ -24,7 +24,8 @@ No credentials, real conversations, or private memory belong in Git.
 The reviewed baseline is recorded in [`hermes.lock`](hermes.lock):
 
 - release: `v2026.8.19` / Hermes Agent `v0.20.5`
-- commit: `b05e680e63d39d5a8e3ec0f5842a41d1c4209c03`
+- source commit: `fcbd1076a93841fa88855acce810e342a5b78101`
+- annotated tag object: `b05e680e63d39d5a8e3ec0f5842a41d1c4209c03`
 
 Deployment must check out the recorded commit and verify it before use. Never
 deploy `latest`, `main`, or an unverified installer result.
@@ -37,6 +38,7 @@ See:
 - [`docs/threat-model.md`](docs/threat-model.md) for initial security controls
 - [`docs/decisions/0001-hermes-boundary.md`](docs/decisions/0001-hermes-boundary.md) for the upstream integration decision
 - [`docs/upstream-review.md`](docs/upstream-review.md) for pin provenance and the upgrade gate
+- [`docs/hermes-compatibility-spike.md`](docs/hermes-compatibility-spike.md) for the passing pinned-image integration evidence
 
 ## Local verification
 
