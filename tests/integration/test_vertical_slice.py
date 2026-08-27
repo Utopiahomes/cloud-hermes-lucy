@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, func, select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from lucy.approvals import ApprovalService
 from lucy.contracts import (
@@ -28,7 +30,9 @@ from lucy.db.models import (
     LifecycleRow,
     MemoryClaimRow,
     OperationRow,
+    WorkingContextRow,
 )
+from lucy.memory import MemoryService
 from lucy.recovery import RecoveryService
 from lucy.vertical_slice import ImportRequest, VerticalSliceService
 
@@ -45,7 +49,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.audit_events, lucy.approval_requests, "
+                "TRUNCATE lucy.working_contexts, lucy.memory_relationships, "
+                "lucy.memory_entities, lucy.audit_events, lucy.approval_requests, "
                 "lucy.budget_reservations, lucy.memory_claims, "
                 "lucy.evidence, lucy.operations, lucy.audit_head, lucy.lifecycle, "
                 "lucy.budget_accounts CASCADE"
@@ -245,3 +250,58 @@ def test_ambiguous_restart_degrades_without_retrying() -> None:
                 AuditEventRow.event_type == "operation.ambiguous"
             )
         ) == 1
+
+
+def test_three_layer_memory_projection_survives_restart_without_raw_archive() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    memory = MemoryService(sessions)
+    graph = memory.materialize_claim(imported.claim_id)
+
+    restarted = MemoryService(create_session_factory(DATABASE_URL))
+    replay = restarted.materialize_claim(imported.claim_id)
+    context = restarted.build_context("Earl Grey", persist=True)
+
+    assert replay.replayed is True
+    assert replay.relationship_id == graph.relationship_id
+    assert len(context.claims) == 1
+    projection = context.claims[0]
+    assert projection["object"] == "Earl Grey"
+    assert projection["evidence_id"] == str(imported.evidence_id)
+    assert "messages" not in projection
+    assert "content" not in projection
+    restarted.build_context("Earl Grey")
+    with sessions() as session:
+        assert session.scalar(select(func.count()).select_from(WorkingContextRow)) == 1
+
+
+def test_archive_evidence_rejects_mutation() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    with (
+        pytest.raises(DBAPIError, match="permission denied|append-only"),
+        sessions.begin() as session,
+    ):
+        session.execute(
+            update(EvidenceRow)
+            .where(EvidenceRow.id == imported.evidence_id)
+            .values(source="hermes")
+        )
+
+
+def test_concurrent_graph_materialization_creates_one_relationship() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+
+    def materialize() -> str:
+        result = MemoryService(create_session_factory(DATABASE_URL)).materialize_claim(
+            imported.claim_id
+        )
+        return str(result.relationship_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        ids = list(executor.map(lambda _: materialize(), range(2)))
+    assert len(set(ids)) == 1

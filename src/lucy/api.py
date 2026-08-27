@@ -1,6 +1,11 @@
-"""Minimal companion API; domain operations will be added by the vertical slice."""
+"""Narrow companion API exposed to the pinned Hermes runtime."""
+
+import os
 
 from fastapi import FastAPI
+
+from lucy.db import create_session_factory
+from lucy.memory import MemoryService
 
 app = FastAPI(title="Lucy Companion API", version="0.1.0")
 
@@ -12,7 +17,10 @@ def health() -> dict[str, str]:
 
 @app.get("/v1/memory/lookup", tags=["memory"])
 def read_only_memory_lookup(query: str) -> dict[str, object]:
-    """Compatibility-spike endpoint; it intentionally performs no mutation."""
+    """Return a bounded projection; never expose or mutate archive evidence."""
 
-    return {"query": query, "claims": [], "read_only": True}
-
+    database_url = os.getenv("LUCY_DATABASE_URL")
+    if database_url is None:
+        return {"query": query, "claims": [], "read_only": True}
+    context = MemoryService(create_session_factory(database_url)).build_context(query)
+    return {"query": query, "claims": context.claims, "read_only": True}

@@ -122,3 +122,37 @@ class ApprovalRequestRow(Base):
     actor_type: Mapped[str | None] = mapped_column(Text)
     decision_reason: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(BigInteger)
+
+
+class MemoryEntityRow(Base):
+    __tablename__ = "memory_entities"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(Text)
+    entity_type: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryRelationshipRow(Base):
+    __tablename__ = "memory_relationships"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    subject_entity_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_entities.id"))
+    object_entity_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_entities.id"))
+    predicate: Mapped[str] = mapped_column(Text)
+    claim_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_claims.id"), unique=True)
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"))
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(BigInteger)
+
+
+class WorkingContextRow(Base):
+    __tablename__ = "working_contexts"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    query: Mapped[str] = mapped_column(Text)
+    projection: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
