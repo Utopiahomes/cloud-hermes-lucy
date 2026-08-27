@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 def main() -> int:
@@ -14,8 +14,12 @@ def main() -> int:
         print("usage: lookup.py QUERY", file=sys.stderr)
         return 2
     base_url = os.environ.get("LUCY_COMPANION_URL", "http://lucy-api:8080").rstrip("/")
+    token = os.environ.get("LUCY_ADAPTER_TOKEN")
+    if not token:
+        raise RuntimeError("LUCY_ADAPTER_TOKEN is required")
     url = f"{base_url}/v1/memory/lookup?{urlencode({'query': sys.argv[1]})}"
-    with urlopen(url, timeout=5) as response:  # noqa: S310 - fixed private service base
+    request = Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urlopen(request, timeout=5) as response:  # noqa: S310 - fixed private service base
         payload = json.load(response)
     if payload.get("read_only") is not True:
         raise RuntimeError("companion response did not assert read-only behavior")
@@ -25,4 +29,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

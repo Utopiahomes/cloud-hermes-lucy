@@ -43,6 +43,7 @@ See:
 - [`docs/memory-layer-acceptance.md`](docs/memory-layer-acceptance.md) for archive, graph, and working-context acceptance
 - [`docs/rejoining-acceptance.md`](docs/rejoining-acceptance.md) for deterministic startup and degraded-mode acceptance
 - [`docs/memory-correction-acceptance.md`](docs/memory-correction-acceptance.md) for governed supersession and provenance history
+- [`docs/hermes-read-adapter-acceptance.md`](docs/hermes-read-adapter-acceptance.md) for the authenticated pinned-Hermes lookup boundary
 
 ## Local verification
 
