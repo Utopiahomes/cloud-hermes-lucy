@@ -1,0 +1,7 @@
+# Reviewed Hermes upstream. Update only through docs/upstream-review.md.
+repository=https://github.com/NousResearch/hermes-agent.git
+release=v2026.8.19
+version=0.20.5
+commit=b05e680e63d39d5a8e3ec0f5842a41d1c4209c03
+verified_at=2026-08-26
+

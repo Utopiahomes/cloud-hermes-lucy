@@ -1,0 +1,34 @@
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+secrets/
+
+# Runtime state and private data
+data/
+runtime/
+archives/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# JavaScript
+node_modules/
+dist/
+coverage/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
