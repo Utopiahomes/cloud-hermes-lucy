@@ -22,6 +22,7 @@ from lucy.contracts import (
     RejoiningState,
 )
 from lucy.contracts.v1 import ConversationEvidenceV1, ConversationMessageV1
+from lucy.corrections import CorrectionService
 from lucy.db import create_session_factory
 from lucy.db.models import (
     ApprovalRequestRow,
@@ -30,6 +31,8 @@ from lucy.db.models import (
     EvidenceRow,
     LifecycleRow,
     MemoryClaimRow,
+    MemoryCorrectionRow,
+    MemoryRelationshipRow,
     OperationRow,
     StartupRunRow,
     WorkingContextRow,
@@ -52,7 +55,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.startup_runs, lucy.working_contexts, lucy.memory_relationships, "
+                "TRUNCATE lucy.memory_corrections, lucy.startup_runs, lucy.working_contexts, "
+                "lucy.memory_relationships, "
                 "lucy.memory_entities, lucy.audit_events, lucy.approval_requests, "
                 "lucy.budget_reservations, lucy.memory_claims, "
                 "lucy.evidence, lucy.operations, lucy.audit_head, lucy.lifecycle, "
@@ -82,11 +86,15 @@ def reset_synthetic_database() -> None:
 
 
 def _request() -> ImportRequest:
+    return _tea_request("acceptance:synthetic-conversation:1", "Earl Grey", "synthetic-1")
+
+
+def _tea_request(idempotency_key: str, tea: str, message_id: str) -> ImportRequest:
     occurred_at = datetime(2026, 8, 26, 12, tzinfo=UTC)
     message = ConversationMessageV1(
-        message_id="synthetic-1",
+        message_id=message_id,
         role="user",
-        content="My favorite tea is Earl Grey.",
+        content=f"My favorite tea is {tea}.",
         occurred_at=occurred_at,
     )
     messages = [message.model_dump(mode="json")]
@@ -94,7 +102,7 @@ def _request() -> ImportRequest:
         json.dumps(messages, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return ImportRequest(
-        idempotency_key="acceptance:synthetic-conversation:1",
+        idempotency_key=idempotency_key,
         evidence=ConversationEvidenceV1(
             evidence_id=uuid4(),
             source="synthetic",
@@ -105,7 +113,7 @@ def _request() -> ImportRequest:
         ),
         subject="user",
         predicate="favorite_tea",
-        object="Earl Grey",
+        object=tea,
         confidence=0.9,
         reserve_microusd=5000,
         settle_microusd=3200,
@@ -392,3 +400,47 @@ def test_rejoining_detects_broken_audit_head_without_extending_chain() -> None:
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(AuditEventRow)) == before
         assert session.scalar(select(func.count()).select_from(StartupRunRow)) == 1
+
+
+def test_approved_correction_supersedes_without_erasing_history() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    first = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    MemoryService(sessions).materialize_claim(first.claim_id)
+    with sessions.begin() as session:
+        lifecycle = session.get(LifecycleRow, True)
+        assert lifecycle is not None
+        lifecycle.state = "offline"
+    replacement = VerticalSliceService(sessions).import_synthetic_conversation(
+        _tea_request("acceptance:synthetic-conversation:2", "English Breakfast", "synthetic-2")
+    )
+    correction_service = CorrectionService(sessions)
+    proposed = correction_service.propose(
+        idempotency_key="correction:tea:1", old_claim_id=first.claim_id,
+        new_evidence_id=replacement.evidence_id,
+        replacement_object="English Breakfast", confidence=0.95,
+    )
+    with pytest.raises(PermissionError):
+        correction_service.apply(proposed.correction_id)
+    ApprovalService(sessions).decide(
+        idempotency_key="correction:tea:decision", approval_id=proposed.approval_id,
+        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        actor_type=HumanActorType.OWNER,
+    )
+    applied = correction_service.apply(proposed.correction_id)
+    replay = CorrectionService(create_session_factory(DATABASE_URL)).apply(
+        proposed.correction_id
+    )
+    assert applied.status == "applied" and replay.replayed is True
+    context = MemoryService(sessions).build_context("tea")
+    assert [claim["object"] for claim in context.claims] == ["English Breakfast"]
+    with sessions() as session:
+        old = session.get(MemoryClaimRow, first.claim_id)
+        new = session.get(MemoryClaimRow, applied.new_claim_id)
+        correction = session.get(MemoryCorrectionRow, proposed.correction_id)
+        relationship = session.scalar(select(MemoryRelationshipRow).where(
+            MemoryRelationshipRow.claim_id == first.claim_id))
+        assert old is not None and old.status == "superseded"
+        assert new is not None and new.supersedes_claim_id == old.id
+        assert correction is not None and correction.new_evidence_id == replacement.evidence_id
+        assert relationship is not None and relationship.valid_to is not None

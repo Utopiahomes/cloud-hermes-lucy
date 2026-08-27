@@ -166,3 +166,19 @@ class StartupRunRow(Base):
     checks: Mapped[dict[str, Any]] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryCorrectionRow(Base):
+    __tablename__ = "memory_corrections"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    old_claim_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_claims.id"))
+    new_evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"))
+    replacement_object: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float)
+    approval_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.approval_requests.id"), unique=True)
+    status: Mapped[str] = mapped_column(Text)
+    new_claim_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.memory_claims.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

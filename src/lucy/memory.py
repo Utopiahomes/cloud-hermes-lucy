@@ -98,6 +98,7 @@ class MemoryService:
                 .join(MemoryClaimRow, MemoryClaimRow.id == MemoryRelationshipRow.claim_id)
                 .join(EvidenceRow, EvidenceRow.id == MemoryRelationshipRow.evidence_id)
                 .where(
+                    MemoryClaimRow.status != "superseded",
                     or_(
                         MemoryClaimRow.subject.ilike(pattern),
                         MemoryClaimRow.predicate.ilike(pattern),
