@@ -41,6 +41,7 @@ See:
 - [`docs/hermes-compatibility-spike.md`](docs/hermes-compatibility-spike.md) for the passing pinned-image integration evidence
 - [`docs/control-layer-acceptance.md`](docs/control-layer-acceptance.md) for the strict tool and durable approval/recovery invariants
 - [`docs/memory-layer-acceptance.md`](docs/memory-layer-acceptance.md) for archive, graph, and working-context acceptance
+- [`docs/rejoining-acceptance.md`](docs/rejoining-acceptance.md) for deterministic startup and degraded-mode acceptance
 
 ## Local verification
 

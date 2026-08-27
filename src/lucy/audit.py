@@ -49,3 +49,31 @@ def append_audit(
     )
     head.last_sequence = sequence
     head.last_hash = event_hash
+
+
+def verify_audit_chain(session: Session) -> str | None:
+    """Return a diagnostic on corruption, otherwise ``None``."""
+    head = session.scalar(select(AuditHeadRow).where(AuditHeadRow.singleton))
+    if head is None:
+        return "audit_head_missing"
+    previous = "0" * 64
+    expected_sequence = 1
+    events = session.scalars(select(AuditEventRow).order_by(AuditEventRow.sequence))
+    for event in events:
+        if event.sequence != expected_sequence:
+            return f"audit_sequence_gap:{expected_sequence}"
+        if event.previous_hash != previous:
+            return f"audit_previous_hash_mismatch:{event.sequence}"
+        material = {
+            "sequence": event.sequence, "operation_id": str(event.operation_id),
+            "event_type": event.event_type, "occurred_at": event.occurred_at.isoformat(),
+            "payload": event.payload, "previous_hash": event.previous_hash,
+        }
+        computed = hashlib.sha256(_canonical_json(material).encode()).hexdigest()
+        if event.event_hash != computed:
+            return f"audit_event_hash_mismatch:{event.sequence}"
+        previous = event.event_hash
+        expected_sequence += 1
+    if head.last_sequence != expected_sequence - 1 or head.last_hash != previous:
+        return "audit_head_mismatch"
+    return None

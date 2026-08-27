@@ -19,6 +19,7 @@ from lucy.contracts import (
     ApprovalStatus,
     HumanActorType,
     OperationOutcome,
+    RejoiningState,
 )
 from lucy.contracts.v1 import ConversationEvidenceV1, ConversationMessageV1
 from lucy.db import create_session_factory
@@ -30,10 +31,12 @@ from lucy.db.models import (
     LifecycleRow,
     MemoryClaimRow,
     OperationRow,
+    StartupRunRow,
     WorkingContextRow,
 )
 from lucy.memory import MemoryService
 from lucy.recovery import RecoveryService
+from lucy.rejoining import RejoiningService
 from lucy.vertical_slice import ImportRequest, VerticalSliceService
 
 DATABASE_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -49,7 +52,7 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.working_contexts, lucy.memory_relationships, "
+                "TRUNCATE lucy.startup_runs, lucy.working_contexts, lucy.memory_relationships, "
                 "lucy.memory_entities, lucy.audit_events, lucy.approval_requests, "
                 "lucy.budget_reservations, lucy.memory_claims, "
                 "lucy.evidence, lucy.operations, lucy.audit_head, lucy.lifecycle, "
@@ -305,3 +308,87 @@ def test_concurrent_graph_materialization_creates_one_relationship() -> None:
     with ThreadPoolExecutor(max_workers=2) as executor:
         ids = list(executor.map(lambda _: materialize(), range(2)))
     assert len(set(ids)) == 1
+
+
+HERMES_COMMIT = "fcbd1076a93841fa88855acce810e342a5b78101"
+
+
+def test_rejoining_reaches_ready_and_can_restart_from_ready() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    service = RejoiningService(sessions, expected_hermes_commit=HERMES_COMMIT)
+    first = service.run(observed_hermes_commit=HERMES_COMMIT)
+    second = RejoiningService(
+        create_session_factory(DATABASE_URL), expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit=HERMES_COMMIT)
+    assert first.state == RejoiningState.READY
+    assert second.state == RejoiningState.READY
+    assert all(value == "ok" for value in second.checks.values())
+
+
+def test_rejoining_pin_mismatch_forces_degraded() -> None:
+    assert DATABASE_URL is not None
+    result = RejoiningService(
+        create_session_factory(DATABASE_URL), expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit="0" * 40)
+    assert result.state == RejoiningState.DEGRADED
+    assert result.checks["hermes_pin"] == "mismatch"
+
+
+def test_rejoining_invalid_budget_forces_degraded() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    with sessions.begin() as session:
+        budget = session.get(BudgetAccountRow, "model.daily")
+        assert budget is not None
+        budget.limit_microusd = 1
+        budget.spent_microusd = 2
+    result = RejoiningService(
+        sessions, expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit=HERMES_COMMIT)
+    assert result.state == RejoiningState.DEGRADED
+    assert result.checks["budgets"] == "invalid"
+
+
+def test_rejoining_quarantines_pending_operation_without_retry() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    pending_id = uuid4()
+    with sessions.begin() as session:
+        session.add(
+            OperationRow(
+                id=pending_id, idempotency_key="startup:uncertain-effect",
+                outcome=OperationOutcome.PENDING, result=None,
+                created_at=datetime.now(UTC), completed_at=None,
+            )
+        )
+    result = RejoiningService(
+        sessions, expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit=HERMES_COMMIT)
+    assert result.state == RejoiningState.DEGRADED
+    assert result.ambiguous_count == 1
+    with sessions() as session:
+        operation = session.get(OperationRow, pending_id)
+        assert operation is not None
+        assert operation.outcome == OperationOutcome.AMBIGUOUS
+        assert operation.result is not None and operation.result["retried"] is False
+
+
+def test_rejoining_detects_broken_audit_head_without_extending_chain() -> None:
+    assert DATABASE_URL is not None and OWNER_DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    with sessions() as session:
+        before = session.scalar(select(func.count()).select_from(AuditEventRow))
+    owner = create_engine(OWNER_DATABASE_URL)
+    with owner.begin() as connection:
+        connection.execute(text("UPDATE lucy.audit_head SET last_hash = repeat('f', 64)"))
+    owner.dispose()
+    result = RejoiningService(
+        sessions, expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit=HERMES_COMMIT)
+    assert result.state == RejoiningState.DEGRADED
+    assert result.checks["audit_chain"] == "audit_head_mismatch"
+    with sessions() as session:
+        assert session.scalar(select(func.count()).select_from(AuditEventRow)) == before
+        assert session.scalar(select(func.count()).select_from(StartupRunRow)) == 1
