@@ -17,6 +17,7 @@ archives/
 __pycache__/
 *.py[cod]
 .venv/
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -31,4 +32,8 @@ coverage/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local test and tool caches
+.coverage
+htmlcov/
 

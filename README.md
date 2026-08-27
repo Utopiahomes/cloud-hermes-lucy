@@ -11,8 +11,13 @@ This repository intentionally does not fork or vendor Hermes.
 
 ## Status
 
-The project is in architecture/bootstrap. No credentials, conversations, or
-private memory belong in Git.
+The first PostgreSQL-backed vertical slice is implemented and tested. It imports
+one synthetic conversation, verifies and preserves immutable evidence, creates a
+provenance-linked provisional memory, advances the first Rejoining transition,
+reserves and settles a model budget, records a tamper-evident audit chain, and
+replays the durable result exactly once after a simulated process restart.
+
+No credentials, real conversations, or private memory belong in Git.
 
 ## Upstream pin
 
@@ -33,6 +38,14 @@ See:
 - [`docs/decisions/0001-hermes-boundary.md`](docs/decisions/0001-hermes-boundary.md) for the upstream integration decision
 - [`docs/upstream-review.md`](docs/upstream-review.md) for pin provenance and the upgrade gate
 
+## Local verification
+
+The development database is PostgreSQL 16 with pgvector, pinned by manifest
+digest in `compose.yaml` and `deploy/images.lock`. Copy `.env.example` to `.env`,
+start `postgres`, apply the Alembic migration, and run the tests with both the
+restricted application URL and owner-only test-reset URL set. The integration
+database contains synthetic data only.
+
 ## Planned layout
 
 ```text
@@ -43,4 +56,3 @@ plugins/               narrow Hermes adapters; no core patches
 deploy/                pinned, reproducible deployment definitions
 docs/                  architecture, security, operations, decisions
 ```
-

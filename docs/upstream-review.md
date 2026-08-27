@@ -29,3 +29,7 @@ The standard Hermes installer tracks upstream behavior and is not itself the pin
 A deployment script must verify that the checked-out `HEAD` exactly equals the
 commit in `hermes.lock` before starting Hermes.
 
+Container provenance—including the human-readable tags, multi-architecture
+manifest digests, and exact Linux AMD64 manifests—is recorded in
+`deploy/images.lock`. Upgrades update source and image pins together and retain
+the prior digests as the rollback target in deployment history.

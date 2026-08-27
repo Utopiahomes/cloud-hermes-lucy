@@ -1,0 +1,20 @@
+# Image provenance verified 2026-08-26. Target: linux/amd64.
+
+[postgres]
+image=docker.io/pgvector/pgvector
+tag=pg16
+manifest_digest=sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+linux_amd64_digest=sha256:eac621400b7b7ff52493883e41e930e3d104695fea5b68cc0c42370cf7880067
+
+[python]
+image=docker.io/library/python
+tag=3.12.11-slim
+manifest_digest=sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+linux_amd64_digest=sha256:0b29ab9e420820f53d1cd5ce0157dfe07bea8a7cff5b4754d6d95c07b0e5bc47
+
+[hermes]
+image=docker.io/nousresearch/hermes-agent
+tag=v2026.8.19
+manifest_digest=sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
+linux_amd64_digest=sha256:f3cba6abf5ed80d47a271498d663ace5dda87f45000552afb8be8370a35df1b5
+source_commit=b05e680e63d39d5a8e3ec0f5842a41d1c4209c03
