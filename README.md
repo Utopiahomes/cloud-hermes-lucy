@@ -39,6 +39,7 @@ See:
 - [`docs/decisions/0001-hermes-boundary.md`](docs/decisions/0001-hermes-boundary.md) for the upstream integration decision
 - [`docs/upstream-review.md`](docs/upstream-review.md) for pin provenance and the upgrade gate
 - [`docs/hermes-compatibility-spike.md`](docs/hermes-compatibility-spike.md) for the passing pinned-image integration evidence
+- [`docs/control-layer-acceptance.md`](docs/control-layer-acceptance.md) for the strict tool and durable approval/recovery invariants
 
 ## Local verification
 

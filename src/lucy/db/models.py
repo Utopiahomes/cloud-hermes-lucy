@@ -104,3 +104,21 @@ class AuditEventRow(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     previous_hash: Mapped[str] = mapped_column(String(64))
     event_hash: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+class ApprovalRequestRow(Base):
+    __tablename__ = "approval_requests"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    request_operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    action_type: Mapped[str] = mapped_column(Text)
+    action_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(Text)
+    actor_type: Mapped[str | None] = mapped_column(Text)
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(BigInteger)

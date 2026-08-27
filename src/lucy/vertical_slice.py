@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from lucy.audit import append_audit
 from lucy.contracts import ConversationEvidenceV1, OperationOutcome, RejoiningState
 from lucy.db.models import (
-    AuditEventRow,
-    AuditHeadRow,
     BudgetAccountRow,
     BudgetReservationRow,
     EvidenceRow,
@@ -49,43 +45,6 @@ class ImportResult(BaseModel):
     replayed: bool = False
 
 
-def _canonical_json(value: dict[str, Any]) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _append_audit(
-    session: Session, operation_id: UUID, event_type: str, payload: dict[str, Any]
-) -> None:
-    head = session.scalar(select(AuditHeadRow).where(AuditHeadRow.singleton).with_for_update())
-    if head is None:
-        raise RuntimeError("audit head is missing")
-    sequence = head.last_sequence + 1
-    occurred_at = datetime.now(UTC)
-    material = {
-        "sequence": sequence,
-        "operation_id": str(operation_id),
-        "event_type": event_type,
-        "occurred_at": occurred_at.isoformat(),
-        "payload": payload,
-        "previous_hash": head.last_hash,
-    }
-    event_hash = hashlib.sha256(_canonical_json(material).encode()).hexdigest()
-    session.add(
-        AuditEventRow(
-            id=uuid4(),
-            sequence=sequence,
-            operation_id=operation_id,
-            event_type=event_type,
-            occurred_at=occurred_at,
-            payload=payload,
-            previous_hash=head.last_hash,
-            event_hash=event_hash,
-        )
-    )
-    head.last_sequence = sequence
-    head.last_hash = event_hash
-
-
 class VerticalSliceService:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -117,7 +76,7 @@ class VerticalSliceService:
             )
             session.add(operation)
             session.flush()
-            _append_audit(session, operation_id, "operation.started", {})
+            append_audit(session, operation_id, "operation.started", {})
 
             evidence = EvidenceRow(
                 id=request.evidence.evidence_id,
@@ -129,7 +88,7 @@ class VerticalSliceService:
                 operation_id=operation_id,
             )
             session.add(evidence)
-            _append_audit(
+            append_audit(
                 session,
                 operation_id,
                 "evidence.preserved",
@@ -150,7 +109,7 @@ class VerticalSliceService:
                     created_at=now,
                 )
             )
-            _append_audit(
+            append_audit(
                 session,
                 operation_id,
                 "memory.provisional_claim_created",
@@ -167,7 +126,7 @@ class VerticalSliceService:
             lifecycle.state = RejoiningState.REJOINING
             lifecycle.version += 1
             lifecycle.updated_at = now
-            _append_audit(
+            append_audit(
                 session,
                 operation_id,
                 "lifecycle.transitioned",
@@ -199,7 +158,7 @@ class VerticalSliceService:
                     settled_at=None,
                 )
             )
-            _append_audit(
+            append_audit(
                 session,
                 operation_id,
                 "budget.reserved",
@@ -212,7 +171,7 @@ class VerticalSliceService:
             budget.spent_microusd += request.settle_microusd
             reservation.settled_microusd = request.settle_microusd
             reservation.settled_at = now
-            _append_audit(
+            append_audit(
                 session,
                 operation_id,
                 "budget.settled",
@@ -229,6 +188,5 @@ class VerticalSliceService:
             operation.outcome = OperationOutcome.SUCCEEDED
             operation.result = result.model_dump(mode="json")
             operation.completed_at = now
-            _append_audit(session, operation_id, "operation.succeeded", operation.result)
+            append_audit(session, operation_id, "operation.succeeded", operation.result)
             return result
-

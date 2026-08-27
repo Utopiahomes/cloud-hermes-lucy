@@ -36,6 +36,23 @@ class OperationOutcome(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+    EXPIRED = "expired"
+
+
+class ApprovalDecision(StrEnum):
+    APPROVE = "approve"
+    DENY = "deny"
+
+
+class HumanActorType(StrEnum):
+    OWNER = "human_owner"
+    DELEGATE = "human_delegate"
+
+
 class ConversationMessageV1(StrictContract):
     message_id: NonBlank
     role: Literal["user", "assistant", "system", "tool"]
@@ -100,3 +117,24 @@ class AuditEventV1(StrictContract):
     payload: dict[str, Any]
     previous_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     event_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class ApprovalRequestV1(StrictContract):
+    contract_version: ContractVersion = "1"
+    approval_id: UUID
+    action_type: NonBlank
+    action_payload: dict[str, Any]
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    requested_at: datetime
+    decided_at: datetime | None = None
+    decided_by: NonBlank | None = None
+    decision_reason: str | None = None
+
+
+class ApprovalDecisionV1(StrictContract):
+    contract_version: ContractVersion = "1"
+    approval_id: UUID
+    decision: ApprovalDecision
+    decided_by: NonBlank
+    actor_type: HumanActorType
+    reason: str | None = None

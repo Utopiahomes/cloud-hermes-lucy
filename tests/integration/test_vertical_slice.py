@@ -7,11 +7,29 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import create_engine, func, select, text
 
+from lucy.approvals import ApprovalService
+from lucy.contracts import (
+    ApprovalDecision,
+    ApprovalDecisionV1,
+    ApprovalStatus,
+    HumanActorType,
+    OperationOutcome,
+)
 from lucy.contracts.v1 import ConversationEvidenceV1, ConversationMessageV1
 from lucy.db import create_session_factory
-from lucy.db.models import AuditEventRow, BudgetAccountRow, EvidenceRow, MemoryClaimRow
+from lucy.db.models import (
+    ApprovalRequestRow,
+    AuditEventRow,
+    BudgetAccountRow,
+    EvidenceRow,
+    LifecycleRow,
+    MemoryClaimRow,
+    OperationRow,
+)
+from lucy.recovery import RecoveryService
 from lucy.vertical_slice import ImportRequest, VerticalSliceService
 
 DATABASE_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -27,7 +45,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.audit_events, lucy.budget_reservations, lucy.memory_claims, "
+                "TRUNCATE lucy.audit_events, lucy.approval_requests, "
+                "lucy.budget_reservations, lucy.memory_claims, "
                 "lucy.evidence, lucy.operations, lucy.audit_head, lucy.lifecycle, "
                 "lucy.budget_accounts CASCADE"
             )
@@ -125,3 +144,104 @@ def test_import_restart_and_exactly_once_recovery() -> None:
             ).hexdigest()
             assert event.event_hash == recomputed
             previous = event.event_hash
+
+
+def test_human_approval_is_durable_and_idempotent() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    service = ApprovalService(sessions)
+    requested = service.request(
+        idempotency_key="approval:request:1",
+        action_type="telegram.send",
+        action_payload={"recipient": "synthetic-only"},
+    )
+    replay = service.request(
+        idempotency_key="approval:request:1",
+        action_type="telegram.send",
+        action_payload={"recipient": "synthetic-only"},
+    )
+    assert replay.replayed is True
+    assert replay.approval_id == requested.approval_id
+
+    decided = service.decide(
+        idempotency_key="approval:decision:1",
+        approval_id=requested.approval_id,
+        decision=ApprovalDecision.APPROVE,
+        decided_by="synthetic-owner",
+        actor_type=HumanActorType.OWNER,
+        reason="integration acceptance",
+    )
+    decision_replay = service.decide(
+        idempotency_key="approval:decision:1",
+        approval_id=requested.approval_id,
+        decision=ApprovalDecision.APPROVE,
+        decided_by="synthetic-owner",
+        actor_type=HumanActorType.OWNER,
+    )
+    assert decided.status == ApprovalStatus.APPROVED
+    assert decision_replay.replayed is True
+    with pytest.raises(RuntimeError, match="conflicting status"):
+        service.decide(
+            idempotency_key="approval:decision:conflict",
+            approval_id=requested.approval_id,
+            decision=ApprovalDecision.DENY,
+            decided_by="synthetic-owner",
+            actor_type=HumanActorType.OWNER,
+        )
+    with sessions() as session:
+        row = session.get(ApprovalRequestRow, requested.approval_id)
+        assert row is not None
+        assert row.actor_type == HumanActorType.OWNER
+        assert row.version == 1
+
+
+def test_model_actor_is_rejected_by_contract() -> None:
+    with pytest.raises(ValidationError):
+        TypeAdapter(ApprovalDecisionV1).validate_python(
+            {
+                "approval_id": str(uuid4()),
+                "decision": "approve",
+                "decided_by": "model-instance",
+                "actor_type": "model",
+            }
+        )
+
+
+def test_ambiguous_restart_degrades_without_retrying() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    pending_id = uuid4()
+    with sessions.begin() as session:
+        lifecycle = session.get(LifecycleRow, True)
+        assert lifecycle is not None
+        lifecycle.state = "rejoining"
+        lifecycle.version = 1
+        session.add(
+            OperationRow(
+                id=pending_id,
+                idempotency_key="external:synthetic:uncertain",
+                outcome=OperationOutcome.PENDING,
+                result=None,
+                created_at=datetime.now(UTC),
+                completed_at=None,
+            )
+        )
+
+    restarted = RecoveryService(create_session_factory(DATABASE_URL))
+    assert restarted.mark_ambiguous_pending() == 1
+    assert restarted.mark_ambiguous_pending() == 0
+    with sessions() as session:
+        operation = session.get(OperationRow, pending_id)
+        lifecycle = session.get(LifecycleRow, True)
+        assert operation is not None and lifecycle is not None
+        assert operation.outcome == OperationOutcome.AMBIGUOUS
+        assert operation.result == {
+            "reason": "outcome_unknown_after_restart",
+            "retried": False,
+        }
+        assert lifecycle.state == "degraded"
+        assert session.scalar(
+            select(func.count()).select_from(AuditEventRow).where(
+                AuditEventRow.event_type == "operation.ambiguous"
+            )
+        ) == 1

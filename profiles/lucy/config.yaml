@@ -1,4 +1,67 @@
 _config_version: 38
 
+toolsets:
+  - clarify
+
+platform_toolsets:
+  cli:
+    - clarify
+  telegram:
+    - clarify
+
+known_plugin_toolsets:
+  cli:
+    - a2a
+    - spotify
+  telegram:
+    - a2a
+    - spotify
+
+known_builtin_toolsets:
+  cli: &known_builtin_toolsets
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - context_engine
+    - cronjob
+    - delegation
+    - discord
+    - discord_admin
+    - file
+    - homeassistant
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - spotify
+    - stt
+    - terminal
+    - todo
+    - tts
+    - video
+    - video_gen
+    - vision
+    - web
+    - x_search
+    - yuanbao
+  telegram: *known_builtin_toolsets
+
 terminal:
   cwd: /opt/data
+
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+  denial_breaker_threshold: 3
+  mcp_reload_confirm: true
+  destructive_slash_confirm: true
+
+security:
+  allow_lazy_installs: false
+
+unauthorized_dm_behavior: ignore
+
+command_allowlist: []
