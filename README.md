@@ -17,6 +17,11 @@ provenance-linked provisional memory, advances the first Rejoining transition,
 reserves and settles a model budget, records a tamper-evident audit chain, and
 replays the durable result exactly once after a simulated process restart.
 
+The guarded pinned-Hermes Telegram gateway is also live: an allowlisted message
+completed through Lucy's automatic OpenRouter budget bridge, the supervised
+gateway restarted, and a post-restart message completed exactly once with no
+stranded reservation or duplicate charge.
+
 No credentials, real conversations, or private memory belong in Git.
 
 ## Upstream pin

@@ -64,8 +64,8 @@ gets exactly one budgeted response, an unknown account gets no response, a
 restart preserves the session boundary without duplicate delivery, and no
 secret appears in committed files or application logs.
 
-This document records the ready-to-activate boundary; it does not claim the live
-Telegram acceptance until those credential-dependent checks have run.
+This document records both the guarded deployment boundary and its completed
+live acceptance.
 
 ## Live evidence
 
@@ -85,5 +85,20 @@ execution.
 
 Restarting the supervised gateway preserved the completed action exactly once:
 the model action count, spent total, and zero-reserved balance were unchanged
-after the process returned. A final post-restart inbound message remains the
-last interactive transport check before calling the live acceptance complete.
+after the process returned. The allowlisted user then sent a new post-restart
+sentinel and received the exact expected response:
+
+```text
+LUCY_AFTER_RESTART_OK
+```
+
+That turn created exactly one additional succeeded action, reserved and released
+5,000 micro-USD, reported 3,248 input tokens, 24 output tokens, and 8 reasoning
+tokens, and settled 101 micro-USD. The model action count advanced once and the
+reserved balance returned to zero.
+
+The live Telegram transport, supervised restart, per-call routing enforcement,
+durable settlement, and no-duplicate recovery checks therefore pass. The
+unauthorized-user path is enforced by a nonempty numeric allowlist, credential
+preflight, and `unauthorized_dm_behavior: ignore`; it was not exercised using a
+second real Telegram identity merely for this acceptance run.
