@@ -11,7 +11,8 @@ secret-free Lucy profile; no Hermes core source is patched.
 The accepted sequence is:
 
 1. Hermes' request middleware injects or clamps the wire-level output limit to
-   1,024 tokens.
+   1,024 tokens and injects Lucy's canonical OpenRouter routing policy into the
+   effective outgoing request.
 2. Execution middleware revalidates the fixed model, custom-provider identity,
    official OpenRouter endpoint, output cap, ZDR controls, parameter support,
    and price ceilings.

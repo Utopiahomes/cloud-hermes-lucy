@@ -180,6 +180,25 @@ def test_request_middleware_injects_and_clamps_output_cap() -> None:
     assert missing["max_tokens"] == 1024
     assert oversized["max_tokens"] == 1024
     assert smaller["max_completion_tokens"] == 200
+    expected_policy = _request()["extra_body"]["provider"]
+    assert missing["extra_body"]["provider"] == expected_policy
+    assert oversized["extra_body"]["provider"] == expected_policy
+    assert smaller["extra_body"]["provider"] == expected_policy
+
+
+def test_request_middleware_replaces_unapproved_provider_policy() -> None:
+    plugin = _load_plugin()
+    request = {
+        "messages": [],
+        "extra_body": {
+            "provider": {"zdr": False, "max_price": {"completion": 999}},
+            "unrelated": "preserved",
+        },
+    }
+    bounded = plugin._request_middleware(request)["request"]
+    assert bounded["extra_body"]["provider"] == _request()["extra_body"]["provider"]
+    assert bounded["extra_body"]["unrelated"] == "preserved"
+    assert request["extra_body"]["provider"]["zdr"] is False
 
 
 def test_middleware_blocks_request_without_price_policy(

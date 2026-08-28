@@ -66,3 +66,24 @@ secret appears in committed files or application logs.
 
 This document records the ready-to-activate boundary; it does not claim the live
 Telegram acceptance until those credential-dependent checks have run.
+
+## Live evidence
+
+On 2026-08-28 the guarded profile authenticated to Telegram, accepted one
+allowlisted direct message, and returned a model response. The request produced
+exactly one durable `model.infer.openrouter` action: 5,000 micro-USD was
+reserved, OpenRouter reported 3,221 input tokens and 34 output tokens, and Lucy
+settled 102 micro-USD with no remaining reservation.
+
+The first attempt exposed a pinned-Hermes gateway discrepancy: the long-running
+Telegram path omitted the configured custom-provider `extra_body` from the
+middleware-visible request, so Lucy correctly blocked it with
+`provider_policy_missing` and created no action or charge. Plugin version 1.0.1
+closes that gap by injecting the canonical routing policy into the effective
+outgoing request before independently revalidating the route immediately before
+execution.
+
+Restarting the supervised gateway preserved the completed action exactly once:
+the model action count, spent total, and zero-reserved balance were unchanged
+after the process returned. A final post-restart inbound message remains the
+last interactive transport check before calling the live acceptance complete.

@@ -21,6 +21,19 @@ MAX_PROMPT_USD_PER_MILLION = 0.10
 MAX_COMPLETION_USD_PER_MILLION = 0.50
 
 
+def _approved_provider_policy() -> dict[str, Any]:
+    return {
+        "zdr": True,
+        "data_collection": "deny",
+        "sort": "price",
+        "require_parameters": True,
+        "max_price": {
+            "prompt": MAX_PROMPT_USD_PER_MILLION,
+            "completion": MAX_COMPLETION_USD_PER_MILLION,
+        },
+    }
+
+
 def _blocked_response(model: str, message: str = BLOCKED_MESSAGE) -> SimpleNamespace:
     return SimpleNamespace(
         id="lucy-budget-blocked",
@@ -141,7 +154,19 @@ def _request_middleware(
             if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0
             else MAX_OUTPUT_TOKENS
         )
-    return {"request": bounded, "source": "lucy_control", "reason": "output_cap"}
+    raw_extra_body = bounded.get("extra_body")
+    extra_body = dict(raw_extra_body) if isinstance(raw_extra_body, dict) else {}
+    # The pinned Hermes gateway path can omit the custom provider's extra_body
+    # even though the same profile includes it for one-shot calls. Inject the
+    # canonical policy into the effective wire request, then independently
+    # revalidate it in execution middleware immediately before next_call().
+    extra_body["provider"] = _approved_provider_policy()
+    bounded["extra_body"] = extra_body
+    return {
+        "request": bounded,
+        "source": "lucy_control",
+        "reason": "output_cap_and_provider_policy",
+    }
 
 
 def _settle(action_id: str, response: Any, *, succeeded: bool) -> None:
