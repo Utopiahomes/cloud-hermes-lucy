@@ -59,15 +59,12 @@ Lucy reserved $0.03 before launching the container and conservatively settled
 the full reservation after success. The durable evaluation ledger therefore
 advanced from 177 to 30,177 micro-USD, remaining below the original $0.10 cap.
 
-## Remaining production gate
+## Production gate closure
 
-This proves the pinned Hermes request path and the per-request provider controls.
-It does **not** yet authorize a long-running gateway. The smoke orchestration made
-one explicit Lucy reservation around the whole container invocation; ordinary
-Hermes gateway turns do not yet reserve and settle Lucy's daily model budget
-automatically.
-
-Before Telegram or an unattended Hermes gateway receives the OpenRouter key, add
-and crash-test an automatic per-turn accounting bridge (or an equivalently hard
-limited-key/egress boundary). Provider price ceilings constrain rates, not total
-spend across sessions.
+The first smoke used one explicit reservation around the whole container
+invocation. The subsequent automatic bridge closes that gap for ordinary Hermes
+requests: it reserves before each provider call, permits exactly one execution,
+settles reported cost, and fails closed when Lucy is unavailable. The key-bearing
+service also waits for a keyless plugin preflight. See
+[`model-budget-bridge-acceptance.md`](model-budget-bridge-acceptance.md) for the
+implementation, live outage proof, and residual compromised-process boundary.

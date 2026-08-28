@@ -8,6 +8,7 @@ from lucy.policy import ActionDisposition, ActionIntent, classify_action
     [
         ("memory.lookup", ActionDisposition.ALLOW),
         ("model.evaluate.synthetic", ActionDisposition.ALLOW),
+        ("model.infer.openrouter", ActionDisposition.ALLOW),
         ("model.infer", ActionDisposition.DENY),
         ("memory.propose", ActionDisposition.REQUIRE_APPROVAL),
         ("telegram.send", ActionDisposition.REQUIRE_APPROVAL),

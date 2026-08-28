@@ -85,3 +85,7 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     ]["extra_body"]["provider"]
     assert auxiliary["title_generation"]["enabled"] is False
     assert auxiliary["background_review"]["enabled"] is False
+    assert config["plugins"] == {"enabled": ["lucy_control"]}
+    plugin = PROFILE_ROOT / "plugins" / "lucy_control"
+    assert (plugin / "plugin.yaml").is_file()
+    assert (plugin / "__init__.py").is_file()

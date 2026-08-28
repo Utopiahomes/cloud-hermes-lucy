@@ -45,6 +45,24 @@ services:
       - clarify
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY outside Git}
+      LUCY_COMPANION_URL: http://lucy-api:8080
+      LUCY_ADAPTER_TOKEN: ${LUCY_ADAPTER_TOKEN:?set LUCY_ADAPTER_TOKEN outside Git}
+    volumes:
+      - hermes-spike-data:/opt/data
+    depends_on:
+      hermes-plugin-preflight:
+        condition: service_completed_successfully
+      lucy-api:
+        condition: service_healthy
+    networks:
+      - lucy-private
+    restart: "no"
+
+  hermes-plugin-preflight:
+    profiles: ["live-openrouter"]
+    image: docker.io/nousresearch/hermes-agent:v2026.8.19@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
+    platform: linux/amd64
+    command: ["plugins", "doctor", "--ci", "lucy_control"]
     volumes:
       - hermes-spike-data:/opt/data
     depends_on:

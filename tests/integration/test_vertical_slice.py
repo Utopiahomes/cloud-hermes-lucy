@@ -41,6 +41,14 @@ from lucy.db.models import (
     WorkingContextRow,
 )
 from lucy.memory import MemoryService
+from lucy.model_execution import (
+    MODEL,
+    RESERVATION_MICROUSD,
+    ModelExecutionBegin,
+    ModelExecutionService,
+    ModelExecutionSettlement,
+    ModelUsage,
+)
 from lucy.policy import ActionIntent
 from lucy.proposals import MemoryProposalInput, MemoryProposalService
 from lucy.recovery import RecoveryService
@@ -561,3 +569,41 @@ def test_rejoining_marks_executing_action_ambiguous_and_charges_reservation() ->
         assert action is not None and budget is not None
         assert action.status == "ambiguous"
         assert budget.reserved_microusd == 0 and budget.spent_microusd == 700
+
+
+def test_model_execution_bridge_reserves_executes_and_settles_once() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    service = ModelExecutionService(sessions)
+    request = ModelExecutionBegin(
+        idempotency_key="hermes-model:session-1:request-1",
+        model=MODEL,
+        reservation_microusd=RESERVATION_MICROUSD,
+        session_id="session-1",
+        api_request_id="request-1",
+    )
+    begun = service.begin(request)
+    duplicate = service.begin(request)
+    assert begun.status == "executing" and begun.execute is True
+    assert duplicate.action_id == begun.action_id
+    assert duplicate.status == "executing" and duplicate.execute is False
+
+    settlement = ModelExecutionSettlement(
+        action_id=begun.action_id,
+        actual_microusd=12,
+        succeeded=True,
+        usage=ModelUsage(
+            input_tokens=100,
+            output_tokens=20,
+            reasoning_tokens=5,
+            provider_cost_microusd=12,
+        ),
+    )
+    settled = service.settle(settlement)
+    replay = service.settle(settlement)
+    assert settled.status == "succeeded" and settled.replayed is False
+    assert replay.status == "succeeded" and replay.replayed is True
+    with sessions() as session:
+        budget = session.get(BudgetAccountRow, "model.daily")
+        assert budget is not None
+        assert budget.reserved_microusd == 0 and budget.spent_microusd == 12

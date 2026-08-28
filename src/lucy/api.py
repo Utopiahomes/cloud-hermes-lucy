@@ -11,6 +11,13 @@ from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
 from lucy.db.models import LifecycleRow
 from lucy.memory import MemoryService
+from lucy.model_execution import (
+    ModelExecutionBegin,
+    ModelExecutionBeginResult,
+    ModelExecutionService,
+    ModelExecutionSettlement,
+    ModelExecutionSettlementResult,
+)
 from lucy.proposals import MemoryProposalInput, MemoryProposalService
 
 app = FastAPI(title="Lucy Companion API", version="0.1.0")
@@ -78,3 +85,31 @@ def propose_memory(
     sessions = _ready_sessions()
     result = MemoryProposalService(sessions).submit(idempotency_key, candidate)
     return result.model_dump(mode="json")
+
+
+@app.post(
+    "/internal/v1/model-executions/begin",
+    tags=["internal"],
+    response_model=ModelExecutionBeginResult,
+)
+def begin_model_execution(
+    request: ModelExecutionBegin,
+    authorization: str | None = Header(default=None),
+) -> ModelExecutionBeginResult:
+    """Reserve once immediately before the Hermes provider call."""
+    _authorize(authorization)
+    return ModelExecutionService(_ready_sessions()).begin(request)
+
+
+@app.post(
+    "/internal/v1/model-executions/settle",
+    tags=["internal"],
+    response_model=ModelExecutionSettlementResult,
+)
+def settle_model_execution(
+    request: ModelExecutionSettlement,
+    authorization: str | None = Header(default=None),
+) -> ModelExecutionSettlementResult:
+    """Settle usage after the wrapped provider call completes."""
+    _authorize(authorization)
+    return ModelExecutionService(_ready_sessions()).settle(request)

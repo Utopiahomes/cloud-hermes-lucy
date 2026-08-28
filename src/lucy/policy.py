@@ -27,6 +27,7 @@ class ActionDecision(BaseModel):
 _LOW_RISK = {
     "memory.lookup": "model.daily",
     "model.evaluate.synthetic": "model.daily",
+    "model.infer.openrouter": "model.daily",
     "status.read": None,
 }
 

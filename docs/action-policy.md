@@ -13,3 +13,8 @@ database operations.
 Classification returns the applicable budget account, but reservation and
 settlement remain a separate durable control step. No classifier result itself
 executes an action.
+
+`model.infer.openrouter` is a known low-risk action charged to `model.daily`.
+That classification does not grant provider access by itself: the Hermes bridge
+must still obtain a durable reservation for the fixed model request, receive the
+single-use execute decision, and settle the result.

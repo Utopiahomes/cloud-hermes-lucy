@@ -48,6 +48,10 @@ provider_routing:
   require_parameters: true
   data_collection: deny
 
+plugins:
+  enabled:
+    - lucy_control
+
 auxiliary:
   transient_retries: 0
   free_only: true
