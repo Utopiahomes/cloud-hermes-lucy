@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import create_engine, func, select, text, update
 from sqlalchemy.exc import DBAPIError
 
+from lucy.actions import ActionControlService
 from lucy.approvals import ApprovalService
 from lucy.contracts import (
     ApprovalDecision,
@@ -25,6 +26,7 @@ from lucy.contracts.v1 import ConversationEvidenceV1, ConversationMessageV1
 from lucy.corrections import CorrectionService
 from lucy.db import create_session_factory
 from lucy.db.models import (
+    ActionExecutionRow,
     ApprovalRequestRow,
     AuditEventRow,
     BudgetAccountRow,
@@ -39,6 +41,7 @@ from lucy.db.models import (
     WorkingContextRow,
 )
 from lucy.memory import MemoryService
+from lucy.policy import ActionIntent
 from lucy.proposals import MemoryProposalInput, MemoryProposalService
 from lucy.recovery import RecoveryService
 from lucy.rejoining import RejoiningService
@@ -57,7 +60,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.memory_write_proposals, lucy.memory_corrections, "
+                "TRUNCATE lucy.action_executions, lucy.memory_write_proposals, "
+                "lucy.memory_corrections, "
                 "lucy.startup_runs, lucy.working_contexts, "
                 "lucy.memory_relationships, "
                 "lucy.memory_entities, lucy.audit_events, lucy.approval_requests, "
@@ -83,6 +87,13 @@ def reset_synthetic_database() -> None:
                 "INSERT INTO lucy.budget_accounts "
                 "(name, limit_microusd, reserved_microusd, spent_microusd) "
                 "VALUES ('model.daily', 1000000, 0, 0)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO lucy.budget_accounts "
+                "(name, limit_microusd, reserved_microusd, spent_microusd) "
+                "VALUES ('action.daily', 1000000, 0, 0)"
             )
         )
     engine.dispose()
@@ -478,3 +489,75 @@ def test_model_memory_proposal_requires_human_approval_and_replays() -> None:
         claim = session.get(MemoryClaimRow, applied.claim_id)
         assert row is not None and claim is not None
         assert claim.evidence_id == imported.evidence_id
+
+
+def test_action_requires_approval_reserves_before_execution_and_settles_once() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    actions = ActionControlService(sessions)
+    submitted = actions.submit(
+        idempotency_key="action:telegram:1",
+        intent=ActionIntent(action_type="telegram.send", estimated_microusd=500),
+        payload={"recipient": "synthetic", "text": "hello"},
+    )
+    assert submitted.status == "awaiting_approval" and submitted.approval_id is not None
+    with pytest.raises(PermissionError):
+        actions.authorize(submitted.action_id)
+    ApprovalService(sessions).decide(
+        idempotency_key="action:telegram:decision:1", approval_id=submitted.approval_id,
+        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        actor_type=HumanActorType.OWNER,
+    )
+    reserved = actions.authorize(submitted.action_id)
+    assert reserved.status == "reserved" and reserved.reservation_id is not None
+    actions.begin_execution(submitted.action_id)
+    assert actions.begin_execution(submitted.action_id).replayed is True
+    settled = actions.settle(
+        submitted.action_id, actual_microusd=320, succeeded=True,
+        result={"delivery": "synthetic-ok"},
+    )
+    replay = actions.settle(
+        submitted.action_id, actual_microusd=320, succeeded=True,
+        result={"delivery": "synthetic-ok"},
+    )
+    assert settled.status == "succeeded" and replay.replayed is True
+    with sessions() as session:
+        budget = session.get(BudgetAccountRow, "action.daily")
+        assert budget is not None
+        assert budget.reserved_microusd == 0 and budget.spent_microusd == 320
+
+
+def test_unknown_action_is_denied_without_reservation() -> None:
+    assert DATABASE_URL is not None
+    result = ActionControlService(create_session_factory(DATABASE_URL)).submit(
+        idempotency_key="action:unknown:1",
+        intent=ActionIntent(action_type="model.invented", estimated_microusd=100),
+        payload={},
+    )
+    assert result.status == "denied" and result.reservation_id is None
+
+
+def test_rejoining_marks_executing_action_ambiguous_and_charges_reservation() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    actions = ActionControlService(sessions)
+    submitted = actions.submit(
+        idempotency_key="action:lookup:crash",
+        intent=ActionIntent(action_type="memory.lookup", estimated_microusd=700),
+        payload={"query": "tea"},
+    )
+    actions.begin_execution(submitted.action_id)
+    with sessions.begin() as session:
+        lifecycle = session.get(LifecycleRow, True)
+        assert lifecycle is not None
+        lifecycle.state = "rejoining"
+    result = RejoiningService(
+        sessions, expected_hermes_commit=HERMES_COMMIT
+    ).run(observed_hermes_commit=HERMES_COMMIT)
+    assert result.state == RejoiningState.DEGRADED and result.ambiguous_count == 1
+    with sessions() as session:
+        action = session.get(ActionExecutionRow, submitted.action_id)
+        budget = session.get(BudgetAccountRow, "model.daily")
+        assert action is not None and budget is not None
+        assert action.status == "ambiguous"
+        assert budget.reserved_microusd == 0 and budget.spent_microusd == 700

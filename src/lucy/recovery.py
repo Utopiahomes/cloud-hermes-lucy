@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from lucy.actions import mark_action_ambiguous
 from lucy.audit import append_audit
 from lucy.contracts import OperationOutcome, RejoiningState
 from lucy.db.models import LifecycleRow, OperationRow
@@ -48,6 +49,7 @@ class RecoveryService:
             session.flush()
             append_audit(session, recovery.id, "operation.started", {"kind": "recovery"})
             for operation in pending:
+                mark_action_ambiguous(session, operation.id, now)
                 operation.outcome = OperationOutcome.AMBIGUOUS
                 operation.result = {"reason": "outcome_unknown_after_restart", "retried": False}
                 operation.completed_at = now

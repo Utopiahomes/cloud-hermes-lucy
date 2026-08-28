@@ -47,6 +47,7 @@ See:
 - [`docs/container-startup-acceptance.md`](docs/container-startup-acceptance.md) for migration ordering and fail-closed Rejoining startup
 - [`docs/memory-proposal-acceptance.md`](docs/memory-proposal-acceptance.md) for gated Hermes-originated memory candidates
 - [`docs/action-policy.md`](docs/action-policy.md) for deterministic fail-closed action classification
+- [`docs/action-budget-acceptance.md`](docs/action-budget-acceptance.md) for durable reserve, execute, settle, and crash recovery
 
 ## Local verification
 

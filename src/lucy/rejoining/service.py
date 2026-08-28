@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from lucy.actions import mark_action_ambiguous
 from lucy.audit import append_audit, verify_audit_chain
 from lucy.contracts import OperationOutcome, RejoiningState
 from lucy.db.models import (
@@ -95,6 +96,7 @@ class RejoiningService:
             if not failures:
                 self._transition(session, lifecycle, operation.id, RejoiningState.RECONCILING)
                 for pending_operation in pending:
+                    mark_action_ambiguous(session, pending_operation.id, started)
                     pending_operation.outcome = OperationOutcome.AMBIGUOUS
                     pending_operation.result = {
                         "reason": "outcome_unknown_after_restart", "retried": False

@@ -199,3 +199,28 @@ class MemoryWriteProposalRow(Base):
     claim_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.memory_claims.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ActionExecutionRow(Base):
+    __tablename__ = "action_executions"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    action_type: Mapped[str] = mapped_column(Text)
+    action_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    estimated_microusd: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(Text)
+    disposition: Mapped[str] = mapped_column(Text)
+    control_operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    approval_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.approval_requests.id"))
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.budget_reservations.id")
+    )
+    execution_operation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
