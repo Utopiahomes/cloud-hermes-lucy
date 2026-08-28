@@ -48,6 +48,7 @@ See:
 - [`docs/memory-proposal-acceptance.md`](docs/memory-proposal-acceptance.md) for gated Hermes-originated memory candidates
 - [`docs/action-policy.md`](docs/action-policy.md) for deterministic fail-closed action classification
 - [`docs/action-budget-acceptance.md`](docs/action-budget-acceptance.md) for durable reserve, execute, settle, and crash recovery
+- [`docs/openrouter-evaluation.md`](docs/openrouter-evaluation.md) for the capped synthetic model-policy evaluation
 
 ## Local verification
 
