@@ -19,6 +19,18 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ready", tags=["operations"])
+def ready() -> dict[str, str]:
+    database_url = os.getenv("LUCY_DATABASE_URL")
+    if database_url is None:
+        raise HTTPException(status_code=503, detail="memory store unavailable")
+    with create_session_factory(database_url)() as session:
+        lifecycle = session.scalar(select(LifecycleRow).where(LifecycleRow.singleton))
+        if lifecycle is None or lifecycle.state != RejoiningState.READY:
+            raise HTTPException(status_code=503, detail="Lucy is not ready")
+    return {"status": "ready"}
+
+
 @app.get("/v1/memory/lookup", tags=["memory"])
 def read_only_memory_lookup(
     query: str, authorization: str | None = Header(default=None)

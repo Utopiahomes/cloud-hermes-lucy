@@ -27,7 +27,7 @@ services:
       hermes-profile-seed:
         condition: service_completed_successfully
       lucy-api:
-        condition: service_started
+        condition: service_healthy
     networks:
       - lucy-private
 

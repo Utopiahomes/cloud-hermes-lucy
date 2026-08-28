@@ -22,6 +22,20 @@ services:
       - lucy-private
     restart: unless-stopped
 
+  lucy-migrate:
+    build:
+      context: .
+      target: runtime
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      LUCY_MIGRATION_DATABASE_URL: ${LUCY_MIGRATION_DATABASE_URL:?set owner migration URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lucy-private
+    restart: "no"
+
   lucy-api:
     build:
       context: .
@@ -29,9 +43,15 @@ services:
     environment:
       LUCY_DATABASE_URL: ${LUCY_DATABASE_URL:?set LUCY_DATABASE_URL in .env}
       LUCY_ADAPTER_TOKEN: ${LUCY_ADAPTER_TOKEN:?set LUCY_ADAPTER_TOKEN outside Git}
+      LUCY_OBSERVED_HERMES_COMMIT: ${LUCY_OBSERVED_HERMES_COMMIT:?set observed Hermes commit}
     depends_on:
-      postgres:
-        condition: service_healthy
+      lucy-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks:
       - lucy-private
     restart: unless-stopped

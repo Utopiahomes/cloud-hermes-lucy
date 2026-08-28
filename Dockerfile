@@ -9,8 +9,10 @@ RUN groupadd --system --gid 10001 lucy \
 
 WORKDIR /app
 COPY pyproject.toml ./
+COPY alembic.ini hermes.lock ./
+COPY migrations ./migrations
 COPY src ./src
 RUN pip install --no-cache-dir .
 
 USER 10001:10001
-CMD ["uvicorn", "lucy.api:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "lucy.runtime"]
