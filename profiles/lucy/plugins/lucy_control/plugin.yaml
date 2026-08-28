@@ -1,4 +1,8 @@
 name: lucy_control
-version: 1.0.1
-description: Fail-closed Lucy budget middleware for Hermes OpenRouter calls.
+version: 1.1.0
+description: Fail-closed Lucy budgets and provenance-aware memory tools.
 author: Lucy
+kind: standalone
+provides_tools:
+  - lucy_memory_lookup
+  - lucy_memory_propose

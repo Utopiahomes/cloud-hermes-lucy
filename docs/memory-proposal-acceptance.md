@@ -21,3 +21,8 @@ The pinned Hermes container submitted a synthetic candidate and received
 `pending`, a proposal ID, and a human approval ID with `claim_id: null`. The
 PostgreSQL suite proves refusal before approval, human approval, application,
 provenance, submission replay, and restart-safe application replay.
+
+Lucy control plugin 1.1.0 now exposes pending-only submission as the first-class
+`lucy_memory_propose` Hermes tool. It derives its own deterministic idempotency
+key and accepts only responses that still have `claim_id: null`; see
+[`hermes-memory-tools-acceptance.md`](hermes-memory-tools-acceptance.md).

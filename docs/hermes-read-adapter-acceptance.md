@@ -17,3 +17,8 @@ claim and all raw conversation content. The response asserted `read_only: true`.
 The Hermes profile volume is refreshed from the versioned, read-only profile
 source on each seed run so adapter updates cannot be hidden by a stale persistent
 volume. Hermes core remains unmodified and the image stays digest-pinned.
+
+The original script remains a narrow compatibility and diagnostic adapter.
+Lucy control plugin 1.1.0 now exposes the same read boundary as the first-class
+`lucy_memory_lookup` Hermes tool; see
+[`hermes-memory-tools-acceptance.md`](hermes-memory-tools-acceptance.md).

@@ -9,11 +9,14 @@ PROFILE_ROOT = REPOSITORY_ROOT / "profiles" / "lucy"
 def test_profile_has_fail_closed_tool_surface() -> None:
     config = yaml.safe_load((PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8"))
     assert config["_config_version"] == 38
-    assert config["toolsets"] == ["clarify"]
-    assert config["platform_toolsets"] == {"cli": ["clarify"], "telegram": ["clarify"]}
+    assert config["toolsets"] == ["clarify", "lucy_memory"]
+    assert config["platform_toolsets"] == {
+        "cli": ["clarify", "lucy_memory"],
+        "telegram": ["clarify", "lucy_memory"],
+    }
     assert config["known_plugin_toolsets"] == {
-        "cli": ["a2a", "spotify"],
-        "telegram": ["a2a", "spotify"],
+        "cli": ["a2a", "lucy_memory", "spotify"],
+        "telegram": ["a2a", "lucy_memory", "spotify"],
     }
     known = config["known_builtin_toolsets"]
     assert known["cli"] == known["telegram"]
@@ -89,3 +92,9 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     plugin = PROFILE_ROOT / "plugins" / "lucy_control"
     assert (plugin / "plugin.yaml").is_file()
     assert (plugin / "__init__.py").is_file()
+    manifest = yaml.safe_load((plugin / "plugin.yaml").read_text(encoding="utf-8"))
+    assert manifest["version"] == "1.1.0"
+    assert manifest["provides_tools"] == [
+        "lucy_memory_lookup",
+        "lucy_memory_propose",
+    ]

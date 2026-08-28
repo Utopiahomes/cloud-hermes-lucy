@@ -69,19 +69,24 @@ auxiliary:
 
 toolsets:
   - clarify
+  - lucy_memory
 
 platform_toolsets:
   cli:
     - clarify
+    - lucy_memory
   telegram:
     - clarify
+    - lucy_memory
 
 known_plugin_toolsets:
   cli:
     - a2a
+    - lucy_memory
     - spotify
   telegram:
     - a2a
+    - lucy_memory
     - spotify
 
 known_builtin_toolsets:

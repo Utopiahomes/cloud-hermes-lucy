@@ -22,6 +22,10 @@ completed through Lucy's automatic OpenRouter budget bridge, the supervised
 gateway restarted, and a post-restart message completed exactly once with no
 stranded reservation or duplicate charge.
 
+Telegram now has first-class Lucy memory lookup and pending-only proposal tools.
+Raw archives, direct memory writes, approvals, database access, files, terminal,
+and code execution remain outside the model-visible tool surface.
+
 No credentials, real conversations, or private memory belong in Git.
 
 ## Upstream pin
@@ -57,6 +61,7 @@ See:
 - [`docs/hermes-openrouter-acceptance.md`](docs/hermes-openrouter-acceptance.md) for the pinned-Hermes controlled-route evidence
 - [`docs/model-budget-bridge-acceptance.md`](docs/model-budget-bridge-acceptance.md) for automatic per-provider-call reservation and settlement
 - [`docs/telegram-gateway-readiness.md`](docs/telegram-gateway-readiness.md) for the deny-by-default pinned-Hermes gateway scaffold
+- [`docs/hermes-memory-tools-acceptance.md`](docs/hermes-memory-tools-acceptance.md) for provenance-aware lookup and pending-only proposal tools
 
 ## Local verification
 

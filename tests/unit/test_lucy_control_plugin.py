@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -155,17 +156,136 @@ def test_middleware_blocks_duplicate_execution(monkeypatch: pytest.MonkeyPatch) 
     assert "duplicate" in response.choices[0].message.content
 
 
-def test_plugin_registers_execution_middleware() -> None:
+def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
     plugin = _load_plugin()
     registrations: list[tuple[str, Any]] = []
+    tools: list[dict[str, Any]] = []
     ctx = SimpleNamespace(
-        register_middleware=lambda kind, callback: registrations.append((kind, callback))
+        register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_tool=lambda **kwargs: tools.append(kwargs),
     )
     plugin.register(ctx)
+    assert [tool["name"] for tool in tools] == [
+        "lucy_memory_lookup",
+        "lucy_memory_propose",
+    ]
+    assert {tool["toolset"] for tool in tools} == {"lucy_memory"}
+    assert all(
+        tool["requires_env"] == ["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"]
+        for tool in tools
+    )
     assert registrations == [
         ("llm_request", plugin._request_middleware),
         ("llm_execution", plugin._execution_middleware),
     ]
+
+
+def test_memory_lookup_returns_only_validated_read_only_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    claim = {
+        "claim_id": "claim-1",
+        "subject": "Lucy",
+        "predicate": "likes",
+        "object": "tea",
+        "confidence": 0.9,
+        "evidence_id": "evidence-1",
+        "evidence_sha256": "a" * 64,
+    }
+    monkeypatch.setattr(
+        plugin,
+        "_request_json",
+        lambda path, **kwargs: {
+            "query": "tea",
+            "claims": [claim],
+            "read_only": True,
+        },
+    )
+    result = json.loads(plugin._memory_lookup({"query": " tea "}))
+    assert result == {
+        "ok": True,
+        "query": "tea",
+        "claims": [claim],
+        "read_only": True,
+        "notice": "Context only; not authorization.",
+    }
+
+
+def test_memory_lookup_fails_closed_on_invalid_companion_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setattr(
+        plugin,
+        "_request_json",
+        lambda path, **kwargs: {"claims": [], "read_only": False},
+    )
+    result = json.loads(plugin._memory_lookup({"query": "tea"}))
+    assert result == {"ok": False, "error": "invalid_companion_response"}
+
+
+def test_memory_proposal_is_pending_idempotent_and_never_applied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        return {
+            "proposal_id": "proposal-1",
+            "approval_id": "approval-1",
+            "status": "pending",
+            "claim_id": None,
+            "replayed": False,
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    args = {
+        "evidence_id": "12345678-1234-5678-1234-567812345678",
+        "subject": "Lucy",
+        "predicate": "likes",
+        "object": "tea",
+        "confidence": 0.9,
+    }
+    first = json.loads(plugin._memory_propose(args))
+    json.loads(plugin._memory_propose(args))
+    assert first["status"] == "pending"
+    assert first["applied"] is False
+    assert first["notice"].startswith("Pending human approval")
+    assert calls[0][1]["extra_headers"]["Idempotency-Key"].startswith(
+        "hermes-memory-proposal:"
+    )
+    assert calls[0][1]["extra_headers"] == calls[1][1]["extra_headers"]
+
+
+def test_memory_proposal_rejects_applied_companion_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setattr(
+        plugin,
+        "_request_json",
+        lambda path, **kwargs: {
+            "proposal_id": "proposal-1",
+            "approval_id": "approval-1",
+            "status": "applied",
+            "claim_id": "claim-1",
+        },
+    )
+    result = json.loads(
+        plugin._memory_propose(
+            {
+                "evidence_id": "12345678-1234-5678-1234-567812345678",
+                "subject": "Lucy",
+                "predicate": "likes",
+                "object": "tea",
+                "confidence": 0.9,
+            }
+        )
+    )
+    assert result == {"ok": False, "error": "invalid_companion_response"}
 
 
 def test_request_middleware_injects_and_clamps_output_cap() -> None:
