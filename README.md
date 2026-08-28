@@ -46,6 +46,7 @@ See:
 - [`docs/hermes-read-adapter-acceptance.md`](docs/hermes-read-adapter-acceptance.md) for the authenticated pinned-Hermes lookup boundary
 - [`docs/container-startup-acceptance.md`](docs/container-startup-acceptance.md) for migration ordering and fail-closed Rejoining startup
 - [`docs/memory-proposal-acceptance.md`](docs/memory-proposal-acceptance.md) for gated Hermes-originated memory candidates
+- [`docs/action-policy.md`](docs/action-policy.md) for deterministic fail-closed action classification
 
 ## Local verification
 
