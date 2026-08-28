@@ -51,6 +51,7 @@ See:
 - [`docs/openrouter-evaluation.md`](docs/openrouter-evaluation.md) for the capped synthetic model-policy evaluation
 - [`docs/hermes-openrouter-acceptance.md`](docs/hermes-openrouter-acceptance.md) for the pinned-Hermes controlled-route evidence
 - [`docs/model-budget-bridge-acceptance.md`](docs/model-budget-bridge-acceptance.md) for automatic per-provider-call reservation and settlement
+- [`docs/telegram-gateway-readiness.md`](docs/telegram-gateway-readiness.md) for the deny-by-default pinned-Hermes gateway scaffold
 
 ## Local verification
 

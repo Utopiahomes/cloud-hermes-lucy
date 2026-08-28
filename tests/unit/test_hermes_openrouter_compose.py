@@ -32,7 +32,7 @@ def test_openrouter_key_is_withheld_until_plugin_preflight_passes() -> None:
         (REPOSITORY_ROOT / "compose.hermes-spike.yaml").read_text(encoding="utf-8")
     )
     preflight = compose["services"]["hermes-plugin-preflight"]
-    assert preflight["profiles"] == ["live-openrouter"]
+    assert preflight["profiles"] == ["live-openrouter", "live-telegram"]
     assert preflight["image"].endswith(
         "@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
     )

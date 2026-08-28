@@ -59,7 +59,7 @@ services:
     restart: "no"
 
   hermes-plugin-preflight:
-    profiles: ["live-openrouter"]
+    profiles: ["live-openrouter", "live-telegram"]
     image: docker.io/nousresearch/hermes-agent:v2026.8.19@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     platform: linux/amd64
     command: ["plugins", "doctor", "--ci", "lucy_control"]
@@ -71,6 +71,51 @@ services:
     networks:
       - lucy-private
     restart: "no"
+
+  hermes-telegram-preflight:
+    profiles: ["live-telegram"]
+    image: docker.io/nousresearch/hermes-agent:v2026.8.19@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
+    platform: linux/amd64
+    entrypoint: ["/opt/hermes/.venv/bin/python3", "/preflight/telegram.py"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LUCY_ADAPTER_TOKEN: ${LUCY_ADAPTER_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_HOME_CHANNEL: ${TELEGRAM_HOME_CHANNEL:-}
+    volumes:
+      - ./deploy/hermes/telegram_preflight.py:/preflight/telegram.py:ro
+    depends_on:
+      hermes-plugin-preflight:
+        condition: service_completed_successfully
+    networks:
+      - lucy-private
+    restart: "no"
+
+  hermes-telegram-gateway:
+    profiles: ["live-telegram"]
+    image: docker.io/nousresearch/hermes-agent:v2026.8.19@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
+    platform: linux/amd64
+    command: ["gateway", "run"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_HOME_CHANNEL: ${TELEGRAM_HOME_CHANNEL:-}
+      LUCY_COMPANION_URL: http://lucy-api:8080
+      LUCY_ADAPTER_TOKEN: ${LUCY_ADAPTER_TOKEN:-}
+    volumes:
+      - hermes-spike-data:/opt/data
+    depends_on:
+      hermes-plugin-preflight:
+        condition: service_completed_successfully
+      hermes-telegram-preflight:
+        condition: service_completed_successfully
+      lucy-api:
+        condition: service_healthy
+    networks:
+      - lucy-private
+    restart: unless-stopped
 
 volumes:
   hermes-spike-data:
