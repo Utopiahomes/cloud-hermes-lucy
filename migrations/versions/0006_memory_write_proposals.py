@@ -1,0 +1,41 @@
+"""Add governed model-originated memory proposals."""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
+revision: str = "0006_memory_write_proposals"
+down_revision: str | None = "0005_memory_corrections"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "memory_write_proposals",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("idempotency_key", sa.Text(), nullable=False, unique=True),
+        sa.Column("evidence_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("subject", sa.Text(), nullable=False),
+        sa.Column("predicate", sa.Text(), nullable=False),
+        sa.Column("object", sa.Text(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("approval_id", postgresql.UUID(as_uuid=True), nullable=False, unique=True),
+        sa.Column("claim_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("applied_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["evidence_id"], ["lucy.evidence.id"]),
+        sa.ForeignKeyConstraint(["approval_id"], ["lucy.approval_requests.id"]),
+        sa.ForeignKeyConstraint(["claim_id"], ["lucy.memory_claims.id"]),
+        sa.CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_write_confidence"),
+        sa.CheckConstraint("status IN ('pending','applied','rejected')", name="ck_write_status"),
+        schema="lucy",
+    )
+    op.execute("GRANT SELECT, INSERT, UPDATE ON lucy.memory_write_proposals TO lucy_app")
+
+
+def downgrade() -> None:
+    op.drop_table("memory_write_proposals", schema="lucy")

@@ -45,6 +45,7 @@ See:
 - [`docs/memory-correction-acceptance.md`](docs/memory-correction-acceptance.md) for governed supersession and provenance history
 - [`docs/hermes-read-adapter-acceptance.md`](docs/hermes-read-adapter-acceptance.md) for the authenticated pinned-Hermes lookup boundary
 - [`docs/container-startup-acceptance.md`](docs/container-startup-acceptance.md) for migration ordering and fail-closed Rejoining startup
+- [`docs/memory-proposal-acceptance.md`](docs/memory-proposal-acceptance.md) for gated Hermes-originated memory candidates
 
 ## Local verification
 

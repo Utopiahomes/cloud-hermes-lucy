@@ -33,11 +33,13 @@ from lucy.db.models import (
     MemoryClaimRow,
     MemoryCorrectionRow,
     MemoryRelationshipRow,
+    MemoryWriteProposalRow,
     OperationRow,
     StartupRunRow,
     WorkingContextRow,
 )
 from lucy.memory import MemoryService
+from lucy.proposals import MemoryProposalInput, MemoryProposalService
 from lucy.recovery import RecoveryService
 from lucy.rejoining import RejoiningService
 from lucy.vertical_slice import ImportRequest, VerticalSliceService
@@ -55,7 +57,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.memory_corrections, lucy.startup_runs, lucy.working_contexts, "
+                "TRUNCATE lucy.memory_write_proposals, lucy.memory_corrections, "
+                "lucy.startup_runs, lucy.working_contexts, "
                 "lucy.memory_relationships, "
                 "lucy.memory_entities, lucy.audit_events, lucy.approval_requests, "
                 "lucy.budget_reservations, lucy.memory_claims, "
@@ -444,3 +447,34 @@ def test_approved_correction_supersedes_without_erasing_history() -> None:
         assert new is not None and new.supersedes_claim_id == old.id
         assert correction is not None and correction.new_evidence_id == replacement.evidence_id
         assert relationship is not None and relationship.valid_to is not None
+
+
+def test_model_memory_proposal_requires_human_approval_and_replays() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    proposals = MemoryProposalService(sessions)
+    candidate = MemoryProposalInput(
+        evidence_id=imported.evidence_id, subject="user", predicate="likes_tea",
+        object="Earl Grey", confidence=0.8,
+    )
+    proposed = proposals.submit("hermes:proposal:1", candidate)
+    duplicate = proposals.submit("hermes:proposal:1", candidate)
+    assert duplicate.replayed is True and duplicate.proposal_id == proposed.proposal_id
+    with pytest.raises(PermissionError):
+        proposals.apply(proposed.proposal_id)
+    ApprovalService(sessions).decide(
+        idempotency_key="hermes:proposal:decision:1", approval_id=proposed.approval_id,
+        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        actor_type=HumanActorType.OWNER,
+    )
+    applied = proposals.apply(proposed.proposal_id)
+    replay = MemoryProposalService(create_session_factory(DATABASE_URL)).apply(
+        proposed.proposal_id
+    )
+    assert applied.status == "applied" and replay.replayed is True
+    with sessions() as session:
+        row = session.get(MemoryWriteProposalRow, proposed.proposal_id)
+        claim = session.get(MemoryClaimRow, applied.claim_id)
+        assert row is not None and claim is not None
+        assert claim.evidence_id == imported.evidence_id

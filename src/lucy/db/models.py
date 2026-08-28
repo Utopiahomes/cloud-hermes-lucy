@@ -182,3 +182,20 @@ class MemoryCorrectionRow(Base):
     new_claim_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.memory_claims.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryWriteProposalRow(Base):
+    __tablename__ = "memory_write_proposals"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"))
+    subject: Mapped[str] = mapped_column(Text)
+    predicate: Mapped[str] = mapped_column(Text)
+    object: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(Text)
+    approval_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.approval_requests.id"), unique=True)
+    claim_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.memory_claims.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
