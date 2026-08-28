@@ -49,6 +49,7 @@ See:
 - [`docs/action-policy.md`](docs/action-policy.md) for deterministic fail-closed action classification
 - [`docs/action-budget-acceptance.md`](docs/action-budget-acceptance.md) for durable reserve, execute, settle, and crash recovery
 - [`docs/openrouter-evaluation.md`](docs/openrouter-evaluation.md) for the capped synthetic model-policy evaluation
+- [`docs/hermes-openrouter-acceptance.md`](docs/hermes-openrouter-acceptance.md) for the pinned-Hermes controlled-route evidence
 
 ## Local verification
 

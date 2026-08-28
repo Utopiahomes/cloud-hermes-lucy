@@ -33,3 +33,55 @@ def test_profile_opts_out_of_all_bundled_skills() -> None:
     assert (PROFILE_ROOT / ".no-bundled-skills").is_file()
     local_skills = sorted(path.name for path in (PROFILE_ROOT / "skills").iterdir())
     assert local_skills == ["lucy-memory"]
+
+
+def test_profile_routes_openrouter_through_bounded_policy() -> None:
+    config = yaml.safe_load((PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8"))
+    assert config["model"] == {
+        "provider": "custom:lucy-openrouter",
+        "default": "openai/gpt-oss-20b",
+    }
+    assert config["fallback_providers"] == []
+    provider = config["providers"]["lucy-openrouter"]
+    assert provider["api"] == "https://openrouter.ai/api/v1"
+    assert provider["key_env"] == "OPENROUTER_API_KEY"
+    assert "api_key" not in provider
+    assert provider["discover_models"] is False
+    assert list(provider["models"]) == ["openai/gpt-oss-20b"]
+    routing = provider["extra_body"]["provider"]
+    assert routing == {
+        "zdr": True,
+        "data_collection": "deny",
+        "sort": "price",
+        "require_parameters": True,
+        "max_price": {"prompt": 0.10, "completion": 0.50},
+    }
+    assert config["openrouter"]["response_cache"] is False
+    assert config["provider_routing"] == {
+        "sort": "price",
+        "require_parameters": True,
+        "data_collection": "deny",
+    }
+
+
+def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
+    config = yaml.safe_load((PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8"))
+    assert config["agent"] == {
+        "max_turns": 4,
+        "run_budget_seconds": 120,
+        "api_max_retries": 1,
+        "reasoning_effort": "low",
+    }
+    limits = config["model_overrides"]["custom:lucy-openrouter"][
+        "openai/gpt-oss-20b"
+    ]
+    assert limits["context_window"] == 16384
+    assert limits["max_output_tokens"] == 1024
+    auxiliary = config["auxiliary"]
+    assert auxiliary["transient_retries"] == 0
+    assert auxiliary["free_only"] is True
+    assert auxiliary["compression"]["extra_body"]["provider"] == config["providers"][
+        "lucy-openrouter"
+    ]["extra_body"]["provider"]
+    assert auxiliary["title_generation"]["enabled"] is False
+    assert auxiliary["background_review"]["enabled"] is False

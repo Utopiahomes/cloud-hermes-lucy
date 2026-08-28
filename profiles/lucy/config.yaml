@@ -1,5 +1,68 @@
 _config_version: 38
 
+model:
+  provider: custom:lucy-openrouter
+  default: openai/gpt-oss-20b
+
+providers:
+  lucy-openrouter:
+    name: Lucy OpenRouter
+    api: https://openrouter.ai/api/v1
+    key_env: OPENROUTER_API_KEY
+    transport: chat_completions
+    default_model: openai/gpt-oss-20b
+    discover_models: false
+    models:
+      openai/gpt-oss-20b: {}
+    extra_body:
+      provider: &lucy_openrouter_policy
+        zdr: true
+        data_collection: deny
+        sort: price
+        require_parameters: true
+        max_price:
+          prompt: 0.10
+          completion: 0.50
+
+fallback_providers: []
+
+model_overrides:
+  custom:lucy-openrouter:
+    openai/gpt-oss-20b:
+      context_window: 16384
+      max_output_tokens: 1024
+      supports_tools: true
+      supports_reasoning: true
+
+agent:
+  max_turns: 4
+  run_budget_seconds: 120
+  api_max_retries: 1
+  reasoning_effort: low
+
+openrouter:
+  response_cache: false
+
+provider_routing:
+  sort: price
+  require_parameters: true
+  data_collection: deny
+
+auxiliary:
+  transient_retries: 0
+  free_only: true
+  compression:
+    provider: openrouter
+    model: openai/gpt-oss-20b
+    timeout: 120
+    reasoning_effort: low
+    extra_body:
+      provider: *lucy_openrouter_policy
+  title_generation:
+    enabled: false
+  background_review:
+    enabled: false
+
 toolsets:
   - clarify
 

@@ -31,5 +31,28 @@ services:
     networks:
       - lucy-private
 
+  hermes-openrouter-smoke:
+    profiles: ["live-openrouter"]
+    image: docker.io/nousresearch/hermes-agent:v2026.8.19@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
+    platform: linux/amd64
+    command:
+      - --oneshot
+      - Return exactly LUCY_HERMES_OPENROUTER_OK. Do not call tools.
+      - --usage-file
+      - /opt/data/openrouter-smoke-usage.json
+      - --ignore-rules
+      - --toolsets
+      - clarify
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY outside Git}
+    volumes:
+      - hermes-spike-data:/opt/data
+    depends_on:
+      hermes-profile-seed:
+        condition: service_completed_successfully
+    networks:
+      - lucy-private
+    restart: "no"
+
 volumes:
   hermes-spike-data:
