@@ -31,7 +31,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["approval_id"], ["lucy.approval_requests.id"]),
         sa.ForeignKeyConstraint(["new_claim_id"], ["lucy.memory_claims.id"]),
         sa.CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_correction_confidence"),
-        sa.CheckConstraint("status IN ('pending','applied','rejected')", name="ck_correction_status"),
+        sa.CheckConstraint(
+            "status IN ('pending','applied','rejected')",
+            name="ck_correction_status",
+        ),
         schema="lucy",
     )
     op.execute("GRANT SELECT, INSERT, UPDATE ON lucy.memory_corrections TO lucy_app")

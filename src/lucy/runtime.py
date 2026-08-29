@@ -5,8 +5,10 @@ from pathlib import Path
 
 import uvicorn
 
+from lucy.archive_crypto import EnvelopeCipher, SqliteArchiveKeyStore
 from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
+from lucy.evidence import EvidenceService
 from lucy.rejoining import RejoiningService
 
 
@@ -22,8 +24,16 @@ def _expected_commit() -> str:
 def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
+    sessions = create_session_factory(database_url)
+    key_store_path = os.environ.get("LUCY_ARCHIVE_KEYSTORE_PATH", "").strip()
+    if key_store_path:
+        EvidenceService(
+            sessions,
+            EnvelopeCipher.from_environment(),
+            SqliteArchiveKeyStore(Path(key_store_path)),
+        ).reconcile_missing_keys()
     result = RejoiningService(
-        create_session_factory(database_url), expected_hermes_commit=_expected_commit()
+        sessions, expected_hermes_commit=_expected_commit()
     ).run(observed_hermes_commit=observed)
     if result.state != RejoiningState.READY:
         raise SystemExit(f"Lucy startup gate failed: {result.checks}")

@@ -159,15 +159,18 @@ def test_middleware_blocks_duplicate_execution(monkeypatch: pytest.MonkeyPatch) 
 def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
     plugin = _load_plugin()
     registrations: list[tuple[str, Any]] = []
+    hooks: list[tuple[str, Any]] = []
     tools: list[dict[str, Any]] = []
     ctx = SimpleNamespace(
         register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_hook=lambda kind, callback: hooks.append((kind, callback)),
         register_tool=lambda **kwargs: tools.append(kwargs),
     )
     plugin.register(ctx)
     assert [tool["name"] for tool in tools] == [
         "lucy_memory_lookup",
         "lucy_memory_propose",
+        "lucy_evidence_retrieve",
     ]
     assert {tool["toolset"] for tool in tools} == {"lucy_memory"}
     assert all(
@@ -178,6 +181,211 @@ def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
         ("llm_request", plugin._request_middleware),
         ("llm_execution", plugin._execution_middleware),
     ]
+    assert hooks == [
+        ("pre_llm_call", plugin._pre_llm_call),
+        ("transform_llm_output", plugin._transform_llm_output),
+        ("post_llm_call", plugin._post_llm_call),
+        ("on_session_end", plugin._on_session_end),
+    ]
+
+
+def test_telegram_transcript_hooks_archive_both_roles_idempotently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if "capture-mode" in path:
+            return {"capture_enabled": True, "version": 0}
+        return {
+            "archived": True,
+            "evidence_id": "evidence-1",
+            "keyed_commitment": "a" * 64,
+            "turn_committed": kwargs["payload"]["role"] == "assistant",
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    hook_context = {
+        "user_message": "Please remember our whole conversation.",
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "platform": "telegram",
+    }
+    context = plugin._pre_llm_call(**hook_context)
+    assert context is not None
+    assert "evidence_id evidence-1" in context["context"]
+    assert plugin._transform_llm_output(
+        response_text="I will retain our conversations by default.",
+        session_id="session-1",
+        platform="telegram",
+    ) is None
+    plugin._post_llm_call(
+        **hook_context,
+        assistant_response="I will retain our conversations by default.",
+    )
+
+    message_calls = [call for call in calls if call[0].endswith("/messages")]
+    assert len(message_calls) == 4
+    assert [call[1]["payload"]["role"] for call in message_calls] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert message_calls[0][1]["extra_headers"] == message_calls[2][1][
+        "extra_headers"
+    ]
+    assert message_calls[1][1]["extra_headers"] == message_calls[3][1][
+        "extra_headers"
+    ]
+
+
+def test_off_record_is_visible_and_skips_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(path)
+        assert path.endswith("/capture-mode")
+        assert kwargs["payload"]["capture_enabled"] is False
+        return {"capture_enabled": False, "version": 1}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Lucy, off the record.",
+        session_id="session-2",
+        turn_id="turn-2",
+        platform="telegram",
+    )
+    transformed = plugin._transform_llm_output(
+        response_text="Understood.",
+        session_id="session-2",
+        platform="telegram",
+    )
+    assert context is not None and "not archiving" in context["context"]
+    assert transformed is not None and transformed.startswith("🔒 Off the record")
+    assert calls == ["/internal/v1/conversations/capture-mode"]
+
+
+def test_back_on_record_archives_the_control_turn_before_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if path.endswith("/capture-mode"):
+            return {"capture_enabled": True, "version": 2}
+        role = kwargs["payload"]["role"]
+        return {
+            "archived": True,
+            "evidence_id": f"evidence-{role}",
+            "keyed_commitment": "a" * 64,
+            "turn_committed": role == "assistant",
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Back on the record.",
+        session_id="session-3",
+        turn_id="turn-3",
+        platform="telegram",
+    )
+    transformed = plugin._transform_llm_output(
+        response_text="Capture is back on.",
+        session_id="session-3",
+        platform="telegram",
+    )
+
+    assert context is not None and "evidence-user" in context["context"]
+    assert transformed is None
+    assert [path for path, _kwargs in calls] == [
+        "/internal/v1/conversations/capture-mode",
+        "/internal/v1/conversations/messages",
+        "/internal/v1/conversations/messages",
+    ]
+    assert [
+        kwargs["payload"]["role"]
+        for path, kwargs in calls
+        if path.endswith("/messages")
+    ] == ["user", "assistant"]
+
+
+def test_forget_last_deletes_before_archiving_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if path.endswith("/forget-last"):
+            return {"deleted": True, "key_destroyed": True}
+        if "capture-mode" in path:
+            return {"capture_enabled": True, "version": 2}
+        role = kwargs["payload"]["role"]
+        return {
+            "archived": True,
+            "evidence_id": f"evidence-{role}",
+            "keyed_commitment": "b" * 64,
+            "turn_committed": role == "assistant",
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Forget the last message.",
+        session_id="session-4",
+        turn_id="turn-4",
+        platform="telegram",
+    )
+    transformed = plugin._transform_llm_output(
+        response_text="That message and its derived memories were deleted.",
+        session_id="session-4",
+        platform="telegram",
+    )
+
+    assert context is not None and "were deleted" in context["context"]
+    assert transformed is None
+    assert [path for path, _kwargs in calls] == [
+        "/internal/v1/conversations/forget-last",
+        "/internal/v1/conversations/capture-mode?source_conversation_id=session-4",
+        "/internal/v1/conversations/messages",
+        "/internal/v1/conversations/messages",
+    ]
+
+
+def test_telegram_model_call_is_blocked_when_archive_state_is_unknown() -> None:
+    plugin = _load_plugin()
+    response = plugin._execution_middleware(
+        _request(),
+        lambda _request: pytest.fail("provider call must not run"),
+        **_middleware_kwargs(),
+        platform="telegram",
+        turn_id="unarchived-turn",
+    )
+    assert "retention state" in response.choices[0].message.content
+
+
+def test_transcript_hooks_ignore_non_telegram_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setattr(
+        plugin,
+        "_request_json",
+        lambda *_args, **_kwargs: pytest.fail("non-Telegram text must not be archived"),
+    )
+    plugin._pre_llm_call(
+        user_message="local test",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="cli",
+    )
 
 
 def test_memory_lookup_returns_only_validated_read_only_projection(
@@ -286,6 +494,59 @@ def test_memory_proposal_rejects_applied_companion_response(
         )
     )
     assert result == {"ok": False, "error": "invalid_companion_response"}
+
+
+def test_evidence_retrieval_is_provenance_bounded_and_audited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[dict[str, Any]] = []
+
+    def request(_path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {
+            "evidence_id": "12345678-1234-5678-1234-567812345678",
+            "message": {
+                "message_id": "turn-1:user",
+                "role": "user",
+                "content": "Exact wording",
+                "occurred_at": "2026-08-28T12:00:00Z",
+            },
+            "reason": "verify_exact_wording",
+            "autonomous": True,
+            "audited": True,
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = json.loads(
+        plugin._evidence_retrieve(
+            {
+                "evidence_id": "12345678-1234-5678-1234-567812345678",
+                "claim_id": "87654321-4321-6789-4321-678943216789",
+                "reason": "verify_exact_wording",
+            }
+        )
+    )
+    assert result["ok"] is True
+    assert result["audited"] is True
+    assert result["message"]["content"] == "Exact wording"
+    assert calls[0]["extra_headers"]["Idempotency-Key"].startswith(
+        "hermes-evidence-read:"
+    )
+
+
+def test_evidence_retrieval_rejects_broad_model_reason() -> None:
+    plugin = _load_plugin()
+    result = json.loads(
+        plugin._evidence_retrieve(
+            {
+                "evidence_id": "12345678-1234-5678-1234-567812345678",
+                "claim_id": "87654321-4321-6789-4321-678943216789",
+                "reason": "owner_export",
+            }
+        )
+    )
+    assert result == {"ok": False, "error": "invalid_retrieval_reason"}
 
 
 def test_request_middleware_injects_and_clamps_output_cap() -> None:

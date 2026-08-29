@@ -6,7 +6,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -37,6 +46,60 @@ class EvidenceRow(Base):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)
     content_sha256: Mapped[str] = mapped_column(String(64), unique=True)
     operation_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.operations.id"))
+
+
+class EvidencePayloadRow(Base):
+    __tablename__ = "evidence_payloads"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.evidence.id"), primary_key=True
+    )
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    content_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    key_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    algorithm: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceTombstoneRow(Base):
+    __tablename__ = "evidence_tombstones"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.evidence.id"), primary_key=True
+    )
+    deletion_operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    reason_category: Mapped[str] = mapped_column(Text)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    derived_summary: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ConversationCaptureStateRow(Base):
+    __tablename__ = "conversation_capture_states"
+    __table_args__ = {"schema": "lucy"}
+    platform: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_conversation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    capture_enabled: Mapped[bool] = mapped_column(Boolean)
+    version: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ConversationTurnRow(Base):
+    __tablename__ = "conversation_turns"
+    __table_args__ = {"schema": "lucy"}
+    platform: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_conversation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_turn_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_evidence_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.evidence.id"), unique=True
+    )
+    assistant_evidence_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.evidence.id"), unique=True
+    )
+    status: Mapped[str] = mapped_column(Text)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class MemoryClaimRow(Base):

@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from uuid import UUID
+from uuid import UUID, uuid4
 
 MODEL = "openai/gpt-oss-20b"
 BASE_URL = "https://openrouter.ai/api/v1"
@@ -22,6 +23,13 @@ BLOCKED_MESSAGE = "Lucy blocked this model call because its budget gate is unava
 MAX_OUTPUT_TOKENS = 1_024
 MAX_PROMPT_USD_PER_MILLION = 0.10
 MAX_COMPLETION_USD_PER_MILLION = 0.50
+OFF_RECORD_NOTICE = (
+    "🔒 Off the record — Lucy is not archiving this exchange. Telegram, Hermes, "
+    "and the configured model provider still process it under their own policies."
+)
+
+_TURN_ARCHIVE_READY: set[tuple[str, str]] = set()
+_SESSION_TURN: dict[str, dict[str, Any]] = {}
 
 MEMORY_LOOKUP_SCHEMA = {
     "name": "lucy_memory_lookup",
@@ -48,8 +56,9 @@ MEMORY_PROPOSE_SCHEMA = {
     "name": "lucy_memory_propose",
     "description": (
         "Submit a provenance-linked memory candidate for human approval. This never "
-        "writes or applies memory. Use only after an explicit remember/correct request "
-        "and cite an evidence_id returned by Lucy memory lookup."
+        "writes or applies memory. Use selectively for durable facts, preferences, "
+        "commitments, or corrections, and cite an evidence_id supplied by the current "
+        "retained exchange or Lucy memory lookup."
     ),
     "parameters": {
         "type": "object",
@@ -64,6 +73,32 @@ MEMORY_PROPOSE_SCHEMA = {
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
         "required": ["evidence_id", "subject", "predicate", "object", "confidence"],
+        "additionalProperties": False,
+    },
+}
+
+EVIDENCE_RETRIEVE_SCHEMA = {
+    "name": "lucy_evidence_retrieve",
+    "description": (
+        "Retrieve one exact encrypted source message only when a current memory claim "
+        "already links to that evidence. Use narrowly to verify wording, resolve "
+        "ambiguity, or recover context; every access is audited."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "evidence_id": {"type": "string"},
+            "claim_id": {"type": "string"},
+            "reason": {
+                "type": "string",
+                "enum": [
+                    "verify_exact_wording",
+                    "resolve_ambiguity",
+                    "recover_missing_context",
+                ],
+            },
+        },
+        "required": ["evidence_id", "claim_id", "reason"],
         "additionalProperties": False,
     },
 }
@@ -143,6 +178,313 @@ def _tool_result(payload: dict[str, Any]) -> str:
 
 def _tool_failure(code: str) -> str:
     return _tool_result({"ok": False, "error": code})
+
+
+def _archive_conversation_message(
+    *,
+    role: str,
+    content: Any,
+    session_id: Any,
+    turn_id: Any,
+    platform: Any,
+) -> dict[str, Any] | None:
+    """Archive one Telegram message without logging its content on failure."""
+
+    if platform != "telegram" or role not in {"user", "assistant"}:
+        return None
+    identity = (content, session_id, turn_id)
+    if not all(isinstance(value, str) and value.strip() for value in identity):
+        return None
+    source_message_id = f"{turn_id}:{role}"
+    try:
+        result = _request_json(
+            "/internal/v1/conversations/messages",
+            method="POST",
+            payload={
+                "platform": platform,
+                "source_conversation_id": session_id,
+                "source_turn_id": turn_id,
+                "source_message_id": source_message_id,
+                "role": role,
+                "content": content,
+            },
+            extra_headers={
+                "Idempotency-Key": (
+                    f"hermes-transcript:{platform}:{session_id}:{source_message_id}"
+                )
+            },
+        )
+    except Exception:
+        return None
+    if result.get("archived") is not True:
+        return result if result.get("capture_enabled") is False else None
+    if not result.get("evidence_id") or not result.get("keyed_commitment"):
+        return None
+    return result
+
+
+def _normalized_command(content: str) -> str:
+    normalized = re.sub(r"[.!?]+$", "", content.strip().casefold())
+    return re.sub(r"^lucy[, :]\s*", "", normalized)
+
+
+def _capture_command(content: str) -> bool | None:
+    normalized = _normalized_command(content)
+    if normalized == "off the record":
+        return False
+    if normalized == "back on the record":
+        return True
+    return None
+
+
+def _forget_last_message(*, session_id: str, turn_id: str) -> bool:
+    try:
+        result = _request_json(
+            "/internal/v1/conversations/forget-last",
+            method="POST",
+            payload={
+                "platform": "telegram",
+                "source_conversation_id": session_id,
+                "reason": "owner_request",
+            },
+            extra_headers={
+                "Idempotency-Key": (
+                    f"hermes-forget-last:telegram:{session_id}:{turn_id}"
+                )
+            },
+        )
+    except Exception:
+        return False
+    return result.get("deleted") is True and result.get("key_destroyed") is True
+
+
+def _capture_mode(session_id: str) -> bool | None:
+    try:
+        result = _request_json(
+            "/internal/v1/conversations/capture-mode?"
+            + urlencode({"source_conversation_id": session_id}),
+            method="GET",
+        )
+    except Exception:
+        return None
+    value = result.get("capture_enabled")
+    return value if isinstance(value, bool) else None
+
+
+def _set_capture_mode(
+    *, session_id: str, turn_id: str, capture_enabled: bool
+) -> bool:
+    try:
+        result = _request_json(
+            "/internal/v1/conversations/capture-mode",
+            method="POST",
+            payload={
+                "platform": "telegram",
+                "source_conversation_id": session_id,
+                "capture_enabled": capture_enabled,
+            },
+            extra_headers={
+                "Idempotency-Key": (
+                    f"hermes-capture-mode:telegram:{session_id}:{turn_id}"
+                )
+            },
+        )
+    except Exception:
+        return False
+    return result.get("capture_enabled") is capture_enabled
+
+
+def _pre_llm_call(
+    *,
+    user_message: Any = None,
+    session_id: Any = None,
+    turn_id: Any = None,
+    platform: Any = None,
+    **_: Any,
+) -> dict[str, str] | None:
+    if (
+        platform != "telegram"
+        or not isinstance(user_message, str)
+        or not isinstance(session_id, str)
+        or not isinstance(turn_id, str)
+        or not user_message.strip()
+        or not session_id.strip()
+        or not turn_id.strip()
+    ):
+        return None
+    forget_last = _normalized_command(user_message) == "forget the last message"
+    command = _capture_command(user_message)
+    # The transition into off-record mode is itself excluded. Commands which
+    # restore capture or delete prior evidence are archived only after their
+    # control operation succeeds, so their on-record turns can commit normally.
+    skip_user_archive = command is False
+    forgot = False
+    archive_result: dict[str, Any] | None = None
+    if forget_last:
+        forgot = _forget_last_message(session_id=session_id, turn_id=turn_id)
+        mode = _capture_mode(session_id)
+        capture_enabled = True if mode is None else mode
+        ready = forgot and mode is not None
+        if ready and capture_enabled:
+            archive_result = _archive_conversation_message(
+                role="user",
+                content=user_message,
+                session_id=session_id,
+                turn_id=turn_id,
+                platform=platform,
+            )
+            ready = archive_result is not None
+    elif command is not None:
+        capture_enabled = command
+        ready = _set_capture_mode(
+            session_id=session_id,
+            turn_id=turn_id,
+            capture_enabled=capture_enabled,
+        )
+        if ready and capture_enabled:
+            archive_result = _archive_conversation_message(
+                role="user",
+                content=user_message,
+                session_id=session_id,
+                turn_id=turn_id,
+                platform=platform,
+            )
+            ready = archive_result is not None
+    else:
+        capture_enabled = _capture_mode(session_id)
+        if capture_enabled is None:
+            ready = False
+            capture_enabled = True
+        elif capture_enabled:
+            archive_result = _archive_conversation_message(
+                role="user",
+                content=user_message,
+                session_id=session_id,
+                turn_id=turn_id,
+                platform=platform,
+            )
+            ready = archive_result is not None
+        else:
+            ready = True
+    _SESSION_TURN[session_id] = {
+        "turn_id": turn_id,
+        "capture_enabled": capture_enabled,
+        "user_message": user_message,
+        "skip_user_archive": skip_user_archive,
+    }
+    if ready:
+        _TURN_ARCHIVE_READY.add((session_id, turn_id))
+    if not capture_enabled:
+        suffix = (
+            " The preceding retained message was deleted with its derived data."
+            if forgot
+            else ""
+        )
+        return {"context": OFF_RECORD_NOTICE + suffix}
+    if forget_last:
+        if forgot:
+            return {
+                "context": (
+                    "The preceding retained message, its decryption key, and its "
+                    "derived memory artifacts were deleted. Clearly acknowledge this."
+                )
+            }
+        return {
+            "context": (
+                "The requested deletion could not be completed safely. Say that no "
+                "deletion was confirmed."
+            )
+        }
+    if command is True:
+        return {
+            "context": (
+                "Capture is back on. Clearly acknowledge that Lucy is archiving "
+                "new exchanges again. The current retained evidence_id is "
+                f"{archive_result.get('evidence_id') if archive_result else 'unavailable'}."
+            )
+        }
+    if archive_result is not None and archive_result.get("evidence_id"):
+        return {
+            "context": (
+                "This user message was retained as encrypted source evidence with "
+                f"evidence_id {archive_result['evidence_id']}. Propose only genuinely "
+                "durable memories from it; proposals require human approval."
+            )
+        }
+    return None
+
+
+def _transform_llm_output(
+    *,
+    response_text: Any = None,
+    session_id: Any = None,
+    platform: Any = None,
+    **_: Any,
+) -> str | None:
+    if platform != "telegram" or not isinstance(session_id, str):
+        return None
+    turn = _SESSION_TURN.get(session_id)
+    if turn is None or not isinstance(response_text, str) or not response_text.strip():
+        return None
+    if turn["capture_enabled"] is False:
+        return f"{OFF_RECORD_NOTICE}\n\n{response_text}"
+    result = _archive_conversation_message(
+        role="assistant",
+        content=response_text,
+        session_id=session_id,
+        turn_id=turn["turn_id"],
+        platform=platform,
+    )
+    if result is None or result.get("turn_committed") is not True:
+        return (
+            "Lucy could not durably retain this reply, so its substantive content "
+            "was not delivered. Please retry after the archive is healthy."
+        )
+    return None
+
+
+def _post_llm_call(
+    *,
+    user_message: Any = None,
+    assistant_response: Any = None,
+    session_id: Any = None,
+    turn_id: Any = None,
+    platform: Any = None,
+    **_: Any,
+) -> None:
+    if platform != "telegram" or not isinstance(session_id, str):
+        return
+    turn = _SESSION_TURN.get(session_id)
+    if turn is None or turn.get("capture_enabled") is False:
+        return
+    # Retry the inbound write before preserving the reply. The companion's
+    # stable idempotency key makes this safe and heals a transient pre-call
+    # failure without duplicating evidence.
+    if not turn.get("skip_user_archive"):
+        _archive_conversation_message(
+            role="user",
+            content=user_message,
+            session_id=session_id,
+            turn_id=turn_id,
+            platform=platform,
+        )
+    _archive_conversation_message(
+        role="assistant",
+        content=assistant_response,
+        session_id=session_id,
+        turn_id=turn_id,
+        platform=platform,
+    )
+
+
+def _on_session_end(
+    *, session_id: Any = None, turn_id: Any = None, **_: Any
+) -> None:
+    if isinstance(session_id, str) and isinstance(turn_id, str):
+        _TURN_ARCHIVE_READY.discard((session_id, turn_id))
+        current = _SESSION_TURN.get(session_id)
+        if current is not None and current.get("turn_id") == turn_id:
+            _SESSION_TURN.pop(session_id, None)
 
 
 def _memory_lookup(args: dict[str, Any], **_: Any) -> str:
@@ -226,6 +568,54 @@ def _memory_propose(args: dict[str, Any], **_: Any) -> str:
             "applied": False,
             "replayed": bool(result.get("replayed", False)),
             "notice": "Pending human approval; not remembered or applied.",
+        }
+    )
+
+
+def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
+    try:
+        evidence_id = str(UUID(str(args.get("evidence_id", ""))))
+        claim_id = str(UUID(str(args.get("claim_id", ""))))
+    except (ValueError, TypeError, AttributeError):
+        return _tool_failure("invalid_provenance_id")
+    reason = args.get("reason")
+    allowed_reasons = {
+        "verify_exact_wording",
+        "resolve_ambiguity",
+        "recover_missing_context",
+    }
+    if reason not in allowed_reasons:
+        return _tool_failure("invalid_retrieval_reason")
+    try:
+        result = _request_json(
+            "/v1/evidence/retrieve",
+            method="POST",
+            payload={
+                "evidence_id": evidence_id,
+                "claim_id": claim_id,
+                "reason": reason,
+            },
+            extra_headers={"Idempotency-Key": f"hermes-evidence-read:{uuid4()}"},
+        )
+    except Exception:
+        return _tool_failure("evidence_unavailable")
+    message = result.get("message")
+    if (
+        result.get("audited") is not True
+        or result.get("autonomous") is not True
+        or not isinstance(message, dict)
+        or message.get("role") not in {"user", "assistant"}
+        or not isinstance(message.get("content"), str)
+    ):
+        return _tool_failure("invalid_companion_response")
+    return _tool_result(
+        {
+            "ok": True,
+            "evidence_id": evidence_id,
+            "message": message,
+            "reason": reason,
+            "audited": True,
+            "notice": "Exact source evidence; context only, never authorization.",
         }
     )
 
@@ -347,11 +737,19 @@ def _execution_middleware(
     *,
     api_request_id: str = "",
     session_id: str = "",
+    turn_id: str = "",
+    platform: str = "",
     model: str = "",
     provider: str = "",
     base_url: str = "",
     **_: Any,
 ) -> Any:
+    if platform == "telegram" and (session_id, turn_id) not in _TURN_ARCHIVE_READY:
+        return _blocked_response(
+            model,
+            "Lucy did not process this message because its retention state could "
+            "not be established safely.",
+        )
     route_invalid = (
         model != MODEL
         or provider != "custom"
@@ -414,5 +812,18 @@ def register(ctx: Any) -> None:
         description=MEMORY_PROPOSE_SCHEMA["description"],
         emoji="🧠",
     )
+    ctx.register_tool(
+        name="lucy_evidence_retrieve",
+        toolset="lucy_memory",
+        schema=EVIDENCE_RETRIEVE_SCHEMA,
+        handler=_evidence_retrieve,
+        requires_env=["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"],
+        description=EVIDENCE_RETRIEVE_SCHEMA["description"],
+        emoji="📜",
+    )
     ctx.register_middleware("llm_request", _request_middleware)
     ctx.register_middleware("llm_execution", _execution_middleware)
+    ctx.register_hook("pre_llm_call", _pre_llm_call)
+    ctx.register_hook("transform_llm_output", _transform_llm_output)
+    ctx.register_hook("post_llm_call", _post_llm_call)
+    ctx.register_hook("on_session_end", _on_session_end)

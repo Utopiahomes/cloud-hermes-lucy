@@ -1,8 +1,14 @@
 name: lucy_control
-version: 1.1.0
-description: Fail-closed Lucy budgets and provenance-aware memory tools.
+version: 2.0.0
+description: Governed encrypted transcripts, budgets, and provenance tools.
 author: Lucy
 kind: standalone
 provides_tools:
   - lucy_memory_lookup
   - lucy_memory_propose
+  - lucy_evidence_retrieve
+provides_hooks:
+  - pre_llm_call
+  - transform_llm_output
+  - post_llm_call
+  - on_session_end

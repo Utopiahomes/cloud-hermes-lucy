@@ -5,9 +5,16 @@ slice.
 
 ## Archive
 
-Normalized conversation evidence is content-addressed and append-only. A
-PostgreSQL trigger rejects updates and deletes even if application code attempts
-them. The model-facing lookup never returns archived message content.
+Versioned conversation evidence envelopes are append-only. A PostgreSQL trigger
+rejects updates and deletes even if application code attempts them. Message
+plaintext is envelope-encrypted with a per-record DEK; only ciphertext, metadata,
+an external key reference, and a keyed commitment enter PostgreSQL.
+
+The staged Telegram bridge feeds this layer automatically for the allowlisted
+owner once its deployment gate is approved. Each inbound and assistant message
+has a stable turn/role identity, replays exactly once, and creates evidence plus
+audit history without creating a claim. It is not enabled in the live gateway
+yet. See [`telegram-transcript-retention.md`](telegram-transcript-retention.md).
 
 ## Graph
 
@@ -35,3 +42,6 @@ The integration test imports one synthetic conversation, materializes its graph
 relationship, restarts the service, replays without duplication, retrieves a
 provenance-linked working projection, verifies raw archive exclusion, and
 proves the archive mutation trigger and concurrent materialization behavior.
+Additional archive acceptance proves narrow audited decryption, owner retrieval,
+crypto-shredding, derived-data invalidation, default-on capture state, visible
+off-record behavior, and authoritative two-message turn commits.

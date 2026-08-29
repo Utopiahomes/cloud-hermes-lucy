@@ -93,8 +93,9 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     assert (plugin / "plugin.yaml").is_file()
     assert (plugin / "__init__.py").is_file()
     manifest = yaml.safe_load((plugin / "plugin.yaml").read_text(encoding="utf-8"))
-    assert manifest["version"] == "1.1.0"
+    assert manifest["version"] == "2.0.0"
     assert manifest["provides_tools"] == [
         "lucy_memory_lookup",
         "lucy_memory_propose",
+        "lucy_evidence_retrieve",
     ]

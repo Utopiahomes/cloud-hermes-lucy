@@ -16,6 +16,7 @@ def test_adapter_surface_has_no_approval_or_apply_route() -> None:
         if route.path.startswith("/v1/")
     }
     assert exposed == {
+        ("POST", "/v1/evidence/retrieve"),
         ("GET", "/v1/memory/lookup"),
         ("POST", "/v1/memory/proposals"),
     }
@@ -29,6 +30,10 @@ def test_internal_surface_only_exposes_model_budget_bridge() -> None:
         if route.path.startswith("/internal/")
     }
     assert exposed == {
+        ("GET", "/internal/v1/conversations/capture-mode"),
+        ("POST", "/internal/v1/conversations/capture-mode"),
+        ("POST", "/internal/v1/conversations/forget-last"),
+        ("POST", "/internal/v1/conversations/messages"),
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
     }
