@@ -17,9 +17,11 @@ Parameters:
     Type: String
   AlertEmail:
     Type: String
-  KeyAdministratorArn:
+  KeyAdministratorPrincipalArnPattern:
     Type: String
-    Description: ARN of the separately authenticated human KMS administrator role
+    Description: >-
+      ArnLike pattern for the IAM Identity Center administrator role, ending in
+      AWSReservedSSO_LucySecurityAdministrator_*
   ArchiveRoleName:
     Type: String
     Default: lucy-render-archive
@@ -31,6 +33,23 @@ Parameters:
     Default: lucy-render-deletion
 
 Resources:
+  KmsRecoveryAdministratorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lucy-kms-recovery-administrator
+      MaxSessionDuration: 3600
+      Description: Stable human-only recovery path for Lucy KMS key administration
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+
   EvidenceKey:
     Type: AWS::KMS::Key
     DeletionPolicy: Retain
@@ -42,11 +61,48 @@ Resources:
       KeyPolicy:
         Version: "2012-10-17"
         Statement:
-          - Sid: HumanKeyAdministratorOnly
+          - Sid: IdentityCenterHumanKeyAdministrator
             Effect: Allow
             Principal:
-              AWS: !Ref KeyAdministratorArn
-            Action: kms:*
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+          - Sid: StableHumanRecoveryAdministrator
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt KmsRecoveryAdministratorRole.Arn
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
             Resource: "*"
           - Sid: ArchiveGenerateOnly
             Effect: Allow
@@ -294,3 +350,5 @@ Outputs:
     Value: !GetAtt EvidenceRole.Arn
   DeletionRoleArn:
     Value: !GetAtt DeletionRole.Arn
+  KmsRecoveryAdministratorRoleArn:
+    Value: !GetAtt KmsRecoveryAdministratorRole.Arn

@@ -7,16 +7,22 @@ Transcript capture remains disabled.
 
 ## Provisioning order
 
-1. Create the owner's AWS account, enable root MFA/passkeys and recovery
-   factors, and create a separate administrative identity. Do not use root for
-   routine setup.
+1. Create the owner's AWS account and enable phishing-resistant root MFA and
+   recovery factors. In IAM Identity Center `us-east-1`, create and permanently
+   assign a `LucySecurityAdministrator` permission set to the owner's group.
+   Use that federated identity for routine setup; never create root or human
+   access keys. Preserve the assignment so AWS does not delete its generated
+   role.
 2. Use a Render workspace that supports managed AWS OIDC. Create one production
    environment and four private services from
    `deploy/render/security-baseline-v1.1.yaml.example`. Record the workspace,
    environment, and immutable service IDs.
 3. In AWS `us-east-1`, create the Render workspace OIDC provider and deploy
-   `deploy/aws/security-baseline-v1.1.yaml` with those exact IDs and an owner
-   alert email. Confirm the SNS subscription.
+   `deploy/aws/security-baseline-v1.1.yaml` with those exact IDs, the
+   `AWSReservedSSO_LucySecurityAdministrator_*` role ARN pattern, and an owner
+   alert email. Confirm the SNS subscription. Confirm that the template's
+   stable `lucy-kms-recovery-administrator` role can be assumed only by that
+   permission set.
 4. Configure each returned role ARN on only its matching Render service. The
    policy service must have no AWS role or static AWS credentials.
 5. Generate independent adapter, owner, policy-gateway, commitment, and Ed25519

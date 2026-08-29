@@ -80,6 +80,14 @@ def test_cloudformation_keeps_master_key_administration_out_of_runtime_roles() -
     assert "DeletionProtectionEnabled: true" in template
     assert "PendingWindowInDays: 30" in template
     assert "EnableKeyRotation: true" in template
+    assert "KeyAdministratorPrincipalArnPattern" in template
+    assert "AWSReservedSSO_LucySecurityAdministrator_*" in template
+    assert "KmsRecoveryAdministratorRole" in template
+    administrator_section = template.split(
+        "          - Sid: IdentityCenterHumanKeyAdministrator", 1
+    )[1].split("          - Sid: ArchiveGenerateOnly", 1)[0]
+    assert "kms:Decrypt" not in administrator_section
+    assert "kms:GenerateDataKey" not in administrator_section
 
 
 def test_cloudformation_template_is_well_formed_yaml_with_expected_boundaries() -> None:

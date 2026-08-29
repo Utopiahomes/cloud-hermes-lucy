@@ -24,6 +24,13 @@ record's KMS-wrapped data-encryption key from DynamoDB. It can never disable,
 delete, rotate, re-policy, or otherwise administer the KMS customer-managed
 master key.
 
+The human administrator signs in through a permanently assigned IAM Identity
+Center permission set. The KMS policy matches its generated role by a bounded
+ARN pattern and also names a stable IAM recovery role that only that permission
+set may assume. This prevents an Identity Center role-suffix rotation from
+orphaning the key. Human key administrators can administer the key but are not
+granted transcript `Decrypt` or `GenerateDataKey` through the key policy.
+
 ## SensitiveActionPermitV1
 
 Raw retrieval and governed deletion require an Ed25519-signed, database-backed,
