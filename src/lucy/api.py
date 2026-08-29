@@ -2,7 +2,6 @@
 
 import os
 import secrets
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import FastAPI, Header, HTTPException
@@ -16,7 +15,11 @@ from lucy.archive import (
     ConversationMessageArchiveInput,
     ConversationMessageArchiveResult,
 )
-from lucy.archive_crypto import EnvelopeCipher, SqliteArchiveKeyStore
+from lucy.archive_crypto import (
+    ArchiveCipher,
+    ArchiveKeyStore,
+    archive_dependencies_from_environment,
+)
 from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
 from lucy.db.models import LifecycleRow
@@ -86,12 +89,9 @@ def _ready_sessions() -> sessionmaker[Session]:
     return sessions
 
 
-def _archive_crypto() -> tuple[EnvelopeCipher, SqliteArchiveKeyStore]:
-    path = os.getenv("LUCY_ARCHIVE_KEYSTORE_PATH", "")
-    if not path:
-        raise HTTPException(status_code=503, detail="archive key store unavailable")
+def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
     try:
-        return EnvelopeCipher.from_environment(), SqliteArchiveKeyStore(Path(path))
+        return archive_dependencies_from_environment()
     except ValueError as exc:
         raise HTTPException(
             status_code=503, detail="archive encryption unavailable"

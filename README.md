@@ -67,6 +67,7 @@ See:
 - [`docs/telegram-gateway-readiness.md`](docs/telegram-gateway-readiness.md) for the deny-by-default pinned-Hermes gateway scaffold
 - [`docs/hermes-memory-tools-acceptance.md`](docs/hermes-memory-tools-acceptance.md) for provenance-aware lookup and pending-only proposal tools
 - [`docs/telegram-transcript-retention.md`](docs/telegram-transcript-retention.md) for encrypted default capture, owner deletion, and its deployment gate
+- [`docs/render-aws-kms-acceptance.md`](docs/render-aws-kms-acceptance.md) for the Render OIDC, AWS KMS, and deletion-aware wrapped-key boundary
 
 ## Local verification
 

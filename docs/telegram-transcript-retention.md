@@ -34,9 +34,9 @@ The keyed commitment supports idempotency and integrity checking without
 leaving a deterministic plaintext SHA-256 fingerprint that permits offline
 guess testing. KEK and commitment-key material remain outside PostgreSQL.
 
-`SqliteArchiveKeyStore` is a local acceptance adapter only. Production requires
-a managed KMS or external deletion-aware key registry. That system must prevent
-a restored registry snapshot from reintroducing a destroyed wrapped DEK.
+`SqliteArchiveKeyStore` is a local acceptance adapter only. Production uses AWS
+KMS through Render OIDC plus a narrowly scoped DynamoDB wrapped-key registry.
+See [`render-aws-kms-acceptance.md`](render-aws-kms-acceptance.md).
 
 ## Owner-sovereign deletion
 
@@ -108,6 +108,6 @@ Transcript capture must remain disabled in the live gateway until:
 
 1. the complete unit, static, migration, and PostgreSQL integration suites pass;
 2. the pinned Hermes plugin compatibility check passes without a core patch;
-3. a production-grade external key service and deletion-aware recovery policy
-   replace the local SQLite adapter; and
+3. the Render-to-AWS OIDC/KMS/DynamoDB acceptance path passes with no static AWS
+   credentials; and
 4. the owner completes a final acceptance review.

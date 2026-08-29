@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RenderLucyServiceOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/oidc.render.com/${RENDER_WORKSPACE_ID}"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.render.com/${RENDER_WORKSPACE_ID}:aud": "sts.amazonaws.com",
+          "oidc.render.com/${RENDER_WORKSPACE_ID}:sub": "workspace:${RENDER_WORKSPACE_ID}:environment:${RENDER_ENVIRONMENT_ID}:service:${RENDER_SERVICE_ID}"
+        }
+      }
+    }
+  ]
+}

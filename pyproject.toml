@@ -9,6 +9,7 @@ description = "Lucy companion control and memory service for Hermes Agent"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "alembic>=1.16,<2",
+  "boto3>=1.40,<2",
   "cryptography>=45,<47",
   "fastapi>=0.116,<1",
   "psycopg[binary]>=3.2,<4",

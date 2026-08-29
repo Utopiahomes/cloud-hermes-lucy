@@ -5,6 +5,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -19,7 +20,12 @@ from lucy.archive import (
     ConversationArchiveService,
     ConversationMessageArchiveInput,
 )
-from lucy.archive_crypto import EnvelopeCipher, MemoryArchiveKeyStore
+from lucy.archive_crypto import (
+    AWS_KMS_ALGORITHM,
+    AwsKmsEnvelopeCipher,
+    EnvelopeCipher,
+    MemoryArchiveKeyStore,
+)
 from lucy.contracts import (
     ApprovalDecision,
     ApprovalDecisionV1,
@@ -288,6 +294,58 @@ def test_archive_idempotency_collision_is_rejected() -> None:
     ConversationArchiveService(sessions, cipher, keys).preserve_message(key, original)
     with pytest.raises(ValueError, match="another message"):
         ConversationArchiveService(sessions, cipher, keys).preserve_message(key, collision)
+
+
+def test_mocked_aws_kms_archive_round_trip_uses_production_algorithm() -> None:
+    assert DATABASE_URL is not None
+    key_arn = (
+        "arn:aws:kms:us-east-1:123456789012:"
+        "key/12345678-1234-1234-1234-123456789012"
+    )
+
+    class Kms:
+        context: dict[str, str] | None = None
+
+        def generate_data_key(self, **kwargs: Any) -> dict[str, Any]:
+            self.context = kwargs["EncryptionContext"]
+            return {
+                "Plaintext": b"d" * 32,
+                "CiphertextBlob": b"kms-wrapped-dek",
+                "KeyId": key_arn,
+            }
+
+        def decrypt(self, **kwargs: Any) -> dict[str, Any]:
+            assert kwargs["EncryptionContext"] == self.context
+            assert kwargs["CiphertextBlob"] == b"kms-wrapped-dek"
+            return {"Plaintext": b"d" * 32, "KeyId": key_arn}
+
+    sessions = create_session_factory(DATABASE_URL)
+    keys = MemoryArchiveKeyStore()
+    cipher = AwsKmsEnvelopeCipher(Kms(), key_arn=key_arn, commitment_key=b"c" * 32)
+    archived = ConversationArchiveService(sessions, cipher, keys).preserve_message(
+        "aws-kms:telegram:session-1:turn-1:user",
+        ConversationMessageArchiveInput(
+            platform="telegram",
+            source_conversation_id="session-1",
+            source_turn_id="turn-1",
+            source_message_id="turn-1:user",
+            role="user",
+            content="Synthetic AWS KMS evidence.",
+        ),
+    )
+    assert archived.evidence_id is not None
+    retrieved = EvidenceService(sessions, cipher, keys).retrieve(
+        "aws-kms:owner-read:1",
+        EvidenceRetrievalRequest(
+            evidence_id=archived.evidence_id,
+            reason="owner_review",
+        ),
+        owner=True,
+    )
+    assert retrieved.message.content == "Synthetic AWS KMS evidence."
+    with sessions() as session:
+        payload = session.get(EvidencePayloadRow, archived.evidence_id)
+        assert payload is not None and payload.algorithm == AWS_KMS_ALGORITHM
 
 
 def test_owner_deletion_crypto_shreds_and_invalidates_all_derived_memory() -> None:

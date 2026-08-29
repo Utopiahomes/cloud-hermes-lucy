@@ -14,6 +14,12 @@ The application image reads the expected Hermes commit from the reviewed
 gate exits nonzero, allowing the supervisor to apply restart policy without ever
 opening the HTTP service.
 
+When an archive backend is configured, startup first exercises a reserved
+synthetic record through DEK generation, wrapped-key put/get/delete, and unwrap.
+It then reconciles any PostgreSQL payload whose external wrapped key disappeared
+during an interrupted deletion. A broken KMS, OIDC, DynamoDB, or local acceptance
+key-store boundary therefore prevents the API from reaching `READY`.
+
 ## Health semantics
 
 - `GET /health` is process liveness only.

@@ -11,12 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from lucy.archive_crypto import (
-    ALGORITHM,
-    ArchiveKeyStore,
-    EncryptedPayload,
-    EnvelopeCipher,
-)
+from lucy.archive_crypto import ArchiveCipher, ArchiveKeyStore, EncryptedPayload
 from lucy.audit import append_audit
 from lucy.contracts import ApprovalStatus, OperationOutcome
 from lucy.contracts.v1 import ConversationMessageV1
@@ -93,7 +88,7 @@ class EvidenceService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        cipher: EnvelopeCipher,
+        cipher: ArchiveCipher,
         key_store: ArchiveKeyStore,
     ) -> None:
         self._sessions = sessions
@@ -123,7 +118,7 @@ class EvidenceService:
             if session.get(EvidenceTombstoneRow, evidence.id) is not None:
                 raise LookupError("evidence payload was deleted")
             payload = session.get(EvidencePayloadRow, evidence.id)
-            if payload is None or payload.algorithm != ALGORITHM:
+            if payload is None or payload.algorithm != self._cipher.algorithm:
                 raise LookupError("encrypted evidence payload is unavailable")
             if not owner:
                 if request.claim_id is None:

@@ -5,7 +5,10 @@ from pathlib import Path
 
 import uvicorn
 
-from lucy.archive_crypto import EnvelopeCipher, SqliteArchiveKeyStore
+from lucy.archive_crypto import (
+    archive_dependencies_from_environment,
+    verify_archive_dependencies,
+)
 from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
 from lucy.evidence import EvidenceService
@@ -25,12 +28,14 @@ def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
     sessions = create_session_factory(database_url)
-    key_store_path = os.environ.get("LUCY_ARCHIVE_KEYSTORE_PATH", "").strip()
-    if key_store_path:
+    archive_backend = os.environ.get("LUCY_ARCHIVE_BACKEND", "").strip()
+    if archive_backend:
+        cipher, key_store = archive_dependencies_from_environment()
+        verify_archive_dependencies(cipher, key_store)
         EvidenceService(
             sessions,
-            EnvelopeCipher.from_environment(),
-            SqliteArchiveKeyStore(Path(key_store_path)),
+            cipher,
+            key_store,
         ).reconcile_missing_keys()
     result = RejoiningService(
         sessions, expected_hermes_commit=_expected_commit()

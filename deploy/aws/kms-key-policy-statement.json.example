@@ -1,0 +1,26 @@
+{
+  "Sid": "AllowLucyRuntimeEnvelopeOperations",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${LUCY_RENDER_ROLE_NAME}"
+  },
+  "Action": [
+    "kms:GenerateDataKey",
+    "kms:Decrypt"
+  ],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "kms:EncryptionContext:application": "cloud-hermes-lucy"
+    },
+    "ForAllValues:StringEquals": {
+      "kms:EncryptionContextKeys": [
+        "application",
+        "evidence-id"
+      ]
+    },
+    "ForAnyValue:StringEquals": {
+      "kms:EncryptionContextKeys": "evidence-id"
+    }
+  }
+}

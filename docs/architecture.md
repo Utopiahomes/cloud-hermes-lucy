@@ -17,7 +17,9 @@ profiles, skills, plugins, MCP tools, and service APIs—not edits to Hermes cor
 | Cron dispatch | Hermes | Jobs call narrow Lucy operations |
 | Tool restrictions and command approvals | Hermes | Minimum toolset and explicit command patterns |
 | Three-layer memory graph | Lucy memory service | Working, relational, and durable knowledge layers |
-| Immutable source archive | Lucy memory service | Append-only records; corrections are new records |
+| Encrypted source archive | Lucy memory service | Append-only envelopes; owner-governed crypto-shredding |
+| Master wrapping key | AWS KMS | Render OIDC role; KMS key material never enters Lucy |
+| Wrapped DEK registry | AWS DynamoDB | Exact-item operations only; isolated from PostgreSQL restore |
 | Rejoining lifecycle | Lucy control service | Explicit transitions with durable checkpoints |
 | High-impact approval workflow | Lucy control service | Separate policy decision from model intent |
 | Audit ledger | Lucy control service | Tamper-evident, append-only event chain |
@@ -41,8 +43,9 @@ profiles, skills, plugins, MCP tools, and service APIs—not edits to Hermes cor
 
 The initial contract deliberately separates evidence from interpretation:
 
-1. **Archive:** immutable source events and content hashes. It is the provenance
-   root and is never rewritten by an agent.
+1. **Archive:** append-only encrypted source envelopes and keyed commitments. It
+   is the provenance root; owner deletion destroys the external wrapped DEK,
+   tombstones the envelope, and invalidates derived state.
 2. **Graph:** versioned entities, relationships, claims, confidence, temporal
    bounds, and links back to archive records.
 3. **Working context:** small, task-scoped projections assembled from graph
@@ -77,5 +80,7 @@ restart cannot turn an uncertain outcome into an automatic retry.
 Hermes and Lucy services should run as separate processes with separate storage
 and credentials. The Hermes process receives only the credentials it directly
 needs. Lucy data services bind to a private interface and authenticate every
-request. Backups preserve encrypted archive/audit data and are tested by restore.
-
+request. Render supplies Lucy a short-lived AWS web identity bound to one
+service. That role can use one KMS key and exact-item operations on one DynamoDB
+table; it has no static AWS credential or administrative permission. Backups
+preserve encrypted archive/audit data and are tested by restore.

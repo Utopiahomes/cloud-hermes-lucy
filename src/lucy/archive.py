@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from lucy.archive_crypto import ALGORITHM, ArchiveKeyStore, EnvelopeCipher
+from lucy.archive_crypto import ArchiveCipher, ArchiveKeyStore
 from lucy.audit import append_audit
 from lucy.contracts import OperationOutcome
 from lucy.contracts.v1 import ConversationMessageV1
@@ -82,7 +82,7 @@ class ConversationArchiveService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        cipher: EnvelopeCipher,
+        cipher: ArchiveCipher,
         key_store: ArchiveKeyStore,
     ) -> None:
         self._sessions = sessions
@@ -343,7 +343,7 @@ class ConversationArchiveService:
                         ciphertext=encrypted.ciphertext,
                         content_nonce=encrypted.content_nonce,
                         key_ref=key_ref,
-                        algorithm=ALGORITHM,
+                        algorithm=self._cipher.algorithm,
                         created_at=now,
                     )
                 )
@@ -355,7 +355,7 @@ class ConversationArchiveService:
                         "evidence_id": str(evidence_id),
                         "platform": request.platform,
                         "role": request.role,
-                        "algorithm": ALGORITHM,
+                        "algorithm": self._cipher.algorithm,
                     },
                 )
 
