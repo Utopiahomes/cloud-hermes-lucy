@@ -66,12 +66,14 @@ destruction record; restoring an old wrapped key is forbidden.
 Ordinary recall uses structured memory. Lucy has one narrowly bounded evidence
 tool for exceptional cases: verifying exact wording, resolving ambiguity, or
 recovering context missed during extraction. Autonomous retrieval requires the
-exact evidence UUID and a current provenance-linked claim UUID. It returns only
-one source message, and every successful access is audited.
+exact evidence UUID, a current provenance-linked claim UUID, an active
+allowlisted owner interaction, and a five-minute single-use
+`SensitiveActionPermitV1`. It returns only one source message, and every
+successful access is audited.
 
-The owner API permits broader single-record review or export with owner
-authentication. There is no model-visible archive search, bulk export,
-approval, or deletion tool.
+The owner API permits single-record review with owner authentication and the
+same signed-permit boundary. Owner export and bulk archive search are not
+implemented. There is no model-visible approval or deletion tool.
 
 ## Off the record
 

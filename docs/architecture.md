@@ -80,7 +80,9 @@ restart cannot turn an uncertain outcome into an automatic retry.
 Hermes and Lucy services should run as separate processes with separate storage
 and credentials. The Hermes process receives only the credentials it directly
 needs. Lucy data services bind to a private interface and authenticate every
-request. Render supplies Lucy a short-lived AWS web identity bound to one
-service. That role can use one KMS key and exact-item operations on one DynamoDB
-table; it has no static AWS credential or administrative permission. Backups
+request. Render supplies separate short-lived AWS web identities to archive,
+evidence, and deletion services. Archive can generate/store new wrapped keys;
+evidence can decrypt/read one permitted key; deletion can remove one wrapped
+key and has no KMS action. The permit-policy service has no AWS identity. No
+runtime has static AWS credentials or administrative permission. Backups
 preserve encrypted archive/audit data and are tested by restore.

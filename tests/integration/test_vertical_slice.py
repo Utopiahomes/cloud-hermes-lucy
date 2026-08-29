@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import create_engine, func, select, text, update
 from sqlalchemy.exc import DBAPIError
@@ -25,6 +26,14 @@ from lucy.archive_crypto import (
     AwsKmsEnvelopeCipher,
     EnvelopeCipher,
     MemoryArchiveKeyStore,
+)
+from lucy.authorization import (
+    SensitiveAction,
+    SensitiveActionPermitRequest,
+    SensitiveActionPermitService,
+    SensitiveActionPermitSigner,
+    SensitiveActionPermitV1,
+    SensitiveActionPermitVerifier,
 )
 from lucy.contracts import (
     ApprovalDecision,
@@ -74,11 +83,36 @@ from lucy.policy import ActionIntent
 from lucy.proposals import MemoryProposalInput, MemoryProposalService
 from lucy.recovery import RecoveryService
 from lucy.rejoining import RejoiningService
+from lucy.secret_filter import MemorySecretDetected
 from lucy.vertical_slice import ImportRequest, VerticalSliceService
 
 DATABASE_URL = os.getenv("LUCY_TEST_DATABASE_URL")
 OWNER_DATABASE_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires PostgreSQL integration database")
+
+_PERMIT_PRIVATE_KEY = Ed25519PrivateKey.generate()
+_PERMIT_SIGNER = SensitiveActionPermitSigner(_PERMIT_PRIVATE_KEY)
+_PERMIT_VERIFIER = SensitiveActionPermitVerifier(_PERMIT_PRIVATE_KEY.public_key())
+
+
+def _permit(
+    sessions: Any,
+    *,
+    action: SensitiveAction,
+    evidence_id: Any,
+    reason: str,
+    key: str,
+) -> SensitiveActionPermitV1:
+    return SensitiveActionPermitService(sessions, _PERMIT_SIGNER).issue(
+        f"permit:{key}",
+        SensitiveActionPermitRequest(
+            action=action,
+            owner_subject="owner:synthetic",
+            owner_interaction_id=f"telegram:{key}",
+            evidence_ids=(evidence_id,),
+            reason=reason,
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +123,8 @@ def reset_synthetic_database() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.action_executions, lucy.memory_write_proposals, "
+                "TRUNCATE lucy.action_executions, lucy.sensitive_action_permits, "
+                "lucy.memory_write_proposals, "
                 "lucy.memory_corrections, "
                 "lucy.evidence_tombstones, lucy.evidence_payloads, "
                 "lucy.conversation_turns, lucy.conversation_capture_states, "
@@ -231,9 +266,7 @@ def test_telegram_messages_are_archived_once_without_creating_claims() -> None:
     )
     replay = ConversationArchiveService(
         create_session_factory(DATABASE_URL), cipher, keys
-    ).preserve_message(
-        "hermes-transcript:telegram:session-1:turn-1:user", request
-    )
+    ).preserve_message("hermes-transcript:telegram:session-1:turn-1:user", request)
     assistant = ConversationArchiveService(sessions, cipher, keys).preserve_message(
         "hermes-transcript:telegram:session-1:turn-1:assistant",
         request.model_copy(
@@ -298,10 +331,7 @@ def test_archive_idempotency_collision_is_rejected() -> None:
 
 def test_mocked_aws_kms_archive_round_trip_uses_production_algorithm() -> None:
     assert DATABASE_URL is not None
-    key_arn = (
-        "arn:aws:kms:us-east-1:123456789012:"
-        "key/12345678-1234-1234-1234-123456789012"
-    )
+    key_arn = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
 
     class Kms:
         context: dict[str, str] | None = None
@@ -334,11 +364,19 @@ def test_mocked_aws_kms_archive_round_trip_uses_production_algorithm() -> None:
         ),
     )
     assert archived.evidence_id is not None
-    retrieved = EvidenceService(sessions, cipher, keys).retrieve(
+    permit = _permit(
+        sessions,
+        action=SensitiveAction.EVIDENCE_RETRIEVE,
+        evidence_id=archived.evidence_id,
+        reason="owner_review",
+        key="aws-kms-owner-read:1",
+    )
+    retrieved = EvidenceService(sessions, cipher, keys, _PERMIT_VERIFIER).retrieve(
         "aws-kms:owner-read:1",
         EvidenceRetrievalRequest(
             evidence_id=archived.evidence_id,
             reason="owner_review",
+            permit=permit,
         ),
         owner=True,
     )
@@ -386,49 +424,72 @@ def test_owner_deletion_crypto_shreds_and_invalidates_all_derived_memory() -> No
     MemoryService(sessions).materialize_claim(applied.claim_id)
     MemoryService(sessions).build_context("Earl Grey", persist=True)
 
-    evidence = EvidenceService(sessions, cipher, keys)
+    evidence = EvidenceService(sessions, cipher, keys, _PERMIT_VERIFIER)
+    owner_read_permit = _permit(
+        sessions,
+        action=SensitiveAction.EVIDENCE_RETRIEVE,
+        evidence_id=archived.evidence_id,
+        reason="owner_review",
+        key="evidence-owner-read:1",
+    )
     owner_retrieval = evidence.retrieve(
         "evidence-owner-read:1",
         EvidenceRetrievalRequest(
             evidence_id=archived.evidence_id,
             reason="owner_review",
+            permit=owner_read_permit,
         ),
         owner=True,
     )
     assert owner_retrieval.message.content == "My favorite tea is Earl Grey."
-    with pytest.raises(ValueError, match="another evidence retrieval"):
-        evidence.retrieve(
-            "evidence-owner-read:1",
-            EvidenceRetrievalRequest(
-                evidence_id=archived.evidence_id,
-                reason="owner_export",
-            ),
-            owner=True,
-        )
     with pytest.raises(PermissionError, match="provenance-linked claim"):
+        missing_claim_permit = _permit(
+            sessions,
+            action=SensitiveAction.EVIDENCE_RETRIEVE,
+            evidence_id=archived.evidence_id,
+            reason="resolve_ambiguity",
+            key="evidence-autonomous-read-without-claim:1",
+        )
         evidence.retrieve(
             "evidence-autonomous-read-without-claim:1",
             EvidenceRetrievalRequest(
                 evidence_id=archived.evidence_id,
                 reason="resolve_ambiguity",
+                permit=missing_claim_permit,
             ),
             owner=False,
         )
+    autonomous_permit = _permit(
+        sessions,
+        action=SensitiveAction.EVIDENCE_RETRIEVE,
+        evidence_id=archived.evidence_id,
+        reason="verify_exact_wording",
+        key="evidence-read:1",
+    )
     retrieved = evidence.retrieve(
         "evidence-read:1",
         EvidenceRetrievalRequest(
             evidence_id=archived.evidence_id,
             claim_id=applied.claim_id,
             reason="verify_exact_wording",
+            permit=autonomous_permit,
         ),
         owner=False,
     )
     assert retrieved.message.content == "My favorite tea is Earl Grey."
+    delete_permit = _permit(
+        sessions,
+        action=SensitiveAction.EVIDENCE_DELETE,
+        evidence_id=archived.evidence_id,
+        reason="owner_request",
+        key="evidence-delete:1",
+    )
     deleted = evidence.delete(
         "evidence-delete:1",
         EvidenceDeletionRequest(
             evidence_id=archived.evidence_id,
             reason="owner_request",
+            permit=delete_permit,
         ),
     )
     replay = evidence.delete(
@@ -436,14 +497,23 @@ def test_owner_deletion_crypto_shreds_and_invalidates_all_derived_memory() -> No
         EvidenceDeletionRequest(
             evidence_id=archived.evidence_id,
             reason="owner_request",
+            permit=delete_permit,
         ),
     )
     with pytest.raises(ValueError, match="another evidence deletion"):
+        other_delete_permit = _permit(
+            sessions,
+            action=SensitiveAction.EVIDENCE_DELETE,
+            evidence_id=archived.evidence_id,
+            reason="sensitive_data",
+            key="evidence-delete-sensitive:1",
+        )
         evidence.delete(
             "evidence-delete:1",
             EvidenceDeletionRequest(
                 evidence_id=archived.evidence_id,
                 reason="sensitive_data",
+                permit=other_delete_permit,
             ),
         )
     assert deleted.key_destroyed is True
@@ -457,6 +527,7 @@ def test_owner_deletion_crypto_shreds_and_invalidates_all_derived_memory() -> No
                 evidence_id=archived.evidence_id,
                 claim_id=applied.claim_id,
                 reason="verify_exact_wording",
+                permit=autonomous_permit,
             ),
             owner=False,
         )
@@ -548,7 +619,7 @@ def test_startup_reconciliation_finishes_interrupted_key_destruction() -> None:
         key_ref = payload.key_ref
     assert keys.delete(key_ref) is True
 
-    evidence = EvidenceService(sessions, cipher, keys)
+    evidence = EvidenceService(sessions, cipher, keys, _PERMIT_VERIFIER)
     assert evidence.reconcile_missing_keys() == 1
     assert evidence.reconcile_missing_keys() == 0
     with sessions() as session:
@@ -661,11 +732,14 @@ def test_ambiguous_restart_degrades_without_retrying() -> None:
             "retried": False,
         }
         assert lifecycle.state == "degraded"
-        assert session.scalar(
-            select(func.count()).select_from(AuditEventRow).where(
-                AuditEventRow.event_type == "operation.ambiguous"
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEventRow)
+                .where(AuditEventRow.event_type == "operation.ambiguous")
             )
-        ) == 1
+            == 1
+        )
 
 
 def test_three_layer_memory_projection_survives_restart_without_raw_archive() -> None:
@@ -687,6 +761,8 @@ def test_three_layer_memory_projection_survives_restart_without_raw_archive() ->
     assert projection["evidence_id"] == str(imported.evidence_id)
     assert "messages" not in projection
     assert "content" not in projection
+    assert "evidence_sha256" not in projection
+    assert "evidence_commitment" not in projection
     restarted.build_context("Earl Grey")
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(WorkingContextRow)) == 1
@@ -756,9 +832,9 @@ def test_rejoining_invalid_budget_forces_degraded() -> None:
         assert budget is not None
         budget.limit_microusd = 1
         budget.spent_microusd = 2
-    result = RejoiningService(
-        sessions, expected_hermes_commit=HERMES_COMMIT
-    ).run(observed_hermes_commit=HERMES_COMMIT)
+    result = RejoiningService(sessions, expected_hermes_commit=HERMES_COMMIT).run(
+        observed_hermes_commit=HERMES_COMMIT
+    )
     assert result.state == RejoiningState.DEGRADED
     assert result.checks["budgets"] == "invalid"
 
@@ -770,14 +846,17 @@ def test_rejoining_quarantines_pending_operation_without_retry() -> None:
     with sessions.begin() as session:
         session.add(
             OperationRow(
-                id=pending_id, idempotency_key="startup:uncertain-effect",
-                outcome=OperationOutcome.PENDING, result=None,
-                created_at=datetime.now(UTC), completed_at=None,
+                id=pending_id,
+                idempotency_key="startup:uncertain-effect",
+                outcome=OperationOutcome.PENDING,
+                result=None,
+                created_at=datetime.now(UTC),
+                completed_at=None,
             )
         )
-    result = RejoiningService(
-        sessions, expected_hermes_commit=HERMES_COMMIT
-    ).run(observed_hermes_commit=HERMES_COMMIT)
+    result = RejoiningService(sessions, expected_hermes_commit=HERMES_COMMIT).run(
+        observed_hermes_commit=HERMES_COMMIT
+    )
     assert result.state == RejoiningState.DEGRADED
     assert result.ambiguous_count == 1
     with sessions() as session:
@@ -797,9 +876,9 @@ def test_rejoining_detects_broken_audit_head_without_extending_chain() -> None:
     with owner.begin() as connection:
         connection.execute(text("UPDATE lucy.audit_head SET last_hash = repeat('f', 64)"))
     owner.dispose()
-    result = RejoiningService(
-        sessions, expected_hermes_commit=HERMES_COMMIT
-    ).run(observed_hermes_commit=HERMES_COMMIT)
+    result = RejoiningService(sessions, expected_hermes_commit=HERMES_COMMIT).run(
+        observed_hermes_commit=HERMES_COMMIT
+    )
     assert result.state == RejoiningState.DEGRADED
     assert result.checks["audit_chain"] == "audit_head_mismatch"
     with sessions() as session:
@@ -821,21 +900,23 @@ def test_approved_correction_supersedes_without_erasing_history() -> None:
     )
     correction_service = CorrectionService(sessions)
     proposed = correction_service.propose(
-        idempotency_key="correction:tea:1", old_claim_id=first.claim_id,
+        idempotency_key="correction:tea:1",
+        old_claim_id=first.claim_id,
         new_evidence_id=replacement.evidence_id,
-        replacement_object="English Breakfast", confidence=0.95,
+        replacement_object="English Breakfast",
+        confidence=0.95,
     )
     with pytest.raises(PermissionError):
         correction_service.apply(proposed.correction_id)
     ApprovalService(sessions).decide(
-        idempotency_key="correction:tea:decision", approval_id=proposed.approval_id,
-        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        idempotency_key="correction:tea:decision",
+        approval_id=proposed.approval_id,
+        decision=ApprovalDecision.APPROVE,
+        decided_by="synthetic-owner",
         actor_type=HumanActorType.OWNER,
     )
     applied = correction_service.apply(proposed.correction_id)
-    replay = CorrectionService(create_session_factory(DATABASE_URL)).apply(
-        proposed.correction_id
-    )
+    replay = CorrectionService(create_session_factory(DATABASE_URL)).apply(proposed.correction_id)
     assert applied.status == "applied" and replay.replayed is True
     context = MemoryService(sessions).build_context("tea")
     assert [claim["object"] for claim in context.claims] == ["English Breakfast"]
@@ -843,8 +924,9 @@ def test_approved_correction_supersedes_without_erasing_history() -> None:
         old = session.get(MemoryClaimRow, first.claim_id)
         new = session.get(MemoryClaimRow, applied.new_claim_id)
         correction = session.get(MemoryCorrectionRow, proposed.correction_id)
-        relationship = session.scalar(select(MemoryRelationshipRow).where(
-            MemoryRelationshipRow.claim_id == first.claim_id))
+        relationship = session.scalar(
+            select(MemoryRelationshipRow).where(MemoryRelationshipRow.claim_id == first.claim_id)
+        )
         assert old is not None and old.status == "superseded"
         assert new is not None and new.supersedes_claim_id == old.id
         assert correction is not None and correction.new_evidence_id == replacement.evidence_id
@@ -857,8 +939,11 @@ def test_model_memory_proposal_requires_human_approval_and_replays() -> None:
     imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
     proposals = MemoryProposalService(sessions)
     candidate = MemoryProposalInput(
-        evidence_id=imported.evidence_id, subject="user", predicate="likes_tea",
-        object="Earl Grey", confidence=0.8,
+        evidence_id=imported.evidence_id,
+        subject="user",
+        predicate="likes_tea",
+        object="Earl Grey",
+        confidence=0.8,
     )
     proposed = proposals.submit("hermes:proposal:1", candidate)
     duplicate = proposals.submit("hermes:proposal:1", candidate)
@@ -866,20 +951,73 @@ def test_model_memory_proposal_requires_human_approval_and_replays() -> None:
     with pytest.raises(PermissionError):
         proposals.apply(proposed.proposal_id)
     ApprovalService(sessions).decide(
-        idempotency_key="hermes:proposal:decision:1", approval_id=proposed.approval_id,
-        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        idempotency_key="hermes:proposal:decision:1",
+        approval_id=proposed.approval_id,
+        decision=ApprovalDecision.APPROVE,
+        decided_by="synthetic-owner",
         actor_type=HumanActorType.OWNER,
     )
     applied = proposals.apply(proposed.proposal_id)
-    replay = MemoryProposalService(create_session_factory(DATABASE_URL)).apply(
-        proposed.proposal_id
-    )
+    replay = MemoryProposalService(create_session_factory(DATABASE_URL)).apply(proposed.proposal_id)
     assert applied.status == "applied" and replay.replayed is True
     with sessions() as session:
         row = session.get(MemoryWriteProposalRow, proposed.proposal_id)
         claim = session.get(MemoryClaimRow, applied.claim_id)
         assert row is not None and claim is not None
         assert claim.evidence_id == imported.evidence_id
+
+
+def test_credential_candidate_is_rejected_without_plaintext_persistence() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    imported = VerticalSliceService(sessions).import_synthetic_conversation(_request())
+    candidate_secret = "password: correct-horse-battery-staple"
+    with pytest.raises(MemorySecretDetected):
+        MemoryProposalService(sessions).submit(
+            "hermes:proposal:credential",
+            MemoryProposalInput(
+                evidence_id=imported.evidence_id,
+                subject="owner",
+                predicate="account_password",
+                object=candidate_secret,
+                confidence=0.99,
+            ),
+        )
+    with sessions() as session:
+        assert session.scalar(select(func.count()).select_from(MemoryWriteProposalRow)) == 0
+        operation = session.scalar(
+            select(OperationRow).where(
+                OperationRow.idempotency_key
+                == "memory-proposal:rejected:hermes:proposal:credential"
+            )
+        )
+        assert operation is not None
+        assert candidate_secret not in json.dumps(operation.result)
+        events = session.scalars(
+            select(AuditEventRow).where(AuditEventRow.operation_id == operation.id)
+        )
+        assert all(candidate_secret not in json.dumps(event.payload) for event in events)
+
+
+def test_sensitive_permit_issuance_is_idempotent_but_not_retargetable() -> None:
+    assert DATABASE_URL is not None
+    sessions = create_session_factory(DATABASE_URL)
+    evidence_id = uuid4()
+    service = SensitiveActionPermitService(sessions, _PERMIT_SIGNER)
+    request = SensitiveActionPermitRequest(
+        action=SensitiveAction.EVIDENCE_RETRIEVE,
+        owner_subject="owner:synthetic",
+        owner_interaction_id="telegram:session:turn",
+        evidence_ids=(evidence_id,),
+        reason="resolve_ambiguity",
+    )
+    first = service.issue("permit:idempotent", request)
+    assert service.issue("permit:idempotent", request) == first
+    with pytest.raises(ValueError, match="another permit request"):
+        service.issue(
+            "permit:idempotent",
+            request.model_copy(update={"reason": "verify_exact_wording"}),
+        )
 
 
 def test_action_requires_approval_reserves_before_execution_and_settles_once() -> None:
@@ -895,8 +1033,10 @@ def test_action_requires_approval_reserves_before_execution_and_settles_once() -
     with pytest.raises(PermissionError):
         actions.authorize(submitted.action_id)
     ApprovalService(sessions).decide(
-        idempotency_key="action:telegram:decision:1", approval_id=submitted.approval_id,
-        decision=ApprovalDecision.APPROVE, decided_by="synthetic-owner",
+        idempotency_key="action:telegram:decision:1",
+        approval_id=submitted.approval_id,
+        decision=ApprovalDecision.APPROVE,
+        decided_by="synthetic-owner",
         actor_type=HumanActorType.OWNER,
     )
     reserved = actions.authorize(submitted.action_id)
@@ -904,11 +1044,15 @@ def test_action_requires_approval_reserves_before_execution_and_settles_once() -
     actions.begin_execution(submitted.action_id)
     assert actions.begin_execution(submitted.action_id).replayed is True
     settled = actions.settle(
-        submitted.action_id, actual_microusd=320, succeeded=True,
+        submitted.action_id,
+        actual_microusd=320,
+        succeeded=True,
         result={"delivery": "synthetic-ok"},
     )
     replay = actions.settle(
-        submitted.action_id, actual_microusd=320, succeeded=True,
+        submitted.action_id,
+        actual_microusd=320,
+        succeeded=True,
         result={"delivery": "synthetic-ok"},
     )
     assert settled.status == "succeeded" and replay.replayed is True
@@ -942,9 +1086,9 @@ def test_rejoining_marks_executing_action_ambiguous_and_charges_reservation() ->
         lifecycle = session.get(LifecycleRow, True)
         assert lifecycle is not None
         lifecycle.state = "rejoining"
-    result = RejoiningService(
-        sessions, expected_hermes_commit=HERMES_COMMIT
-    ).run(observed_hermes_commit=HERMES_COMMIT)
+    result = RejoiningService(sessions, expected_hermes_commit=HERMES_COMMIT).run(
+        observed_hermes_commit=HERMES_COMMIT
+    )
     assert result.state == RejoiningState.DEGRADED and result.ambiguous_count == 1
     with sessions() as session:
         action = session.get(ActionExecutionRow, submitted.action_id)

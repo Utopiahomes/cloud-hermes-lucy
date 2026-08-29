@@ -14,11 +14,12 @@ The application image reads the expected Hermes commit from the reviewed
 gate exits nonzero, allowing the supervisor to apply restart policy without ever
 opening the HTTP service.
 
-When an archive backend is configured, startup first exercises a reserved
-synthetic record through DEK generation, wrapped-key put/get/delete, and unwrap.
-It then reconciles any PostgreSQL payload whose external wrapped key disappeared
-during an interrupted deletion. A broken KMS, OIDC, DynamoDB, or local acceptance
-key-store boundary therefore prevents the API from reaching `READY`.
+The combined `all-local` acceptance mode can exercise a reserved synthetic
+record through DEK generation, wrapped-key put/get/delete, and unwrap. Production
+does not combine those permissions: the deletion service alone reconciles
+PostgreSQL payloads whose external key disappeared during an interrupted
+deletion. Each production boundary fails its operation closed, while the
+real-cloud acceptance gate separately proves all three AWS paths before capture.
 
 ## Health semantics
 

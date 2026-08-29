@@ -18,7 +18,9 @@
 | PostgreSQL backup disclosure | Per-message AES-GCM, AWS KMS-wrapped DEKs outside PostgreSQL, keyed commitments |
 | Deleted plaintext resurrected by DB restore | Destroy wrapped DEK in the live DynamoDB registry before tombstoning and derived-data invalidation |
 | Long-lived cloud credential theft | Render OIDC, rotated web identity, service-bound trust policy, no AWS access keys |
-| AWS role abuse from compromised runtime | Exact KMS key/table resources, two KMS operations, three item operations, encryption-context constraints, CloudTrail |
+| AWS role abuse from compromised runtime | Separate archive/evidence/deletion identities, disjoint KMS/item actions, exact resources, encryption-context constraints, CloudTrail |
+| Credential promoted as semantic memory | High-confidence pre-persistence rejection with category-only audit |
+| Ownerless raw-evidence request | Five-minute signed exact-record permit bound to an active allowlisted owner interaction |
 | Arbitrary shell execution | Minimal toolsets, sandbox/container boundary, explicit approvals, constrained working directory |
 | Duplicate effects after crash | Idempotency keys, durable execution journal, Rejoining reconciliation |
 | Memory poisoning | Immutable evidence, proposal validation, provenance, confidence and correction history |
@@ -35,8 +37,10 @@
 - Archive evidence is append-only; deletion/redaction uses an explicit governed
   process and leaves a verifiable administrative record.
 - Restoring PostgreSQL cannot restore a destroyed wrapped DEK.
-- The Render runtime has no long-lived AWS credential and no KMS, DynamoDB, or
-  IAM administration permission.
+- Render runtimes have no long-lived AWS credential and no KMS, DynamoDB, IAM,
+  backup, or database administration permission.
+- Wrapped-key destruction never grants deletion-service authority over the KMS
+  master key.
 - Production never follows a moving upstream reference.
 
 This is the bootstrap threat model. Each implemented service must add data-flow,

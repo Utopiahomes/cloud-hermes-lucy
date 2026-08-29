@@ -30,6 +30,7 @@ OFF_RECORD_NOTICE = (
 
 _TURN_ARCHIVE_READY: set[tuple[str, str]] = set()
 _SESSION_TURN: dict[str, dict[str, Any]] = {}
+_CURRENT_OWNER_INTERACTION: tuple[str, str] | None = None
 
 MEMORY_LOOKUP_SCHEMA = {
     "name": "lucy_memory_lookup",
@@ -127,9 +128,7 @@ def _blocked_response(model: str, message: str = BLOCKED_MESSAGE) -> SimpleNames
             SimpleNamespace(
                 index=0,
                 finish_reason="stop",
-                message=SimpleNamespace(
-                    role="assistant", content=message, tool_calls=None
-                ),
+                message=SimpleNamespace(role="assistant", content=message, tool_calls=None),
             )
         ],
         usage=SimpleNamespace(
@@ -170,6 +169,63 @@ def _request_json(
     with urlopen(request, timeout=5) as response:  # noqa: S310 - configured private URL
         result: dict[str, Any] = json.load(response)
         return result
+
+
+def _request_boundary_json(
+    boundary: str,
+    path: str,
+    *,
+    method: str,
+    payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Use a distinct private service/token when production separation is active."""
+
+    base_url = os.environ.get(f"LUCY_{boundary}_URL", "").rstrip("/")
+    token = os.environ.get(f"LUCY_{boundary}_TOKEN", "")
+    if not base_url and not token:
+        return _request_json(path, method=method, payload=payload, extra_headers=extra_headers)
+    if not base_url or not token:
+        raise RuntimeError(f"Lucy {boundary.lower()} boundary is incomplete")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    headers.update(extra_headers or {})
+    request = Request(
+        f"{base_url}{path}",
+        data=json.dumps(payload).encode() if payload is not None else None,
+        method=method,
+        headers=headers,
+    )
+    with urlopen(request, timeout=5) as response:  # noqa: S310 - private URL
+        result: dict[str, Any] = json.load(response)
+        return result
+
+
+def _issue_sensitive_permit(
+    *,
+    action: str,
+    evidence_id: str,
+    reason: str,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    return _request_boundary_json(
+        "POLICY",
+        "/internal/v1/sensitive-action-permits",
+        method="POST",
+        payload={
+            "action": action,
+            "platform": "telegram",
+            "source_conversation_id": session_id,
+            "source_turn_id": turn_id,
+            "evidence_ids": [evidence_id],
+            "reason": reason,
+            "max_bytes": 65_536,
+        },
+        extra_headers={"Idempotency-Key": f"gateway-permit:{uuid4()}"},
+    )
 
 
 def _tool_result(payload: dict[str, Any]) -> str:
@@ -239,18 +295,33 @@ def _capture_command(content: str) -> bool | None:
 
 def _forget_last_message(*, session_id: str, turn_id: str) -> bool:
     try:
-        result = _request_json(
+        latest = _request_boundary_json(
+            "DELETION",
+            "/internal/v1/conversations/latest-retained-evidence"
+            + "?"
+            + urlencode({"source_conversation_id": session_id}),
+            method="GET",
+        )
+        evidence_id = str(UUID(str(latest.get("evidence_id", ""))))
+        permit = _issue_sensitive_permit(
+            action="evidence.delete",
+            evidence_id=evidence_id,
+            reason="owner_request",
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        result = _request_boundary_json(
+            "DELETION",
             "/internal/v1/conversations/forget-last",
             method="POST",
             payload={
                 "platform": "telegram",
                 "source_conversation_id": session_id,
                 "reason": "owner_request",
+                "permit": permit,
             },
             extra_headers={
-                "Idempotency-Key": (
-                    f"hermes-forget-last:telegram:{session_id}:{turn_id}"
-                )
+                "Idempotency-Key": (f"hermes-forget-last:telegram:{session_id}:{turn_id}")
             },
         )
     except Exception:
@@ -271,9 +342,7 @@ def _capture_mode(session_id: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _set_capture_mode(
-    *, session_id: str, turn_id: str, capture_enabled: bool
-) -> bool:
+def _set_capture_mode(*, session_id: str, turn_id: str, capture_enabled: bool) -> bool:
     try:
         result = _request_json(
             "/internal/v1/conversations/capture-mode",
@@ -284,9 +353,7 @@ def _set_capture_mode(
                 "capture_enabled": capture_enabled,
             },
             extra_headers={
-                "Idempotency-Key": (
-                    f"hermes-capture-mode:telegram:{session_id}:{turn_id}"
-                )
+                "Idempotency-Key": (f"hermes-capture-mode:telegram:{session_id}:{turn_id}")
             },
         )
     except Exception:
@@ -302,6 +369,7 @@ def _pre_llm_call(
     platform: Any = None,
     **_: Any,
 ) -> dict[str, str] | None:
+    global _CURRENT_OWNER_INTERACTION
     if (
         platform != "telegram"
         or not isinstance(user_message, str)
@@ -312,6 +380,7 @@ def _pre_llm_call(
         or not turn_id.strip()
     ):
         return None
+    _CURRENT_OWNER_INTERACTION = (session_id, turn_id)
     forget_last = _normalized_command(user_message) == "forget the last message"
     command = _capture_command(user_message)
     # The transition into off-record mode is itself excluded. Commands which
@@ -376,9 +445,7 @@ def _pre_llm_call(
         _TURN_ARCHIVE_READY.add((session_id, turn_id))
     if not capture_enabled:
         suffix = (
-            " The preceding retained message was deleted with its derived data."
-            if forgot
-            else ""
+            " The preceding retained message was deleted with its derived data." if forgot else ""
         )
         return {"context": OFF_RECORD_NOTICE + suffix}
     if forget_last:
@@ -421,6 +488,11 @@ def _transform_llm_output(
     platform: Any = None,
     **_: Any,
 ) -> str | None:
+    global _CURRENT_OWNER_INTERACTION
+    if (session_id, _SESSION_TURN.get(str(session_id), {}).get("turn_id")) == (
+        _CURRENT_OWNER_INTERACTION
+    ):
+        _CURRENT_OWNER_INTERACTION = None
     if platform != "telegram" or not isinstance(session_id, str):
         return None
     turn = _SESSION_TURN.get(session_id)
@@ -477,14 +549,15 @@ def _post_llm_call(
     )
 
 
-def _on_session_end(
-    *, session_id: Any = None, turn_id: Any = None, **_: Any
-) -> None:
+def _on_session_end(*, session_id: Any = None, turn_id: Any = None, **_: Any) -> None:
     if isinstance(session_id, str) and isinstance(turn_id, str):
         _TURN_ARCHIVE_READY.discard((session_id, turn_id))
         current = _SESSION_TURN.get(session_id)
         if current is not None and current.get("turn_id") == turn_id:
             _SESSION_TURN.pop(session_id, None)
+    global _CURRENT_OWNER_INTERACTION
+    if (session_id, turn_id) == _CURRENT_OWNER_INTERACTION:
+        _CURRENT_OWNER_INTERACTION = None
 
 
 def _memory_lookup(args: dict[str, Any], **_: Any) -> str:
@@ -586,14 +659,27 @@ def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
     }
     if reason not in allowed_reasons:
         return _tool_failure("invalid_retrieval_reason")
+    interaction = _CURRENT_OWNER_INTERACTION
+    if interaction is None:
+        return _tool_failure("owner_interaction_required")
+    session_id, turn_id = interaction
     try:
-        result = _request_json(
+        permit = _issue_sensitive_permit(
+            action="evidence.retrieve",
+            evidence_id=evidence_id,
+            reason=reason,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        result = _request_boundary_json(
+            "EVIDENCE",
             "/v1/evidence/retrieve",
             method="POST",
             payload={
                 "evidence_id": evidence_id,
                 "claim_id": claim_id,
                 "reason": reason,
+                "permit": permit,
             },
             extra_headers={"Idempotency-Key": f"hermes-evidence-read:{uuid4()}"},
         )
@@ -679,9 +765,7 @@ def _request_policy_failure(request: dict[str, Any]) -> str | None:
     return None if valid else "provider_policy_mismatch"
 
 
-def _request_middleware(
-    request: dict[str, Any], **_: Any
-) -> dict[str, Any]:
+def _request_middleware(request: dict[str, Any], **_: Any) -> dict[str, Any]:
     bounded = dict(request)
     if "max_completion_tokens" in bounded:
         raw = bounded.get("max_completion_tokens")
@@ -759,9 +843,7 @@ def _execution_middleware(
     policy_failure = _request_policy_failure(request)
     if route_invalid or policy_failure:
         reason = "route_identity" if route_invalid else policy_failure
-        return _blocked_response(
-            model, f"Lucy blocked an unapproved model route ({reason})."
-        )
+        return _blocked_response(model, f"Lucy blocked an unapproved model route ({reason}).")
     try:
         begun = _post_json(
             "/internal/v1/model-executions/begin",

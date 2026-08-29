@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DecryptPermittedEvidenceOnly",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "${LUCY_KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:application": "cloud-hermes-lucy"
+        },
+        "ForAllValues:StringEquals": {
+          "kms:EncryptionContextKeys": ["application", "evidence-id"]
+        }
+      }
+    },
+    {
+      "Sid": "ReadOneWrappedEvidenceKeyOnly",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DYNAMODB_TABLE}"
+    }
+  ]
+}

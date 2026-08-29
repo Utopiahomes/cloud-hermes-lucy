@@ -68,6 +68,7 @@ See:
 - [`docs/hermes-memory-tools-acceptance.md`](docs/hermes-memory-tools-acceptance.md) for provenance-aware lookup and pending-only proposal tools
 - [`docs/telegram-transcript-retention.md`](docs/telegram-transcript-retention.md) for encrypted default capture, owner deletion, and its deployment gate
 - [`docs/render-aws-kms-acceptance.md`](docs/render-aws-kms-acceptance.md) for the Render OIDC, AWS KMS, and deletion-aware wrapped-key boundary
+- [`docs/security-baseline-v1.1.md`](docs/security-baseline-v1.1.md) for the approved execution-identity, permit, memory-confidentiality, and recovery baseline
 
 ## Local verification
 

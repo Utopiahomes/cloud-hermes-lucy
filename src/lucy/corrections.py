@@ -21,6 +21,7 @@ from lucy.db.models import (
     MemoryRelationshipRow,
     OperationRow,
 )
+from lucy.secret_filter import reject_memory_secrets
 
 
 class CorrectionResult(BaseModel):
@@ -42,6 +43,7 @@ class CorrectionService:
     ) -> CorrectionResult:
         if not replacement_object.strip() or not 0 <= confidence <= 1:
             raise ValueError("replacement and confidence are invalid")
+        reject_memory_secrets(replacement_object)
         with self._sessions() as session:
             existing = session.scalar(
                 select(MemoryCorrectionRow).where(
@@ -51,8 +53,10 @@ class CorrectionService:
             if existing is not None:
                 return self._result(existing, replayed=True)
             old = session.get(MemoryClaimRow, old_claim_id)
-            evidence = session.get(EvidenceRow, new_evidence_id)
-            if old is None or evidence is None:
+            evidence_id = session.scalar(
+                select(EvidenceRow.id).where(EvidenceRow.id == new_evidence_id)
+            )
+            if old is None or evidence_id is None:
                 raise LookupError("claim or replacement evidence does not exist")
             if old.status == "superseded" or old.object == replacement_object:
                 raise ValueError("correction must contradict a current claim")

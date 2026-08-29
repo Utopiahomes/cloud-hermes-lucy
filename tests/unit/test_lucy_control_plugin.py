@@ -9,9 +9,7 @@ from typing import Any
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
-PLUGIN_PATH = (
-    REPOSITORY_ROOT / "profiles" / "lucy" / "plugins" / "lucy_control" / "__init__.py"
-)
+PLUGIN_PATH = REPOSITORY_ROOT / "profiles" / "lucy" / "plugins" / "lucy_control" / "__init__.py"
 
 
 def _load_plugin() -> ModuleType:
@@ -78,9 +76,7 @@ def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPa
         assert request == _request()
         return _response()
 
-    response = plugin._execution_middleware(
-        _request(), next_call, **_middleware_kwargs()
-    )
+    response = plugin._execution_middleware(_request(), next_call, **_middleware_kwargs())
     assert response is not None and calls == 1
     assert posts[0][0].endswith("/begin")
     assert posts[1][0].endswith("/settle")
@@ -150,8 +146,9 @@ def test_middleware_blocks_duplicate_execution(monkeypatch: pytest.MonkeyPatch) 
         },
     )
     response = plugin._execution_middleware(
-        _request(), lambda _request: pytest.fail("provider call must not run"),
-        **_middleware_kwargs()
+        _request(),
+        lambda _request: pytest.fail("provider call must not run"),
+        **_middleware_kwargs(),
     )
     assert "duplicate" in response.choices[0].message.content
 
@@ -174,8 +171,7 @@ def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
     ]
     assert {tool["toolset"] for tool in tools} == {"lucy_memory"}
     assert all(
-        tool["requires_env"] == ["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"]
-        for tool in tools
+        tool["requires_env"] == ["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"] for tool in tools
     )
     assert registrations == [
         ("llm_request", plugin._request_middleware),
@@ -216,11 +212,14 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     context = plugin._pre_llm_call(**hook_context)
     assert context is not None
     assert "evidence_id evidence-1" in context["context"]
-    assert plugin._transform_llm_output(
-        response_text="I will retain our conversations by default.",
-        session_id="session-1",
-        platform="telegram",
-    ) is None
+    assert (
+        plugin._transform_llm_output(
+            response_text="I will retain our conversations by default.",
+            session_id="session-1",
+            platform="telegram",
+        )
+        is None
+    )
     plugin._post_llm_call(
         **hook_context,
         assistant_response="I will retain our conversations by default.",
@@ -234,12 +233,8 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
         "user",
         "assistant",
     ]
-    assert message_calls[0][1]["extra_headers"] == message_calls[2][1][
-        "extra_headers"
-    ]
-    assert message_calls[1][1]["extra_headers"] == message_calls[3][1][
-        "extra_headers"
-    ]
+    assert message_calls[0][1]["extra_headers"] == message_calls[2][1]["extra_headers"]
+    assert message_calls[1][1]["extra_headers"] == message_calls[3][1]["extra_headers"]
 
 
 def test_off_record_is_visible_and_skips_archive(
@@ -309,11 +304,10 @@ def test_back_on_record_archives_the_control_turn_before_delivery(
         "/internal/v1/conversations/messages",
         "/internal/v1/conversations/messages",
     ]
-    assert [
-        kwargs["payload"]["role"]
-        for path, kwargs in calls
-        if path.endswith("/messages")
-    ] == ["user", "assistant"]
+    assert [kwargs["payload"]["role"] for path, kwargs in calls if path.endswith("/messages")] == [
+        "user",
+        "assistant",
+    ]
 
 
 def test_forget_last_deletes_before_archiving_the_command(
@@ -324,6 +318,10 @@ def test_forget_last_deletes_before_archiving_the_command(
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((path, kwargs))
+        if "latest-retained-evidence" in path:
+            return {"evidence_id": "12345678-1234-5678-1234-567812345678"}
+        if path.endswith("/sensitive-action-permits"):
+            return {"signed": "permit"}
         if path.endswith("/forget-last"):
             return {"deleted": True, "key_destroyed": True}
         if "capture-mode" in path:
@@ -352,6 +350,8 @@ def test_forget_last_deletes_before_archiving_the_command(
     assert context is not None and "were deleted" in context["context"]
     assert transformed is None
     assert [path for path, _kwargs in calls] == [
+        "/internal/v1/conversations/latest-retained-evidence?source_conversation_id=session-4",
+        "/internal/v1/sensitive-action-permits",
         "/internal/v1/conversations/forget-last",
         "/internal/v1/conversations/capture-mode?source_conversation_id=session-4",
         "/internal/v1/conversations/messages",
@@ -399,7 +399,7 @@ def test_memory_lookup_returns_only_validated_read_only_projection(
         "object": "tea",
         "confidence": 0.9,
         "evidence_id": "evidence-1",
-        "evidence_sha256": "a" * 64,
+        "relationship_version": 1,
     }
     monkeypatch.setattr(
         plugin,
@@ -462,9 +462,7 @@ def test_memory_proposal_is_pending_idempotent_and_never_applied(
     assert first["status"] == "pending"
     assert first["applied"] is False
     assert first["notice"].startswith("Pending human approval")
-    assert calls[0][1]["extra_headers"]["Idempotency-Key"].startswith(
-        "hermes-memory-proposal:"
-    )
+    assert calls[0][1]["extra_headers"]["Idempotency-Key"].startswith("hermes-memory-proposal:")
     assert calls[0][1]["extra_headers"] == calls[1][1]["extra_headers"]
 
 
@@ -502,8 +500,10 @@ def test_evidence_retrieval_is_provenance_bounded_and_audited(
     plugin = _load_plugin()
     calls: list[dict[str, Any]] = []
 
-    def request(_path: str, **kwargs: Any) -> dict[str, Any]:
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
+        if path.endswith("/sensitive-action-permits"):
+            return {"signed": "permit"}
         return {
             "evidence_id": "12345678-1234-5678-1234-567812345678",
             "message": {
@@ -518,6 +518,7 @@ def test_evidence_retrieval_is_provenance_bounded_and_audited(
         }
 
     monkeypatch.setattr(plugin, "_request_json", request)
+    plugin._CURRENT_OWNER_INTERACTION = ("session-1", "turn-1")
     result = json.loads(
         plugin._evidence_retrieve(
             {
@@ -530,9 +531,21 @@ def test_evidence_retrieval_is_provenance_bounded_and_audited(
     assert result["ok"] is True
     assert result["audited"] is True
     assert result["message"]["content"] == "Exact wording"
-    assert calls[0]["extra_headers"]["Idempotency-Key"].startswith(
-        "hermes-evidence-read:"
+    assert calls[1]["extra_headers"]["Idempotency-Key"].startswith("hermes-evidence-read:")
+
+
+def test_evidence_retrieval_requires_an_active_owner_interaction() -> None:
+    plugin = _load_plugin()
+    result = json.loads(
+        plugin._evidence_retrieve(
+            {
+                "evidence_id": "12345678-1234-5678-1234-567812345678",
+                "claim_id": "87654321-4321-6789-4321-678943216789",
+                "reason": "verify_exact_wording",
+            }
+        )
     )
+    assert result == {"ok": False, "error": "owner_interaction_required"}
 
 
 def test_evidence_retrieval_rejects_broad_model_reason() -> None:
@@ -552,12 +565,8 @@ def test_evidence_retrieval_rejects_broad_model_reason() -> None:
 def test_request_middleware_injects_and_clamps_output_cap() -> None:
     plugin = _load_plugin()
     missing = plugin._request_middleware({"messages": []})["request"]
-    oversized = plugin._request_middleware(
-        {"messages": [], "max_tokens": 9000}
-    )["request"]
-    smaller = plugin._request_middleware(
-        {"messages": [], "max_completion_tokens": 200}
-    )["request"]
+    oversized = plugin._request_middleware({"messages": [], "max_tokens": 9000})["request"]
+    smaller = plugin._request_middleware({"messages": [], "max_completion_tokens": 200})["request"]
     assert missing["max_tokens"] == 1024
     assert oversized["max_tokens"] == 1024
     assert smaller["max_completion_tokens"] == 200
@@ -594,7 +603,6 @@ def test_middleware_blocks_request_without_price_policy(
     request = _request()
     request["extra_body"] = {}
     response = plugin._execution_middleware(
-        request, lambda _request: pytest.fail("provider call must not run"),
-        **_middleware_kwargs()
+        request, lambda _request: pytest.fail("provider call must not run"), **_middleware_kwargs()
     )
     assert "unapproved model route" in response.choices[0].message.content

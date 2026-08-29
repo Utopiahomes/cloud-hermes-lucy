@@ -18,6 +18,7 @@ from lucy.db.models import (
     MemoryWriteProposalRow,
     OperationRow,
 )
+from lucy.secret_filter import MemorySecretDetected, detect_memory_secrets
 
 
 class MemoryProposalInput(BaseModel):
@@ -45,13 +46,22 @@ class MemoryProposalService:
     def submit(self, idempotency_key: str, candidate: MemoryProposalInput) -> MemoryProposalResult:
         if not idempotency_key.strip():
             raise ValueError("idempotency key must not be blank")
+        findings = detect_memory_secrets(
+            candidate.subject, candidate.predicate, candidate.object
+        )
+        if findings:
+            categories = tuple(finding.category for finding in findings)
+            self._record_sensitive_rejection(idempotency_key, categories)
+            raise MemorySecretDetected(categories)
         with self._sessions.begin() as session:
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(select(MemoryWriteProposalRow).where(
                 MemoryWriteProposalRow.idempotency_key == idempotency_key))
             if existing is not None:
                 return self._result(existing, replayed=True)
-            if session.get(EvidenceRow, candidate.evidence_id) is None:
+            if session.scalar(
+                select(EvidenceRow.id).where(EvidenceRow.id == candidate.evidence_id)
+            ) is None:
                 raise LookupError("immutable evidence does not exist")
             now = datetime.now(UTC)
             operation = OperationRow(
@@ -87,6 +97,35 @@ class MemoryProposalService:
             operation.completed_at = now
             append_audit(session, operation.id, "operation.succeeded", operation.result)
             return result
+
+    def _record_sensitive_rejection(
+        self, idempotency_key: str, categories: tuple[str, ...]
+    ) -> None:
+        operation_key = f"memory-proposal:rejected:{idempotency_key}"
+        with self._sessions.begin() as session:
+            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(operation_key))))
+            existing = session.scalar(
+                select(OperationRow).where(OperationRow.idempotency_key == operation_key)
+            )
+            if existing is not None:
+                return
+            now = datetime.now(UTC)
+            operation = OperationRow(
+                id=uuid4(),
+                idempotency_key=operation_key,
+                outcome=OperationOutcome.FAILED,
+                result={"rejected": True, "categories": list(categories)},
+                created_at=now,
+                completed_at=now,
+            )
+            session.add(operation)
+            session.flush()
+            append_audit(
+                session,
+                operation.id,
+                "memory.write_rejected_sensitive",
+                {"categories": list(categories)},
+            )
 
     def apply(self, proposal_id: UUID) -> MemoryProposalResult:
         with self._sessions.begin() as session:

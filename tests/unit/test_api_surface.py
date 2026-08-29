@@ -31,11 +31,13 @@ def test_internal_surface_only_exposes_model_budget_bridge() -> None:
     }
     assert exposed == {
         ("GET", "/internal/v1/conversations/capture-mode"),
+        ("GET", "/internal/v1/conversations/latest-retained-evidence"),
         ("POST", "/internal/v1/conversations/capture-mode"),
         ("POST", "/internal/v1/conversations/forget-last"),
         ("POST", "/internal/v1/conversations/messages"),
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
+        ("POST", "/internal/v1/sensitive-action-permits"),
     }
 
 

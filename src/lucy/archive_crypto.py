@@ -405,6 +405,20 @@ def archive_dependencies_from_environment() -> tuple[ArchiveCipher, ArchiveKeySt
     raise ValueError("unsupported LUCY_ARCHIVE_BACKEND")
 
 
+def archive_key_store_from_environment() -> ArchiveKeyStore:
+    """Build only the wrapped-key registry; deletion needs no KMS authority."""
+
+    backend = os.environ.get("LUCY_ARCHIVE_BACKEND", "local-sqlite").strip()
+    if backend == "local-sqlite":
+        path = os.environ.get("LUCY_ARCHIVE_KEYSTORE_PATH", "").strip()
+        if not path:
+            raise ValueError("LUCY_ARCHIVE_KEYSTORE_PATH is required")
+        return SqliteArchiveKeyStore(Path(path))
+    if backend == "aws-kms-dynamodb":
+        return AwsDynamoArchiveKeyStore.from_environment()
+    raise ValueError("unsupported LUCY_ARCHIVE_BACKEND")
+
+
 def verify_archive_dependencies(
     cipher: ArchiveCipher,
     key_store: ArchiveKeyStore,

@@ -84,7 +84,7 @@ class VerticalSliceService:
                 source_conversation_id=request.evidence.source_conversation_id,
                 captured_at=request.evidence.captured_at,
                 content=request.evidence.model_dump(mode="json"),
-                content_sha256=request.evidence.content_sha256,
+                content_commitment=request.evidence.content_sha256,
                 operation_id=operation_id,
             )
             session.add(evidence)
@@ -92,7 +92,10 @@ class VerticalSliceService:
                 session,
                 operation_id,
                 "evidence.preserved",
-                {"evidence_id": str(evidence.id), "content_sha256": evidence.content_sha256},
+                {
+                    "evidence_id": str(evidence.id),
+                    "content_sha256": request.evidence.content_sha256,
+                },
             )
 
             claim_id = uuid4()

@@ -1,0 +1,296 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Lucy Security Baseline v1.1 - scoped Render OIDC identities
+
+Parameters:
+  RenderOidcProviderArn:
+    Type: String
+    Description: Existing IAM OIDC provider ARN for the Render workspace
+  RenderWorkspaceId:
+    Type: String
+  RenderEnvironmentId:
+    Type: String
+  RenderArchiveServiceId:
+    Type: String
+  RenderEvidenceServiceId:
+    Type: String
+  RenderDeletionServiceId:
+    Type: String
+  AlertEmail:
+    Type: String
+  KeyAdministratorArn:
+    Type: String
+    Description: ARN of the separately authenticated human KMS administrator role
+  ArchiveRoleName:
+    Type: String
+    Default: lucy-render-archive
+  EvidenceRoleName:
+    Type: String
+    Default: lucy-render-evidence
+  DeletionRoleName:
+    Type: String
+    Default: lucy-render-deletion
+
+Resources:
+  EvidenceKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Cloud Lucy per-record evidence DEK wrapping key
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: HumanKeyAdministratorOnly
+            Effect: Allow
+            Principal:
+              AWS: !Ref KeyAdministratorArn
+            Action: kms:*
+            Resource: "*"
+          - Sid: ArchiveGenerateOnly
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ArchiveRoleName}
+            Action: kms:GenerateDataKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+              ForAllValues:StringEquals:
+                kms:EncryptionContextKeys:
+                  - application
+                  - evidence-id
+          - Sid: EvidenceDecryptOnly
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${EvidenceRoleName}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+              ForAllValues:StringEquals:
+                kms:EncryptionContextKeys:
+                  - application
+                  - evidence-id
+
+  EvidenceKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/cloud-lucy-evidence
+      TargetKeyId: !Ref EvidenceKey
+
+  WrappedKeyRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: lucy-wrapped-evidence-keys
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: key_ref
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key_ref
+          KeyType: HASH
+
+  ArchiveRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ArchiveRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderArchiveServiceId
+      Policies:
+        - PolicyName: lucy-archive-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: kms:GenerateDataKey
+                Resource: !GetAtt EvidenceKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:EncryptionContext:application: cloud-hermes-lucy
+                  ForAllValues:StringEquals:
+                    kms:EncryptionContextKeys:
+                      - application
+                      - evidence-id
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt WrappedKeyRegistry.Arn
+
+  EvidenceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref EvidenceRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderEvidenceServiceId
+      Policies:
+        - PolicyName: lucy-evidence-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !GetAtt EvidenceKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:EncryptionContext:application: cloud-hermes-lucy
+                  ForAllValues:StringEquals:
+                    kms:EncryptionContextKeys:
+                      - application
+                      - evidence-id
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt WrappedKeyRegistry.Arn
+
+  DeletionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref DeletionRoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderDeletionServiceId
+      Policies:
+        - PolicyName: lucy-delete-individual-keys-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt WrappedKeyRegistry.Arn
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt AuditBucket.Arn
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/lucy-security-audit
+          - Sid: CloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${AuditBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/lucy-security-audit
+
+  AuditTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: AuditBucketPolicy
+    Properties:
+      TrailName: lucy-security-audit
+      S3BucketName: !Ref AuditBucket
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: false
+      IsLogging: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+
+  SecurityAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: lucy-security-alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  SecurityAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref SecurityAlertTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SecurityAlertTopic
+
+  KeyAdministrationAlert:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Alert on changes capable of disabling Lucy evidence decryption
+      EventPattern:
+        source: [aws.kms]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventSource: [kms.amazonaws.com]
+          eventName:
+            - DisableKey
+            - ScheduleKeyDeletion
+            - PutKeyPolicy
+            - DeleteAlias
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SecurityAlertTopic
+          Id: lucy-kms-owner-alert
+
+Outputs:
+  EvidenceKeyArn:
+    Value: !GetAtt EvidenceKey.Arn
+  WrappedKeyTableName:
+    Value: !Ref WrappedKeyRegistry
+  ArchiveRoleArn:
+    Value: !GetAtt ArchiveRole.Arn
+  EvidenceRoleArn:
+    Value: !GetAtt EvidenceRole.Arn
+  DeletionRoleArn:
+    Value: !GetAtt DeletionRole.Arn

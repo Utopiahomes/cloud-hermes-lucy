@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.archive_crypto import ArchiveCipher, ArchiveKeyStore, EncryptedPayload
 from lucy.audit import append_audit
+from lucy.authorization import (
+    SensitiveAction,
+    SensitiveActionPermitV1,
+    SensitiveActionPermitVerifier,
+)
 from lucy.contracts import ApprovalStatus, OperationOutcome
 from lucy.contracts.v1 import ConversationMessageV1
 from lucy.db.models import (
@@ -35,7 +40,6 @@ EvidenceAccessReason = Literal[
     "resolve_ambiguity",
     "recover_missing_context",
     "owner_review",
-    "owner_export",
 ]
 DeletionReason = Literal["owner_request", "sensitive_data", "retention_expired"]
 
@@ -46,6 +50,7 @@ class EvidenceRetrievalRequest(BaseModel):
     evidence_id: UUID
     claim_id: UUID | None = None
     reason: EvidenceAccessReason
+    permit: SensitiveActionPermitV1
 
 
 class EvidenceRetrievalResult(BaseModel):
@@ -64,6 +69,7 @@ class EvidenceDeletionRequest(BaseModel):
 
     evidence_id: UUID
     reason: DeletionReason
+    permit: SensitiveActionPermitV1
 
 
 class ForgetLastRequest(BaseModel):
@@ -72,6 +78,7 @@ class ForgetLastRequest(BaseModel):
     platform: Literal["telegram"]
     source_conversation_id: str
     reason: DeletionReason = "owner_request"
+    permit: SensitiveActionPermitV1
 
 
 class EvidenceDeletionResult(BaseModel):
@@ -88,12 +95,36 @@ class EvidenceService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        cipher: ArchiveCipher,
+        cipher: ArchiveCipher | None,
         key_store: ArchiveKeyStore,
+        permit_verifier: SensitiveActionPermitVerifier,
     ) -> None:
         self._sessions = sessions
         self._cipher = cipher
         self._key_store = key_store
+        self._permit_verifier = permit_verifier
+
+    def latest_retained_evidence(
+        self, platform: str, source_conversation_id: str
+    ) -> UUID:
+        source_id = f"{platform}:{source_conversation_id}"
+        with self._sessions() as session:
+            evidence_id = session.scalar(
+                select(EvidenceRow.id)
+                .join(
+                    EvidencePayloadRow,
+                    EvidencePayloadRow.evidence_id == EvidenceRow.id,
+                )
+                .where(
+                    EvidenceRow.source == "hermes",
+                    EvidenceRow.source_conversation_id == source_id,
+                )
+                .order_by(EvidenceRow.captured_at.desc())
+                .limit(1)
+            )
+        if evidence_id is None:
+            raise LookupError("conversation has no retained evidence")
+        return evidence_id
 
     def retrieve(
         self,
@@ -102,15 +133,13 @@ class EvidenceService:
         *,
         owner: bool,
     ) -> EvidenceRetrievalResult:
-        if owner and request.reason not in {"owner_review", "owner_export"}:
+        if owner and request.reason != "owner_review":
             raise ValueError("owner retrieval requires an owner reason")
-        if not owner and request.reason in {"owner_review", "owner_export"}:
+        if not owner and request.reason == "owner_review":
             raise PermissionError("autonomous retrieval cannot use an owner reason")
         with self._sessions.begin() as session:
             session.execute(
-                select(
-                    func.pg_advisory_xact_lock(func.hashtext(str(request.evidence_id)))
-                )
+                select(func.pg_advisory_xact_lock(func.hashtext(str(request.evidence_id))))
             )
             evidence = session.get(EvidenceRow, request.evidence_id)
             if evidence is None:
@@ -118,6 +147,8 @@ class EvidenceService:
             if session.get(EvidenceTombstoneRow, evidence.id) is not None:
                 raise LookupError("evidence payload was deleted")
             payload = session.get(EvidencePayloadRow, evidence.id)
+            if self._cipher is None:
+                raise PermissionError("this service has no evidence-decryption capability")
             if payload is None or payload.algorithm != self._cipher.algorithm:
                 raise LookupError("encrypted evidence payload is unavailable")
             if not owner:
@@ -135,6 +166,32 @@ class EvidenceService:
                         "autonomous retrieval requires a current provenance-linked claim"
                     )
 
+            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
+            operation = session.scalar(
+                select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
+            )
+            expected = {
+                "evidence_id": str(evidence.id),
+                "reason": request.reason,
+                "autonomous": not owner,
+            }
+            if operation is not None:
+                if operation.outcome != OperationOutcome.SUCCEEDED or operation.result is None:
+                    raise RuntimeError("evidence retrieval operation is not replayable")
+                if operation.result != expected:
+                    raise ValueError(
+                        "idempotency key was already used for another evidence retrieval"
+                    )
+
+            self._permit_verifier.authorize(
+                session,
+                request.permit,
+                idempotency_key=idempotency_key,
+                action=SensitiveAction.EVIDENCE_RETRIEVE,
+                evidence_id=evidence.id,
+                reason=request.reason,
+            )
+
             wrapped_key = self._key_store.get(payload.key_ref)
             if wrapped_key is None:
                 raise LookupError("evidence decryption key was destroyed")
@@ -142,7 +199,7 @@ class EvidenceService:
                 ciphertext=payload.ciphertext,
                 content_nonce=payload.content_nonce,
                 wrapped_key=wrapped_key,
-                keyed_commitment=evidence.content_sha256,
+                keyed_commitment=evidence.content_commitment,
             )
             plaintext = self._cipher.decrypt(
                 evidence.id,
@@ -151,14 +208,6 @@ class EvidenceService:
             )
             message = ConversationMessageV1.model_validate_json(plaintext)
 
-            session.execute(
-                select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key)))
-            )
-            operation = session.scalar(
-                select(OperationRow).where(
-                    OperationRow.idempotency_key == idempotency_key
-                )
-            )
             replayed = operation is not None
             if operation is None:
                 now = datetime.now(UTC)
@@ -187,14 +236,13 @@ class EvidenceService:
                         "claim_id": str(request.claim_id) if request.claim_id else None,
                         "reason": request.reason,
                         "autonomous": not owner,
+                        "permit_id": str(request.permit.permit_id),
+                        "owner_subject": request.permit.owner_subject,
+                        "owner_interaction_id": request.permit.owner_interaction_id,
                     },
                 )
                 operation.outcome = OperationOutcome.SUCCEEDED
-                operation.result = {
-                    "evidence_id": str(evidence.id),
-                    "reason": request.reason,
-                    "autonomous": not owner,
-                }
+                operation.result = expected
                 operation.completed_at = now
                 append_audit(
                     session,
@@ -202,21 +250,6 @@ class EvidenceService:
                     "operation.succeeded",
                     {"operation_type": "evidence.retrieve"},
                 )
-            else:
-                if (
-                    operation.outcome != OperationOutcome.SUCCEEDED
-                    or operation.result is None
-                ):
-                    raise RuntimeError("evidence retrieval operation is not replayable")
-                expected = {
-                    "evidence_id": str(evidence.id),
-                    "reason": request.reason,
-                    "autonomous": not owner,
-                }
-                if operation.result != expected:
-                    raise ValueError(
-                        "idempotency key was already used for another evidence retrieval"
-                    )
             return EvidenceRetrievalResult(
                 evidence_id=evidence.id,
                 message=message,
@@ -230,14 +263,19 @@ class EvidenceService:
         idempotency_key: str,
         request: EvidenceDeletionRequest,
     ) -> EvidenceDeletionResult:
+        return self._delete(idempotency_key, request, require_permit=True)
+
+    def _delete(
+        self,
+        idempotency_key: str,
+        request: EvidenceDeletionRequest,
+        *,
+        require_permit: bool,
+    ) -> EvidenceDeletionResult:
         with self._sessions.begin() as session:
-            session.execute(
-                select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key)))
-            )
+            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(
-                select(OperationRow).where(
-                    OperationRow.idempotency_key == idempotency_key
-                )
+                select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
             )
             if existing is not None:
                 if existing.outcome != OperationOutcome.SUCCEEDED or existing.result is None:
@@ -249,6 +287,15 @@ class EvidenceService:
                     raise ValueError(
                         "idempotency key was already used for another evidence deletion"
                     )
+                if require_permit:
+                    self._permit_verifier.authorize(
+                        session,
+                        request.permit,
+                        idempotency_key=idempotency_key,
+                        action=SensitiveAction.EVIDENCE_DELETE,
+                        evidence_id=request.evidence_id,
+                        reason=request.reason,
+                    )
                 return EvidenceDeletionResult.model_validate(
                     {
                         key: value
@@ -259,28 +306,44 @@ class EvidenceService:
                 )
 
             session.execute(
-                select(
-                    func.pg_advisory_xact_lock(func.hashtext(str(request.evidence_id)))
-                )
+                select(func.pg_advisory_xact_lock(func.hashtext(str(request.evidence_id))))
             )
             evidence = session.get(EvidenceRow, request.evidence_id)
             if evidence is None:
                 raise LookupError("evidence does not exist")
             tombstone = session.get(EvidenceTombstoneRow, evidence.id)
             if tombstone is not None:
+                if require_permit:
+                    self._permit_verifier.authorize(
+                        session,
+                        request.permit,
+                        idempotency_key=idempotency_key,
+                        action=SensitiveAction.EVIDENCE_DELETE,
+                        evidence_id=evidence.id,
+                        reason=request.reason,
+                    )
                 return EvidenceDeletionResult(
                     evidence_id=evidence.id,
                     deleted=True,
                     key_destroyed=True,
                     derived_summary={
-                        str(key): int(value)
-                        for key, value in tombstone.derived_summary.items()
+                        str(key): int(value) for key, value in tombstone.derived_summary.items()
                     },
                     replayed=True,
                 )
             payload = session.get(EvidencePayloadRow, evidence.id)
             if payload is None:
                 raise LookupError("encrypted evidence payload is unavailable")
+
+            if require_permit:
+                self._permit_verifier.authorize(
+                    session,
+                    request.permit,
+                    idempotency_key=idempotency_key,
+                    action=SensitiveAction.EVIDENCE_DELETE,
+                    evidence_id=evidence.id,
+                    reason=request.reason,
+                )
 
             now = datetime.now(UTC)
             operation = OperationRow(
@@ -328,6 +391,10 @@ class EvidenceService:
                     "reason": request.reason,
                     "key_destroyed": key_destroyed,
                     "derived_summary": summary,
+                    "permit_id": (str(request.permit.permit_id) if require_permit else None),
+                    "owner_subject": (
+                        request.permit.owner_subject if require_permit else "system-recovery"
+                    ),
                 },
             )
             result = EvidenceDeletionResult(
@@ -355,9 +422,7 @@ class EvidenceService:
 
         with self._sessions() as session:
             candidates = list(
-                session.execute(
-                    select(EvidencePayloadRow.evidence_id, EvidencePayloadRow.key_ref)
-                )
+                session.execute(select(EvidencePayloadRow.evidence_id, EvidencePayloadRow.key_ref))
             )
         missing = [
             evidence_id
@@ -365,12 +430,14 @@ class EvidenceService:
             if self._key_store.get(key_ref) is None
         ]
         for evidence_id in missing:
-            self.delete(
+            self._delete(
                 f"archive-reconcile-missing-key:{evidence_id}",
                 EvidenceDeletionRequest(
                     evidence_id=evidence_id,
                     reason="sensitive_data",
+                    permit=_recovery_placeholder_permit(evidence_id),
                 ),
+                require_permit=False,
             )
         return len(missing)
 
@@ -396,17 +463,17 @@ class EvidenceService:
             raise LookupError("conversation has no retained message")
         return self.delete(
             idempotency_key,
-            EvidenceDeletionRequest(evidence_id=evidence_id, reason=request.reason),
+            EvidenceDeletionRequest(
+                evidence_id=evidence_id,
+                reason=request.reason,
+                permit=request.permit,
+            ),
         )
 
     @staticmethod
-    def _invalidate_derived(
-        session: Session, evidence_id: UUID, now: datetime
-    ) -> dict[str, int]:
+    def _invalidate_derived(session: Session, evidence_id: UUID, now: datetime) -> dict[str, int]:
         claims = list(
-            session.scalars(
-                select(MemoryClaimRow).where(MemoryClaimRow.evidence_id == evidence_id)
-            )
+            session.scalars(select(MemoryClaimRow).where(MemoryClaimRow.evidence_id == evidence_id))
         )
         claim_ids = {claim.id for claim in claims}
         while claim_ids:
@@ -422,11 +489,7 @@ class EvidenceService:
                 break
             claim_ids.update(new_ids)
         all_claims = (
-            list(
-                session.scalars(
-                    select(MemoryClaimRow).where(MemoryClaimRow.id.in_(claim_ids))
-                )
-            )
+            list(session.scalars(select(MemoryClaimRow).where(MemoryClaimRow.id.in_(claim_ids))))
             if claim_ids
             else []
         )
@@ -454,9 +517,7 @@ class EvidenceService:
         for relationship in relationships:
             relationship.predicate = "[redacted]"
             relationship.valid_to = relationship.valid_to or now
-            entity_ids.update(
-                {relationship.subject_entity_id, relationship.object_entity_id}
-            )
+            entity_ids.update({relationship.subject_entity_id, relationship.object_entity_id})
         for claim in all_claims:
             claim.subject = "[redacted]"
             claim.predicate = "[redacted]"
@@ -530,9 +591,7 @@ class EvidenceService:
                     entity.version += 1
                     redacted_entities += 1
 
-        working_contexts = (
-            session.scalar(select(func.count()).select_from(WorkingContextRow)) or 0
-        )
+        working_contexts = session.scalar(select(func.count()).select_from(WorkingContextRow)) or 0
         session.execute(delete(WorkingContextRow))
         turns = list(
             session.scalars(
@@ -559,6 +618,24 @@ class EvidenceService:
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def _recovery_placeholder_permit(evidence_id: UUID) -> SensitiveActionPermitV1:
+    """Typed placeholder never verified or treated as owner authorization."""
+
+    now = datetime.now(UTC)
+    return SensitiveActionPermitV1(
+        permit_id=UUID(int=0),
+        action=SensitiveAction.EVIDENCE_DELETE,
+        owner_subject="system-recovery",
+        owner_interaction_id="missing-key-reconciliation",
+        evidence_ids=(evidence_id,),
+        reason="sensitive_data",
+        max_records=1,
+        max_bytes=1,
+        issued_at=now,
+        expires_at=now + timedelta(seconds=1),
+        nonce="0" * 32,
+        signature="not-used",
+    )

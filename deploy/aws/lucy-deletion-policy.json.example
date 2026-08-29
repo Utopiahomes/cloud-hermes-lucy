@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DestroyIndividualWrappedEvidenceKeysOnly",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem", "dynamodb:DeleteItem"],
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DYNAMODB_TABLE}"
+    }
+  ]
+}

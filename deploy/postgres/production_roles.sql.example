@@ -1,0 +1,70 @@
+-- Run as the production database owner. Login roles and passwords are created
+-- in Render; grant each login membership in exactly one NOLOGIN capability role.
+-- These roles cannot create databases, roles, schemas, extensions, or tables.
+
+CREATE ROLE lucy_routine NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_policy NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_evidence_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_evidence_deleter NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+
+GRANT CONNECT ON DATABASE lucy TO
+  lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+GRANT USAGE ON SCHEMA lucy TO
+  lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+
+-- Routine memory, budget, capture, and ciphertext ingestion. It may insert but
+-- cannot read raw evidence ciphertext or tombstones.
+GRANT SELECT, INSERT, UPDATE ON
+  lucy.operations, lucy.lifecycle,
+  lucy.budget_accounts, lucy.budget_reservations, lucy.approval_requests,
+  lucy.memory_claims, lucy.memory_entities, lucy.memory_relationships,
+  lucy.working_contexts, lucy.memory_corrections, lucy.memory_write_proposals,
+  lucy.action_executions, lucy.conversation_capture_states,
+  lucy.conversation_turns
+TO lucy_routine;
+GRANT SELECT (id), INSERT ON lucy.evidence TO lucy_routine;
+GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_routine;
+GRANT SELECT, INSERT ON lucy.audit_events TO lucy_routine;
+GRANT INSERT ON lucy.evidence_payloads TO lucy_routine;
+
+-- The policy service can issue/inspect permits and append sanitized audit data.
+GRANT SELECT, INSERT, UPDATE ON
+  lucy.operations, lucy.sensitive_action_permits
+TO lucy_policy;
+GRANT SELECT ON lucy.lifecycle TO lucy_policy;
+GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_policy;
+GRANT SELECT, INSERT ON lucy.audit_events TO lucy_policy;
+
+-- Exact-record evidence service. Application permits provide row scoping;
+-- this role cannot change evidence, memory, or wrapped keys.
+GRANT SELECT ON
+  lucy.lifecycle, lucy.evidence, lucy.evidence_payloads,
+  lucy.evidence_tombstones, lucy.memory_claims,
+  lucy.operations, lucy.sensitive_action_permits
+TO lucy_evidence_reader;
+GRANT INSERT, UPDATE ON
+  lucy.operations,
+  lucy.sensitive_action_permits
+TO lucy_evidence_reader;
+GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_evidence_reader;
+GRANT SELECT, INSERT ON lucy.audit_events TO lucy_evidence_reader;
+
+-- Deletion performs the reviewed cascade, but receives no DDL or backup role.
+GRANT SELECT, INSERT, UPDATE ON
+  lucy.operations, lucy.sensitive_action_permits,
+  lucy.evidence_tombstones, lucy.memory_claims, lucy.memory_entities,
+  lucy.memory_relationships, lucy.working_contexts,
+  lucy.memory_corrections, lucy.memory_write_proposals,
+  lucy.approval_requests, lucy.conversation_turns, lucy.evidence
+TO lucy_evidence_deleter;
+GRANT SELECT, DELETE ON lucy.evidence_payloads TO lucy_evidence_deleter;
+GRANT DELETE ON lucy.working_contexts TO lucy_evidence_deleter;
+GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_evidence_deleter;
+GRANT SELECT, INSERT ON lucy.audit_events TO lucy_evidence_deleter;
+
+-- Example membership statements; replace the LOGIN role names after Render
+-- creates them. Never grant one login more than one capability role.
+-- GRANT lucy_routine TO lucy_routine_login;
+-- GRANT lucy_policy TO lucy_policy_login;
+-- GRANT lucy_evidence_reader TO lucy_evidence_login;
+-- GRANT lucy_evidence_deleter TO lucy_deletion_login;

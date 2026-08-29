@@ -44,7 +44,7 @@ class EvidenceRow(Base):
     source_conversation_id: Mapped[str] = mapped_column(Text)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)
-    content_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    content_commitment: Mapped[str] = mapped_column(String(64), unique=True)
     operation_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.operations.id"))
 
 
@@ -73,6 +73,24 @@ class EvidenceTombstoneRow(Base):
     reason_category: Mapped[str] = mapped_column(Text)
     deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     derived_summary: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class SensitiveActionPermitRow(Base):
+    __tablename__ = "sensitive_action_permits"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    nonce: Mapped[str] = mapped_column(Text, unique=True)
+    action: Mapped[str] = mapped_column(Text)
+    owner_subject: Mapped[str] = mapped_column(Text)
+    owner_interaction_id: Mapped[str] = mapped_column(Text)
+    serialized_permit: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    issued_operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_by_idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
 
 
 class ConversationCaptureStateRow(Base):

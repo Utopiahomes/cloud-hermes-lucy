@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from lucy.audit import append_audit
 from lucy.contracts import OperationOutcome
 from lucy.db.models import (
-    EvidenceRow,
     MemoryClaimRow,
     MemoryEntityRow,
     MemoryRelationshipRow,
@@ -94,9 +93,8 @@ class MemoryService:
         with self._sessions.begin() as session:
             pattern = f"%{query.strip()}%"
             rows = session.execute(
-                select(MemoryRelationshipRow, MemoryClaimRow, EvidenceRow)
+                select(MemoryRelationshipRow, MemoryClaimRow)
                 .join(MemoryClaimRow, MemoryClaimRow.id == MemoryRelationshipRow.claim_id)
-                .join(EvidenceRow, EvidenceRow.id == MemoryRelationshipRow.evidence_id)
                 .where(
                     MemoryClaimRow.status != "superseded",
                     or_(
@@ -113,11 +111,10 @@ class MemoryService:
                     "claim_id": str(claim.id), "subject": claim.subject,
                     "predicate": claim.predicate, "object": claim.object,
                     "confidence": claim.confidence, "status": claim.status,
-                    "evidence_id": str(evidence.id),
-                    "evidence_sha256": evidence.content_sha256,
+                    "evidence_id": str(relationship.evidence_id),
                     "relationship_version": relationship.version,
                 }
-                for relationship, claim, evidence in rows
+                for relationship, claim in rows
             ]
             now = datetime.now(UTC)
             context = WorkingContext(

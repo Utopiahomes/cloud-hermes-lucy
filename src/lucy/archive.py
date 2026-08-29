@@ -45,12 +45,8 @@ class ConversationMessageArchiveResult(BaseModel):
 
     operation_id: UUID | None = None
     evidence_id: UUID | None = None
-    keyed_commitment: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    request_commitment: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    keyed_commitment: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    request_commitment: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     archived: bool
     capture_enabled: bool
     turn_committed: bool = False
@@ -76,6 +72,12 @@ class CaptureModeResult(BaseModel):
     replayed: bool = False
 
 
+class LatestRetainedEvidenceResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evidence_id: UUID
+
+
 class ConversationArchiveService:
     """Preserve encrypted evidence without interpreting it as memory."""
 
@@ -89,9 +91,7 @@ class ConversationArchiveService:
         self._cipher = cipher
         self._key_store = key_store
 
-    def capture_mode(
-        self, platform: str, source_conversation_id: str
-    ) -> CaptureModeResult:
+    def capture_mode(self, platform: str, source_conversation_id: str) -> CaptureModeResult:
         with self._sessions() as session:
             row = session.get(
                 ConversationCaptureStateRow,
@@ -108,13 +108,9 @@ class ConversationArchiveService:
         self, idempotency_key: str, request: CaptureModeInput
     ) -> CaptureModeResult:
         with self._sessions.begin() as session:
-            session.execute(
-                select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key)))
-            )
+            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(
-                select(OperationRow).where(
-                    OperationRow.idempotency_key == idempotency_key
-                )
+                select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
             )
             if existing is not None:
                 if existing.outcome != OperationOutcome.SUCCEEDED or existing.result is None:
@@ -122,17 +118,13 @@ class ConversationArchiveService:
                         f"capture-mode operation is not replayable: {existing.outcome}"
                     )
                 if (
-                    existing.result.get("source_conversation_id")
-                    != request.source_conversation_id
-                    or existing.result.get("capture_enabled")
-                    is not request.capture_enabled
+                    existing.result.get("source_conversation_id") != request.source_conversation_id
+                    or existing.result.get("capture_enabled") is not request.capture_enabled
                 ):
                     raise ValueError(
                         "idempotency key was already used for another capture transition"
                     )
-                return CaptureModeResult.model_validate(
-                    {**existing.result, "replayed": True}
-                )
+                return CaptureModeResult.model_validate({**existing.result, "replayed": True})
 
             now = datetime.now(UTC)
             operation = OperationRow(
@@ -207,33 +199,22 @@ class ConversationArchiveService:
         request: ConversationMessageArchiveInput,
     ) -> ConversationMessageArchiveResult:
         request_commitment = self._cipher.commitment(request.canonical_bytes())
-        key_ref: UUID | None = None
         try:
             with self._sessions.begin() as session:
-                session.execute(
-                    select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key)))
-                )
+                session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
                 existing = session.scalar(
-                    select(OperationRow).where(
-                        OperationRow.idempotency_key == idempotency_key
-                    )
+                    select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
                 )
                 if existing is not None:
-                    if (
-                        existing.outcome != OperationOutcome.SUCCEEDED
-                        or existing.result is None
-                    ):
+                    if existing.outcome != OperationOutcome.SUCCEEDED or existing.result is None:
                         raise RuntimeError(
-                            "archive operation has non-replayable outcome: "
-                            f"{existing.outcome}"
+                            f"archive operation has non-replayable outcome: {existing.outcome}"
                         )
                     replay = ConversationMessageArchiveResult.model_validate(
                         {**existing.result, "replayed": True}
                     )
                     if replay.request_commitment != request_commitment:
-                        raise ValueError(
-                            "idempotency key was already used for another message"
-                        )
+                        raise ValueError("idempotency key was already used for another message")
                     return replay
 
                 capture = session.get(
@@ -298,7 +279,7 @@ class ConversationArchiveService:
                         ),
                         captured_at=now,
                         content=metadata,
-                        content_sha256=encrypted.keyed_commitment,
+                        content_commitment=encrypted.keyed_commitment,
                         operation_id=operation_id,
                     )
                 )
@@ -323,11 +304,7 @@ class ConversationArchiveService:
                         updated_at=now,
                     )
                     session.add(turn)
-                field = (
-                    "user_evidence_id"
-                    if request.role == "user"
-                    else "assistant_evidence_id"
-                )
+                field = "user_evidence_id" if request.role == "user" else "assistant_evidence_id"
                 current_evidence_id = getattr(turn, field)
                 if current_evidence_id is not None and current_evidence_id != evidence_id:
                     raise ValueError("conversation turn role already has different evidence")
@@ -382,12 +359,11 @@ class ConversationArchiveService:
                 )
                 return result
         except Exception:
-            if key_ref is not None:
-                self._key_store.delete(key_ref)
+            # The writer role deliberately cannot delete wrapped keys. If the
+            # PostgreSQL transaction fails after PutItem, the orphan contains
+            # no message ciphertext and is removed by an out-of-band janitor.
             raise
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()

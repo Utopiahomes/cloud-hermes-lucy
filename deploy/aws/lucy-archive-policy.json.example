@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GenerateNewEvidenceDataKeysOnly",
+      "Effect": "Allow",
+      "Action": "kms:GenerateDataKey",
+      "Resource": "${LUCY_KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:application": "cloud-hermes-lucy"
+        },
+        "ForAllValues:StringEquals": {
+          "kms:EncryptionContextKeys": ["application", "evidence-id"]
+        }
+      }
+    },
+    {
+      "Sid": "StoreNewWrappedEvidenceKeysOnly",
+      "Effect": "Allow",
+      "Action": "dynamodb:PutItem",
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DYNAMODB_TABLE}"
+    }
+  ]
+}

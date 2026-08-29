@@ -7,8 +7,10 @@ import uvicorn
 
 from lucy.archive_crypto import (
     archive_dependencies_from_environment,
+    archive_key_store_from_environment,
     verify_archive_dependencies,
 )
+from lucy.authorization import SensitiveActionPermitVerifier
 from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
 from lucy.evidence import EvidenceService
@@ -29,13 +31,22 @@ def main() -> None:
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
     sessions = create_session_factory(database_url)
     archive_backend = os.environ.get("LUCY_ARCHIVE_BACKEND", "").strip()
-    if archive_backend:
+    service_mode = os.environ.get("LUCY_SERVICE_MODE", "all-local").strip()
+    if archive_backend and service_mode == "all-local":
         cipher, key_store = archive_dependencies_from_environment()
         verify_archive_dependencies(cipher, key_store)
         EvidenceService(
             sessions,
             cipher,
             key_store,
+            SensitiveActionPermitVerifier.from_environment(),
+        ).reconcile_missing_keys()
+    elif archive_backend and service_mode == "deletion":
+        EvidenceService(
+            sessions,
+            None,
+            archive_key_store_from_environment(),
+            SensitiveActionPermitVerifier.from_environment(),
         ).reconcile_missing_keys()
     result = RejoiningService(
         sessions, expected_hermes_commit=_expected_commit()

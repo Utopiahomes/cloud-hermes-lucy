@@ -1,0 +1,36 @@
+[
+  {
+    "Sid": "AllowLucyArchiveToGenerateDataKeys",
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${LUCY_ARCHIVE_ROLE_NAME}"
+    },
+    "Action": "kms:GenerateDataKey",
+    "Resource": "*",
+    "Condition": {
+      "StringEquals": {
+        "kms:EncryptionContext:application": "cloud-hermes-lucy"
+      },
+      "ForAllValues:StringEquals": {
+        "kms:EncryptionContextKeys": ["application", "evidence-id"]
+      }
+    }
+  },
+  {
+    "Sid": "AllowLucyEvidenceServiceToDecrypt",
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${LUCY_EVIDENCE_ROLE_NAME}"
+    },
+    "Action": "kms:Decrypt",
+    "Resource": "*",
+    "Condition": {
+      "StringEquals": {
+        "kms:EncryptionContext:application": "cloud-hermes-lucy"
+      },
+      "ForAllValues:StringEquals": {
+        "kms:EncryptionContextKeys": ["application", "evidence-id"]
+      }
+    }
+  }
+]

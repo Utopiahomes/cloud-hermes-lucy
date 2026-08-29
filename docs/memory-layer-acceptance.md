@@ -31,8 +31,8 @@ Graph materialization is recorded as a completed operation and adds
 ## Working context
 
 Lookup builds a bounded, TTL-bearing projection ordered by confidence and
-recency. It includes claim values, status, evidence ID, evidence hash, and graph
-version, but excludes raw evidence. Projections may be persisted as disposable
+recency. It includes claim values, status, evidence ID, and graph version, but
+excludes raw evidence and keyed commitments. Projections may be persisted as disposable
 cache records when explicitly requested. The Hermes-facing GET endpoint uses the
 non-persisting mode, preserving its read-only contract.
 
