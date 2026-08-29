@@ -58,3 +58,16 @@ Automated checks cover registration metadata, environment requirements,
 read-only response validation, companion failure, deterministic proposal replay
 identity, pending-only results, rejection of applied responses, provider-policy
 enforcement, and the profile's explicit per-platform tool allowlist.
+
+## Live Telegram tool loop
+
+The allowlisted owner instructed Telegram Lucy to use `lucy_memory_lookup` for
+`tea` and not answer from conversation history. Lucy reported that the tool
+succeeded with zero claims. Companion access logs independently recorded one
+authenticated `GET /v1/memory/lookup?query=tea` from the gateway container,
+proving this was a real tool call rather than a model-authored assertion.
+
+The bounded agent loop used four model calls, each with its own durable
+reservation and settlement. They added 473 micro-USD of provider-reported cost
+in total and left the reserved balance at zero. The lookup itself created no
+claim, proposal, approval, archive record, or other memory mutation.

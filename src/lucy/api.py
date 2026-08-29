@@ -80,10 +80,15 @@ def propose_memory(
 ) -> dict[str, object]:
     """Create a gated candidate; this endpoint can never apply a memory write."""
     _authorize(authorization)
-    if idempotency_key is None:
+    if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     sessions = _ready_sessions()
-    result = MemoryProposalService(sessions).submit(idempotency_key, candidate)
+    try:
+        result = MemoryProposalService(sessions).submit(idempotency_key, candidate)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404, detail="immutable evidence does not exist"
+        ) from exc
     return result.model_dump(mode="json")
 
 

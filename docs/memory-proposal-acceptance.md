@@ -26,3 +26,7 @@ Lucy control plugin 1.1.0 now exposes pending-only submission as the first-class
 `lucy_memory_propose` Hermes tool. It derives its own deterministic idempotency
 key and accepts only responses that still have `claim_id: null`; see
 [`hermes-memory-tools-acceptance.md`](hermes-memory-tools-acceptance.md).
+
+Missing immutable evidence is returned as a controlled `404` without creating a
+proposal or claim. Blank idempotency keys are rejected as `400`; neither case is
+reported as an internal server failure.
