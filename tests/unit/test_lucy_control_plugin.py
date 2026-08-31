@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import Context
 from pathlib import Path
+from threading import Barrier
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -31,6 +34,12 @@ def _response() -> SimpleNamespace:
     )
 
 
+def _active_turn(plugin: ModuleType, session: str = "session-1", turn: str = "turn-1") -> None:
+    plugin._SESSION_TURN[session] = {
+        "turn_id": turn, "capture_enabled": True, "active": True, "proposal_keys": {},
+    }
+
+
 def _middleware_kwargs() -> dict[str, str]:
     return {
         "api_request_id": "request-1",
@@ -39,6 +48,76 @@ def _middleware_kwargs() -> dict[str, str]:
         "provider": "custom",
         "base_url": "https://openrouter.ai/api/v1",
     }
+
+
+def test_lookup_binds_all_observed_sources_before_proposing_or_archiving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    a = "11111111-1111-4111-8111-111111111111"
+    b = "22222222-2222-4222-8222-222222222222"
+    forged = "33333333-3333-4333-8333-333333333333"
+    _active_turn(plugin)
+    _active_turn(plugin, "session-2", "turn-2")
+    calls: list[dict[str, Any]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs.get("payload", {}))
+        if path.endswith("lookup"):
+            return {"read_only": True, "claims": [{"object": "synthetic fact",
+                                                   "source_evidence_ids": [a, b]}]}
+        if path.endswith("proposals"):
+            return {"status": "pending", "proposal_id": a, "approval_id": b}
+        return {"archived": True, "evidence_id": a, "keyed_commitment": "a" * 64,
+                "turn_committed": True}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = plugin._tool_execution_middleware(
+        {"query": "tea", "source_evidence_ids": [forged]},
+        lambda args: plugin._memory_lookup(args, session_id="session-1"),
+        tool_name="lucy_memory_lookup", session_id="session-1", turn_id="turn-1",
+    )
+    assert json.loads(result)["ok"]
+    assert plugin._SESSION_TURN["session-1"]["source_evidence_ids"] == {a, b}
+    assert not plugin._SESSION_TURN["session-2"].get("source_evidence_ids")
+    proposed = plugin._memory_propose(
+        {"evidence_id": a, "subject": "owner", "predicate": "likes", "object": "tea",
+         "confidence": 0.9, "source_evidence_ids": [forged]},
+        session_id="session-1", turn_id="turn-1",
+    )
+    assert json.loads(proposed)["ok"]
+    assert calls[-1]["source_evidence_ids"] == [a, b]
+    plugin._archive_conversation_message(
+        role="assistant", content="Synthetic reply", session_id="session-1",
+        turn_id="turn-1", platform="telegram",
+    )
+    assert calls[-1]["source_evidence_ids"] == [a, b]
+
+
+def test_untracked_lookup_content_is_never_returned_to_an_active_retained_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin)
+    monkeypatch.setattr(plugin, "_request_json", lambda *_a, **_k: {
+        "read_only": True, "claims": [{"object": "synthetic hidden text"}],
+    })
+    result = json.loads(plugin._memory_lookup({"query": "tea"}, session_id="session-1",
+                                              turn_id="turn-1"))
+    assert result == {"ok": False, "error": "invalid_companion_provenance"}
+    assert "synthetic hidden text" not in json.dumps(result)
+
+
+def test_cold_gateway_cannot_resume_retention_with_missing_tool_exposure_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setattr(plugin, "_request_json", lambda *_a, **_k: {
+        "capture_enabled": True, "replayed": True, "version": 0,
+    })
+    assert plugin._accept_turn("session-1", "turn-1") is None
+    _active_turn(plugin)
+    assert plugin._accept_turn("session-1", "turn-1") is True
 
 
 def _request() -> dict[str, Any]:
@@ -176,6 +255,7 @@ def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
     assert registrations == [
         ("llm_request", plugin._request_middleware),
         ("llm_execution", plugin._execution_middleware),
+        ("tool_execution", plugin._tool_execution_middleware),
     ]
     assert hooks == [
         ("pre_llm_call", plugin._pre_llm_call),
@@ -193,7 +273,7 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((path, kwargs))
-        if "capture-mode" in path:
+        if "capture-mode" in path or path.endswith("/accept-turn"):
             return {"capture_enabled": True, "version": 0}
         return {
             "archived": True,
@@ -216,6 +296,7 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
         plugin._transform_llm_output(
             response_text="I will retain our conversations by default.",
             session_id="session-1",
+            turn_id="turn-1",
             platform="telegram",
         )
         is None
@@ -245,8 +326,11 @@ def test_off_record_is_visible_and_skips_archive(
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(path)
-        assert path.endswith("/capture-mode")
-        assert kwargs["payload"]["capture_enabled"] is False
+        assert path.endswith(("/capture-mode", "/accept-turn"))
+        if path.endswith("/capture-mode"):
+            assert kwargs["payload"]["capture_enabled"] is False
+        else:
+            assert "content" not in kwargs["payload"]
         return {"capture_enabled": False, "version": 1}
 
     monkeypatch.setattr(plugin, "_request_json", request)
@@ -259,11 +343,13 @@ def test_off_record_is_visible_and_skips_archive(
     transformed = plugin._transform_llm_output(
         response_text="Understood.",
         session_id="session-2",
+        turn_id="turn-2",
         platform="telegram",
     )
     assert context is not None and "not archiving" in context["context"]
     assert transformed is not None and transformed.startswith("🔒 Off the record")
-    assert calls == ["/internal/v1/conversations/capture-mode"]
+    assert calls == ["/internal/v1/conversations/capture-mode",
+                     "/internal/v1/conversations/accept-turn"]
 
 
 def test_back_on_record_archives_the_control_turn_before_delivery(
@@ -274,7 +360,7 @@ def test_back_on_record_archives_the_control_turn_before_delivery(
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((path, kwargs))
-        if path.endswith("/capture-mode"):
+        if path.endswith(("/capture-mode", "/accept-turn")):
             return {"capture_enabled": True, "version": 2}
         role = kwargs["payload"]["role"]
         return {
@@ -294,6 +380,7 @@ def test_back_on_record_archives_the_control_turn_before_delivery(
     transformed = plugin._transform_llm_output(
         response_text="Capture is back on.",
         session_id="session-3",
+        turn_id="turn-3",
         platform="telegram",
     )
 
@@ -301,6 +388,7 @@ def test_back_on_record_archives_the_control_turn_before_delivery(
     assert transformed is None
     assert [path for path, _kwargs in calls] == [
         "/internal/v1/conversations/capture-mode",
+        "/internal/v1/conversations/accept-turn",
         "/internal/v1/conversations/messages",
         "/internal/v1/conversations/messages",
     ]
@@ -314,6 +402,9 @@ def test_forget_last_deletes_before_archiving_the_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = _load_plugin()
+    # This isolated protocol test stubs the policy issuer. The actual gateway
+    # permit endpoint remains quarantined and has its own negative API test.
+    monkeypatch.setenv("LUCY_ALLOW_LOCAL_BOUNDARY_FALLBACK", "true")
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
@@ -324,7 +415,7 @@ def test_forget_last_deletes_before_archiving_the_command(
             return {"signed": "permit"}
         if path.endswith("/forget-last"):
             return {"deleted": True, "key_destroyed": True}
-        if "capture-mode" in path:
+        if "capture-mode" in path or path.endswith("/accept-turn"):
             return {"capture_enabled": True, "version": 2}
         role = kwargs["payload"]["role"]
         return {
@@ -344,6 +435,7 @@ def test_forget_last_deletes_before_archiving_the_command(
     transformed = plugin._transform_llm_output(
         response_text="That message and its derived memories were deleted.",
         session_id="session-4",
+        turn_id="turn-4",
         platform="telegram",
     )
 
@@ -353,7 +445,7 @@ def test_forget_last_deletes_before_archiving_the_command(
         "/internal/v1/conversations/latest-retained-evidence?source_conversation_id=session-4",
         "/internal/v1/sensitive-action-permits",
         "/internal/v1/conversations/forget-last",
-        "/internal/v1/conversations/capture-mode?source_conversation_id=session-4",
+        "/internal/v1/conversations/accept-turn",
         "/internal/v1/conversations/messages",
         "/internal/v1/conversations/messages",
     ]
@@ -437,6 +529,7 @@ def test_memory_proposal_is_pending_idempotent_and_never_applied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = _load_plugin()
+    _active_turn(plugin)
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
@@ -457,8 +550,8 @@ def test_memory_proposal_is_pending_idempotent_and_never_applied(
         "object": "tea",
         "confidence": 0.9,
     }
-    first = json.loads(plugin._memory_propose(args))
-    json.loads(plugin._memory_propose(args))
+    first = json.loads(plugin._memory_propose(args, session_id="session-1", turn_id="turn-1"))
+    json.loads(plugin._memory_propose(args, session_id="session-1", turn_id="turn-1"))
     assert first["status"] == "pending"
     assert first["applied"] is False
     assert first["notice"].startswith("Pending human approval")
@@ -470,6 +563,7 @@ def test_memory_proposal_rejects_applied_companion_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = _load_plugin()
+    _active_turn(plugin)
     monkeypatch.setattr(
         plugin,
         "_request_json",
@@ -488,7 +582,7 @@ def test_memory_proposal_rejects_applied_companion_response(
                 "predicate": "likes",
                 "object": "tea",
                 "confidence": 0.9,
-            }
+            }, session_id="session-1", turn_id="turn-1",
         )
     )
     assert result == {"ok": False, "error": "invalid_companion_response"}
@@ -498,6 +592,7 @@ def test_evidence_retrieval_is_provenance_bounded_and_audited(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_ALLOW_LOCAL_BOUNDARY_FALLBACK", "true")
     calls: list[dict[str, Any]] = []
 
     def request(path: str, **kwargs: Any) -> dict[str, Any]:
@@ -518,14 +613,14 @@ def test_evidence_retrieval_is_provenance_bounded_and_audited(
         }
 
     monkeypatch.setattr(plugin, "_request_json", request)
-    plugin._CURRENT_OWNER_INTERACTION = ("session-1", "turn-1")
+    _active_turn(plugin)
     result = json.loads(
         plugin._evidence_retrieve(
             {
                 "evidence_id": "12345678-1234-5678-1234-567812345678",
                 "claim_id": "87654321-4321-6789-4321-678943216789",
                 "reason": "verify_exact_wording",
-            }
+            }, session_id="session-1", turn_id="turn-1",
         )
     )
     assert result["ok"] is True
@@ -546,6 +641,112 @@ def test_evidence_retrieval_requires_an_active_owner_interaction() -> None:
         )
     )
     assert result == {"ok": False, "error": "owner_interaction_required"}
+
+
+@pytest.mark.parametrize("context", [{}, {"session_id": "session-1", "turn_id": "stale"},
+                                    {"session_id": "unknown", "turn_id": "turn-1"}])
+def test_model_arguments_cannot_supply_trusted_invocation_context(
+    monkeypatch: pytest.MonkeyPatch, context: dict[str, str],
+) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin)
+    monkeypatch.setattr(plugin, "_request_json", lambda *_a, **_k: pytest.fail("no HTTP allowed"))
+    args = {"evidence_id": "12345678-1234-5678-1234-567812345678",
+            "claim_id": "87654321-4321-6789-4321-678943216789",
+            "subject": "owner", "predicate": "likes", "object": "tea", "confidence": 0.9,
+            "reason": "resolve_ambiguity", "session_id": "session-1", "turn_id": "turn-1"}
+    assert not json.loads(plugin._memory_propose(args, **context))["ok"]
+    assert not json.loads(plugin._evidence_retrieve(args, **context))["ok"]
+
+
+def test_off_record_memory_proposal_never_calls_companion(monkeypatch: pytest.MonkeyPatch) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin)
+    plugin._SESSION_TURN["session-1"]["capture_enabled"] = False
+    monkeypatch.setattr(plugin, "_request_json", lambda *_a, **_k: pytest.fail("no HTTP allowed"))
+    result = json.loads(plugin._memory_propose(
+        {"evidence_id": "12345678-1234-5678-1234-567812345678", "subject": "private"},
+        session_id="session-1", turn_id="turn-1",
+    ))
+    assert result == {"ok": False, "error": "retained_turn_required"}
+
+
+def test_parallel_sessions_keep_evidence_authority_invocation_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin, "session-A", "turn-A")
+    _active_turn(plugin, "session-B", "turn-B")
+    captured: list[dict[str, Any]] = []
+
+    def issue(**kwargs: Any) -> Any:
+        captured.append(kwargs)
+        raise RuntimeError("synthetic stop before disclosure")
+
+    monkeypatch.setattr(plugin, "_issue_sensitive_permit", issue)
+    plugin._evidence_retrieve(
+        {"evidence_id": "12345678-1234-5678-1234-567812345678",
+         "claim_id": "87654321-4321-6789-4321-678943216789", "reason": "resolve_ambiguity"},
+        session_id="session-A", turn_id="turn-A",
+    )
+    assert captured[0]["session_id"] == "session-A"
+    assert captured[0]["turn_id"] == "turn-A"
+
+
+def test_pinned_handler_signature_gets_turn_from_execution_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin, "A", "turn-A")
+    _active_turn(plugin, "B", "turn-B")
+    barrier = Barrier(2)
+
+    def issue(**kwargs: Any) -> Any:
+        assert kwargs["turn_id"] == f"turn-{kwargs['session_id']}"
+        raise RuntimeError("synthetic stop before disclosure")
+
+    monkeypatch.setattr(plugin, "_issue_sensitive_permit", issue)
+
+    def invoke(session: str) -> None:
+        args = {"evidence_id": "12345678-1234-5678-1234-567812345678",
+                "claim_id": "87654321-4321-6789-4321-678943216789",
+                "reason": "resolve_ambiguity", "session_id": "FORGED", "turn_id": "FORGED"}
+
+        def dispatch(arguments: dict[str, Any]) -> str:
+            barrier.wait(timeout=5)
+            assert plugin._TOOL_CONTEXT.get() == (session, f"turn-{session}")
+            # Matches model_tools.py: the handler receives session_id, no turn_id.
+            return plugin._evidence_retrieve(arguments, session_id=session)
+
+        plugin._tool_execution_middleware(
+            args, dispatch, tool_name="lucy_evidence_retrieve",
+            session_id=session, turn_id=f"turn-{session}",
+        )
+        assert plugin._TOOL_CONTEXT.get() is None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(invoke, ("A", "B")))
+
+
+def test_pinned_output_hook_uses_execution_local_lifecycle_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setattr(plugin, "_accept_turn", lambda *_: False)
+    contexts = {session: Context() for session in ("A", "B")}
+    for session, context in contexts.items():
+        context.run(plugin._pre_llm_call, user_message="Synthetic off-record turn",
+                    session_id=session, turn_id=f"turn-{session}", platform="telegram")
+    # The pinned finalizer sends no turn_id. Session B's later start must not
+    # change A's context, and a context with no pre-call hook must fail closed.
+    for session, context in contexts.items():
+        result = context.run(plugin._transform_llm_output, response_text="Synthetic reply",
+                             session_id=session, platform="telegram")
+        assert result.startswith(plugin.OFF_RECORD_NOTICE)
+        assert context.run(plugin._TURN_CONTEXT.get) is None
+    result = Context().run(plugin._transform_llm_output, response_text="Synthetic reply",
+                           session_id="A", platform="telegram")
+    assert "could not verify" in result
 
 
 def test_evidence_retrieval_rejects_broad_model_reason() -> None:

@@ -36,6 +36,23 @@ class OperationRow(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class DeletionJournalBindingRow(Base):
+    __tablename__ = "deletion_journal_binding"
+    __table_args__ = {"schema": "lucy"}
+    singleton: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    journal_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    registry_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+
+
+class DeletionJournalReceiptRow(Base):
+    __tablename__ = "deletion_journal_receipts"
+    __table_args__ = {"schema": "lucy"}
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    intent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    digest: Mapped[str] = mapped_column(String(64))
+    operation_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.operations.id"), unique=True)
+
+
 class EvidenceRow(Base):
     __tablename__ = "evidence"
     __table_args__ = {"schema": "lucy"}
@@ -68,7 +85,7 @@ class EvidenceTombstoneRow(Base):
         ForeignKey("lucy.evidence.id"), primary_key=True
     )
     deletion_operation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("lucy.operations.id"), unique=True
+        ForeignKey("lucy.operations.id")
     )
     reason_category: Mapped[str] = mapped_column(Text)
     deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -103,6 +120,19 @@ class ConversationCaptureStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class CaptureReceiptRow(Base):
+    """Never contains message content or a fingerprint of excluded content."""
+
+    __tablename__ = "capture_receipts"
+    __table_args__ = {"schema": "lucy"}
+    platform: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_conversation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_turn_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    capture_enabled: Mapped[bool] = mapped_column(Boolean)
+    capture_version: Mapped[int] = mapped_column(BigInteger)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ConversationTurnRow(Base):
     __tablename__ = "conversation_turns"
     __table_args__ = {"schema": "lucy"}
@@ -134,6 +164,47 @@ class MemoryClaimRow(Base):
         ForeignKey("lucy.memory_claims.id")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceDerivationRow(Base):
+    __tablename__ = "evidence_derivations"
+    __table_args__ = {"schema": "lucy"}
+    parent_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+    child_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+
+
+class ClaimSourceRow(Base):
+    __tablename__ = "claim_sources"
+    __table_args__ = {"schema": "lucy"}
+    claim_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_claims.id"), primary_key=True)
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+
+
+class ProposalSourceRow(Base):
+    __tablename__ = "proposal_sources"
+    __table_args__ = {"schema": "lucy"}
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.memory_write_proposals.id"), primary_key=True,
+    )
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+
+
+class CorrectionSourceRow(Base):
+    __tablename__ = "correction_sources"
+    __table_args__ = {"schema": "lucy"}
+    correction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.memory_corrections.id"), primary_key=True,
+    )
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+
+
+class RuntimeAdmissionRow(Base):
+    __tablename__ = "runtime_admission"
+    __table_args__ = {"schema": "lucy"}
+    singleton: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    state: Mapped[str] = mapped_column(Text)
+    storage_epoch: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class LifecycleRow(Base):

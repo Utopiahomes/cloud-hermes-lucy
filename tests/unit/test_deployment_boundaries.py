@@ -53,5 +53,25 @@ def test_production_database_roles_have_no_ddl_or_role_administration() -> None:
     assert "DROP " not in executable
     assert "CREATE TABLE" not in executable
     assert "CREATE DATABASE" not in executable
-    assert executable.count("NOCREATEROLE") == 4
-    assert executable.count("NOINHERIT") == 4
+    bootstrap = (ROOT / "deploy" / "postgres" / "production_bootstrap.sql.example").read_text()
+    assert bootstrap.count("NOCREATEROLE") == 5
+    assert bootstrap.count("NOINHERIT") == 5
+    assert "CREATE ROLE lucy_app NOLOGIN" in bootstrap
+    assert "lucy.runtime_admission" in executable.lower()
+
+
+def test_local_maintenance_is_explicit_and_owner_credential_never_reaches_http() -> None:
+    services = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
+    maintenance = services["lucy-maintenance"]
+    assert maintenance["profiles"] == ["maintenance"]
+    assert maintenance["command"] == ["quarantine"]
+    assert maintenance["restart"] == "no"
+    assert "LUCY_MAINTENANCE_DATABASE_URL" in maintenance["environment"]
+    http = services["lucy-api"]
+    assert "lucy-maintenance" not in http["depends_on"]
+    assert "LUCY_MAINTENANCE_DATABASE_URL" not in http["environment"]
+    assert "LUCY_MIGRATION_DATABASE_URL" not in http["environment"]
+    for service in _render_services().values():
+        assert "LUCY_STORAGE_EPOCH" in _env_keys(service)
+        assert "LUCY_ENVIRONMENT" in _env_keys(service)
+        assert "LUCY_MAINTENANCE_DATABASE_URL" not in _env_keys(service)

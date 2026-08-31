@@ -2,9 +2,12 @@
 
 Date: 2026-08-29
 
-Status: approved and implemented locally. Real AWS/Render provisioning and the
-cloud acceptance report remain required. Live Telegram transcript capture is
-disabled until the owner accepts that report.
+Status: approved design; local implementation is undergoing gap remediation.
+The [latest deletion-recovery checkpoint](deletion-recovery-2026-08-31.md)
+records local proof and remaining blockers. Real AWS/Render provisioning and
+cloud acceptance remain required. Live Telegram transcript capture must not be
+activated until the owner accepts the final report. Infrastructure statements
+below describe requirements/templates, not verified deployed configuration.
 
 ## Security invariant
 
@@ -14,10 +17,10 @@ infrastructure administration. The four production processes are:
 
 | Process | Authority | Explicitly absent |
 | --- | --- | --- |
-| Routine/archive | KMS `GenerateDataKey`; DynamoDB `PutItem`; normal memory and ciphertext ingestion | KMS `Decrypt`; wrapped-key reads/deletes; KMS/IAM/backup administration |
+| Routine/archive | KMS `GenerateDataKey`; wrapped-key `PutItem`; deletion-head metadata `GetItem`; normal memory and ciphertext ingestion | KMS `Decrypt`; wrapped-key reads/deletes; deletion-intent reads/writes; KMS/IAM/backup administration |
 | Policy | Sign five-minute `SensitiveActionPermitV1` capabilities | Every AWS role and all evidence plaintext |
-| Evidence | KMS `Decrypt`; DynamoDB exact `GetItem`; exact ciphertext reads | Archive writes; wrapped-key deletion; KMS administration; scans/exports |
-| Deletion | DynamoDB exact `GetItem`/`DeleteItem`; governed database cascade | Every KMS action, including master-key disable/delete/policy changes |
+| Evidence | KMS `Decrypt`; exact wrapped-key and deletion-head `GetItem`; exact ciphertext reads | Archive writes; wrapped-key deletion; deletion-intent reads/writes; KMS administration; scans/exports |
+| Deletion | Exact wrapped-key `GetItem`/`DeleteItem`; journal `GetItem`; transaction-only intent `PutItem`/head `UpdateItem`; governed database cascade | Every KMS action, table administration, scans/queries, and non-transactional journal writes |
 
 The deletion service's "key deletion" means only removal of one evidence
 record's KMS-wrapped data-encryption key from DynamoDB. It can never disable,
@@ -39,9 +42,11 @@ interaction, exact evidence UUID, reason, record and byte limits, five-minute
 expiry, and random nonce. The policy service retains the private signing key and
 has no AWS identity. Evidence and deletion services retain only the public key.
 
-Hermes can request a permit only during an active allowlisted Telegram turn.
-Background jobs, cron, and ownerless model activity have no active interaction
-and therefore cannot retrieve raw evidence. Owner export is not implemented.
+The intended Hermes permit path requires an independently verified active owner
+interaction. Gateway permit minting is currently disabled until that broker is
+implemented and accepted; a bearer plus supplied Telegram identifiers is not
+sufficient authority. Background jobs, cron, and ownerless model activity must
+not retrieve raw evidence. Owner export is not implemented.
 Future quorum authentication may issue the same versioned contract without
 changing evidence/deletion services.
 
@@ -50,8 +55,9 @@ changing evidence/deletion services.
 PostgreSQL is authoritative for ciphertext, non-plaintext evidence metadata,
 provenance, memory, decisions, permits, and audit history. DynamoDB is
 authoritative for whether a per-record wrapped DEK remains available. AWS KMS
-is the wrapping authority. Restoring PostgreSQL cannot restore a deleted
-DynamoDB record.
+is the wrapping authority. A separate DynamoDB head plus append-only intent table
+is authoritative for accepted deletion ordering. Restoring PostgreSQL cannot
+restore a deleted wrapped-key record or erase an accepted external deletion.
 
 The wrapped-key table has deletion protection and no point-in-time recovery.
 This is deliberate: restoring an older copy of that table could resurrect a
@@ -79,20 +85,33 @@ secret.
 
 Deletion removes the individual wrapped DEK before deleting ciphertext and
 invalidating or redacting derived claims, relationships, entities, proposals,
-corrections, approvals, working contexts, and turn state. Missing-key startup
-reconciliation finishes a database cascade after a crash between DynamoDB
-deletion and PostgreSQL commit.
+corrections, approvals, working contexts, and turn state. Multi-source closure
+for the current artifact types is implemented locally; full runtime-history,
+future artifact writers and cross-store recovery remain unaccepted. The previous
+automatic missing-key cascade has been
+removed: a missing key is not owner deletion authority. Controlled maintenance
+closes admission before reconciliation and leaves it closed on missing keys.
+A local independent deletion-intent journal now fences service transactions and
+supports explicit interrupted-deletion/restore recovery; see the current recovery
+checkpoint. A strongly consistent, conditional DynamoDB provider and scoped IAM
+templates are implemented and mocked locally; identity/permissions and cloud
+restore still require real-cloud acceptance before capture. Normal service startup
+does not perform recovery or key-registry scans. A compromised direct SQL
+credential is outside the application hook; the structured-memory plaintext
+residual boundary remains explicit.
 
-PostgreSQL backups are encrypted and retained for 30 days. Backup restoration
-must be tested before activation and periodically thereafter. Restoring a
+PostgreSQL backups must be encrypted and retained for 30 days; provisioning and
+verification remain required. Backup restoration must be tested before
+activation and periodically thereafter. Restoring a
 database backup alone cannot decrypt evidence whose DynamoDB key record was
 destroyed. Runtime services receive no backup deletion or restoration authority.
 
 ## AWS controls
 
 The evidence KMS key uses automatic rotation, a 30-day deletion waiting period,
-and a retained CloudFormation lifecycle. CloudTrail records management and KMS
-cryptographic calls. EventBridge alerts the owner through SNS for `DisableKey`,
+and a retained CloudFormation lifecycle. CloudTrail records management, KMS
+cryptographic calls, and data events for the wrapped-key and deletion-journal
+tables. EventBridge alerts the owner through SNS for `DisableKey`,
 `ScheduleKeyDeletion`, `PutKeyPolicy`, and alias deletion. Only a separately
 authenticated human administrative identity may administer the key.
 

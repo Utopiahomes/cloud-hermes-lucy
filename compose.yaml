@@ -36,6 +36,24 @@ services:
       - lucy-private
     restart: "no"
 
+  # Opt-in operator job. Never a dependency of normal service startup/restart.
+  lucy-maintenance:
+    profiles: [maintenance]
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["python", "-m", "lucy.maintenance"]
+    command: ["quarantine"]
+    environment:
+      LUCY_MAINTENANCE_DATABASE_URL: ${LUCY_MIGRATION_DATABASE_URL:?set owner migration URL}
+      LUCY_OBSERVED_HERMES_COMMIT: ${LUCY_OBSERVED_HERMES_COMMIT:?set observed Hermes commit}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lucy-private
+    restart: "no"
+
   lucy-api:
     build:
       context: .
@@ -44,6 +62,9 @@ services:
       LUCY_DATABASE_URL: ${LUCY_DATABASE_URL:?set LUCY_DATABASE_URL in .env}
       LUCY_ADAPTER_TOKEN: ${LUCY_ADAPTER_TOKEN:?set LUCY_ADAPTER_TOKEN outside Git}
       LUCY_OBSERVED_HERMES_COMMIT: ${LUCY_OBSERVED_HERMES_COMMIT:?set observed Hermes commit}
+      LUCY_ENVIRONMENT: development
+      LUCY_SERVICE_MODE: all-local
+      LUCY_STORAGE_EPOCH: ${LUCY_STORAGE_EPOCH:-}
     depends_on:
       lucy-migrate:
         condition: service_completed_successfully

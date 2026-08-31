@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from lucy.audit import append_audit
 from lucy.contracts import ApprovalDecision, ApprovalStatus, HumanActorType, OperationOutcome
 from lucy.db.models import ApprovalRequestRow, OperationRow
+from lucy.retention import retention_fence
 
 
 class ApprovalResult(BaseModel):
@@ -31,6 +32,7 @@ class ApprovalService:
         if not idempotency_key or not action_type:
             raise ValueError("idempotency_key and action_type must not be blank")
         with self._sessions.begin() as session:
+            retention_fence(session)
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(
                 select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
@@ -73,6 +75,7 @@ class ApprovalService:
         if not idempotency_key or not decided_by:
             raise ValueError("idempotency_key and decided_by must not be blank")
         with self._sessions.begin() as session:
+            retention_fence(session)
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(
                 select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
@@ -111,12 +114,15 @@ class ApprovalService:
             approval.decided_at = now
             approval.decided_by = decided_by
             approval.actor_type = actor_type
-            approval.decision_reason = reason
+            # Free text can contain the very fact a later deletion must remove.
+            # Retain only a deterministic decision code, never caller prose.
+            reason_code = f"owner_{target.value}"
+            approval.decision_reason = reason_code
             approval.version += 1
             append_audit(
                 session, operation.id, f"approval.{target.value}",
                 {"approval_id": str(approval.id), "actor_type": actor_type.value,
-                 "decided_by": decided_by, "reason": reason},
+                 "decided_by": decided_by, "reason_code": reason_code},
             )
             result = ApprovalResult(approval_id=approval.id, status=target)
             operation.outcome = OperationOutcome.SUCCEEDED

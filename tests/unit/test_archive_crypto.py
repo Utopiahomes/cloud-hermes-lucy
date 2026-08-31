@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from botocore.exceptions import ClientError
@@ -172,6 +172,42 @@ def test_dynamodb_key_store_is_conditional_idempotent_and_deletable() -> None:
     assert store.delete(key_ref) is True
     assert store.get(key_ref) is None
     assert store.delete(key_ref) is False
+
+
+def test_dynamodb_key_store_exposes_only_explicit_registry_identity() -> None:
+    registry_id = uuid4()
+    configured = AwsDynamoArchiveKeyStore(
+        FakeDynamoClient(),
+        table_name="lucy-wrapped-keys-prod",
+        registry_id=registry_id,
+    )
+    assert configured.registry_identity == registry_id
+    unbound = AwsDynamoArchiveKeyStore(
+        FakeDynamoClient(), table_name="lucy-wrapped-keys-prod"
+    )
+    with pytest.raises(RuntimeError, match="not configured"):
+        _ = unbound.registry_identity
+
+
+def test_dynamodb_key_store_environment_binds_registry_without_reading_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_id = uuid4()
+    client = FakeDynamoClient()
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("LUCY_AWS_DYNAMODB_KEY_TABLE", "lucy-wrapped-keys-prod")
+    monkeypatch.setenv("LUCY_ARCHIVE_REGISTRY_ID", str(registry_id))
+
+    def fake_boto_client(service: str, *, region_name: str) -> FakeDynamoClient:
+        calls.append((service, region_name))
+        return client
+
+    monkeypatch.setattr("lucy.archive_crypto.boto3.client", fake_boto_client)
+    store = AwsDynamoArchiveKeyStore.from_environment()
+    assert store.registry_identity == UUID(str(registry_id))
+    assert calls == [("dynamodb", "us-east-1")]
+    assert client.items == {}
 
 
 def test_startup_check_exercises_kms_and_registry_without_leaving_a_key() -> None:

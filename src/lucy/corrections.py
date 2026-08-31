@@ -9,18 +9,20 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from lucy.approvals import ApprovalService
 from lucy.audit import append_audit
 from lucy.contracts import ApprovalStatus, OperationOutcome
 from lucy.db.models import (
     ApprovalRequestRow,
-    EvidenceRow,
+    ClaimSourceRow,
+    CorrectionSourceRow,
     MemoryClaimRow,
     MemoryCorrectionRow,
     MemoryEntityRow,
     MemoryRelationshipRow,
     OperationRow,
 )
+from lucy.provenance import active_sources, claim_sources
+from lucy.retention import require_active_evidence, retention_fence
 from lucy.secret_filter import reject_memory_secrets
 
 
@@ -44,58 +46,103 @@ class CorrectionService:
         if not replacement_object.strip() or not 0 <= confidence <= 1:
             raise ValueError("replacement and confidence are invalid")
         reject_memory_secrets(replacement_object)
-        with self._sessions() as session:
+        with self._sessions.begin() as session:
+            retention_fence(session)
+            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
+            require_active_evidence(session, new_evidence_id)
+            old = session.get(MemoryClaimRow, old_claim_id)
+            if old is None:
+                raise LookupError("claim does not exist")
+            require_active_evidence(session, old.evidence_id)
+            sources = active_sources(session, {new_evidence_id, *claim_sources(session, old.id)})
             existing = session.scalar(
                 select(MemoryCorrectionRow).where(
                     MemoryCorrectionRow.idempotency_key == idempotency_key
                 )
             )
             if existing is not None:
+                if (existing.old_claim_id, existing.new_evidence_id,
+                    existing.replacement_object, existing.confidence) != (
+                    old_claim_id, new_evidence_id, replacement_object, confidence
+                ):
+                    raise ValueError("idempotency key was already used for another correction")
                 return self._result(existing, replayed=True)
-            old = session.get(MemoryClaimRow, old_claim_id)
-            evidence_id = session.scalar(
-                select(EvidenceRow.id).where(EvidenceRow.id == new_evidence_id)
-            )
-            if old is None or evidence_id is None:
-                raise LookupError("claim or replacement evidence does not exist")
-            if old.status == "superseded" or old.object == replacement_object:
+            if old.status not in {"accepted", "provisional"} or old.object == replacement_object:
                 raise ValueError("correction must contradict a current claim")
-        approval = ApprovalService(self._sessions).request(
-            idempotency_key=f"correction-approval:{idempotency_key}",
-            action_type="memory.correct",
-            action_payload={"old_claim_id": str(old_claim_id),
-                            "new_evidence_id": str(new_evidence_id)},
-        )
-        with self._sessions.begin() as session:
-            session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
-            existing = session.scalar(select(MemoryCorrectionRow).where(
-                MemoryCorrectionRow.idempotency_key == idempotency_key))
-            if existing is not None:
-                return self._result(existing, replayed=True)
+            now = datetime.now(UTC)
+            operation = OperationRow(
+                id=uuid4(), idempotency_key=f"correction-propose:{idempotency_key}",
+                outcome=OperationOutcome.PENDING, result=None, created_at=now,
+                completed_at=None,
+            )
+            session.add(operation)
+            session.flush()
+            approval = ApprovalRequestRow(
+                id=uuid4(), request_operation_id=operation.id, action_type="memory.correct",
+                action_payload={"old_claim_id": str(old_claim_id),
+                                "new_evidence_id": str(new_evidence_id),
+                                "replacement_object": replacement_object,
+                                "confidence": confidence,
+                                "source_evidence_ids": [str(value) for value in sorted(sources)]},
+                status=ApprovalStatus.PENDING, requested_at=now, decided_at=None,
+                decided_by=None, actor_type=None, decision_reason=None, version=0,
+            )
+            session.add(approval)
             row = MemoryCorrectionRow(
                 id=uuid4(), idempotency_key=idempotency_key, old_claim_id=old_claim_id,
                 new_evidence_id=new_evidence_id, replacement_object=replacement_object,
-                confidence=confidence, approval_id=approval.approval_id, status="pending",
+                confidence=confidence, approval_id=approval.id, status="pending",
                 new_claim_id=None, created_at=datetime.now(UTC), applied_at=None,
             )
             session.add(row)
-            return self._result(row)
+            session.flush()
+            session.add_all(CorrectionSourceRow(correction_id=row.id, evidence_id=source)
+                            for source in sorted(sources))
+            result = self._result(row)
+            operation.outcome = OperationOutcome.SUCCEEDED
+            operation.result = result.model_dump(mode="json")
+            operation.completed_at = now
+            append_audit(session, operation.id, "memory.correction_proposed", {
+                "correction_id": str(row.id), "approval_id": str(approval.id),
+            })
+            return result
 
     def apply(self, correction_id: UUID) -> CorrectionResult:
         with self._sessions.begin() as session:
+            retention_fence(session)
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(str(correction_id)))))
             correction = session.scalar(select(MemoryCorrectionRow).where(
                 MemoryCorrectionRow.id == correction_id).with_for_update())
             if correction is None:
                 raise LookupError("correction does not exist")
+            require_active_evidence(session, correction.new_evidence_id)
+            old = session.get(MemoryClaimRow, correction.old_claim_id)
+            if old is None:
+                raise LookupError("original claim does not exist")
+            require_active_evidence(session, old.evidence_id)
+            sources = active_sources(session, session.scalars(
+                select(CorrectionSourceRow.evidence_id).where(
+                    CorrectionSourceRow.correction_id == correction.id,
+                ),
+            ))
             if correction.status == "applied":
                 return self._result(correction, replayed=True)
+            if correction.status != "pending":
+                raise PermissionError("correction is no longer eligible for promotion")
             approval = session.get(ApprovalRequestRow, correction.approval_id)
             if approval is None or approval.status != ApprovalStatus.APPROVED:
                 raise PermissionError("correction requires human approval")
+            if approval.action_type != "memory.correct" or approval.action_payload != {
+                "old_claim_id": str(correction.old_claim_id),
+                "new_evidence_id": str(correction.new_evidence_id),
+                "replacement_object": correction.replacement_object,
+                "confidence": correction.confidence,
+                "source_evidence_ids": [str(value) for value in sorted(sources)],
+            }:
+                raise PermissionError("approval does not match the proposed correction")
             old = session.scalar(select(MemoryClaimRow).where(
                 MemoryClaimRow.id == correction.old_claim_id).with_for_update())
-            if old is None or old.status == "superseded":
+            if old is None or old.status not in {"accepted", "provisional"}:
                 raise RuntimeError("original claim is no longer current")
             now = datetime.now(UTC)
             operation = OperationRow(
@@ -113,6 +160,9 @@ class CorrectionService:
                 supersedes_claim_id=old.id, created_at=now,
             )
             session.add(new_claim)
+            session.flush()
+            session.add_all(ClaimSourceRow(claim_id=new_claim.id, evidence_id=source)
+                            for source in sorted(sources))
             old.status = "superseded"
             relationship = session.scalar(select(MemoryRelationshipRow).where(
                 MemoryRelationshipRow.claim_id == old.id).with_for_update())

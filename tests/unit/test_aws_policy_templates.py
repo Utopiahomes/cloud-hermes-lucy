@@ -41,6 +41,7 @@ def test_execution_policies_are_capability_separated() -> None:
     assert _actions("lucy-archive-policy.json.example") == {
         "kms:GenerateDataKey",
         "dynamodb:PutItem",
+        "dynamodb:GetItem",
     }
     assert _actions("lucy-evidence-policy.json.example") == {
         "kms:Decrypt",
@@ -49,6 +50,8 @@ def test_execution_policies_are_capability_separated() -> None:
     assert _actions("lucy-deletion-policy.json.example") == {
         "dynamodb:GetItem",
         "dynamodb:DeleteItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
     }
     assert "kms:Decrypt" not in _actions("lucy-archive-policy.json.example")
     assert not any(
@@ -121,7 +124,25 @@ def test_cloudformation_template_is_well_formed_yaml_with_expected_boundaries() 
         "DeletionRole",
         "AuditTrail",
         "KeyAdministrationAlert",
+        "DeletionJournalHead",
+        "DeletionJournalIntents",
     } <= resources.keys()
+
+
+def test_journal_tables_are_retained_protected_and_backed_up() -> None:
+    resources = _cloudformation()["Resources"]
+    for name in ("DeletionJournalHead", "DeletionJournalIntents"):
+        resource = resources[name]
+        assert resource["DeletionPolicy"] == "Retain"
+        assert resource["UpdateReplacePolicy"] == "Retain"
+        assert resource["Properties"]["DeletionProtectionEnabled"] is True
+        assert resource["Properties"]["PointInTimeRecoverySpecification"] == {
+            "PointInTimeRecoveryEnabled": True
+        }
+    # Wrapped-key backup resurrection would defeat crypto-shredding.
+    assert resources["WrappedKeyRegistry"]["Properties"]["PointInTimeRecoverySpecification"] == {
+        "PointInTimeRecoveryEnabled": False
+    }
 
 
 def test_cloudformation_creates_kms_principals_before_key_without_cycles() -> None:
@@ -171,10 +192,106 @@ def test_cloudformation_creates_kms_principals_before_key_without_cycles() -> No
             item["Action"]
             for item in resources[policy]["Properties"]["PolicyDocument"]["Statement"]
         }
-        assert policy_actions == {
+        expected = {
             action,
             "dynamodb:PutItem" if role == "ArchiveRole" else "dynamodb:GetItem",
         }
+        if role == "ArchiveRole":
+            expected.add("dynamodb:GetItem")
+        assert policy_actions == expected
+
+
+def test_journal_iam_separates_head_readers_from_intent_writer() -> None:
+    resources = _cloudformation()["Resources"]
+    archive = json.dumps(resources["ArchivePolicy"])
+    evidence = json.dumps(resources["EvidencePolicy"])
+    deletion = json.dumps(resources["DeletionRole"])
+    assert "DeletionJournalHead" in archive and "DeletionJournalIntents" not in archive
+    assert "DeletionJournalHead" in evidence and "DeletionJournalIntents" not in evidence
+    assert "DeletionJournalHead" in deletion and "DeletionJournalIntents" in deletion
+    assert "dynamodb:UpdateItem" in deletion and "dynamodb:PutItem" in deletion
+    assert "TransactWriteItems" in deletion
+    assert not any(token in deletion for token in ("dynamodb:Scan", "dynamodb:Query", "kms:"))
+
+
+def test_head_readers_can_request_only_identity_and_chain_metadata() -> None:
+    resources = _cloudformation()["Resources"]
+    for policy_name in ("ArchivePolicy", "EvidencePolicy"):
+        statements = resources[policy_name]["Properties"]["PolicyDocument"]["Statement"]
+        statement = next(
+            item
+            for item in statements
+            if item["Action"] == "dynamodb:GetItem"
+            and item["Resource"] == {"Fn::GetAtt": "DeletionJournalHead.Arn"}
+        )
+        assert statement["Condition"] == {
+            "ForAllValues:StringEquals": {
+                "dynamodb:Attributes": ["journal_id", "registry_id", "sequence", "digest"]
+            }
+        }
+
+
+def test_cloudtrail_records_all_security_table_data_events() -> None:
+    resources = _cloudformation()["Resources"]
+    selectors = resources["AuditTrail"]["Properties"]["EventSelectors"]
+    assert len(selectors) == 1
+    assert selectors[0]["ReadWriteType"] == "All"
+    assert selectors[0]["IncludeManagementEvents"] is True
+    assert selectors[0]["DataResources"] == [
+        {
+            "Type": "AWS::DynamoDB::Table",
+            "Values": [
+                {"Fn::GetAtt": "WrappedKeyRegistry.Arn"},
+                {"Fn::GetAtt": "DeletionJournalHead.Arn"},
+                {"Fn::GetAtt": "DeletionJournalIntents.Arn"},
+            ],
+        }
+    ]
+
+
+def test_policy_render_service_keeps_no_aws_role_or_journal_access() -> None:
+    render = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.1.yaml.example").read_text()
+    )
+    policy = next(service for service in render["services"] if service["name"] == "lucy-policy")
+    keys = {item["key"] for item in policy["envVars"]}
+    assert "AWS_ROLE_ARN" not in keys
+    assert not any("JOURNAL" in key or "DYNAMODB" in key for key in keys)
+
+
+def test_render_oidc_and_journal_configuration_is_exactly_service_scoped() -> None:
+    render = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.1.yaml.example").read_text()
+    )
+    services = {service["name"]: service for service in render["services"]}
+    journal_keys = {
+        "LUCY_ARCHIVE_REGISTRY_ID",
+        "LUCY_DELETION_JOURNAL_ID",
+        "LUCY_AWS_DELETION_HEAD_TABLE",
+        "LUCY_AWS_DELETION_INTENT_TABLE",
+    }
+    forbidden = {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+    }
+    for name, service in services.items():
+        keys = [item["key"] for item in service["envVars"]]
+        assert forbidden.isdisjoint(keys)
+        if name == "lucy-policy":
+            assert "AWS_ROLE_ARN" not in keys
+            assert journal_keys.isdisjoint(keys)
+        else:
+            assert keys.count("AWS_ROLE_ARN") == 1
+            assert journal_keys <= set(keys)
+
+
+def test_initializer_is_create_only_and_never_rewinds_head() -> None:
+    script = (AWS_DEPLOY / "initialize-deletion-journal.ps1").read_text()
+    assert "attribute_not_exists(journal_key)" in script
+    assert "put-item" in script
+    assert not any(action in script for action in ("update-item", "delete-item", "transact-write"))
 
 
 def test_render_example_has_no_active_static_aws_credentials() -> None:

@@ -4,17 +4,16 @@ import os
 from pathlib import Path
 
 import uvicorn
+from sqlalchemy.exc import SQLAlchemyError
 
-from lucy.archive_crypto import (
-    archive_dependencies_from_environment,
-    archive_key_store_from_environment,
-    verify_archive_dependencies,
-)
-from lucy.authorization import SensitiveActionPermitVerifier
-from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
-from lucy.evidence import EvidenceService
-from lucy.rejoining import RejoiningService
+from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_environment
+from lucy.readiness import (
+    ReadinessError,
+    ServiceReadiness,
+    expected_storage_epoch,
+    service_mode_from_environment,
+)
 
 
 def _expected_commit() -> str:
@@ -30,30 +29,26 @@ def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
     sessions = create_session_factory(database_url)
-    archive_backend = os.environ.get("LUCY_ARCHIVE_BACKEND", "").strip()
-    service_mode = os.environ.get("LUCY_SERVICE_MODE", "all-local").strip()
-    if archive_backend and service_mode == "all-local":
-        cipher, key_store = archive_dependencies_from_environment()
-        verify_archive_dependencies(cipher, key_store)
-        EvidenceService(
+    if observed != _expected_commit():
+        raise SystemExit("Lucy startup gate failed: Hermes pin mismatch")
+    mode = service_mode_from_environment()
+    try:
+        journal = None if mode == "policy" else deletion_journal_from_environment()
+        ServiceReadiness(
             sessions,
-            cipher,
-            key_store,
-            SensitiveActionPermitVerifier.from_environment(),
-        ).reconcile_missing_keys()
-    elif archive_backend and service_mode == "deletion":
-        EvidenceService(
-            sessions,
-            None,
-            archive_key_store_from_environment(),
-            SensitiveActionPermitVerifier.from_environment(),
-        ).reconcile_missing_keys()
-    result = RejoiningService(
-        sessions, expected_hermes_commit=_expected_commit()
-    ).run(observed_hermes_commit=observed)
-    if result.state != RejoiningState.READY:
-        raise SystemExit(f"Lucy startup gate failed: {result.checks}")
-    uvicorn.run("lucy.api:app", host="0.0.0.0", port=8080)
+            mode=mode,
+            storage_epoch=expected_storage_epoch(mode),
+            journal=journal,
+        ).check()
+    except (ReadinessError, DeletionJournalError) as exc:
+        raise SystemExit(f"Lucy startup gate failed: {exc}") from exc
+    except SQLAlchemyError:
+        raise SystemExit(
+            "Lucy startup gate failed: storage or permission check unavailable"
+        ) from None
+    # No lifecycle writes, pending-operation scans, KMS calls, registry scans,
+    # migrations, or recovery occur when any HTTP service starts/restarts.
+    uvicorn.run("lucy.api:app", host="0.0.0.0", port=8080, access_log=False)
 
 
 if __name__ == "__main__":

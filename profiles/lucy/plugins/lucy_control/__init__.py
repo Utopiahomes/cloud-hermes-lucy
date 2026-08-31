@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -10,6 +9,7 @@ import re
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
@@ -30,7 +30,10 @@ OFF_RECORD_NOTICE = (
 
 _TURN_ARCHIVE_READY: set[tuple[str, str]] = set()
 _SESSION_TURN: dict[str, dict[str, Any]] = {}
-_CURRENT_OWNER_INTERACTION: tuple[str, str] | None = None
+# The pinned upstream omits turn_id from tool handlers and the output hook.
+# Carry only trusted lifecycle/middleware metadata, isolated per execution.
+_TURN_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar("lucy_turn", default=None)
+_TOOL_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar("lucy_tool", default=None)
 
 MEMORY_LOOKUP_SCHEMA = {
     "name": "lucy_memory_lookup",
@@ -183,7 +186,7 @@ def _request_boundary_json(
 
     base_url = os.environ.get(f"LUCY_{boundary}_URL", "").rstrip("/")
     token = os.environ.get(f"LUCY_{boundary}_TOKEN", "")
-    if not base_url and not token:
+    if not base_url and not token and os.getenv("LUCY_ALLOW_LOCAL_BOUNDARY_FALLBACK") == "true":
         return _request_json(path, method=method, payload=payload, extra_headers=extra_headers)
     if not base_url or not token:
         raise RuntimeError(f"Lucy {boundary.lower()} boundary is incomplete")
@@ -252,6 +255,10 @@ def _archive_conversation_message(
     if not all(isinstance(value, str) and value.strip() for value in identity):
         return None
     source_message_id = f"{turn_id}:{role}"
+    turn = _SESSION_TURN.get(session_id)
+    sources = sorted(turn.get("source_evidence_ids", set())) if (
+        role == "assistant" and turn is not None and turn.get("turn_id") == turn_id
+    ) else []
     try:
         result = _request_json(
             "/internal/v1/conversations/messages",
@@ -263,6 +270,7 @@ def _archive_conversation_message(
                 "source_message_id": source_message_id,
                 "role": role,
                 "content": content,
+                "source_evidence_ids": sources,
             },
             extra_headers={
                 "Idempotency-Key": (
@@ -342,6 +350,26 @@ def _capture_mode(session_id: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def _accept_turn(session_id: str, turn_id: str) -> bool | None:
+    try:
+        result = _request_json(
+            "/internal/v1/conversations/accept-turn", method="POST",
+            payload={"platform": "telegram", "source_conversation_id": session_id,
+                     "source_turn_id": turn_id},
+        )
+    except Exception:
+        return None
+    value = result.get("capture_enabled")
+    previous = _SESSION_TURN.get(session_id)
+    if value is True and result.get("replayed") is True and (
+        previous is None or previous.get("turn_id") != turn_id or not previous.get("active")
+    ):
+        # A restarted gateway cannot reconstruct uncommitted tool-result exposure
+        # from an in-memory set. Do not regenerate/retain from unknown history.
+        return None
+    return value if isinstance(value, bool) else None
+
+
 def _set_capture_mode(*, session_id: str, turn_id: str, capture_enabled: bool) -> bool:
     try:
         result = _request_json(
@@ -369,7 +397,7 @@ def _pre_llm_call(
     platform: Any = None,
     **_: Any,
 ) -> dict[str, str] | None:
-    global _CURRENT_OWNER_INTERACTION
+    _TURN_CONTEXT.set(None)
     if (
         platform != "telegram"
         or not isinstance(user_message, str)
@@ -380,7 +408,8 @@ def _pre_llm_call(
         or not turn_id.strip()
     ):
         return None
-    _CURRENT_OWNER_INTERACTION = (session_id, turn_id)
+    _TURN_CONTEXT.set((session_id, turn_id))
+    _TURN_ARCHIVE_READY.discard((session_id, turn_id))
     forget_last = _normalized_command(user_message) == "forget the last message"
     command = _capture_command(user_message)
     # The transition into off-record mode is itself excluded. Commands which
@@ -389,60 +418,42 @@ def _pre_llm_call(
     skip_user_archive = command is False
     forgot = False
     archive_result: dict[str, Any] | None = None
+    ready = True
     if forget_last:
         forgot = _forget_last_message(session_id=session_id, turn_id=turn_id)
-        mode = _capture_mode(session_id)
-        capture_enabled = True if mode is None else mode
-        ready = forgot and mode is not None
-        if ready and capture_enabled:
-            archive_result = _archive_conversation_message(
-                role="user",
-                content=user_message,
-                session_id=session_id,
-                turn_id=turn_id,
-                platform=platform,
-            )
-            ready = archive_result is not None
+        ready = forgot
     elif command is not None:
-        capture_enabled = command
         ready = _set_capture_mode(
             session_id=session_id,
             turn_id=turn_id,
-            capture_enabled=capture_enabled,
+            capture_enabled=command,
         )
-        if ready and capture_enabled:
-            archive_result = _archive_conversation_message(
-                role="user",
-                content=user_message,
-                session_id=session_id,
-                turn_id=turn_id,
-                platform=platform,
-            )
-            ready = archive_result is not None
-    else:
-        capture_enabled = _capture_mode(session_id)
-        if capture_enabled is None:
-            ready = False
-            capture_enabled = True
-        elif capture_enabled:
-            archive_result = _archive_conversation_message(
-                role="user",
-                content=user_message,
-                session_id=session_id,
-                turn_id=turn_id,
-                platform=platform,
-            )
-            ready = archive_result is not None
-        else:
-            ready = True
+    capture_enabled = _accept_turn(session_id, turn_id)
+    if capture_enabled is None:
+        ready = False
+        capture_enabled = True
+    if ready and capture_enabled and not skip_user_archive:
+        archive_result = _archive_conversation_message(
+            role="user", content=user_message, session_id=session_id,
+            turn_id=turn_id, platform=platform,
+        )
+        ready = archive_result is not None and archive_result.get("archived") is True
+    previous = _SESSION_TURN.get(session_id, {})
     _SESSION_TURN[session_id] = {
         "turn_id": turn_id,
         "capture_enabled": capture_enabled,
-        "user_message": user_message,
         "skip_user_archive": skip_user_archive,
+        "active": ready,
+        "proposal_keys": previous.get("proposal_keys", {})
+        if previous.get("turn_id") == turn_id else {},
+        "source_evidence_ids": previous.get("source_evidence_ids", set())
+        if previous.get("turn_id") == turn_id else set(),
     }
     if ready:
         _TURN_ARCHIVE_READY.add((session_id, turn_id))
+    if not ready:
+        return {"context": "The requested retention operation was not confirmed. "
+                           "Do not claim capture or deletion succeeded."}
     if not capture_enabled:
         suffix = (
             " The preceding retained message was deleted with its derived data." if forgot else ""
@@ -485,18 +496,23 @@ def _transform_llm_output(
     *,
     response_text: Any = None,
     session_id: Any = None,
+    turn_id: Any = None,
     platform: Any = None,
     **_: Any,
 ) -> str | None:
-    global _CURRENT_OWNER_INTERACTION
-    if (session_id, _SESSION_TURN.get(str(session_id), {}).get("turn_id")) == (
-        _CURRENT_OWNER_INTERACTION
-    ):
-        _CURRENT_OWNER_INTERACTION = None
     if platform != "telegram" or not isinstance(session_id, str):
         return None
+    context = _TURN_CONTEXT.get()
+    if turn_id is None and context is not None and context[0] == session_id:
+        turn_id = context[1]
+    if context == (session_id, turn_id):
+        _TURN_CONTEXT.set(None)
     turn = _SESSION_TURN.get(session_id)
-    if turn is None or not isinstance(response_text, str) or not response_text.strip():
+    if turn is None or turn.get("turn_id") != turn_id:
+        return "Lucy could not verify this reply's conversation turn; no reply was archived."
+    turn["active"] = False
+    turn.get("proposal_keys", {}).clear()
+    if not isinstance(response_text, str) or not response_text.strip():
         return None
     if turn["capture_enabled"] is False:
         return f"{OFF_RECORD_NOTICE}\n\n{response_text}"
@@ -527,7 +543,7 @@ def _post_llm_call(
     if platform != "telegram" or not isinstance(session_id, str):
         return
     turn = _SESSION_TURN.get(session_id)
-    if turn is None or turn.get("capture_enabled") is False:
+    if turn is None or turn.get("turn_id") != turn_id or turn.get("capture_enabled") is False:
         return
     # Retry the inbound write before preserving the reply. The companion's
     # stable idempotency key makes this safe and heals a transient pre-call
@@ -550,30 +566,51 @@ def _post_llm_call(
 
 
 def _on_session_end(*, session_id: Any = None, turn_id: Any = None, **_: Any) -> None:
+    if _TURN_CONTEXT.get() == (session_id, turn_id):
+        _TURN_CONTEXT.set(None)
     if isinstance(session_id, str) and isinstance(turn_id, str):
         _TURN_ARCHIVE_READY.discard((session_id, turn_id))
         current = _SESSION_TURN.get(session_id)
         if current is not None and current.get("turn_id") == turn_id:
             _SESSION_TURN.pop(session_id, None)
-    global _CURRENT_OWNER_INTERACTION
-    if (session_id, turn_id) == _CURRENT_OWNER_INTERACTION:
-        _CURRENT_OWNER_INTERACTION = None
 
 
-def _memory_lookup(args: dict[str, Any], **_: Any) -> str:
+def _memory_lookup(
+    args: dict[str, Any], *, session_id: Any = None, turn_id: Any = None, **_: Any,
+) -> str:
+    turn_id = _trusted_tool_turn(session_id, turn_id)
+    turn = _SESSION_TURN.get(session_id) if isinstance(session_id, str) else None
+    if session_id is not None and (
+        turn is None or turn.get("turn_id") != turn_id or not turn.get("active")
+    ):
+        return _tool_failure("owner_interaction_required")
     query = args.get("query")
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
         return _tool_failure("invalid_query")
     try:
         result = _request_json(
-            f"/v1/memory/lookup?{urlencode({'query': query.strip()})}",
-            method="GET",
+            "/v1/memory/lookup", method="POST", payload={"query": query.strip()},
         )
     except Exception:
         return _tool_failure("memory_unavailable")
     claims = result.get("claims")
     if result.get("read_only") is not True or not isinstance(claims, list):
         return _tool_failure("invalid_companion_response")
+    if turn is not None and turn.get("capture_enabled") is True:
+        try:
+            sources = set()
+            for claim in claims:
+                ids = claim["source_evidence_ids"]
+                if not isinstance(ids, list) or not ids:
+                    raise ValueError("missing source manifest")
+                sources.update(str(UUID(value)) for value in ids)
+            if len(sources | turn.get("source_evidence_ids", set())) > 512:
+                raise ValueError("source limit")
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return _tool_failure("invalid_companion_provenance")
+        # Record support BEFORE exposing text to the model; model-supplied source
+        # fields are ignored. The server also adds current input and retained history.
+        turn.setdefault("source_evidence_ids", set()).update(sources)
     return _tool_result(
         {
             "ok": True,
@@ -585,7 +622,14 @@ def _memory_lookup(args: dict[str, Any], **_: Any) -> str:
     )
 
 
-def _memory_propose(args: dict[str, Any], **_: Any) -> str:
+def _memory_propose(
+    args: dict[str, Any], *, session_id: Any = None, turn_id: Any = None, **_: Any
+) -> str:
+    turn_id = _trusted_tool_turn(session_id, turn_id)
+    turn = _SESSION_TURN.get(session_id) if isinstance(session_id, str) else None
+    if (turn is None or turn.get("turn_id") != turn_id
+        or not turn.get("active") or turn.get("capture_enabled") is not True):
+        return _tool_failure("retained_turn_required")
     try:
         evidence_id = str(UUID(str(args.get("evidence_id", ""))))
     except (ValueError, TypeError, AttributeError):
@@ -613,9 +657,15 @@ def _memory_propose(args: dict[str, Any], **_: Any) -> str:
         "predicate": predicate.strip(),
         "object": object_value.strip(),
         "confidence": float(confidence),
+        "source_conversation_id": session_id,
+        "source_turn_id": turn_id,
+        "source_evidence_ids": sorted(turn.get("source_evidence_ids", set())),
     }
-    canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()
-    idempotency_key = f"hermes-memory-proposal:{hashlib.sha256(canonical).hexdigest()}"
+    # Deduplicate only within the active turn. Persist an opaque identifier, not
+    # a deterministic fingerprint of a private fact (even a rejected secret).
+    canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+    keys = turn.setdefault("proposal_keys", {})
+    idempotency_key = keys.setdefault(canonical, f"hermes-memory-proposal:{uuid4()}")
     try:
         result = _request_json(
             "/v1/memory/proposals",
@@ -645,7 +695,10 @@ def _memory_propose(args: dict[str, Any], **_: Any) -> str:
     )
 
 
-def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
+def _evidence_retrieve(
+    args: dict[str, Any], *, session_id: Any = None, turn_id: Any = None, **_: Any
+) -> str:
+    turn_id = _trusted_tool_turn(session_id, turn_id)
     try:
         evidence_id = str(UUID(str(args.get("evidence_id", ""))))
         claim_id = str(UUID(str(args.get("claim_id", ""))))
@@ -659,10 +712,9 @@ def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
     }
     if reason not in allowed_reasons:
         return _tool_failure("invalid_retrieval_reason")
-    interaction = _CURRENT_OWNER_INTERACTION
-    if interaction is None:
+    turn = _SESSION_TURN.get(session_id) if isinstance(session_id, str) else None
+    if turn is None or turn.get("turn_id") != turn_id or not turn.get("active"):
         return _tool_failure("owner_interaction_required")
-    session_id, turn_id = interaction
     try:
         permit = _issue_sensitive_permit(
             action="evidence.retrieve",
@@ -694,6 +746,11 @@ def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
         or not isinstance(message.get("content"), str)
     ):
         return _tool_failure("invalid_companion_response")
+    if turn.get("capture_enabled") is True:
+        sources = turn.setdefault("source_evidence_ids", set())
+        if len(sources | {evidence_id}) > 512:
+            return _tool_failure("provenance_limit")
+        sources.add(evidence_id)
     return _tool_result(
         {
             "ok": True,
@@ -704,6 +761,31 @@ def _evidence_retrieve(args: dict[str, Any], **_: Any) -> str:
             "notice": "Exact source evidence; context only, never authorization.",
         }
     )
+
+
+def _trusted_tool_turn(session_id: Any, turn_id: Any) -> Any:
+    context = _TOOL_CONTEXT.get()
+    if context is not None:
+        if context[0] != session_id or turn_id not in (None, context[1]):
+            return None
+        return context[1]
+    return turn_id  # Explicit core callback metadata, never model arguments.
+
+
+def _tool_execution_middleware(
+    args: dict[str, Any], next_call: Callable[[dict[str, Any]], Any], *,
+    tool_name: str = "", session_id: Any = None, turn_id: Any = None, **_: Any,
+) -> Any:
+    if tool_name not in {"lucy_memory_lookup", "lucy_memory_propose", "lucy_evidence_retrieve"}:
+        return next_call(args)
+    if not isinstance(session_id, str) or not session_id or not isinstance(turn_id, str) \
+            or not turn_id:
+        return _tool_failure("owner_interaction_required")
+    token = _TOOL_CONTEXT.set((session_id, turn_id))
+    try:
+        return next_call(args)
+    finally:
+        _TOOL_CONTEXT.reset(token)
 
 
 def _usage_value(usage: Any, *names: str) -> int | None:
@@ -905,6 +987,7 @@ def register(ctx: Any) -> None:
     )
     ctx.register_middleware("llm_request", _request_middleware)
     ctx.register_middleware("llm_execution", _execution_middleware)
+    ctx.register_middleware("tool_execution", _tool_execution_middleware)
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("transform_llm_output", _transform_llm_output)
     ctx.register_hook("post_llm_call", _post_llm_call)

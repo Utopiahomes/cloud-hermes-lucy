@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+import lucy.runtime as runtime
+from lucy.readiness import (
+    ReadinessError,
+    expected_storage_epoch,
+    service_mode_from_environment,
+)
+from lucy.rejoining import RejoiningService
+
+
+@pytest.mark.parametrize("mode", ["routine", "policy", "evidence", "deletion", "all-local"])
+def test_service_startup_only_reads_admission_and_never_runs_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", mode)
+    monkeypatch.setenv("LUCY_DATABASE_URL", "synthetic-not-connected")
+    monkeypatch.setenv("LUCY_OBSERVED_HERMES_COMMIT", "a" * 40)
+    monkeypatch.setenv("LUCY_STORAGE_EPOCH", str(uuid4()))
+    monkeypatch.setenv("LUCY_ENVIRONMENT", "development" if mode == "all-local" else "production")
+    monkeypatch.delenv("LUCY_ARCHIVE_BACKEND", raising=False)
+    monkeypatch.setattr(runtime, "_expected_commit", lambda: "a" * 40)
+    monkeypatch.setattr(runtime, "create_session_factory", lambda *_: object())
+    monkeypatch.setattr(runtime, "deletion_journal_from_environment", lambda: object())
+    calls: list[str] = []
+    monkeypatch.setattr(
+        runtime,
+        "ServiceReadiness",
+        lambda *_a, **_k: SimpleNamespace(
+            check=lambda: calls.append("read_only_check"),
+        ),
+    )
+    monkeypatch.setattr(RejoiningService, "run", lambda *_a, **_k: pytest.fail("must not recover"))
+    monkeypatch.setattr(runtime.uvicorn, "run", lambda *_a, **_k: calls.append("serve"))
+    runtime.main()
+    assert calls == ["read_only_check", "serve"]
+
+
+@pytest.mark.parametrize("mode", [None, "all-local", "unknown"])
+def test_production_cannot_fall_back_to_combined_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str | None,
+) -> None:
+    monkeypatch.setenv("LUCY_ENVIRONMENT", "production")
+    if mode is None:
+        monkeypatch.delenv("LUCY_SERVICE_MODE", raising=False)
+    else:
+        monkeypatch.setenv("LUCY_SERVICE_MODE", mode)
+    with pytest.raises(ReadinessError, match="isolated service identity"):
+        service_mode_from_environment()
+
+
+def test_aws_backend_always_requires_isolated_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LUCY_ENVIRONMENT", "development")
+    monkeypatch.setenv("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb")
+    monkeypatch.delenv("LUCY_SERVICE_MODE", raising=False)
+    with pytest.raises(ReadinessError):
+        service_mode_from_environment()
+
+
+def test_policy_startup_never_requests_an_aws_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_ENVIRONMENT", "production")
+    monkeypatch.setenv("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb")
+    monkeypatch.setenv("LUCY_DATABASE_URL", "synthetic-not-connected")
+    monkeypatch.setenv("LUCY_OBSERVED_HERMES_COMMIT", "a" * 40)
+    monkeypatch.setenv("LUCY_STORAGE_EPOCH", str(uuid4()))
+    monkeypatch.setattr(runtime, "_expected_commit", lambda: "a" * 40)
+    monkeypatch.setattr(runtime, "create_session_factory", lambda *_: object())
+    monkeypatch.setattr(
+        runtime,
+        "deletion_journal_from_environment",
+        lambda: pytest.fail("policy identity must not request an AWS journal"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "ServiceReadiness",
+        lambda *_a, **kwargs: SimpleNamespace(
+            check=lambda: None if kwargs["journal"] is None else pytest.fail("unexpected journal")
+        ),
+    )
+    monkeypatch.setattr(runtime.uvicorn, "run", lambda *_a, **_k: None)
+    runtime.main()
+
+
+def test_service_requires_external_storage_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LUCY_STORAGE_EPOCH", raising=False)
+    with pytest.raises(ReadinessError):
+        expected_storage_epoch("routine")
+    assert expected_storage_epoch("all-local") is None
+
+
+def test_failed_startup_check_never_starts_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "routine")
+    monkeypatch.setenv("LUCY_DATABASE_URL", "synthetic-not-connected")
+    monkeypatch.setenv("LUCY_OBSERVED_HERMES_COMMIT", "a" * 40)
+    monkeypatch.setenv("LUCY_STORAGE_EPOCH", str(uuid4()))
+    monkeypatch.setattr(runtime, "_expected_commit", lambda: "a" * 40)
+    monkeypatch.setattr(runtime, "create_session_factory", lambda *_: object())
+    monkeypatch.setattr(runtime, "deletion_journal_from_environment", lambda: object())
+
+    def denied() -> None:
+        raise ReadinessError("storage is quarantined")
+
+    monkeypatch.setattr(
+        runtime, "ServiceReadiness", lambda *_a, **_k: SimpleNamespace(check=denied)
+    )
+    monkeypatch.setattr(
+        runtime.uvicorn, "run", lambda *_a, **_k: pytest.fail("listener must not start")
+    )
+    with pytest.raises(SystemExit, match="quarantined"):
+        runtime.main()

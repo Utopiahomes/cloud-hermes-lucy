@@ -1,13 +1,18 @@
 # Telegram conversation archive
 
-Date: 2026-08-28
+Updated: 2026-08-31
 
-Status: implemented and tested, but deliberately not enabled in the live
-Telegram gateway pending owner acceptance.
+Status: local implementation under security hardening; **not accepted for live
+capture**. The original acceptance claims below are bounded by the remaining
+gaps in [the current recovery checkpoint](deletion-recovery-2026-08-31.md).
+This document is not evidence of a deployed or approved retention configuration.
 
 ## Product policy
 
-The allowlisted owner's Telegram exchanges with Lucy are captured by default.
+After final acceptance and explicit activation, the allowlisted owner's Telegram
+exchanges with Lucy are intended to be captured by default. The revised server
+defaults to capture disabled; `LUCY_TRANSCRIPT_CAPTURE_ENABLED=true` is required
+but is not a substitute for the acceptance process.
 Capture preserves what happened; it does not silently promote every sentence
 to a fact, instruction, authorization, or durable belief.
 
@@ -40,15 +45,19 @@ See [`render-aws-kms-acceptance.md`](render-aws-kms-acceptance.md).
 
 ## Owner-sovereign deletion
 
-"Forget the last message" selects the most recent still-decryptable message in
-the conversation and destroys its wrapped DEK before removing its ciphertext.
+An authorized "forget the last message" operation pins the chosen evidence ID
+in its permit. Retries do not select a newer message. It destroys the wrapped
+DEK before removing ciphertext. Gateway permit issuance is currently quarantined
+until independently verified owner-event authorization exists; the direct owner
+API still requires owner authentication and an exact-record signed permit.
 The append-only evidence envelope remains as a non-plaintext tombstoned record
 so audit and provenance history do not silently disappear.
 
 Deletion also traces and neutralizes derived state:
 
-- directly derived claims and superseding descendants are invalidated and
-  redacted;
+- derived encrypted replies lose their keys and ciphertext through the full
+  registered evidence closure;
+- multi-source claims and superseding descendants are invalidated and redacted;
 - graph relationships are closed and redacted;
 - proposals and corrections are rejected and redacted;
 - associated approval payloads are scrubbed and pending approvals denied;
@@ -56,10 +65,23 @@ Deletion also traces and neutralizes derived state:
 - disposable working contexts are purged; and
 - affected conversation-turn commits are marked redacted.
 
-A database backup alone cannot resurrect deleted plaintext because wrapped DEKs
-are outside PostgreSQL. Production PostgreSQL backups are encrypted and retained
-for no more than 30 days. Key-registry recovery must honor the permanent
-destruction record; restoring an old wrapped key is forbidden.
+The source graph now covers current inputs, retained conversation history and
+observed memory/evidence tool results. Hidden Hermes history, safe resumption
+after excluded/deleted/unfinished turns, and independent cross-store deletion
+recovery remain capture blockers. See the provenance checkpoint for the exact
+guarantees and the conservative clean-history refusal behavior.
+
+Wrapped DEKs are outside PostgreSQL, so restoring that database alone does not
+restore a destroyed raw-transcript key. The [local recovery protocol](deletion-recovery-2026-08-31.md)
+now fences HTTP service access to restored plaintext projections when the
+independent accepted-deletion journal does not match database receipts. Explicit
+offline maintenance can finish only previously accepted intents, never infer
+authority from missing keys. Normal service startup is read-only and does not
+scan the key registry or perform recovery. Real-cloud compound restore, journal
+identity/permissions and freshness still require acceptance. This is not a
+defense against direct SQL credentials or a coordinated rollback of all stores.
+The 30-day encrypted-backup window is a requirement, not provisioned or verified
+production behavior. Restoring a previously destroyed wrapped key is forbidden.
 
 ## Raw evidence retrieval
 
@@ -69,7 +91,13 @@ recovering context missed during extraction. Autonomous retrieval requires the
 exact evidence UUID, a current provenance-linked claim UUID, an active
 allowlisted owner interaction, and a five-minute single-use
 `SensitiveActionPermitV1`. It returns only one source message, and every
-successful access is audited.
+successful access is audited. Gateway minting is disabled pending owner-event
+verification. Reads are single-disclosure: even an identical successful retry
+requires a fresh permit and delivery key. `max_bytes` limits the decrypted
+canonical source-record bytes (including its envelope), not just character count.
+Application permission, missing-record, and validation denials are recorded in
+separate content-free audit transactions; infrastructure failures may prevent
+auditing and still fail closed.
 
 The owner API permits single-record review with owner authentication and the
 same signed-permit boundary. Owner export and bulk archive search are not
@@ -81,6 +109,12 @@ The exact commands "off the record" and "back on the record" change a durable,
 audited conversation state. While capture is disabled, every Lucy response is
 prefixed with a visible notice. The transition into off-record mode and all
 subsequent exchange content are excluded from Lucy's archive.
+
+A content-free receipt records each turn's consent generation before processing.
+Excluded turns cannot become retained through a later retry or restart. Toggling
+capture invalidates older in-flight generations; those turns require a new
+delivery rather than retroactive consent. Memory proposals enforce this at both
+submission and promotion. Unknown consent blocks model processing.
 
 Off the record means *not archived by Lucy*. Telegram, Hermes, and the configured
 model provider still necessarily process the exchange under their own policies.
@@ -101,10 +135,13 @@ purged.
 
 ## Acceptance and deployment gate
 
-Automated acceptance proves encrypted-at-rest storage, keyed commitments,
-idempotent turn commits, default-on and visible off-record behavior, narrowly
-audited retrieval, owner retrieval, cryptographic deletion, cascading derived
-data invalidation, and restart-safe replay.
+Local tests cover encrypted storage, keyed commitments, idempotent turn commits,
+activation and off-record behavior, bounded audited retrieval, direct-source
+deletion fences, and restart-safe replay. They do not establish full derivation
+closure or cloud recovery safety. Separate real PostgreSQL logins now prove the
+local four-role capability matrix, not deployed Render/AWS isolation. The pinned
+Hermes middleware/registry and output-hook compatibility probe uses only
+synthetic data with networking disabled.
 
 Transcript capture must remain disabled in the live gateway until:
 

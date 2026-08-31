@@ -1,6 +1,11 @@
 # Container startup acceptance
 
-Lucy now enforces Rejoining before the API process begins serving requests.
+Historical evidence, before migration 0014. **Do not use the restart-to-recover
+procedure below for current code.** Per-service startup is now read-only;
+operator maintenance is explicit. See
+[service admission and controlled recovery](service-boundaries-2026-08-31.md).
+
+The earlier implementation enforced Rejoining before the API began serving.
 
 ## Startup order
 

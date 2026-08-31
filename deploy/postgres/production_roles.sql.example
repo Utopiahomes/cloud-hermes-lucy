@@ -1,21 +1,27 @@
--- Run as the production database owner. Login roles and passwords are created
+-- Run after migrations as the production database/schema owner. First run
+-- production_bootstrap.sql.example with the role administrator. Logins/passwords are created
 -- in Render; grant each login membership in exactly one NOLOGIN capability role.
 -- These roles cannot create databases, roles, schemas, extensions, or tables.
 
-CREATE ROLE lucy_routine NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-CREATE ROLE lucy_policy NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-CREATE ROLE lucy_evidence_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-CREATE ROLE lucy_evidence_deleter NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-
-GRANT CONNECT ON DATABASE lucy TO
-  lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+DO $$ BEGIN
+  EXECUTE format('REVOKE CONNECT, TEMP ON DATABASE %I FROM PUBLIC', current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO lucy_routine, lucy_policy, '
+    'lucy_evidence_reader, lucy_evidence_deleter', current_database());
+END $$;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA lucy TO
   lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission, public.alembic_version TO
+  lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+GRANT SELECT ON lucy.deletion_journal_binding, lucy.deletion_journal_receipts TO
+  lucy_routine, lucy_policy, lucy_evidence_reader, lucy_evidence_deleter;
+GRANT INSERT ON lucy.deletion_journal_receipts TO lucy_evidence_deleter;
 
 -- Routine memory, budget, capture, and ciphertext ingestion. It may insert but
--- cannot read raw evidence ciphertext or tombstones.
+-- cannot read raw evidence ciphertext. Content-free tombstones are readable so
+-- every derived-memory write and recall can reject deleted source evidence.
 GRANT SELECT, INSERT, UPDATE ON
-  lucy.operations, lucy.lifecycle,
+  lucy.operations,
   lucy.budget_accounts, lucy.budget_reservations, lucy.approval_requests,
   lucy.memory_claims, lucy.memory_entities, lucy.memory_relationships,
   lucy.working_contexts, lucy.memory_corrections, lucy.memory_write_proposals,
@@ -26,6 +32,13 @@ GRANT SELECT (id), INSERT ON lucy.evidence TO lucy_routine;
 GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_routine;
 GRANT SELECT, INSERT ON lucy.audit_events TO lucy_routine;
 GRANT INSERT ON lucy.evidence_payloads TO lucy_routine;
+GRANT SELECT ON lucy.evidence_tombstones TO lucy_routine;
+GRANT SELECT, INSERT ON lucy.capture_receipts TO lucy_routine;
+GRANT SELECT, INSERT ON lucy.evidence_derivations, lucy.claim_sources,
+  lucy.proposal_sources, lucy.correction_sources TO lucy_routine;
+GRANT SELECT ON lucy.evidence_derivations, lucy.claim_sources,
+  lucy.proposal_sources, lucy.correction_sources TO lucy_evidence_deleter;
+GRANT SELECT ON lucy.evidence_derivations, lucy.claim_sources TO lucy_evidence_reader;
 
 -- The policy service can issue/inspect permits and append sanitized audit data.
 GRANT SELECT, INSERT, UPDATE ON
@@ -42,20 +55,23 @@ GRANT SELECT ON
   lucy.evidence_tombstones, lucy.memory_claims,
   lucy.operations, lucy.sensitive_action_permits
 TO lucy_evidence_reader;
-GRANT INSERT, UPDATE ON
-  lucy.operations,
-  lucy.sensitive_action_permits
+GRANT INSERT, UPDATE ON lucy.operations TO lucy_evidence_reader;
+GRANT UPDATE (consumed_at, consumed_by_idempotency_key) ON lucy.sensitive_action_permits
 TO lucy_evidence_reader;
 GRANT SELECT, UPDATE ON lucy.audit_head TO lucy_evidence_reader;
 GRANT SELECT, INSERT ON lucy.audit_events TO lucy_evidence_reader;
 
 -- Deletion performs the reviewed cascade, but receives no DDL or backup role.
-GRANT SELECT, INSERT, UPDATE ON
-  lucy.operations, lucy.sensitive_action_permits,
-  lucy.evidence_tombstones, lucy.memory_claims, lucy.memory_entities,
+GRANT SELECT, INSERT, UPDATE ON lucy.operations TO lucy_evidence_deleter;
+GRANT SELECT ON lucy.evidence, lucy.sensitive_action_permits TO lucy_evidence_deleter;
+GRANT UPDATE (consumed_at, consumed_by_idempotency_key) ON lucy.sensitive_action_permits
+TO lucy_evidence_deleter;
+GRANT SELECT, INSERT ON lucy.evidence_tombstones TO lucy_evidence_deleter;
+GRANT SELECT, UPDATE ON
+  lucy.memory_claims, lucy.memory_entities,
   lucy.memory_relationships, lucy.working_contexts,
   lucy.memory_corrections, lucy.memory_write_proposals,
-  lucy.approval_requests, lucy.conversation_turns, lucy.evidence
+  lucy.approval_requests, lucy.conversation_turns
 TO lucy_evidence_deleter;
 GRANT SELECT, DELETE ON lucy.evidence_payloads TO lucy_evidence_deleter;
 GRANT DELETE ON lucy.working_contexts TO lucy_evidence_deleter;
@@ -68,3 +84,4 @@ GRANT SELECT, INSERT ON lucy.audit_events TO lucy_evidence_deleter;
 -- GRANT lucy_policy TO lucy_policy_login;
 -- GRANT lucy_evidence_reader TO lucy_evidence_login;
 -- GRANT lucy_evidence_deleter TO lucy_deletion_login;
+-- Never grant lucy_app, schema ownership, or the maintenance credential to them.

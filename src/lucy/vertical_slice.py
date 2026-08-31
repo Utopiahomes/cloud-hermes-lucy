@@ -14,12 +14,14 @@ from lucy.contracts import ConversationEvidenceV1, OperationOutcome, RejoiningSt
 from lucy.db.models import (
     BudgetAccountRow,
     BudgetReservationRow,
+    ClaimSourceRow,
     EvidenceRow,
     LifecycleRow,
     MemoryClaimRow,
     OperationRow,
 )
 from lucy.rejoining import can_transition
+from lucy.retention import require_active_evidence, retention_fence
 
 
 class ImportRequest(BaseModel):
@@ -50,7 +52,10 @@ class VerticalSliceService:
         self._sessions = sessions
 
     def import_synthetic_conversation(self, request: ImportRequest) -> ImportResult:
+        if request.evidence.source != "synthetic":
+            raise PermissionError("plaintext fixture importer accepts synthetic evidence only")
         with self._sessions.begin() as session:
+            retention_fence(session)
             # Serialize identical keys before checking. PostgreSQL holds this lock
             # until transaction end, including after a process restart/retry.
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(request.idempotency_key))))
@@ -62,7 +67,9 @@ class VerticalSliceService:
             if existing is not None:
                 if existing.outcome != OperationOutcome.SUCCEEDED or existing.result is None:
                     raise RuntimeError(f"operation has non-replayable outcome: {existing.outcome}")
-                return ImportResult.model_validate({**existing.result, "replayed": True})
+                replay = ImportResult.model_validate({**existing.result, "replayed": True})
+                require_active_evidence(session, replay.evidence_id)
+                return replay
 
             now = datetime.now(UTC)
             operation_id = uuid4()
@@ -118,6 +125,8 @@ class VerticalSliceService:
                 "memory.provisional_claim_created",
                 {"claim_id": str(claim_id), "evidence_id": str(evidence.id)},
             )
+            session.flush()
+            session.add(ClaimSourceRow(claim_id=claim_id, evidence_id=evidence.id))
 
             lifecycle = session.scalar(
                 select(LifecycleRow).where(LifecycleRow.singleton).with_for_update()

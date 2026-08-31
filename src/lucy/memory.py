@@ -12,12 +12,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from lucy.audit import append_audit
 from lucy.contracts import OperationOutcome
 from lucy.db.models import (
+    ClaimSourceRow,
+    EvidenceTombstoneRow,
     MemoryClaimRow,
     MemoryEntityRow,
     MemoryRelationshipRow,
     OperationRow,
     WorkingContextRow,
 )
+from lucy.provenance import claim_sources
+from lucy.retention import require_active_evidence, retention_fence
 
 
 class GraphResult(BaseModel):
@@ -42,7 +46,15 @@ class MemoryService:
 
     def materialize_claim(self, claim_id: UUID) -> GraphResult:
         with self._sessions.begin() as session:
+            retention_fence(session)
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(str(claim_id)))))
+            claim = session.get(MemoryClaimRow, claim_id)
+            if claim is None:
+                raise LookupError("claim does not exist")
+            require_active_evidence(session, claim.evidence_id)
+            claim_sources(session, claim.id)
+            if claim.status not in {"provisional", "accepted"}:
+                raise PermissionError("claim is no longer current")
             existing = session.scalar(
                 select(MemoryRelationshipRow).where(MemoryRelationshipRow.claim_id == claim_id)
             )
@@ -50,9 +62,6 @@ class MemoryService:
                 return GraphResult(
                     relationship_id=existing.id, claim_id=claim_id, replayed=True
                 )
-            claim = session.get(MemoryClaimRow, claim_id)
-            if claim is None:
-                raise LookupError("claim does not exist")
             now = datetime.now(UTC)
             operation = OperationRow(
                 id=uuid4(), idempotency_key=f"memory:materialize:{claim_id}",
@@ -91,12 +100,24 @@ class MemoryService:
         if not 1 <= limit <= 50:
             raise ValueError("limit must be between 1 and 50")
         with self._sessions.begin() as session:
+            retention_fence(session)
             pattern = f"%{query.strip()}%"
             rows = session.execute(
                 select(MemoryRelationshipRow, MemoryClaimRow)
                 .join(MemoryClaimRow, MemoryClaimRow.id == MemoryRelationshipRow.claim_id)
                 .where(
-                    MemoryClaimRow.status != "superseded",
+                    MemoryClaimRow.status.in_(("provisional", "accepted")),
+                    MemoryRelationshipRow.valid_to.is_(None),
+                    ~select(EvidenceTombstoneRow.evidence_id).where(
+                        EvidenceTombstoneRow.evidence_id == MemoryClaimRow.evidence_id
+                    ).exists(),
+                    select(ClaimSourceRow.claim_id).where(
+                        ClaimSourceRow.claim_id == MemoryClaimRow.id,
+                    ).exists(),
+                    ~select(ClaimSourceRow.claim_id).join(
+                        EvidenceTombstoneRow,
+                        EvidenceTombstoneRow.evidence_id == ClaimSourceRow.evidence_id,
+                    ).where(ClaimSourceRow.claim_id == MemoryClaimRow.id).exists(),
                     or_(
                         MemoryClaimRow.subject.ilike(pattern),
                         MemoryClaimRow.predicate.ilike(pattern),
@@ -112,6 +133,9 @@ class MemoryService:
                     "predicate": claim.predicate, "object": claim.object,
                     "confidence": claim.confidence, "status": claim.status,
                     "evidence_id": str(relationship.evidence_id),
+                    "source_evidence_ids": [str(value) for value in sorted(
+                        claim_sources(session, claim.id),
+                    )],
                     "relationship_version": relationship.version,
                 }
                 for relationship, claim in rows

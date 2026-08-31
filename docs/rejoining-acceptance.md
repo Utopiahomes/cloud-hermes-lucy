@@ -1,8 +1,10 @@
 # Rejoining acceptance
 
-Rejoining is Lucy's deterministic startup gate. It is implemented in domain
-code, not in a prompt, and serializes concurrent startup attempts with a
-PostgreSQL advisory lock.
+Rejoining is Lucy's deterministic control-plane recovery gate. Since migration
+0014, only explicit operator maintenance invokes it; service restarts perform
+read-only admission checks. See
+[service admission and controlled recovery](service-boundaries-2026-08-31.md).
+The domain implementation serializes recovery runs with a PostgreSQL advisory lock.
 
 ## Healthy path
 

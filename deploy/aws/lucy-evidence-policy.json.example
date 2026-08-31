@@ -20,6 +20,17 @@
       "Effect": "Allow",
       "Action": "dynamodb:GetItem",
       "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DYNAMODB_TABLE}"
+    },
+    {
+      "Sid": "ReadDeletionAdmissionHeadOnly",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DELETION_HEAD_TABLE}",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:Attributes": ["journal_id", "registry_id", "sequence", "digest"]
+        }
+      }
     }
   ]
 }

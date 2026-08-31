@@ -85,6 +85,13 @@ class SensitiveActionPermitRequest(BaseModel):
     def validate_scope(self) -> SensitiveActionPermitRequest:
         if self.max_records > len(self.evidence_ids):
             raise ValueError("record limit exceeds evidence scope")
+        allowed_reasons = (
+            {"verify_exact_wording", "resolve_ambiguity", "recover_missing_context", "owner_review"}
+            if self.action == SensitiveAction.EVIDENCE_RETRIEVE
+            else {"owner_request", "sensitive_data", "retention_expired"}
+        )
+        if self.reason not in allowed_reasons:
+            raise ValueError("a content-free reason code matching the action is required")
         return self
 
 
@@ -161,7 +168,8 @@ class SensitiveActionPermitVerifier:
         action: SensitiveAction,
         evidence_id: UUID,
         reason: str,
-        requested_bytes: int = 65_536,
+        requested_bytes: int = 0,
+        allow_replay: bool = True,
     ) -> None:
         self.verify_signature(permit)
         now = datetime.now(UTC)
@@ -172,7 +180,7 @@ class SensitiveActionPermitVerifier:
             or permit.evidence_ids != (evidence_id,)
             or permit.max_records != 1
             or permit.reason != reason
-            or requested_bytes > permit.max_bytes
+            or not 0 <= requested_bytes <= permit.max_bytes
         ):
             raise PermissionError("sensitive-action permit does not match the request")
 
@@ -184,6 +192,8 @@ class SensitiveActionPermitVerifier:
         if row is None or row.serialized_permit != permit.model_dump(mode="json"):
             raise PermissionError("sensitive-action permit was not issued by this policy store")
         if row.consumed_by_idempotency_key not in {None, idempotency_key}:
+            raise PermissionError("sensitive-action permit was already consumed")
+        if not allow_replay and row.consumed_by_idempotency_key is not None:
             raise PermissionError("sensitive-action permit was already consumed")
         if row.consumed_by_idempotency_key is None:
             row.consumed_at = now

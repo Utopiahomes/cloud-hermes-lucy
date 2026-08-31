@@ -11,7 +11,9 @@ archives/
 *.db
 *.db-*
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
 
 # Python
 __pycache__/
@@ -36,4 +38,3 @@ Thumbs.db
 # Local test and tool caches
 .coverage
 htmlcov/
-

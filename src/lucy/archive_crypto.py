@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
@@ -40,6 +40,9 @@ class EncryptedPayload:
 
 
 class ArchiveKeyStore(Protocol):
+    @property
+    def registry_identity(self) -> UUID: ...
+
     def put(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None: ...
 
     def get(self, key_ref: UUID) -> WrappedDataKey | None: ...
@@ -53,13 +56,9 @@ class ArchiveCipher(Protocol):
 
     def commitment(self, plaintext: bytes) -> str: ...
 
-    def encrypt(
-        self, evidence_id: UUID, plaintext: bytes, aad: bytes
-    ) -> EncryptedPayload: ...
+    def encrypt(self, evidence_id: UUID, plaintext: bytes, aad: bytes) -> EncryptedPayload: ...
 
-    def decrypt(
-        self, evidence_id: UUID, payload: EncryptedPayload, aad: bytes
-    ) -> bytes: ...
+    def decrypt(self, evidence_id: UUID, payload: EncryptedPayload, aad: bytes) -> bytes: ...
 
 
 class KmsClient(Protocol):
@@ -79,8 +78,13 @@ class DynamoClient(Protocol):
 class MemoryArchiveKeyStore:
     """Test-only key registry with the same delete semantics as production."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, registry_id: UUID | None = None) -> None:
         self._records: dict[UUID, WrappedDataKey] = {}
+        self._registry_id = registry_id or uuid4()
+
+    @property
+    def registry_identity(self) -> UUID:
+        return self._registry_id
 
     def put(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None:
         existing = self._records.get(key_ref)
@@ -119,16 +123,32 @@ class SqliteArchiveKeyStore:
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.execute(
+                "CREATE TABLE IF NOT EXISTS registry_identity ("
+                "singleton INTEGER PRIMARY KEY CHECK(singleton=1), registry_id TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO registry_identity VALUES (1,?)", (str(uuid4()),)
+            )
+            connection.execute(
                 "CREATE TABLE IF NOT EXISTS wrapped_keys ("
                 "key_ref TEXT PRIMARY KEY, ciphertext BLOB NOT NULL, "
                 "nonce BLOB NOT NULL, kek_version TEXT NOT NULL)"
             )
 
+    @property
+    def registry_identity(self) -> UUID:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT registry_id FROM registry_identity WHERE singleton=1"
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("archive registry identity is unavailable")
+        return UUID(row[0])
+
     def put(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None:
         with self._connect() as connection:
             existing = connection.execute(
-                "SELECT ciphertext, nonce, kek_version FROM wrapped_keys "
-                "WHERE key_ref = ?",
+                "SELECT ciphertext, nonce, kek_version FROM wrapped_keys WHERE key_ref = ?",
                 (str(key_ref),),
             ).fetchone()
             candidate = (
@@ -147,8 +167,7 @@ class SqliteArchiveKeyStore:
     def get(self, key_ref: UUID) -> WrappedDataKey | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT ciphertext, nonce, kek_version FROM wrapped_keys "
-                "WHERE key_ref = ?",
+                "SELECT ciphertext, nonce, kek_version FROM wrapped_keys WHERE key_ref = ?",
                 (str(key_ref),),
             ).fetchone()
         if row is None:
@@ -166,18 +185,35 @@ class SqliteArchiveKeyStore:
 class AwsDynamoArchiveKeyStore:
     """Production wrapped-DEK registry isolated from PostgreSQL backups."""
 
-    def __init__(self, client: DynamoClient, *, table_name: str) -> None:
+    def __init__(
+        self,
+        client: DynamoClient,
+        *,
+        table_name: str,
+        registry_id: UUID | None = None,
+    ) -> None:
         if re.fullmatch(r"[A-Za-z0-9_.-]{3,255}", table_name) is None:
             raise ValueError("invalid DynamoDB archive key table name")
         self._client = client
         self._table_name = table_name
+        self._registry_id = registry_id
+
+    @property
+    def registry_identity(self) -> UUID:
+        if self._registry_id is None:
+            raise RuntimeError("production registry identity is not configured")
+        return self._registry_id
 
     @classmethod
     def from_environment(cls) -> AwsDynamoArchiveKeyStore:
         table_name = os.environ.get("LUCY_AWS_DYNAMODB_KEY_TABLE", "").strip()
+        try:
+            registry_id = UUID(os.environ["LUCY_ARCHIVE_REGISTRY_ID"])
+        except (KeyError, ValueError):
+            raise ValueError("LUCY_ARCHIVE_REGISTRY_ID must be a UUID") from None
         region = _aws_region()
         client = cast(DynamoClient, boto3.client("dynamodb", region_name=region))
-        return cls(client, table_name=table_name)
+        return cls(client, table_name=table_name, registry_id=registry_id)
 
     def put(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None:
         item = {
@@ -193,9 +229,7 @@ class AwsDynamoArchiveKeyStore:
                 ConditionExpression="attribute_not_exists(key_ref)",
             )
         except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") != (
-                "ConditionalCheckFailedException"
-            ):
+            if exc.response.get("Error", {}).get("Code") != ("ConditionalCheckFailedException"):
                 raise
             if self.get(key_ref) != wrapped_key:
                 raise ValueError("key reference collision") from exc
@@ -257,9 +291,7 @@ class EnvelopeCipher:
         content_nonce = os.urandom(12)
         ciphertext = AESGCM(dek).encrypt(content_nonce, plaintext, aad)
         wrap_nonce = os.urandom(12)
-        wrapped = AESGCM(self._kek).encrypt(
-            wrap_nonce, dek, self._key_aad(evidence_id)
-        )
+        wrapped = AESGCM(self._kek).encrypt(wrap_nonce, dek, self._key_aad(evidence_id))
         return EncryptedPayload(
             ciphertext=ciphertext,
             content_nonce=content_nonce,
@@ -285,9 +317,7 @@ class EnvelopeCipher:
             self._key_aad(evidence_id),
         )
         plaintext = AESGCM(dek).decrypt(payload.content_nonce, payload.ciphertext, aad)
-        if not hmac.compare_digest(
-            payload.keyed_commitment, self.commitment(plaintext)
-        ):
+        if not hmac.compare_digest(payload.keyed_commitment, self.commitment(plaintext)):
             raise ValueError("archive commitment mismatch")
         return plaintext
 
@@ -462,8 +492,7 @@ def _decode_key(name: str) -> bytes:
 
 def _aws_region() -> str:
     region = (
-        os.environ.get("AWS_REGION", "").strip()
-        or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+        os.environ.get("AWS_REGION", "").strip() or os.environ.get("AWS_DEFAULT_REGION", "").strip()
     )
     if re.fullmatch(r"[a-z]{2}(?:-gov)?-[a-z]+-\d", region) is None:
         raise ValueError("AWS_REGION must name an explicit AWS region")

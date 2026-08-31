@@ -1,0 +1,9 @@
+-- Fresh-cluster bootstrap, run once by the database role administrator before
+-- migrations. Do not grant lucy_app to any production login: old immutable
+-- migrations name this inert compatibility role. It must remain NOLOGIN.
+-- Existing conflicting roles cause a deliberate error, not silent adoption.
+CREATE ROLE lucy_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_routine NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_policy NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_evidence_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE lucy_evidence_deleter NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;

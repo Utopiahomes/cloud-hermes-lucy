@@ -6,6 +6,37 @@
       "Effect": "Allow",
       "Action": ["dynamodb:GetItem", "dynamodb:DeleteItem"],
       "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DYNAMODB_TABLE}"
+    },
+    {
+      "Sid": "ReadDeletionJournal",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": [
+        "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DELETION_HEAD_TABLE}",
+        "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DELETION_INTENT_TABLE}"
+      ]
+    },
+    {
+      "Sid": "AdvanceDeletionHeadTransactionOnly",
+      "Effect": "Allow",
+      "Action": "dynamodb:UpdateItem",
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DELETION_HEAD_TABLE}",
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "dynamodb:EnclosingOperation": "TransactWriteItems"
+        }
+      }
+    },
+    {
+      "Sid": "AppendDeletionIntentTransactionOnly",
+      "Effect": "Allow",
+      "Action": "dynamodb:PutItem",
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${LUCY_DELETION_INTENT_TABLE}",
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "dynamodb:EnclosingOperation": "TransactWriteItems"
+        }
+      }
     }
   ]
 }

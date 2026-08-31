@@ -1,11 +1,15 @@
 """Narrow companion API exposed to the pinned Hermes runtime."""
 
 import os
+import re
 import secrets
+from functools import lru_cache
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException
-from sqlalchemy import select
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.archive import (
@@ -15,6 +19,8 @@ from lucy.archive import (
     ConversationMessageArchiveInput,
     ConversationMessageArchiveResult,
     LatestRetainedEvidenceResult,
+    TurnCaptureInput,
+    TurnCaptureResult,
 )
 from lucy.archive_crypto import (
     ArchiveCipher,
@@ -30,9 +36,8 @@ from lucy.authorization import (
     SensitiveActionPermitV1,
     SensitiveActionPermitVerifier,
 )
-from lucy.contracts import RejoiningState
 from lucy.db import create_session_factory
-from lucy.db.models import LifecycleRow
+from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_environment
 from lucy.evidence import (
     EvidenceDeletionRequest,
     EvidenceDeletionResult,
@@ -49,12 +54,26 @@ from lucy.model_execution import (
     ModelExecutionSettlement,
     ModelExecutionSettlementResult,
 )
-from lucy.proposals import MemoryProposalInput, MemoryProposalService
+from lucy.proposals import GatewayMemoryProposalInput, MemoryProposalService
+from lucy.readiness import (
+    SERVICE_MODES as SERVICE_MODES,
+)
+from lucy.readiness import (
+    ReadinessError,
+    ServiceReadiness,
+    admitted_session_factory,
+    expected_storage_epoch,
+    service_mode_from_environment,
+)
 from lucy.secret_filter import MemorySecretDetected
 
 app = FastAPI(title="Lucy Companion API", version="0.1.0")
 
-SERVICE_MODES = {"routine", "policy", "evidence", "deletion", "all-local"}
+
+@app.exception_handler(ReadinessError)
+@app.exception_handler(DeletionJournalError)
+def admission_closed(_request: Request, _error: ReadinessError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Lucy storage is not admitted"})
 
 
 @app.get("/health", tags=["operations"])
@@ -64,45 +83,45 @@ def health() -> dict[str, str]:
 
 @app.get("/ready", tags=["operations"])
 def ready() -> dict[str, str]:
-    database_url = os.getenv("LUCY_DATABASE_URL")
-    if database_url is None:
-        raise HTTPException(status_code=503, detail="memory store unavailable")
-    with create_session_factory(database_url)() as session:
-        lifecycle = session.scalar(select(LifecycleRow).where(LifecycleRow.singleton))
-        if lifecycle is None or lifecycle.state != RejoiningState.READY:
-            raise HTTPException(status_code=503, detail="Lucy is not ready")
+    _ready_sessions()
     return {"status": "ready"}
 
 
 def _authorize(authorization: str | None) -> None:
     token = os.getenv("LUCY_ADAPTER_TOKEN")
-    if token is None or authorization is None or not secrets.compare_digest(
-        authorization, f"Bearer {token}"
+    if (
+        not token
+        or authorization is None
+        or not secrets.compare_digest(authorization, f"Bearer {token}")
     ):
         raise HTTPException(status_code=401, detail="invalid adapter credential")
 
 
 def _authorize_owner(authorization: str | None) -> None:
     token = os.getenv("LUCY_OWNER_TOKEN")
-    if not token or authorization is None or not secrets.compare_digest(
-        authorization, f"Bearer {token}"
+    if (
+        not token
+        or authorization is None
+        or not secrets.compare_digest(authorization, f"Bearer {token}")
     ):
         raise HTTPException(status_code=401, detail="invalid owner credential")
 
 
 def _authorize_policy_gateway(authorization: str | None) -> None:
     token = os.getenv("LUCY_POLICY_GATEWAY_TOKEN")
-    if not token or authorization is None or not secrets.compare_digest(
-        authorization, f"Bearer {token}"
+    if (
+        not token
+        or authorization is None
+        or not secrets.compare_digest(authorization, f"Bearer {token}")
     ):
         raise HTTPException(status_code=401, detail="invalid policy gateway credential")
 
 
 def _service_mode() -> str:
-    mode = os.getenv("LUCY_SERVICE_MODE", "all-local").strip()
-    if mode not in SERVICE_MODES:
-        raise HTTPException(status_code=503, detail="invalid Lucy service mode")
-    return mode
+    try:
+        return service_mode_from_environment()
+    except ReadinessError as exc:
+        raise HTTPException(status_code=503, detail="invalid Lucy service mode") from exc
 
 
 def _require_mode(*allowed: str) -> None:
@@ -115,30 +134,54 @@ def _ready_sessions() -> sessionmaker[Session]:
     database_url = os.getenv("LUCY_DATABASE_URL")
     if database_url is None:
         raise HTTPException(status_code=503, detail="memory store unavailable")
-    sessions = create_session_factory(database_url)
-    with sessions() as session:
-        lifecycle = session.scalar(select(LifecycleRow).where(LifecycleRow.singleton))
-        if lifecycle is None or lifecycle.state != RejoiningState.READY:
-            raise HTTPException(status_code=503, detail="Lucy is not ready")
-    return sessions
+    try:
+        mode = _service_mode()
+        epoch = expected_storage_epoch(mode)
+        # Cache engines rather than creating a new connection pool per request.
+        sessions = _readiness_sessions(database_url)
+        journal = None if mode == "policy" else deletion_journal_from_environment()
+        ServiceReadiness(sessions, mode=mode, storage_epoch=epoch, journal=journal).check()
+        return admitted_session_factory(
+            database_url, epoch, journal, journal_required=mode != "policy"
+        )
+    except (ReadinessError, DeletionJournalError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail="Lucy storage is not admitted") from exc
+
+
+@lru_cache(maxsize=8)
+def _readiness_sessions(database_url: str) -> sessionmaker[Session]:
+    return create_session_factory(database_url)
 
 
 def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
     try:
         return archive_dependencies_from_environment()
     except ValueError as exc:
-        raise HTTPException(
-            status_code=503, detail="archive encryption unavailable"
-        ) from exc
+        raise HTTPException(status_code=503, detail="archive encryption unavailable") from exc
 
 
 def _archive_service() -> ConversationArchiveService:
     cipher, key_store = _archive_crypto()
-    return ConversationArchiveService(_ready_sessions(), cipher, key_store)
+    try:
+        if key_store.registry_identity != deletion_journal_from_environment().head().registry_id:
+            raise DeletionJournalError("archive registry identity mismatch")
+    except (DeletionJournalError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="archive boundary unavailable") from exc
+    return ConversationArchiveService(
+        _ready_sessions(),
+        cipher,
+        key_store,
+        capture_authorized=os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true",
+    )
 
 
 def _evidence_service() -> EvidenceService:
     cipher, key_store = _archive_crypto()
+    try:
+        if key_store.registry_identity != deletion_journal_from_environment().head().registry_id:
+            raise DeletionJournalError("archive registry identity mismatch")
+    except (DeletionJournalError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="evidence boundary unavailable") from exc
     return EvidenceService(
         _ready_sessions(),
         cipher,
@@ -153,25 +196,38 @@ def _deletion_service() -> EvidenceService:
         verifier = SensitiveActionPermitVerifier.from_environment()
     except ValueError as exc:
         raise HTTPException(status_code=503, detail="deletion boundary unavailable") from exc
-    return EvidenceService(_ready_sessions(), None, key_store, verifier)
+    return EvidenceService(
+        _ready_sessions(),
+        None,
+        key_store,
+        verifier,
+        journal=deletion_journal_from_environment(),
+    )
 
 
-@app.get("/v1/memory/lookup", tags=["memory"])
+class MemoryLookupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    query: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/v1/memory/lookup", tags=["memory"])
 def read_only_memory_lookup(
-    query: str, authorization: str | None = Header(default=None)
+    request: MemoryLookupInput, authorization: str | None = Header(default=None)
 ) -> dict[str, object]:
     """Return a bounded projection; never expose or mutate archive evidence."""
 
     _require_mode("routine")
     _authorize(authorization)
     sessions = _ready_sessions()
-    context = MemoryService(sessions).build_context(query)
-    return {"query": query, "claims": context.claims, "read_only": True}
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be blank")
+    context = MemoryService(sessions).build_context(request.query)
+    return {"query": request.query, "claims": context.claims, "read_only": True}
 
 
 @app.post("/v1/memory/proposals", tags=["memory"], status_code=202)
 def propose_memory(
-    candidate: MemoryProposalInput,
+    candidate: GatewayMemoryProposalInput,
     authorization: str | None = Header(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict[str, object]:
@@ -180,18 +236,33 @@ def propose_memory(
     _authorize(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    if os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED") != "true":
+        raise HTTPException(status_code=403, detail="live retention is not authorized")
+    if not isinstance(candidate, GatewayMemoryProposalInput):
+        raise HTTPException(status_code=400, detail="turn-bound provenance is required")
+    if (
+        re.fullmatch(
+            r"hermes-memory-proposal:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}"
+            r"-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            idempotency_key,
+        )
+        is None
+    ):
+        raise HTTPException(status_code=400, detail="opaque proposal idempotency key required")
     sessions = _ready_sessions()
     try:
         result = MemoryProposalService(sessions).submit(idempotency_key, candidate)
     except LookupError as exc:
-        raise HTTPException(
-            status_code=404, detail="immutable evidence does not exist"
-        ) from exc
+        raise HTTPException(status_code=404, detail="immutable evidence does not exist") from exc
     except MemorySecretDetected as exc:
         raise HTTPException(
             status_code=422,
             detail="credential-like content cannot be promoted to normal memory",
         ) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="retention not authorized") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="idempotency conflict") from exc
     return result.model_dump(mode="json")
 
 
@@ -226,6 +297,20 @@ def settle_model_execution(
 
 
 @app.post(
+    "/internal/v1/conversations/accept-turn",
+    tags=["internal"],
+    response_model=TurnCaptureResult,
+)
+def accept_conversation_turn(
+    request: TurnCaptureInput,
+    authorization: str | None = Header(default=None),
+) -> TurnCaptureResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _archive_service().accept_turn(request)
+
+
+@app.post(
     "/internal/v1/conversations/messages",
     tags=["internal"],
     response_model=ConversationMessageArchiveResult,
@@ -244,6 +329,8 @@ def archive_conversation_message(
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
         return _archive_service().preserve_message(idempotency_key.strip(), request)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="retention not authorized") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="idempotency conflict") from exc
 
@@ -299,6 +386,8 @@ def set_capture_mode(
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
         return _archive_service().set_capture_mode(idempotency_key.strip(), request)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="live capture is not authorized") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="idempotency conflict") from exc
 
@@ -320,9 +409,7 @@ def forget_last_conversation_message(
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
-        return _deletion_service().delete_last_message(
-            idempotency_key.strip(), request
-        )
+        return _deletion_service().delete_last_message(idempotency_key.strip(), request)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="retained message unavailable") from exc
     except PermissionError as exc:
@@ -348,9 +435,7 @@ def retrieve_provenance_evidence(
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
-        return _evidence_service().retrieve(
-            idempotency_key.strip(), request, owner=False
-        )
+        return _evidence_service().retrieve(idempotency_key.strip(), request, owner=False)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="evidence unavailable") from exc
     except PermissionError as exc:
@@ -374,9 +459,7 @@ def owner_retrieve_evidence(
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
-        return _evidence_service().retrieve(
-            idempotency_key.strip(), request, owner=True
-        )
+        return _evidence_service().retrieve(idempotency_key.strip(), request, owner=True)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="evidence unavailable") from exc
     except PermissionError as exc:
@@ -435,6 +518,9 @@ def issue_sensitive_action_permit(
     _authorize_owner(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    owner_subject = os.getenv("LUCY_OWNER_SUBJECT", "").strip()
+    if not owner_subject or request.owner_subject != owner_subject:
+        raise HTTPException(status_code=403, detail="owner subject does not match")
     try:
         signer = SensitiveActionPermitSigner.from_environment()
     except ValueError as exc:
@@ -458,22 +544,8 @@ def issue_gateway_sensitive_action_permit(
     authorization: str | None = Header(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> SensitiveActionPermitV1:
-    """Translate one allowlisted Telegram interaction into a bounded permit."""
+    """Quarantined until an independently verified owner-event broker exists."""
 
     _require_mode("policy")
     _authorize_policy_gateway(authorization)
-    if idempotency_key is None or not idempotency_key.strip():
-        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
-    owner_subject = os.getenv("LUCY_OWNER_SUBJECT", "").strip()
-    if not owner_subject:
-        raise HTTPException(status_code=503, detail="owner identity unavailable")
-    try:
-        signer = SensitiveActionPermitSigner.from_environment()
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail="permit issuer unavailable") from exc
-    try:
-        return SensitiveActionPermitService(_ready_sessions(), signer).issue(
-            idempotency_key.strip(), request.to_owner_request(owner_subject)
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail="idempotency conflict") from exc
+    raise HTTPException(status_code=403, detail="verified owner interaction required")

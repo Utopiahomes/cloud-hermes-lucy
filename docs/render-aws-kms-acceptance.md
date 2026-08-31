@@ -2,7 +2,8 @@
 
 Date: 2026-08-29
 
-Status: local implementation passes; cloud resources have not been provisioned.
+Status: local implementation and mocked production-journal paths pass; cloud
+resources have not been provisioned.
 Transcript capture remains disabled.
 
 ## First-deployment preflight (2026-08-31)
@@ -27,21 +28,30 @@ IAM propagation and actual authorization still require the tests below.
    environment and four private services from
    `deploy/render/security-baseline-v1.1.yaml.example`. Record the workspace,
    environment, and immutable service IDs.
-3. In AWS `us-east-1`, create the Render workspace OIDC provider and deploy
+3. Generate independent journal and archive-registry UUIDs once. They are not
+   secrets, but they are durable security identities: record them with the stack
+   outputs and never silently replace them.
+4. In AWS `us-east-1`, create the Render workspace OIDC provider and deploy
    `deploy/aws/security-baseline-v1.1.yaml` with those exact IDs, the
    `AWSReservedSSO_LucySecurityAdministrator_*` role ARN pattern, and an owner
    alert email. Confirm the SNS subscription. Confirm that the template's
    stable `lucy-kms-recovery-administrator` role can be assumed only by that
    permission set.
-4. Configure each returned role ARN on only its matching Render service. The
-   policy service must have no AWS role or static AWS credentials.
-5. Generate independent adapter, owner, policy-gateway, commitment, and Ed25519
+5. As the human administrator, run `deploy/aws/initialize-deletion-journal.ps1`
+   exactly once with the returned head-table name, the recorded IDs, and
+   `us-east-1`. Its conditional create must fail if a head already exists; never
+   update or rewind that head manually.
+6. Configure each returned role ARN and table/identity output on only its matching
+   Render service. The policy service must have no AWS role, DynamoDB variables,
+   or static AWS credentials. Do not set `AWS_WEB_IDENTITY_TOKEN_FILE`; Render
+   supplies and rotates it for the OIDC-enabled services.
+7. Generate independent adapter, owner, policy-gateway, commitment, and Ed25519
    signing secrets. Policy receives the private signing key; evidence/deletion
    receive only the public key.
-6. Create distinct production database logins, apply
+8. Create distinct production database logins, apply
    `deploy/postgres/production_roles.sql.example`, and use private Render
    database URLs. Keep the migration owner credential outside runtime.
-7. Connect Hermes to all four private URLs with independent tokens. Do not
+9. Connect Hermes to all four private URLs with independent tokens. Do not
    enable transcript capture.
 
 ## Positive acceptance
@@ -55,6 +65,9 @@ IAM propagation and actual authorization still require the tests below.
   or idempotency key is denied.
 - Deletion removes only the synthetic record's wrapped key and completes the
   database cascade without any KMS permission.
+- The deletion identity appends one conditional journal transaction; a stale
+  head loses, and a deliberately lost response recovers only the exact immutable
+  committed intent.
 - PostgreSQL restoration after key destruction cannot decrypt the message.
   Missing-key recovery completes exactly once after a simulated crash.
 - A 30-day PostgreSQL backup restores into an isolated recovery database; RPO
@@ -65,12 +78,15 @@ IAM propagation and actual authorization still require the tests below.
 Use IAM policy simulation or harmless read-only calls. Never test denial by
 actually invoking key disable/deletion, database deletion, or backup deletion.
 
-- Archive denies `kms:Decrypt`, DynamoDB `GetItem`/`DeleteItem`/`Scan`, table
-  deletion, and every IAM/KMS administration action.
+- Archive permits `GetItem` only for the four projected deletion-head attributes;
+  it denies wrapped-key/intent reads, `DeleteItem`/`Scan`/`Query`, table deletion,
+  `kms:Decrypt`, and every IAM/KMS administration action.
 - Evidence denies `GenerateDataKey`, DynamoDB `PutItem`/`DeleteItem`/`Scan`, bulk
-  export, and every administration action.
-- Deletion denies every KMS action, DynamoDB `PutItem`/`Scan`/table deletion,
-  and every administration action.
+  export, intent access, and every administration action; its only journal access
+  is the four projected head attributes.
+- Deletion denies every KMS action, `Scan`/`Query`/table deletion, non-transactional
+  journal writes, and every administration action. It permits only exact key
+  removal, strong journal reads, and the reviewed atomic intent/head transaction.
 - Policy has no web-identity/static AWS variables or callable AWS identity.
 - Every runtime database login denies DDL, role/schema creation, backup actions,
   and access outside its documented tables.
@@ -79,6 +95,9 @@ actually invoking key disable/deletion, database deletion, or backup deletion.
 
 - CloudTrail contains expected `GenerateDataKey` and `Decrypt` records with no
   unexpected principal/resource.
+- CloudTrail contains the synthetic wrapped-key create/read/delete and journal
+  read/transaction data events. Account for CloudTrail data-event charges and
+  verify the selected retention before activation.
 - A controlled non-production policy-change event reaches the confirmed owner
   SNS destination; destructive key events are not exercised.
 - Application logs contain no synthetic transcript, candidate credential,

@@ -15,6 +15,12 @@ Parameters:
     Type: String
   RenderDeletionServiceId:
     Type: String
+  DeletionJournalId:
+    Type: String
+    Description: Independently generated UUID for the append-only deletion journal
+  ArchiveRegistryId:
+    Type: String
+    Description: Independently generated UUID bound to the wrapped-key registry
   AlertEmail:
     Type: String
   KeyAdministratorPrincipalArnPattern:
@@ -156,6 +162,48 @@ Resources:
         - AttributeName: key_ref
           KeyType: HASH
 
+  DeletionJournalHead:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: lucy-deletion-journal-head
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: journal_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: journal_key
+          KeyType: HASH
+
+  DeletionJournalIntents:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: lucy-deletion-journal-intents
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: journal_id
+          AttributeType: S
+        - AttributeName: entry_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: journal_id
+          KeyType: HASH
+        - AttributeName: entry_key
+          KeyType: RANGE
+
   ArchiveRole:
     Type: AWS::IAM::Role
     Properties:
@@ -192,6 +240,16 @@ Resources:
           - Effect: Allow
             Action: dynamodb:PutItem
             Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt DeletionJournalHead.Arn
+            Condition:
+              ForAllValues:StringEquals:
+                dynamodb:Attributes:
+                  - journal_id
+                  - registry_id
+                  - sequence
+                  - digest
 
   EvidenceRole:
     Type: AWS::IAM::Role
@@ -227,6 +285,16 @@ Resources:
           - Effect: Allow
             Action: dynamodb:GetItem
             Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt DeletionJournalHead.Arn
+            Condition:
+              ForAllValues:StringEquals:
+                dynamodb:Attributes:
+                  - journal_id
+                  - registry_id
+                  - sequence
+                  - digest
 
   DeletionRole:
     Type: AWS::IAM::Role
@@ -250,6 +318,23 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt WrappedKeyRegistry.Arn
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource:
+                  - !GetAtt DeletionJournalHead.Arn
+                  - !GetAtt DeletionJournalIntents.Arn
+              - Effect: Allow
+                Action: dynamodb:UpdateItem
+                Resource: !GetAtt DeletionJournalHead.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt DeletionJournalIntents.Arn
+                Condition:
+                  ForAnyValue:StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
 
   AuditBucket:
     Type: AWS::S3::Bucket
@@ -308,6 +393,12 @@ Resources:
       EventSelectors:
         - IncludeManagementEvents: true
           ReadWriteType: All
+          DataResources:
+            - Type: AWS::DynamoDB::Table
+              Values:
+                - !GetAtt WrappedKeyRegistry.Arn
+                - !GetAtt DeletionJournalHead.Arn
+                - !GetAtt DeletionJournalIntents.Arn
 
   SecurityAlertTopic:
     Type: AWS::SNS::Topic
@@ -354,6 +445,14 @@ Outputs:
     Value: !GetAtt EvidenceKey.Arn
   WrappedKeyTableName:
     Value: !Ref WrappedKeyRegistry
+  DeletionJournalHeadTableName:
+    Value: !Ref DeletionJournalHead
+  DeletionJournalIntentTableName:
+    Value: !Ref DeletionJournalIntents
+  DeletionJournalId:
+    Value: !Ref DeletionJournalId
+  ArchiveRegistryId:
+    Value: !Ref ArchiveRegistryId
   ArchiveRoleArn:
     Value: !GetAtt ArchiveRole.Arn
   EvidenceRoleArn:

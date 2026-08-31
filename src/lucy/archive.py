@@ -16,15 +16,38 @@ from lucy.audit import append_audit
 from lucy.contracts import OperationOutcome
 from lucy.contracts.v1 import ConversationMessageV1
 from lucy.db.models import (
+    CaptureReceiptRow,
     ConversationCaptureStateRow,
     ConversationTurnRow,
+    EvidenceDerivationRow,
     EvidencePayloadRow,
     EvidenceRow,
     OperationRow,
 )
+from lucy.provenance import DerivationSourcesV1, active_sources, conversation_sources
+from lucy.retention import (
+    lock_conversation,
+    require_active_evidence,
+    require_capturable_turn,
+    retention_fence,
+)
 
 
-class ConversationMessageArchiveInput(BaseModel):
+class TurnCaptureInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    platform: Literal["telegram"]
+    source_conversation_id: str = Field(min_length=1, max_length=512)
+    source_turn_id: str = Field(min_length=1, max_length=512)
+
+
+class TurnCaptureResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    capture_enabled: bool
+    version: int
+    replayed: bool = False
+
+
+class ConversationMessageArchiveInput(DerivationSourcesV1):
     """One normalized message from an authenticated Hermes conversation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -86,10 +109,41 @@ class ConversationArchiveService:
         sessions: sessionmaker[Session],
         cipher: ArchiveCipher,
         key_store: ArchiveKeyStore,
+        *,
+        capture_authorized: bool = False,
     ) -> None:
         self._sessions = sessions
         self._cipher = cipher
         self._key_store = key_store
+        self._capture_authorized = capture_authorized
+
+    def accept_turn(self, request: TurnCaptureInput) -> TurnCaptureResult:
+        """Freeze consent before inference; excluded turns stay excluded on retry."""
+        with self._sessions.begin() as session:
+            retention_fence(session)
+            lock_conversation(session, request.platform, request.source_conversation_id)
+            identity = request.model_dump()
+            receipt = session.get(CaptureReceiptRow, identity)
+            mode = session.get(ConversationCaptureStateRow, {
+                "platform": request.platform,
+                "source_conversation_id": request.source_conversation_id,
+            })
+            if receipt is not None:
+                return TurnCaptureResult(
+                    capture_enabled=(
+                        receipt.capture_enabled and self._capture_authorized
+                        and (mode is None or mode.capture_enabled)
+                        and receipt.capture_version == (0 if mode is None else mode.version)
+                    ),
+                    version=receipt.capture_version, replayed=True,
+                )
+            enabled = self._capture_authorized and (mode is None or mode.capture_enabled)
+            version = 0 if mode is None else mode.version
+            session.add(CaptureReceiptRow(
+                **identity, capture_enabled=enabled, capture_version=version,
+                accepted_at=datetime.now(UTC),
+            ))
+            return TurnCaptureResult(capture_enabled=enabled, version=version)
 
     def capture_mode(self, platform: str, source_conversation_id: str) -> CaptureModeResult:
         with self._sessions() as session:
@@ -100,7 +154,7 @@ class ConversationArchiveService:
             return CaptureModeResult(
                 platform="telegram",
                 source_conversation_id=source_conversation_id,
-                capture_enabled=True if row is None else row.capture_enabled,
+                capture_enabled=self._capture_authorized and (row is None or row.capture_enabled),
                 version=0 if row is None else row.version,
             )
 
@@ -108,6 +162,10 @@ class ConversationArchiveService:
         self, idempotency_key: str, request: CaptureModeInput
     ) -> CaptureModeResult:
         with self._sessions.begin() as session:
+            retention_fence(session)
+            lock_conversation(session, request.platform, request.source_conversation_id)
+            if request.capture_enabled and not self._capture_authorized:
+                raise PermissionError("live capture has not been authorized")
             session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
             existing = session.scalar(
                 select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
@@ -198,9 +256,17 @@ class ConversationArchiveService:
         idempotency_key: str,
         request: ConversationMessageArchiveInput,
     ) -> ConversationMessageArchiveResult:
-        request_commitment = self._cipher.commitment(request.canonical_bytes())
+        if not self._capture_authorized:
+            raise PermissionError("live capture has not been authorized")
+        if request.role == "user" and request.source_evidence_ids:
+            raise ValueError("inbound user evidence is an independent source")
         try:
             with self._sessions.begin() as session:
+                retention_fence(session)
+                require_capturable_turn(
+                    session, request.source_conversation_id, request.source_turn_id
+                )
+                request_commitment = self._cipher.commitment(request.canonical_bytes())
                 session.execute(select(func.pg_advisory_xact_lock(func.hashtext(idempotency_key))))
                 existing = session.scalar(
                     select(OperationRow).where(OperationRow.idempotency_key == idempotency_key)
@@ -215,21 +281,19 @@ class ConversationArchiveService:
                     )
                     if replay.request_commitment != request_commitment:
                         raise ValueError("idempotency key was already used for another message")
+                    if replay.evidence_id is not None:
+                        require_active_evidence(session, replay.evidence_id)
                     return replay
 
-                capture = session.get(
-                    ConversationCaptureStateRow,
-                    {
-                        "platform": request.platform,
-                        "source_conversation_id": request.source_conversation_id,
-                    },
+                sources = (
+                    active_sources(session, {
+                        *request.source_evidence_ids,
+                        *conversation_sources(
+                            session, request.source_conversation_id, request.source_turn_id,
+                        ),
+                    }) if request.role == "assistant" else set()
                 )
-                if capture is not None and not capture.capture_enabled:
-                    return ConversationMessageArchiveResult(
-                        archived=False,
-                        capture_enabled=False,
-                    )
-
+                # Validate origin, history and every declared source before KMS/PutItem.
                 now = datetime.now(UTC)
                 operation_id = uuid4()
                 operation = OperationRow(
@@ -256,7 +320,8 @@ class ConversationArchiveService:
                     occurred_at=now,
                 )
                 metadata = {
-                    "contract_version": "2",
+                    "contract_version": "3",
+                    "source_evidence_ids": [str(value) for value in sorted(sources)],
                     "encrypted": True,
                     "platform": request.platform,
                     "source_message_id": request.source_message_id,
@@ -284,6 +349,8 @@ class ConversationArchiveService:
                     )
                 )
                 session.flush()
+                session.add_all(EvidenceDerivationRow(parent_id=parent, child_id=evidence_id)
+                                for parent in sorted(sources))
                 turn = session.get(
                     ConversationTurnRow,
                     {
