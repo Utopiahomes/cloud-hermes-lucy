@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from graphlib import TopologicalSorter
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +26,7 @@ def test_render_trust_is_bound_to_one_workspace_environment_and_service() -> Non
         "workspace:${RENDER_WORKSPACE_ID}:environment:${RENDER_ENVIRONMENT_ID}:"
         "service:${RENDER_SERVICE_ID}",
     }
-    assert statement["Principal"]["Federated"].endswith(
-        "oidc.render.com/${RENDER_WORKSPACE_ID}"
-    )
+    assert statement["Principal"]["Federated"].endswith("oidc.render.com/${RENDER_WORKSPACE_ID}")
 
 
 def _actions(name: str) -> set[str]:
@@ -52,8 +52,7 @@ def test_execution_policies_are_capability_separated() -> None:
     }
     assert "kms:Decrypt" not in _actions("lucy-archive-policy.json.example")
     assert not any(
-        action.startswith("kms:")
-        for action in _actions("lucy-deletion-policy.json.example")
+        action.startswith("kms:") for action in _actions("lucy-deletion-policy.json.example")
     )
 
 
@@ -72,9 +71,7 @@ def test_kms_key_statements_separate_generation_from_decryption() -> None:
 
 def test_cloudformation_keeps_master_key_administration_out_of_runtime_roles() -> None:
     template = (AWS_DEPLOY / "security-baseline-v1.1.yaml").read_text(encoding="utf-8")
-    deletion_section = template.split("  DeletionRole:", 1)[1].split(
-        "  SecurityAlertTopic:", 1
-    )[0]
+    deletion_section = template.split("  DeletionRole:", 1)[1].split("  SecurityAlertTopic:", 1)[0]
     assert "kms:" not in deletion_section
     assert "dynamodb:DeleteItem" in deletion_section
     assert "DeletionProtectionEnabled: true" in template
@@ -90,34 +87,94 @@ def test_cloudformation_keeps_master_key_administration_out_of_runtime_roles() -
     assert "kms:GenerateDataKey" not in administrator_section
 
 
-def test_cloudformation_template_is_well_formed_yaml_with_expected_boundaries() -> None:
+def _cloudformation() -> dict[str, Any]:
     class CloudFormationLoader(yaml.SafeLoader):
         pass
 
-    def construct_tag(loader: CloudFormationLoader, _suffix: str, node: Any) -> Any:
+    def construct_tag(loader: CloudFormationLoader, suffix: str, node: Any) -> Any:
         if isinstance(node, ScalarNode):
-            return loader.construct_scalar(node)
-        if isinstance(node, SequenceNode):
-            return loader.construct_sequence(node)
-        if isinstance(node, MappingNode):
-            return loader.construct_mapping(node)
-        raise TypeError("unsupported YAML node")
+            value = loader.construct_scalar(node)
+        elif isinstance(node, SequenceNode):
+            value = loader.construct_sequence(node)
+        elif isinstance(node, MappingNode):
+            value = loader.construct_mapping(node)
+        else:
+            raise TypeError("unsupported YAML node")
+        return {suffix if suffix == "Ref" else f"Fn::{suffix}": value}
 
     CloudFormationLoader.add_multi_constructor("!", construct_tag)
-    template = yaml.load(
+    return yaml.load(
         (AWS_DEPLOY / "security-baseline-v1.1.yaml").read_text(encoding="utf-8"),
         Loader=CloudFormationLoader,
     )
-    resources = template["Resources"]
+
+
+def test_cloudformation_template_is_well_formed_yaml_with_expected_boundaries() -> None:
+    resources = _cloudformation()["Resources"]
     assert {
         "EvidenceKey",
         "WrappedKeyRegistry",
         "ArchiveRole",
+        "ArchivePolicy",
         "EvidenceRole",
+        "EvidencePolicy",
         "DeletionRole",
         "AuditTrail",
         "KeyAdministrationAlert",
     } <= resources.keys()
+
+
+def test_cloudformation_creates_kms_principals_before_key_without_cycles() -> None:
+    resources = _cloudformation()["Resources"]
+
+    def references(value: Any) -> set[str]:
+        if isinstance(value, list):
+            return set().union(*(references(item) for item in value))
+        if not isinstance(value, dict):
+            return set()
+        result: set[str] = set()
+        if "Ref" in value:
+            result.add(value["Ref"])
+        if "Fn::GetAtt" in value:
+            target = value["Fn::GetAtt"]
+            result.add(target.split(".")[0] if isinstance(target, str) else target[0])
+        if "Fn::Sub" in value:
+            sub = value["Fn::Sub"]
+            template = sub if isinstance(sub, str) else sub[0]
+            overrides = set() if isinstance(sub, str) else set(sub[1])
+            result.update(
+                token.split(".")[0]
+                for token in re.findall(r"\$\{([^}]+)\}", template)
+                if token not in overrides
+            )
+        for child in value.values():
+            result.update(references(child))
+        return result & resources.keys()
+
+    dependencies = {name: references(resource) for name, resource in resources.items()}
+    for name, resource in resources.items():
+        explicit = resource.get("DependsOn", [])
+        dependencies[name].update([explicit] if isinstance(explicit, str) else explicit)
+    order = list(TopologicalSorter(dependencies).static_order())
+    for role, policy, sid, action in (
+        ("ArchiveRole", "ArchivePolicy", "ArchiveGenerateOnly", "kms:GenerateDataKey"),
+        ("EvidenceRole", "EvidencePolicy", "EvidenceDecryptOnly", "kms:Decrypt"),
+    ):
+        assert order.index(role) < order.index("EvidenceKey") < order.index(policy)
+        assert "Policies" not in resources[role]["Properties"]
+        assert resources[policy]["Properties"]["Roles"] == [{"Ref": role}]
+        statements = resources["EvidenceKey"]["Properties"]["KeyPolicy"]["Statement"]
+        statement = next(item for item in statements if item["Sid"] == sid)
+        assert statement["Principal"]["AWS"] == {"Fn::GetAtt": f"{role}.Arn"}
+        assert statement["Action"] == action
+        policy_actions = {
+            item["Action"]
+            for item in resources[policy]["Properties"]["PolicyDocument"]["Statement"]
+        }
+        assert policy_actions == {
+            action,
+            "dynamodb:PutItem" if role == "ArchiveRole" else "dynamodb:GetItem",
+        }
 
 
 def test_render_example_has_no_active_static_aws_credentials() -> None:

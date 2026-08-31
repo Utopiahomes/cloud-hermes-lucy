@@ -107,7 +107,7 @@ Resources:
           - Sid: ArchiveGenerateOnly
             Effect: Allow
             Principal:
-              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ArchiveRoleName}
+              AWS: !GetAtt ArchiveRole.Arn
             Action: kms:GenerateDataKey
             Resource: "*"
             Condition:
@@ -120,7 +120,7 @@ Resources:
           - Sid: EvidenceDecryptOnly
             Effect: Allow
             Principal:
-              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${EvidenceRoleName}
+              AWS: !GetAtt EvidenceRole.Arn
             Action: kms:Decrypt
             Resource: "*"
             Condition:
@@ -168,24 +168,30 @@ Resources:
           Workspace: !Ref RenderWorkspaceId
           Environment: !Ref RenderEnvironmentId
           Service: !Ref RenderArchiveServiceId
-      Policies:
-        - PolicyName: lucy-archive-only
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: kms:GenerateDataKey
-                Resource: !GetAtt EvidenceKey.Arn
-                Condition:
-                  StringEquals:
-                    kms:EncryptionContext:application: cloud-hermes-lucy
-                  ForAllValues:StringEquals:
-                    kms:EncryptionContextKeys:
-                      - application
-                      - evidence-id
-              - Effect: Allow
-                Action: dynamodb:PutItem
-                Resource: !GetAtt WrappedKeyRegistry.Arn
+
+  # Attach permissions after the roles and key exist. Inline policies here
+  # would create a cycle when the key policy references the role principals.
+  ArchivePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: lucy-archive-only
+      Roles: [!Ref ArchiveRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: kms:GenerateDataKey
+            Resource: !GetAtt EvidenceKey.Arn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+              ForAllValues:StringEquals:
+                kms:EncryptionContextKeys:
+                  - application
+                  - evidence-id
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt WrappedKeyRegistry.Arn
 
   EvidenceRole:
     Type: AWS::IAM::Role
@@ -199,24 +205,28 @@ Resources:
           Workspace: !Ref RenderWorkspaceId
           Environment: !Ref RenderEnvironmentId
           Service: !Ref RenderEvidenceServiceId
-      Policies:
-        - PolicyName: lucy-evidence-only
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: kms:Decrypt
-                Resource: !GetAtt EvidenceKey.Arn
-                Condition:
-                  StringEquals:
-                    kms:EncryptionContext:application: cloud-hermes-lucy
-                  ForAllValues:StringEquals:
-                    kms:EncryptionContextKeys:
-                      - application
-                      - evidence-id
-              - Effect: Allow
-                Action: dynamodb:GetItem
-                Resource: !GetAtt WrappedKeyRegistry.Arn
+
+  EvidencePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: lucy-evidence-only
+      Roles: [!Ref EvidenceRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !GetAtt EvidenceKey.Arn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+              ForAllValues:StringEquals:
+                kms:EncryptionContextKeys:
+                  - application
+                  - evidence-id
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt WrappedKeyRegistry.Arn
 
   DeletionRole:
     Type: AWS::IAM::Role

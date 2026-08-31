@@ -5,6 +5,16 @@ Date: 2026-08-29
 Status: local implementation passes; cloud resources have not been provisioned.
 Transcript capture remains disabled.
 
+## First-deployment preflight (2026-08-31)
+
+The KMS key policy now references the actual archive/evidence IAM roles with
+`GetAtt`, so CloudFormation creates those principals before the key. Their
+key-scoped policies are separate `AWS::IAM::Policy` resources, attached after
+the key exists to avoid a circular dependency. A regression test checks the
+dependency graph, principal bindings, and unchanged runtime action sets.
+This is local validation, not proof of AWS provisioning or cloud acceptance;
+IAM propagation and actual authorization still require the tests below.
+
 ## Provisioning order
 
 1. Create the owner's AWS account and enable phishing-resistant root MFA and
