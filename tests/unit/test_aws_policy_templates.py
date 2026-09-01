@@ -253,7 +253,8 @@ def test_policy_render_service_keeps_no_aws_role_or_journal_access() -> None:
     render = yaml.safe_load(
         (ROOT / "deploy" / "render" / "security-baseline-v1.1.yaml.example").read_text()
     )
-    policy = next(service for service in render["services"] if service["name"] == "lucy-policy")
+    services = render["projects"][0]["environments"][0]["services"]
+    policy = next(service for service in services if service["name"] == "lucy-policy")
     keys = {item["key"] for item in policy["envVars"]}
     assert "AWS_ROLE_ARN" not in keys
     assert not any("JOURNAL" in key or "DYNAMODB" in key for key in keys)
@@ -263,7 +264,8 @@ def test_render_oidc_and_journal_configuration_is_exactly_service_scoped() -> No
     render = yaml.safe_load(
         (ROOT / "deploy" / "render" / "security-baseline-v1.1.yaml.example").read_text()
     )
-    services = {service["name"]: service for service in render["services"]}
+    configured = render["projects"][0]["environments"][0]["services"]
+    services = {service["name"]: service for service in configured}
     journal_keys = {
         "LUCY_ARCHIVE_REGISTRY_ID",
         "LUCY_DELETION_JOURNAL_ID",

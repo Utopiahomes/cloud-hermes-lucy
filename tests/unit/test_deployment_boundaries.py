@@ -14,7 +14,8 @@ def _render_services() -> dict[str, dict[str, Any]]:
             encoding="utf-8"
         )
     )
-    return {service["name"]: service for service in blueprint["services"]}
+    environments = blueprint["projects"][0]["environments"]
+    return {service["name"]: service for service in environments[0]["services"]}
 
 
 def _env_keys(service: dict[str, Any]) -> set[str]:
@@ -47,6 +48,26 @@ def test_render_private_services_use_only_supported_blueprint_fields() -> None:
     for service in _render_services().values():
         assert service["type"] == "pserv"
         assert "healthCheckPath" not in service
+        assert service["region"] == "virginia"
+        assert service["plan"] == "0.5c-512mb"
+        assert service["autoDeployTrigger"] == "off"
+
+
+def test_render_services_share_one_protected_isolated_production_environment() -> None:
+    blueprint = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.1.yaml.example").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "services" not in blueprint
+    assert len(blueprint["projects"]) == 1
+    project = blueprint["projects"][0]
+    assert project["name"] == "cloud-lucy"
+    assert len(project["environments"]) == 1
+    environment = project["environments"][0]
+    assert environment["name"] == "production"
+    assert environment["networking"] == {"isolation": "enabled"}
+    assert environment["permissions"] == {"protection": "enabled"}
 
 
 def test_production_database_roles_have_no_ddl_or_role_administration() -> None:
