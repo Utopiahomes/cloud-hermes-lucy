@@ -43,6 +43,12 @@ def test_render_services_keep_signing_and_aws_capabilities_separate() -> None:
     assert "LUCY_ARCHIVE_COMMITMENT_KEY_B64" not in deletion
 
 
+def test_render_private_services_use_only_supported_blueprint_fields() -> None:
+    for service in _render_services().values():
+        assert service["type"] == "pserv"
+        assert "healthCheckPath" not in service
+
+
 def test_production_database_roles_have_no_ddl_or_role_administration() -> None:
     sql = (
         ROOT / "deploy" / "postgres" / "production_roles.sql.example"

@@ -4,8 +4,25 @@ Date: 2026-08-31
 
 Status: implementation, policy templates, and synthetic acceptance complete;
 **not real-cloud acceptance and not permission to enable transcript capture**.
-No AWS or Render resource, live image, live database, credential, profile, or
-capture setting was changed.
+
+## Cloud deployment preflight
+
+The tested repository was pushed privately to
+`Utopiahomes/cloud-hermes-lucy` at commit `32c9837`. The Render `Utopia`
+workspace was upgraded from Hobby to Pro so managed AWS OIDC can be used, and
+the existing Render GitHub App installation was extended from its existing
+`utopia-wordspaces` access to this one additional selected repository. It was
+not granted access to all repositories.
+
+A Render Blueprint dry-run rejected `healthCheckPath` on all four `pserv`
+definitions. Those unsupported fields were removed and a regression test now
+requires every private-service entry to omit them. The targeted deployment
+tests pass (18 tests), and the available non-Docker suite passes (145 tests,
+170 PostgreSQL tests skipped because the isolated database was not active).
+
+No Lucy Render service, live image, AWS KMS/IAM/DynamoDB/CloudTrail/SNS
+resource, production database credential, or capture setting has been created
+or changed. Transcript capture remains disabled.
 
 ## Implemented production contract
 

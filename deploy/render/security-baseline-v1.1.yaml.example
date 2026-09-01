@@ -7,7 +7,6 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /ready
     envVars:
       - key: LUCY_SERVICE_MODE
         value: routine
@@ -49,7 +48,6 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /ready
     envVars:
       - key: LUCY_SERVICE_MODE
         value: policy
@@ -75,7 +73,6 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /ready
     envVars:
       - key: LUCY_SERVICE_MODE
         value: evidence
@@ -119,7 +116,6 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /ready
     envVars:
       - key: LUCY_SERVICE_MODE
         value: deletion
