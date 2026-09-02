@@ -75,6 +75,11 @@ class EvidencePayloadRow(Base):
     content_nonce: Mapped[bytes] = mapped_column(LargeBinary)
     key_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
     algorithm: Mapped[str] = mapped_column(Text)
+    encryption_context_version: Mapped[int] = mapped_column(default=1)
+    record_version: Mapped[int] = mapped_column(BigInteger, default=1)
+    storage_epoch: Mapped[int] = mapped_column(BigInteger, default=1)
+    registry_epoch: Mapped[int] = mapped_column(BigInteger, default=1)
+    key_epoch: Mapped[int] = mapped_column(BigInteger, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -108,6 +113,222 @@ class SensitiveActionPermitRow(Base):
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consumed_by_idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
+
+
+class SecurityContractEpochRow(Base):
+    __tablename__ = "security_contract_epochs"
+    __table_args__ = {"schema": "lucy"}
+    singleton: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    registry_epoch: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OwnerInteractionAssertionRow(Base):
+    __tablename__ = "owner_interaction_assertions_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    nonce: Mapped[str] = mapped_column(Text, unique=True)
+    anti_replay_id: Mapped[str] = mapped_column(Text, unique=True)
+    action: Mapped[str] = mapped_column(Text)
+    evidence_id: Mapped[UUID | None] = mapped_column(ForeignKey("lucy.evidence.id"))
+    owner_subject: Mapped[str] = mapped_column(Text)
+    issuer: Mapped[str] = mapped_column(Text)
+    environment: Mapped[str] = mapped_column(Text)
+    assertion_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_assertion: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    registry_epoch: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SensitiveActionPermitV2Row(Base):
+    __tablename__ = "sensitive_action_permits_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    nonce: Mapped[str] = mapped_column(Text, unique=True)
+    action: Mapped[str] = mapped_column(Text)
+    owner_subject: Mapped[str] = mapped_column(Text)
+    owner_assertion_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.owner_interaction_assertions_v1.id"), unique=True
+    )
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"))
+    reason: Mapped[str] = mapped_column(Text)
+    max_records: Mapped[int]
+    max_bytes: Mapped[int]
+    record_version: Mapped[int] = mapped_column(BigInteger)
+    permit_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_permit: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    permit_claim_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    registry_epoch: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+    issuance_idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    issued_operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), unique=True
+    )
+    state: Mapped[str] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_operation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    claimed_idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
+    claimed_session_user: Mapped[str | None] = mapped_column(Text)
+
+
+class DeletionTargetManifestRow(Base):
+    __tablename__ = "deletion_target_manifests_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    permit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_action_permits_v2.id"), unique=True
+    )
+    root_evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"))
+    idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    scope_version: Mapped[int] = mapped_column(BigInteger)
+    target_count: Mapped[int]
+    targets_digest: Mapped[str | None] = mapped_column(String(64))
+    unsigned_manifest_digest: Mapped[str | None] = mapped_column(String(64))
+    unsigned_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    signed_manifest_digest: Mapped[str | None] = mapped_column(String(64), unique=True)
+    signed_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    permit_claim_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    execution_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(Text)
+    prepared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeletionManifestTargetRow(Base):
+    __tablename__ = "deletion_manifest_targets_v1"
+    __table_args__ = {"schema": "lucy"}
+    manifest_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.deletion_target_manifests_v1.id"), primary_key=True
+    )
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.evidence.id"), primary_key=True
+    )
+    key_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    record_version: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+
+
+class ExecutorBindingRow(Base):
+    __tablename__ = "executor_bindings_v1"
+    __table_args__ = {"schema": "lucy"}
+    action: Mapped[str] = mapped_column(Text, primary_key=True)
+    environment: Mapped[str] = mapped_column(Text, primary_key=True)
+    executor_identity: Mapped[str] = mapped_column(Text)
+    executor_alias_arn: Mapped[str] = mapped_column(Text, unique=True)
+    executor_version: Mapped[int] = mapped_column(BigInteger)
+    receipt_key_id: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean)
+    configured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SensitiveOperationV1Row(Base):
+    __tablename__ = "sensitive_operations_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    permit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_action_permits_v2.id"), unique=True
+    )
+    action: Mapped[str] = mapped_column(Text)
+    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    manifest_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.deletion_target_manifests_v1.id"), unique=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text, unique=True)
+    caller_session_user: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    encrypted_package: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    package_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    package_size_bytes: Mapped[int]
+    record_version: Mapped[int] = mapped_column(BigInteger)
+    storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    registry_epoch: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+    permit_claim_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    execution_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    executor_receipt_digest: Mapped[str | None] = mapped_column(String(64))
+
+
+class SensitiveExecutionGrantRow(Base):
+    __tablename__ = "sensitive_execution_grants_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v1.id"), unique=True
+    )
+    grant_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_grant: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    executor_identity: Mapped[str] = mapped_column(Text)
+    executor_alias_arn: Mapped[str] = mapped_column(Text)
+    executor_version: Mapped[int] = mapped_column(BigInteger)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    execution_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    stored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ExecutorReceiptAttestationRow(Base):
+    __tablename__ = "executor_receipt_attestations_v1"
+    __table_args__ = {"schema": "lucy"}
+    receipt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v1.id"), unique=True
+    )
+    execution_grant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    receipt_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    result: Mapped[str] = mapped_column(Text)
+    receipt_key_id: Mapped[str] = mapped_column(Text)
+    executor_identity: Mapped[str] = mapped_column(Text)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    policy_session_user: Mapped[str] = mapped_column(Text)
+
+
+class EvidenceDeletionFenceRow(Base):
+    __tablename__ = "evidence_deletion_fences_v1"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.evidence.id"), primary_key=True)
+    permit_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    operation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    state: Mapped[str] = mapped_column(Text)
+    fenced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeletionFinalityRow(Base):
+    __tablename__ = "deletion_finality_v1"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v1.id"), primary_key=True
+    )
+    deletion_effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finality_status: Mapped[str] = mapped_column(Text)
+    metadata_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    earliest_restorable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_restorable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recoverable_copy_count: Mapped[int | None]
+    metadata_inventory_digest: Mapped[str | None] = mapped_column(String(64))
+
+
+class SensitiveOperationEventRow(Base):
+    __tablename__ = "sensitive_operation_events_v1"
+    __table_args__ = {"schema": "lucy"}
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    operation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    event_type: Mapped[str] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class ConversationCaptureStateRow(Base):

@@ -388,6 +388,11 @@ class ConversationArchiveService:
                         content_nonce=encrypted.content_nonce,
                         key_ref=key_ref,
                         algorithm=self._cipher.algorithm,
+                        encryption_context_version=self._cipher.encryption_context_version,
+                        record_version=self._cipher.record_version,
+                        storage_epoch=self._cipher.storage_epoch,
+                        registry_epoch=self._cipher.registry_epoch,
+                        key_epoch=self._cipher.key_epoch,
                         created_at=now,
                     )
                 )

@@ -1,8 +1,12 @@
 -- Never run against a real database. compose.test.yaml owns this tmpfs cluster.
 CREATE ROLE lucy_app LOGIN PASSWORD 'synthetic-app-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE;
+CREATE ROLE lucy_security_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOINHERIT NOREPLICATION NOBYPASSRLS;
+GRANT lucy_security_function_owner TO lucy_owner;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_app;
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA lucy AUTHORIZATION lucy_owner;
 GRANT USAGE ON SCHEMA lucy TO lucy_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE lucy_owner IN SCHEMA lucy

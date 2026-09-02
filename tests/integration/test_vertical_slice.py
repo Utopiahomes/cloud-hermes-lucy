@@ -47,6 +47,7 @@ from lucy.contracts import (
     OperationOutcome,
     RejoiningState,
 )
+from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.v1 import ConversationEvidenceV1, ConversationMessageV1
 from lucy.corrections import CorrectionService
 from lucy.db import create_session_factory
@@ -411,7 +412,16 @@ def test_mocked_aws_kms_archive_round_trip_uses_production_algorithm() -> None:
 
     sessions = create_session_factory(DATABASE_URL)
     keys = MemoryArchiveKeyStore()
-    cipher = AwsKmsEnvelopeCipher(Kms(), key_arn=key_arn, commitment_key=b"c" * 32)
+    cipher = AwsKmsEnvelopeCipher(
+        Kms(),
+        key_arn=key_arn,
+        commitment_key=b"c" * 32,
+        environment=DeploymentEnvironment.TEST,
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        record_version=1,
+    )
     archived = _capturing_archive(sessions, cipher, keys).preserve_message(
         "aws-kms:telegram:session-1:turn-1:user",
         ConversationMessageArchiveInput(
@@ -444,6 +454,7 @@ def test_mocked_aws_kms_archive_round_trip_uses_production_algorithm() -> None:
     with sessions() as session:
         payload = session.get(EvidencePayloadRow, archived.evidence_id)
         assert payload is not None and payload.algorithm == AWS_KMS_ALGORITHM
+        assert payload.encryption_context_version == 2
 
 
 def test_owner_deletion_crypto_shreds_and_invalidates_all_derived_memory() -> None:

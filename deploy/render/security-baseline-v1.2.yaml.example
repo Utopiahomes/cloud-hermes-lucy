@@ -1,0 +1,270 @@
+# Cloud Lucy Security Baseline v1.2 Render Blueprint example.
+#
+# This file defines exactly four continuously running private backends. Archive
+# ingestion remains part of lucy-routine. The additional cron resource is only
+# a base artifact/identity for operator-triggered one-off finality jobs; its
+# scheduled command is a fail-closed no-op and must never verify finality.
+#
+# Before syncing:
+#   1. create/select a protected Pro workspace project environment in Virginia;
+#   2. keep its private-network isolation enabled;
+#   3. set the external PostgreSQL inbound allowlist to empty separately;
+#   4. populate each sync:false value in the Render dashboard; and
+#   5. leave LUCY_TRANSCRIPT_CAPTURE_ENABLED exactly "false".
+#
+# After the first sync, copy the immutable workspace, environment, routine,
+# evidence, deletion, and finality utility service IDs into the v1.2 AWS stack.
+# Then copy only the resulting exact AWS role/alias/table outputs back into the
+# corresponding Render services. Never set AWS_WEB_IDENTITY_TOKEN_FILE or a
+# static AWS access key: Render supplies the short-lived OIDC token.
+
+projects:
+  - name: cloud-lucy
+    environments:
+      - name: production
+        networking:
+          isolation: enabled
+        permissions:
+          protection: enabled
+        services:
+          - type: pserv
+            name: lucy-routine
+            runtime: docker
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - key: LUCY_SERVICE_MODE
+                value: routine
+              - key: LUCY_ENVIRONMENT
+                value: production
+              - key: LUCY_SECURITY_ENVIRONMENT
+                value: production
+              - key: LUCY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_REGISTRY_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_KEY_EPOCH
+                sync: false
+              - key: LUCY_ARCHIVE_RECORD_VERSION
+                value: "1"
+              - key: LUCY_TRANSCRIPT_CAPTURE_ENABLED
+                value: "false"
+              - key: LUCY_DATABASE_URL
+                sync: false
+              - key: LUCY_OBSERVED_HERMES_COMMIT
+                sync: false
+              - key: LUCY_ADAPTER_TOKEN
+                sync: false
+              - key: LUCY_ARCHIVE_BACKEND
+                value: aws-kms-dynamodb
+              - key: AWS_REGION
+                value: us-east-1
+              - key: AWS_ROLE_ARN
+                sync: false
+              - key: LUCY_AWS_KMS_KEY_ARN
+                sync: false
+              - key: LUCY_AWS_DYNAMODB_KEY_TABLE
+                sync: false
+              - key: LUCY_ARCHIVE_REGISTRY_ID
+                sync: false
+              - key: LUCY_DELETION_JOURNAL_ID
+                sync: false
+              - key: LUCY_AWS_DELETION_HEAD_TABLE
+                sync: false
+              - key: LUCY_ARCHIVE_COMMITMENT_KEY_B64
+                sync: false
+
+          - type: pserv
+            name: lucy-policy
+            runtime: docker
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - key: LUCY_SERVICE_MODE
+                value: policy
+              - key: LUCY_ENVIRONMENT
+                value: production
+              - key: LUCY_SECURITY_ENVIRONMENT
+                value: production
+              - key: LUCY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_REGISTRY_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_KEY_EPOCH
+                sync: false
+              - key: LUCY_DATABASE_URL
+                sync: false
+              - key: LUCY_OBSERVED_HERMES_COMMIT
+                sync: false
+              - key: LUCY_OWNER_TOKEN
+                sync: false
+              - key: LUCY_POLICY_GATEWAY_TOKEN
+                sync: false
+              - key: LUCY_OWNER_SUBJECT
+                sync: false
+              - key: LUCY_POLICY_SIGNING_PRIVATE_KEY_B64
+                sync: false
+              - key: LUCY_POLICY_KEY_ID
+                sync: false
+              - key: LUCY_POLICY_ISSUER
+                value: lucy-policy
+              - key: LUCY_OWNER_TRUST_STORE_JSON
+                sync: false
+              - key: LUCY_EXECUTOR_RECEIPT_TRUST_STORE_JSON
+                sync: false
+              - key: LUCY_RETRIEVAL_EXECUTOR_IDENTITY
+                value: lucy-evidence-executor
+              - key: LUCY_RETRIEVAL_EXECUTOR_ALIAS_ARN
+                sync: false
+              - key: LUCY_RETRIEVAL_EXECUTOR_VERSION
+                sync: false
+              - key: LUCY_DELETION_EXECUTOR_IDENTITY
+                value: lucy-deletion-executor
+              - key: LUCY_DELETION_EXECUTOR_ALIAS_ARN
+                sync: false
+              - key: LUCY_DELETION_EXECUTOR_VERSION
+                sync: false
+
+          - type: pserv
+            name: lucy-evidence
+            runtime: docker
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - key: LUCY_SERVICE_MODE
+                value: evidence
+              - key: LUCY_ENVIRONMENT
+                value: production
+              - key: LUCY_SECURITY_ENVIRONMENT
+                value: production
+              - key: LUCY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_REGISTRY_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_KEY_EPOCH
+                sync: false
+              - key: LUCY_DATABASE_URL
+                sync: false
+              - key: LUCY_OBSERVED_HERMES_COMMIT
+                sync: false
+              - key: LUCY_ADAPTER_TOKEN
+                sync: false
+              - key: LUCY_OWNER_TOKEN
+                sync: false
+              - key: LUCY_POLICY_GATEWAY_TOKEN
+                sync: false
+              - key: LUCY_POLICY_HOSTPORT
+                fromService:
+                  type: pserv
+                  name: lucy-policy
+                  property: hostport
+              - key: AWS_REGION
+                value: us-east-1
+              - key: AWS_ROLE_ARN
+                sync: false
+              - key: LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN
+                sync: false
+
+          - type: pserv
+            name: lucy-deletion
+            runtime: docker
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - key: LUCY_SERVICE_MODE
+                value: deletion
+              - key: LUCY_ENVIRONMENT
+                value: production
+              - key: LUCY_SECURITY_ENVIRONMENT
+                value: production
+              - key: LUCY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_REGISTRY_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_KEY_EPOCH
+                sync: false
+              - key: LUCY_DATABASE_URL
+                sync: false
+              - key: LUCY_OBSERVED_HERMES_COMMIT
+                sync: false
+              - key: LUCY_ADAPTER_TOKEN
+                sync: false
+              - key: LUCY_OWNER_TOKEN
+                sync: false
+              - key: LUCY_POLICY_GATEWAY_TOKEN
+                sync: false
+              - key: LUCY_POLICY_HOSTPORT
+                fromService:
+                  type: pserv
+                  name: lucy-policy
+                  property: hostport
+              - key: AWS_REGION
+                value: us-east-1
+              - key: AWS_ROLE_ARN
+                sync: false
+              - key: LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN
+                sync: false
+
+          # This is not a fifth continuously running backend. Render one-off jobs
+          # inherit their base service's artifact and complete environment, so a
+          # dedicated base is required to keep the finality AWS role and database
+          # login out of lucy-policy and lucy-deletion. The scheduled sentinel
+          # exits without reading AWS or PostgreSQL. An operator supplies an exact
+          # operation ID only through the reviewed one-off job command.
+          - type: cron
+            name: lucy-finality-utility
+            runtime: docker
+            region: virginia
+            plan: 0.5c-512mb
+            schedule: "0 0 1 1 *"
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.finality --scheduled-sentinel
+            envVars:
+              - key: LUCY_SERVICE_MODE
+                value: finality
+              - key: LUCY_ENVIRONMENT
+                value: production
+              - key: LUCY_SECURITY_ENVIRONMENT
+                value: production
+              - key: LUCY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_STORAGE_EPOCH
+                sync: false
+              - key: LUCY_SECURITY_REGISTRY_EPOCH
+                sync: false
+              - key: LUCY_DATABASE_URL
+                sync: false
+              - key: AWS_REGION
+                value: us-east-1
+              - key: AWS_ROLE_ARN
+                sync: false
+              - key: LUCY_AWS_WRAPPED_KEY_TABLE
+                sync: false
+              - key: LUCY_FINALITY_QUARANTINE_TABLE_PREFIX
+                sync: false

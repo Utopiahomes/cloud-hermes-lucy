@@ -19,6 +19,7 @@ from lucy.archive_crypto import (
     WrappedDataKey,
     verify_archive_dependencies,
 )
+from lucy.contracts.security_v1_2 import DeploymentEnvironment
 
 KMS_KEY_ARN = (
     "arn:aws:kms:us-east-1:123456789012:"
@@ -123,6 +124,11 @@ def test_aws_kms_envelope_uses_bound_encryption_context() -> None:
         client,
         key_arn=KMS_KEY_ARN,
         commitment_key=b"c" * 32,
+        environment=DeploymentEnvironment.TEST,
+        storage_epoch=2,
+        registry_epoch=3,
+        key_epoch=4,
+        record_version=5,
     )
     evidence_id = uuid4()
     plaintext = b"private conversation"
@@ -137,7 +143,12 @@ def test_aws_kms_envelope_uses_bound_encryption_context() -> None:
             "KeySpec": "AES_256",
             "EncryptionContext": {
                 "application": "cloud-hermes-lucy",
+                "environment": "test",
                 "evidence-id": str(evidence_id),
+                "storage-epoch": "2",
+                "registry-epoch": "3",
+                "key-epoch": "4",
+                "record-version": "5",
             },
         }
     ]
@@ -217,6 +228,11 @@ def test_startup_check_exercises_kms_and_registry_without_leaving_a_key() -> Non
         kms,
         key_arn=KMS_KEY_ARN,
         commitment_key=b"c" * 32,
+        environment=DeploymentEnvironment.TEST,
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        record_version=1,
     )
     store = AwsDynamoArchiveKeyStore(dynamo, table_name="lucy-wrapped-keys-prod")
 

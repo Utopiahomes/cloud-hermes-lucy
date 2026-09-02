@@ -24,7 +24,7 @@ def test_adapter_surface_has_no_approval_or_apply_route() -> None:
     }
 
 
-def test_internal_surface_only_exposes_model_budget_bridge() -> None:
+def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
     exposed = {
         (method, route.path)
         for route in app.routes
@@ -41,6 +41,13 @@ def test_internal_surface_only_exposes_model_budget_bridge() -> None:
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
         ("POST", "/internal/v1/sensitive-action-permits"),
+        ("POST", "/internal/v2/evidence/{operation_id}/delivery"),
+        ("POST", "/internal/v2/security/deletion-manifests"),
+        ("POST", "/internal/v2/security/operations/{operation_id}/grant"),
+        (
+            "POST",
+            "/internal/v2/security/operations/{operation_id}/receipt-attestation",
+        ),
     }
 
 
@@ -128,6 +135,15 @@ def test_empty_adapter_token_does_not_authorize_empty_bearer(
     with pytest.raises(HTTPException) as caught:
         api._authorize("Bearer ")
     assert caught.value.status_code == 401
+
+
+def test_production_v12_hides_superseded_sensitive_v1_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_ENVIRONMENT", "production")
+    with pytest.raises(HTTPException) as caught:
+        api._require_legacy_sensitive_api_allowed()
+    assert caught.value.status_code == 404
 
 
 def test_recall_text_is_sent_in_body_not_url(monkeypatch: pytest.MonkeyPatch) -> None:

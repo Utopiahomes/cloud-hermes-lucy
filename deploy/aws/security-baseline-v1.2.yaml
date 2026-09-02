@@ -1,0 +1,971 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Lucy Security Baseline v1.2 - execute-only Render callers and AWS executors
+
+Parameters:
+  ResourceNamespace:
+    Type: String
+    Default: lucy-prod-v12
+    AllowedPattern: "[a-z0-9-]{3,32}"
+  SecurityEnvironment:
+    Type: String
+    Default: production
+    AllowedValues: [production, development]
+  RenderOidcProviderArn:
+    Type: String
+    Description: Existing IAM OIDC provider ARN for the exact Render workspace
+  RenderWorkspaceId:
+    Type: String
+    AllowedPattern: "tea-[A-Za-z0-9_-]+"
+  RenderEnvironmentId:
+    Type: String
+    AllowedPattern: "evm-[A-Za-z0-9_-]+"
+  RenderArchiveServiceId:
+    Type: String
+  RenderEvidenceServiceId:
+    Type: String
+  RenderDeletionServiceId:
+    Type: String
+  RenderFinalityServiceId:
+    Type: String
+    Description: Exact service/job identity used only for operator-triggered finality checks
+  KeyAdministratorPrincipalArnPattern:
+    Type: String
+    Description: ArnLike pattern ending in AWSReservedSSO_LucySecurityAdministrator_*
+  AlertEmail:
+    Type: String
+  ArchiveRegistryId:
+    Type: String
+    AllowedPattern: "[0-9a-fA-F-]{36}"
+  DeletionJournalId:
+    Type: String
+    AllowedPattern: "[0-9a-fA-F-]{36}"
+  StorageEpoch:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  RegistryEpoch:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  KeyEpoch:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  ArchiveRecordVersion:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  EvidenceDatabaseSessionUser:
+    Type: String
+    Default: lucy_evidence_workflow
+  DeletionDatabaseSessionUser:
+    Type: String
+    Default: lucy_deletion_workflow
+  PolicyTrustStoreJson:
+    Type: String
+    NoEcho: true
+    Description: Reviewed public Ed25519 policy-notary verification-key inventory
+  ExecutorArtifactBucket:
+    Type: String
+  ExecutorArtifactKey:
+    Type: String
+  ExecutorArtifactObjectVersion:
+    Type: String
+  ExecutorArtifactCodeSha256:
+    Type: String
+    Description: Base64 SHA-256 of the exact Lambda zip artifact
+  RetrievalFunctionName:
+    Type: String
+    Default: lucy-evidence-executor-v12
+  DeletionFunctionName:
+    Type: String
+    Default: lucy-deletion-executor-v12
+  RetrievalMinuteLimit:
+    Type: Number
+    Default: 5
+    MinValue: 1
+  RetrievalDayLimit:
+    Type: Number
+    Default: 20
+    MinValue: 1
+  DeletionMinuteLimit:
+    Type: Number
+    Default: 3
+    MinValue: 1
+  DeletionDayLimit:
+    Type: Number
+    Default: 10
+    MinValue: 1
+
+Resources:
+  KmsRecoveryAdministratorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-recovery-administrator
+      MaxSessionDuration: 3600
+      Description: Human-only quarantined wrapped-key recovery; never KMS decrypt
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+
+  LambdaDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-lambda-deployer
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+
+  ArchiveRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-render-archive
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderArchiveServiceId
+
+  EvidenceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-render-evidence-caller
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderEvidenceServiceId
+
+  DeletionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-render-deletion-caller
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderDeletionServiceId
+
+  FinalityVerifierRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-finality-verifier
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}
+        - Provider: !Ref RenderOidcProviderArn
+          Workspace: !Ref RenderWorkspaceId
+          Environment: !Ref RenderEnvironmentId
+          Service: !Ref RenderFinalityServiceId
+
+  RetrievalExecutorRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-retrieval-runtime
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+
+  DeletionExecutorRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-deletion-runtime
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+
+  EvidenceKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Cloud Lucy v1.2 per-record evidence DEK wrapping key
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: IdentityCenterHumanKeyAdministrator
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+          - Sid: ArchiveGenerateOnly
+            Effect: Allow
+            Principal: {AWS: !GetAtt ArchiveRole.Arn}
+            Action: kms:GenerateDataKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+                kms:EncryptionContext:environment: !Ref SecurityEnvironment
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - application
+                  - environment
+                  - evidence-id
+                  - storage-epoch
+                  - registry-epoch
+                  - key-epoch
+                  - record-version
+              "Null":
+                kms:EncryptionContext:evidence-id: "false"
+                kms:EncryptionContext:storage-epoch: "false"
+                kms:EncryptionContext:registry-epoch: "false"
+                kms:EncryptionContext:key-epoch: "false"
+                kms:EncryptionContext:record-version: "false"
+          - Sid: RetrievalExecutorDecryptOnly
+            Effect: Allow
+            Principal: {AWS: !GetAtt RetrievalExecutorRuntimeRole.Arn}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+                kms:EncryptionContext:environment: !Ref SecurityEnvironment
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - application
+                  - environment
+                  - evidence-id
+                  - storage-epoch
+                  - registry-epoch
+                  - key-epoch
+                  - record-version
+              "Null":
+                kms:EncryptionContext:evidence-id: "false"
+                kms:EncryptionContext:storage-epoch: "false"
+                kms:EncryptionContext:registry-epoch: "false"
+                kms:EncryptionContext:key-epoch: "false"
+                kms:EncryptionContext:record-version: "false"
+
+  EvidenceKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ResourceNamespace}-evidence
+      TargetKeyId: !Ref EvidenceKey
+
+  RetrievalReceiptKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Cloud Lucy v1.2 retrieval receipt signing key
+      KeySpec: ECC_NIST_P256
+      KeyUsage: SIGN_VERIFY
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: IdentityCenterHumanKeyAdministrator
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
+            Action: ["kms:Create*", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*", "kms:Revoke*", "kms:Disable*", "kms:Get*", "kms:Delete*", "kms:TagResource", "kms:UntagResource", "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion"]
+            Resource: "*"
+            Condition: {ArnLike: {"aws:PrincipalArn": !Ref KeyAdministratorPrincipalArnPattern}}
+          - Sid: RetrievalReceiptSignOnly
+            Effect: Allow
+            Principal: {AWS: !GetAtt RetrievalExecutorRuntimeRole.Arn}
+            Action: kms:Sign
+            Resource: "*"
+            Condition: {StringEquals: {"kms:SigningAlgorithm": ECDSA_SHA_256}}
+
+  DeletionReceiptKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Cloud Lucy v1.2 deletion receipt signing key
+      KeySpec: ECC_NIST_P256
+      KeyUsage: SIGN_VERIFY
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: IdentityCenterHumanKeyAdministrator
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
+            Action: ["kms:Create*", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*", "kms:Revoke*", "kms:Disable*", "kms:Get*", "kms:Delete*", "kms:TagResource", "kms:UntagResource", "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion"]
+            Resource: "*"
+            Condition: {ArnLike: {"aws:PrincipalArn": !Ref KeyAdministratorPrincipalArnPattern}}
+          - Sid: DeletionReceiptSignOnly
+            Effect: Allow
+            Principal: {AWS: !GetAtt DeletionExecutorRuntimeRole.Arn}
+            Action: kms:Sign
+            Resource: "*"
+            Condition: {StringEquals: {"kms:SigningAlgorithm": ECDSA_SHA_256}}
+
+  WrappedKeyRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-wrapped-keys
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 30
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: key_ref, AttributeType: S}]
+      KeySchema: [{AttributeName: key_ref, KeyType: HASH}]
+      Tags:
+        - {Key: lucy:Environment, Value: !Ref SecurityEnvironment}
+        - {Key: lucy:RecoveryAuthority, Value: protected-window}
+
+  DeletionJournalHead:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-deletion-journal-head
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: journal_key, AttributeType: S}]
+      KeySchema: [{AttributeName: journal_key, KeyType: HASH}]
+
+  DeletionJournalIntents:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-deletion-journal-intents
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions:
+        - {AttributeName: journal_id, AttributeType: S}
+        - {AttributeName: entry_key, AttributeType: S}
+      KeySchema:
+        - {AttributeName: journal_id, KeyType: HASH}
+        - {AttributeName: entry_key, KeyType: RANGE}
+
+  RetrievalReceiptLedger:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-retrieval-receipts
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: operation_id, AttributeType: S}]
+      KeySchema: [{AttributeName: operation_id, KeyType: HASH}]
+
+  DeletionReceiptLedger:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-deletion-receipts
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: operation_id, AttributeType: S}]
+      KeySchema: [{AttributeName: operation_id, KeyType: HASH}]
+
+  DeletionExecutionIntents:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-deletion-execution-intents
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: operation_id, AttributeType: S}]
+      KeySchema: [{AttributeName: operation_id, KeyType: HASH}]
+
+  RetrievalQuotaLedger:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-retrieval-quotas
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: quota_key, AttributeType: S}]
+      KeySchema: [{AttributeName: quota_key, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+
+  DeletionQuotaLedger:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-deletion-quotas
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: quota_key, AttributeType: S}]
+      KeySchema: [{AttributeName: quota_key, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+
+  ArchivePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-archive-only
+      Roles: [!Ref ArchiveRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: kms:GenerateDataKey
+            Resource: !GetAtt EvidenceKey.Arn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+                kms:EncryptionContext:environment: !Ref SecurityEnvironment
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - application
+                  - environment
+                  - evidence-id
+                  - storage-epoch
+                  - registry-epoch
+                  - key-epoch
+                  - record-version
+              "Null":
+                kms:EncryptionContext:evidence-id: "false"
+                kms:EncryptionContext:storage-epoch: "false"
+                kms:EncryptionContext:registry-epoch: "false"
+                kms:EncryptionContext:key-epoch: "false"
+                kms:EncryptionContext:record-version: "false"
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt DeletionJournalHead.Arn
+            Condition:
+              "ForAllValues:StringEquals":
+                dynamodb:Attributes: [journal_id, registry_id, sequence, digest]
+
+  RetrievalLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${RetrievalFunctionName}
+      RetentionInDays: 90
+
+  DeletionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DeletionFunctionName}
+      RetentionInDays: 90
+
+  RetrievalRuntimePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-retrieval-runtime-only
+      Roles: [!Ref RetrievalExecutorRuntimeRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub ${RetrievalLogGroup.Arn}:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              - !GetAtt WrappedKeyRegistry.Arn
+              - !GetAtt RetrievalReceiptLedger.Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt RetrievalReceiptLedger.Arn
+          - Effect: Allow
+            Action: dynamodb:UpdateItem
+            Resource: !GetAtt RetrievalQuotaLedger.Arn
+            Condition: {"ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": TransactWriteItems}}
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !GetAtt EvidenceKey.Arn
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:application: cloud-hermes-lucy
+                kms:EncryptionContext:environment: !Ref SecurityEnvironment
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - application
+                  - environment
+                  - evidence-id
+                  - storage-epoch
+                  - registry-epoch
+                  - key-epoch
+                  - record-version
+              "Null":
+                kms:EncryptionContext:evidence-id: "false"
+                kms:EncryptionContext:storage-epoch: "false"
+                kms:EncryptionContext:registry-epoch: "false"
+                kms:EncryptionContext:key-epoch: "false"
+                kms:EncryptionContext:record-version: "false"
+          - Effect: Allow
+            Action: kms:Sign
+            Resource: !GetAtt RetrievalReceiptKey.Arn
+            Condition: {StringEquals: {"kms:SigningAlgorithm": ECDSA_SHA_256}}
+
+  DeletionRuntimePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-deletion-runtime-only
+      Roles: [!Ref DeletionExecutorRuntimeRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub ${DeletionLogGroup.Arn}:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt DeletionReceiptLedger.Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource: !GetAtt WrappedKeyRegistry.Arn
+            Condition: {"ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": TransactWriteItems}}
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+              - !GetAtt DeletionReceiptLedger.Arn
+              - !GetAtt DeletionExecutionIntents.Arn
+            Condition: {"ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": TransactWriteItems}}
+          - Effect: Allow
+            Action: dynamodb:UpdateItem
+            Resource: !GetAtt DeletionQuotaLedger.Arn
+            Condition: {"ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": TransactWriteItems}}
+          - Effect: Allow
+            Action: kms:Sign
+            Resource: !GetAtt DeletionReceiptKey.Arn
+            Condition: {StringEquals: {"kms:SigningAlgorithm": ECDSA_SHA_256}}
+
+  RetrievalExecutorFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [RetrievalRuntimePolicy, RetrievalLogGroup]
+    Properties:
+      FunctionName: !Ref RetrievalFunctionName
+      Description: Cloud Lucy v1.2 exact-record evidence retrieval executor
+      Runtime: python3.12
+      RuntimeManagementConfig: {UpdateRuntimeOn: Auto}
+      Architectures: [x86_64]
+      Handler: lucy.executors.handlers.retrieval_lambda_handler
+      Role: !GetAtt RetrievalExecutorRuntimeRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      ReservedConcurrentExecutions: 2
+      Code:
+        S3Bucket: !Ref ExecutorArtifactBucket
+        S3Key: !Ref ExecutorArtifactKey
+        S3ObjectVersion: !Ref ExecutorArtifactObjectVersion
+      Environment:
+        Variables:
+          LUCY_EXECUTOR_ENVIRONMENT: !Ref SecurityEnvironment
+          LUCY_SECURITY_STORAGE_EPOCH: !Ref StorageEpoch
+          LUCY_SECURITY_REGISTRY_EPOCH: !Ref RegistryEpoch
+          LUCY_SECURITY_KEY_EPOCH: !Ref KeyEpoch
+          LUCY_ARCHIVE_RECORD_VERSION: !Ref ArchiveRecordVersion
+          LUCY_EXECUTOR_IDENTITY: lucy-evidence-executor
+          LUCY_EXECUTOR_ALIAS_NAME: production
+          LUCY_EXPECTED_DATABASE_SESSION_USER: !Ref EvidenceDatabaseSessionUser
+          LUCY_AWS_EVIDENCE_KEY_ARN: !GetAtt EvidenceKey.Arn
+          LUCY_AWS_RECEIPT_SIGNING_KEY_ARN: !GetAtt RetrievalReceiptKey.Arn
+          LUCY_AWS_WRAPPED_KEY_TABLE: !Ref WrappedKeyRegistry
+          LUCY_AWS_EXECUTOR_RECEIPT_TABLE: !Ref RetrievalReceiptLedger
+          LUCY_AWS_EXECUTOR_QUOTA_TABLE: !Ref RetrievalQuotaLedger
+          LUCY_EXECUTOR_MINUTE_LIMIT: !Ref RetrievalMinuteLimit
+          LUCY_EXECUTOR_DAY_LIMIT: !Ref RetrievalDayLimit
+          LUCY_POLICY_TRUST_STORE_JSON: !Ref PolicyTrustStoreJson
+
+  DeletionExecutorFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [DeletionRuntimePolicy, DeletionLogGroup]
+    Properties:
+      FunctionName: !Ref DeletionFunctionName
+      Description: Cloud Lucy v1.2 manifest-bound wrapped-key deletion executor
+      Runtime: python3.12
+      RuntimeManagementConfig: {UpdateRuntimeOn: Auto}
+      Architectures: [x86_64]
+      Handler: lucy.executors.handlers.deletion_lambda_handler
+      Role: !GetAtt DeletionExecutorRuntimeRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      ReservedConcurrentExecutions: 1
+      Code:
+        S3Bucket: !Ref ExecutorArtifactBucket
+        S3Key: !Ref ExecutorArtifactKey
+        S3ObjectVersion: !Ref ExecutorArtifactObjectVersion
+      Environment:
+        Variables:
+          LUCY_EXECUTOR_ENVIRONMENT: !Ref SecurityEnvironment
+          LUCY_SECURITY_STORAGE_EPOCH: !Ref StorageEpoch
+          LUCY_SECURITY_REGISTRY_EPOCH: !Ref RegistryEpoch
+          LUCY_SECURITY_KEY_EPOCH: !Ref KeyEpoch
+          LUCY_ARCHIVE_RECORD_VERSION: !Ref ArchiveRecordVersion
+          LUCY_EXECUTOR_IDENTITY: lucy-deletion-executor
+          LUCY_EXECUTOR_ALIAS_NAME: production
+          LUCY_EXPECTED_DATABASE_SESSION_USER: !Ref DeletionDatabaseSessionUser
+          LUCY_AWS_RECEIPT_SIGNING_KEY_ARN: !GetAtt DeletionReceiptKey.Arn
+          LUCY_AWS_WRAPPED_KEY_TABLE: !Ref WrappedKeyRegistry
+          LUCY_AWS_EXECUTOR_RECEIPT_TABLE: !Ref DeletionReceiptLedger
+          LUCY_AWS_EXECUTOR_QUOTA_TABLE: !Ref DeletionQuotaLedger
+          LUCY_AWS_DELETION_INTENT_TABLE: !Ref DeletionExecutionIntents
+          LUCY_EXECUTOR_MINUTE_LIMIT: !Ref DeletionMinuteLimit
+          LUCY_EXECUTOR_DAY_LIMIT: !Ref DeletionDayLimit
+          LUCY_POLICY_TRUST_STORE_JSON: !Ref PolicyTrustStoreJson
+
+  RetrievalExecutorVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref RetrievalExecutorFunction
+      CodeSha256: !Ref ExecutorArtifactCodeSha256
+      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256}
+
+  DeletionExecutorVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref DeletionExecutorFunction
+      CodeSha256: !Ref ExecutorArtifactCodeSha256
+      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256}
+
+  RetrievalExecutorAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: production
+      FunctionName: !Ref RetrievalExecutorFunction
+      FunctionVersion: !GetAtt RetrievalExecutorVersion.Version
+
+  DeletionExecutorAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: production
+      FunctionName: !Ref DeletionExecutorFunction
+      FunctionVersion: !GetAtt DeletionExecutorVersion.Version
+
+  EvidenceCallerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-invoke-retrieval-alias-only
+      Roles: [!Ref EvidenceRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref RetrievalExecutorAlias
+
+  DeletionCallerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-invoke-deletion-alias-only
+      Roles: [!Ref DeletionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref DeletionExecutorAlias
+
+  FinalityVerifierPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-finality-metadata-only
+      Roles: [!Ref FinalityVerifierRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [dynamodb:DescribeTable, dynamodb:DescribeContinuousBackups]
+            Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: [dynamodb:DescribeTable, dynamodb:ListTagsOfResource]
+            Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourceNamespace}-quarantine-*
+          - Effect: Allow
+            Action:
+              - dynamodb:ListTables
+              - dynamodb:ListBackups
+              - dynamodb:ListExports
+              - dynamodb:ListImports
+              - dynamodb:ListGlobalTables
+              - backup:ListProtectedResources
+              - backup:ListRecoveryPointsByResource
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+
+  RecoveryAdministratorPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-quarantined-recovery
+      Roles: [!Ref KmsRecoveryAdministratorRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [dynamodb:DescribeTable, dynamodb:DescribeContinuousBackups, dynamodb:RestoreTableToPointInTime]
+            Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: [dynamodb:DescribeTable, dynamodb:TagResource, dynamodb:UntagResource, dynamodb:GetItem, dynamodb:DeleteTable]
+            Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourceNamespace}-quarantine-*
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt WrappedKeyRegistry.Arn
+          - Effect: Allow
+            Action: [dynamodb:ListTables, dynamodb:ListBackups]
+            Resource: "*"
+            Condition: {StringEquals: {"aws:RequestedRegion": !Ref "AWS::Region"}}
+
+  LambdaDeployerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-lambda-deployer-only
+      Roles: [!Ref LambdaDeployerRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [lambda:GetFunction, lambda:UpdateFunctionCode, lambda:UpdateFunctionConfiguration, lambda:PublishVersion]
+            Resource:
+              - !GetAtt RetrievalExecutorFunction.Arn
+              - !GetAtt DeletionExecutorFunction.Arn
+          - Effect: Allow
+            Action: [lambda:GetAlias, lambda:UpdateAlias]
+            Resource:
+              - !Ref RetrievalExecutorAlias
+              - !Ref DeletionExecutorAlias
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource:
+              - !GetAtt RetrievalExecutorRuntimeRole.Arn
+              - !GetAtt DeletionExecutorRuntimeRole.Arn
+            Condition: {StringEquals: {"iam:PassedToService": lambda.amazonaws.com}}
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudTrailAclCheck
+            Effect: Allow
+            Principal: {Service: cloudtrail.amazonaws.com}
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt AuditBucket.Arn
+            Condition: {StringEquals: {"AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${ResourceNamespace}-security-audit"}}
+          - Sid: CloudTrailWrite
+            Effect: Allow
+            Principal: {Service: cloudtrail.amazonaws.com}
+            Action: s3:PutObject
+            Resource: !Sub ${AuditBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${ResourceNamespace}-security-audit
+
+  AuditTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: AuditBucketPolicy
+    Properties:
+      TrailName: !Sub ${ResourceNamespace}-security-audit
+      S3BucketName: !Ref AuditBucket
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: false
+      IsLogging: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - IncludeManagementEvents: true
+          ReadWriteType: All
+          DataResources:
+            - Type: AWS::DynamoDB::Table
+              Values:
+                - !GetAtt WrappedKeyRegistry.Arn
+                - !GetAtt RetrievalReceiptLedger.Arn
+                - !GetAtt DeletionReceiptLedger.Arn
+                - !GetAtt DeletionExecutionIntents.Arn
+                - !GetAtt DeletionJournalHead.Arn
+                - !GetAtt DeletionJournalIntents.Arn
+            - Type: AWS::Lambda::Function
+              Values:
+                - !GetAtt RetrievalExecutorFunction.Arn
+                - !GetAtt DeletionExecutorFunction.Arn
+
+  SecurityAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ResourceNamespace}-security-alerts
+      Subscription: [{Protocol: email, Endpoint: !Ref AlertEmail}]
+
+  SecurityAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref SecurityAlertTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sns:Publish
+            Resource: !Ref SecurityAlertTopic
+
+  SecurityAdministrationAlert:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Alert on KMS, Lambda alias/code, IAM, PITR, backup, and restore changes
+      EventPattern:
+        source: [aws.kms, aws.lambda, aws.iam, aws.dynamodb, aws.backup]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventSource:
+            - kms.amazonaws.com
+            - lambda.amazonaws.com
+            - iam.amazonaws.com
+            - dynamodb.amazonaws.com
+            - backup.amazonaws.com
+          eventName:
+            - DisableKey
+            - ScheduleKeyDeletion
+            - PutKeyPolicy
+            - DeleteAlias
+            - UpdateFunctionCode
+            - UpdateFunctionConfiguration
+            - UpdateAlias
+            - PutRolePolicy
+            - AttachRolePolicy
+            - UpdateContinuousBackups
+            - CreateBackup
+            - RestoreTableToPointInTime
+            - RestoreTableFromBackup
+      State: ENABLED
+      Targets: [{Arn: !Ref SecurityAlertTopic, Id: lucy-security-change-alert}]
+
+  RetrievalErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy retrieval executor errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref RetrievalFunctionName}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  DeletionInvocationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: More than one Lucy deletion executor invocation in five minutes
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions: [{Name: FunctionName, Value: !Ref DeletionFunctionName}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+Outputs:
+  EvidenceKeyArn: {Value: !GetAtt EvidenceKey.Arn}
+  RetrievalReceiptKeyArn: {Value: !GetAtt RetrievalReceiptKey.Arn}
+  DeletionReceiptKeyArn: {Value: !GetAtt DeletionReceiptKey.Arn}
+  WrappedKeyTableName: {Value: !Ref WrappedKeyRegistry}
+  RetrievalReceiptTableName: {Value: !Ref RetrievalReceiptLedger}
+  DeletionReceiptTableName: {Value: !Ref DeletionReceiptLedger}
+  DeletionIntentTableName: {Value: !Ref DeletionExecutionIntents}
+  DeletionJournalHeadTableName: {Value: !Ref DeletionJournalHead}
+  DeletionJournalIntentTableName: {Value: !Ref DeletionJournalIntents}
+  RetrievalQuotaTableName: {Value: !Ref RetrievalQuotaLedger}
+  DeletionQuotaTableName: {Value: !Ref DeletionQuotaLedger}
+  ArchiveRoleArn: {Value: !GetAtt ArchiveRole.Arn}
+  EvidenceCallerRoleArn: {Value: !GetAtt EvidenceRole.Arn}
+  DeletionCallerRoleArn: {Value: !GetAtt DeletionRole.Arn}
+  FinalityVerifierRoleArn: {Value: !GetAtt FinalityVerifierRole.Arn}
+  RecoveryAdministratorRoleArn: {Value: !GetAtt KmsRecoveryAdministratorRole.Arn}
+  LambdaDeployerRoleArn: {Value: !GetAtt LambdaDeployerRole.Arn}
+  RetrievalExecutorAliasArn: {Value: !Ref RetrievalExecutorAlias}
+  RetrievalExecutorVersion: {Value: !GetAtt RetrievalExecutorVersion.Version}
+  RetrievalExecutorIdentity: {Value: lucy-evidence-executor}
+  DeletionExecutorAliasArn: {Value: !Ref DeletionExecutorAlias}
+  DeletionExecutorVersion: {Value: !GetAtt DeletionExecutorVersion.Version}
+  DeletionExecutorIdentity: {Value: lucy-deletion-executor}
+  ExecutorArtifactCodeSha256: {Value: !Ref ExecutorArtifactCodeSha256}
+  ArchiveRegistryId: {Value: !Ref ArchiveRegistryId}
+  DeletionJournalId: {Value: !Ref DeletionJournalId}
+  SecurityEnvironment: {Value: !Ref SecurityEnvironment}
+  StorageEpoch: {Value: !Ref StorageEpoch}
+  RegistryEpoch: {Value: !Ref RegistryEpoch}
+  KeyEpoch: {Value: !Ref KeyEpoch}
+  ArchiveRecordVersion: {Value: !Ref ArchiveRecordVersion}
+  FinalityQuarantineTablePrefix:
+    Value: !Sub ${ResourceNamespace}-quarantine-

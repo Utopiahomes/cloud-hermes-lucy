@@ -33,7 +33,9 @@ def main() -> None:
         raise SystemExit("Lucy startup gate failed: Hermes pin mismatch")
     mode = service_mode_from_environment()
     try:
-        journal = None if mode == "policy" else deletion_journal_from_environment()
+        # V1.2 evidence/deletion callers have no DynamoDB credentials. Only the
+        # routine/archive boundary reads the bounded journal head at admission.
+        journal = deletion_journal_from_environment() if mode == "routine" else None
         ServiceReadiness(
             sessions,
             mode=mode,

@@ -109,9 +109,8 @@ class MaintenanceService:
                 text(
                     "SELECT count(*) FROM pg_stat_activity a JOIN pg_roles u ON u.oid=a.usesysid "
                     "WHERE a.datname=current_database() AND a.pid<>pg_backend_pid() "
-                    "AND NOT u.rolsuper AND EXISTS (SELECT 1 FROM pg_roles r WHERE "
-                    "r.rolname IN ('lucy_routine','lucy_policy','lucy_evidence_reader',"
-                    "'lucy_evidence_deleter','lucy_app') AND pg_has_role(u.oid,r.oid,'MEMBER'))"
+                    "AND NOT u.rolsuper AND u.rolname<>current_user "
+                    "AND has_schema_privilege(u.oid,'lucy','USAGE')"
                 )
             )
             if connected:

@@ -10,7 +10,9 @@ from lucy.db.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Alembic can run in the same verification process as application modules.
+    # Do not silently disable pre-existing sanitized security loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 database_url = os.environ.get("LUCY_MIGRATION_DATABASE_URL")
 if database_url:
@@ -46,4 +48,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

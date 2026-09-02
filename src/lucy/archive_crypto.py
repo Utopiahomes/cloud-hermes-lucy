@@ -17,6 +17,8 @@ import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from lucy.contracts.security_v1_2 import DeploymentEnvironment, KmsEncryptionContextV1
+
 LOCAL_ALGORITHM = "AES-256-GCM+AES-KW-GCM"
 AWS_KMS_ALGORITHM = "AES-256-GCM+AWS-KMS"
 ALGORITHM = LOCAL_ALGORITHM
@@ -53,6 +55,21 @@ class ArchiveKeyStore(Protocol):
 class ArchiveCipher(Protocol):
     @property
     def algorithm(self) -> str: ...
+
+    @property
+    def encryption_context_version(self) -> int: ...
+
+    @property
+    def record_version(self) -> int: ...
+
+    @property
+    def storage_epoch(self) -> int: ...
+
+    @property
+    def registry_epoch(self) -> int: ...
+
+    @property
+    def key_epoch(self) -> int: ...
 
     def commitment(self, plaintext: bytes) -> str: ...
 
@@ -275,6 +292,26 @@ class EnvelopeCipher:
     def algorithm(self) -> str:
         return LOCAL_ALGORITHM
 
+    @property
+    def encryption_context_version(self) -> int:
+        return 1
+
+    @property
+    def record_version(self) -> int:
+        return 1
+
+    @property
+    def storage_epoch(self) -> int:
+        return 1
+
+    @property
+    def registry_epoch(self) -> int:
+        return 1
+
+    @property
+    def key_epoch(self) -> int:
+        return 1
+
     @classmethod
     def from_environment(cls) -> EnvelopeCipher:
         return cls(
@@ -334,14 +371,26 @@ class AwsKmsEnvelopeCipher:
         *,
         key_arn: str,
         commitment_key: bytes,
+        environment: DeploymentEnvironment,
+        storage_epoch: int,
+        registry_epoch: int,
+        key_epoch: int,
+        record_version: int = 1,
     ) -> None:
         if not _valid_kms_key_arn(key_arn):
             raise ValueError("LUCY_AWS_KMS_KEY_ARN must be a full KMS key ARN")
         if len(commitment_key) != 32:
             raise ValueError("archive commitment key must contain 32 bytes")
+        if min(storage_epoch, registry_epoch, key_epoch, record_version) < 1:
+            raise ValueError("archive security epochs and record version must be positive")
         self._client = client
         self._key_arn = key_arn
         self._commitment_key = commitment_key
+        self._environment = environment
+        self._storage_epoch = storage_epoch
+        self._registry_epoch = registry_epoch
+        self._key_epoch = key_epoch
+        self._record_version = record_version
 
     @classmethod
     def from_environment(cls) -> AwsKmsEnvelopeCipher:
@@ -351,11 +400,38 @@ class AwsKmsEnvelopeCipher:
             client,
             key_arn=os.environ.get("LUCY_AWS_KMS_KEY_ARN", "").strip(),
             commitment_key=_decode_key("LUCY_ARCHIVE_COMMITMENT_KEY_B64"),
+            environment=DeploymentEnvironment(
+                os.environ.get("LUCY_SECURITY_ENVIRONMENT", "").strip()
+            ),
+            storage_epoch=_positive_environment_int("LUCY_SECURITY_STORAGE_EPOCH"),
+            registry_epoch=_positive_environment_int("LUCY_SECURITY_REGISTRY_EPOCH"),
+            key_epoch=_positive_environment_int("LUCY_SECURITY_KEY_EPOCH"),
+            record_version=_positive_environment_int("LUCY_ARCHIVE_RECORD_VERSION"),
         )
 
     @property
     def algorithm(self) -> str:
         return AWS_KMS_ALGORITHM
+
+    @property
+    def encryption_context_version(self) -> int:
+        return 2
+
+    @property
+    def record_version(self) -> int:
+        return self._record_version
+
+    @property
+    def storage_epoch(self) -> int:
+        return self._storage_epoch
+
+    @property
+    def registry_epoch(self) -> int:
+        return self._registry_epoch
+
+    @property
+    def key_epoch(self) -> int:
+        return self._key_epoch
 
     def commitment(self, plaintext: bytes) -> str:
         return hmac.new(self._commitment_key, plaintext, hashlib.sha256).hexdigest()
@@ -412,12 +488,15 @@ class AwsKmsEnvelopeCipher:
             raise ValueError("archive commitment mismatch")
         return plaintext
 
-    @staticmethod
-    def _encryption_context(evidence_id: UUID) -> dict[str, str]:
-        return {
-            "application": AWS_KMS_CONTEXT_APPLICATION,
-            "evidence-id": str(evidence_id),
-        }
+    def _encryption_context(self, evidence_id: UUID) -> dict[str, str]:
+        return KmsEncryptionContextV1(
+            environment=self._environment,
+            evidence_id=evidence_id,
+            storage_epoch=self._storage_epoch,
+            registry_epoch=self._registry_epoch,
+            key_epoch=self._key_epoch,
+            record_version=self._record_version,
+        ).as_aws_context()
 
 
 def archive_dependencies_from_environment() -> tuple[ArchiveCipher, ArchiveKeyStore]:
@@ -514,4 +593,14 @@ def _required_bytes(response: dict[str, Any], name: str) -> bytes:
     value = response.get(name)
     if not isinstance(value, bytes):
         raise ValueError(f"AWS response did not include {name}")
+    return value
+
+
+def _positive_environment_int(name: str) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer")
     return value

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -13,6 +15,8 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select, text
@@ -34,10 +38,29 @@ from lucy.authorization import (
     SensitiveActionPermitSigner,
     SensitiveActionPermitVerifier,
 )
+from lucy.contracts.security_v1_2 import (
+    DeletionTargetManifestV1,
+    DeletionTargetReferenceV1,
+    DeploymentEnvironment,
+    Ed25519ContractSigner,
+    EncryptedEvidencePackageV1,
+    ExecutorReceiptV1,
+    ExecutorResult,
+    OwnerAuthenticationMethod,
+    OwnerInteractionAssertionV1,
+    OwnerInteractionChannel,
+    SensitiveActionPermitV2,
+    SensitiveActionV2,
+    SensitiveExecutionGrantV1,
+    SensitiveReasonCode,
+    deletion_targets_digest,
+)
 from lucy.db.models import (
     Base,
     DeletionJournalBindingRow,
     EvidencePayloadRow,
+    EvidenceRow,
+    ExecutorBindingRow,
     LifecycleRow,
     OperationRow,
     RuntimeAdmissionRow,
@@ -99,8 +122,9 @@ def role_urls() -> Iterator[dict[str, str]]:
             text((ROOT / "deploy/postgres/production_roles.sql.example").read_text())
         )
     urls = {"owner": owner_url, "admin": ADMIN_URL}
+    finality_login = "test_finality"
     with admin.begin() as connection:
-        for mode, capability in SERVICE_ROLES.items():
+        for mode in SERVICE_ROLES:
             login = f"test_{mode}"
             if not connection.scalar(
                 text("SELECT 1 FROM pg_roles WHERE rolname=:login"), {"login": login}
@@ -109,10 +133,32 @@ def role_urls() -> Iterator[dict[str, str]]:
                     f"CREATE ROLE {login} LOGIN PASSWORD 'synthetic-service-only' "
                     "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
                 )
-            connection.exec_driver_sql(f"GRANT {capability} TO {login}")
             urls[mode] = parsed.set(
                 username=login, password="synthetic-service-only"
             ).render_as_string(hide_password=False)
+        if not connection.scalar(
+            text("SELECT 1 FROM pg_roles WHERE rolname=:login"), {"login": finality_login}
+        ):
+            connection.exec_driver_sql(
+                f"CREATE ROLE {finality_login} LOGIN PASSWORD 'synthetic-service-only' "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
+            )
+        urls["finality"] = parsed.set(
+            username=finality_login, password="synthetic-service-only"
+        ).render_as_string(hide_password=False)
+    grants = (
+        ROOT / "deploy/postgres/production_roles_v1.2.sql.example"
+    ).read_text(encoding="utf-8")
+    for placeholder, login in {
+        "__LUCY_ROUTINE_LOGIN__": "test_routine",
+        "__LUCY_POLICY_LOGIN__": "test_policy",
+        "__LUCY_EVIDENCE_LOGIN__": "test_evidence",
+        "__LUCY_DELETION_LOGIN__": "test_deletion",
+        "__LUCY_FINALITY_LOGIN__": finality_login,
+    }.items():
+        grants = grants.replace(placeholder, login)
+    with owner.begin() as connection:
+        connection.execute(text(grants))
     owner.dispose()
     admin.dispose()
     yield urls
@@ -131,6 +177,7 @@ def role_db(role_urls: dict[str, str]) -> Iterator[dict[str, Any]]:
                 "INSERT INTO lucy.lifecycle VALUES (true, 'offline', 0, now()); "
                 "INSERT INTO lucy.runtime_admission VALUES (true, 'quarantined', NULL, now()); "
                 "INSERT INTO lucy.audit_head VALUES (true, 0, repeat('0',64)); "
+                "INSERT INTO lucy.security_contract_epochs VALUES (true,1,1,1,now()); "
                 "INSERT INTO lucy.budget_accounts VALUES ('model.daily',1000000,0,0),"
                 "('action.daily',1000000,0,0)"
             )
@@ -222,8 +269,8 @@ def test_each_service_login_is_denied_control_and_administrative_writes(
     assert caught.value.orig.sqlstate == "42501"  # permission denied, not a syntax/constraint error
 
 
-@pytest.mark.parametrize("mode", ["routine", "policy", "evidence"])
-def test_only_deleter_can_acknowledge_independent_intents(
+@pytest.mark.parametrize("mode", SERVICE_ROLES)
+def test_v12_services_cannot_acknowledge_legacy_independent_intents(
     role_db: dict[str, Any], mode: str
 ) -> None:
     with pytest.raises(DBAPIError) as caught, role_db["sessions"][mode].begin() as session:
@@ -262,7 +309,7 @@ def test_read_and_deletion_services_cannot_mint_authority_or_rewrite_deletion_hi
     assert caught.value.orig.sqlstate == "42501"
 
 
-def test_actual_four_role_archive_permit_read_and_delete_path(
+def test_v1_local_migration_path_remains_available_while_capture_is_disabled(
     role_db: dict[str, Any],
     tmp_path: Path,
 ) -> None:
@@ -284,8 +331,11 @@ def test_actual_four_role_archive_permit_read_and_delete_path(
                 registry_id=head.registry_id,
             )
         )
+    # V1 is a local/historical migration input, not a production service path.
+    # Use the isolated schema-owner fixture after proving each V2 login passes
+    # readiness with only its direct grants.
     admitted = {
-        mode: admitted_session_factory(role_db["urls"][mode], epoch, journal)
+        mode: admitted_session_factory(role_db["urls"]["owner"], epoch, journal)
         for mode in SERVICE_ROLES
     }
     archive = ConversationArchiveService(admitted["routine"], cipher, keys, capture_authorized=True)
@@ -369,6 +419,625 @@ def test_actual_four_role_archive_permit_read_and_delete_path(
     assert deleted.derived_summary["evidence_records_deleted"] == 2
     for factory in admitted.values():
         factory.kw["bind"].dispose()
+
+
+def _insert_v2_evidence(
+    role_db: dict[str, Any],
+    evidence_id: Any,
+    *,
+    parent_id: Any | None = None,
+) -> None:
+    operation_id = uuid4()
+    with role_db["owner"].begin() as session:
+        session.add(
+            OperationRow(
+                id=operation_id,
+                idempotency_key=f"synthetic:v2-archive:{evidence_id}",
+                outcome="succeeded",
+                result={"synthetic": True},
+                created_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+        session.add(
+            EvidenceRow(
+                id=evidence_id,
+                source="synthetic",
+                source_conversation_id=f"acceptance:{evidence_id}",
+                captured_at=datetime.now(UTC),
+                content={
+                    "contract_version": "3",
+                    "encrypted": True,
+                    "occurred_at": datetime.now(UTC).isoformat(),
+                    "role": "user",
+                    "source_message_id": str(evidence_id),
+                },
+                content_commitment=evidence_id.hex * 2,
+                operation_id=operation_id,
+            )
+        )
+        # These fixtures intentionally construct rows without ORM relationships.
+        # Flush the parent chain before adding the encrypted payload so the
+        # database, rather than SQLAlchemy's incidental insert order, proves the
+        # foreign-key boundary deterministically.
+        session.flush()
+        session.add(
+            EvidencePayloadRow(
+                evidence_id=evidence_id,
+                ciphertext=b"synthetic-ciphertext-with-gcm-tag",
+                content_nonce=b"n" * 12,
+                key_ref=uuid4(),
+                algorithm="AES-256-GCM+AWS-KMS",
+                encryption_context_version=2,
+                record_version=1,
+                storage_epoch=1,
+                registry_epoch=1,
+                key_epoch=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+        if parent_id is not None:
+            session.execute(
+                text(
+                    "INSERT INTO lucy.evidence_derivations(parent_id,child_id) "
+                    "VALUES (:parent,:child)"
+                ),
+                {"parent": parent_id, "child": evidence_id},
+            )
+
+
+def _signed_v2_authorization(
+    evidence_id: Any,
+    action: SensitiveActionV2,
+) -> tuple[OwnerInteractionAssertionV1, SensitiveActionPermitV2, Ed25519ContractSigner]:
+    now = datetime.now(UTC)
+    owner_signer = Ed25519ContractSigner(
+        Ed25519PrivateKey.from_private_bytes(bytes(range(32))),
+        key_id="owner-broker.test.1",
+    )
+    assertion = owner_signer.sign(
+        OwnerInteractionAssertionV1(
+            key_id="owner-broker.test.1",
+            issuer="owner-broker.test",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=now,
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            assertion_id=uuid4(),
+            broker_identity="owner-broker.test",
+            channel=OwnerInteractionChannel.SYNTHETIC_ACCEPTANCE,
+            owner_subject="owner:synthetic",
+            source_interaction_id=f"interaction-{uuid4()}",
+            source_message_id=f"message-{uuid4()}",
+            requested_action=action,
+            evidence_id=evidence_id,
+            authentication_method=OwnerAuthenticationMethod.SYNTHETIC_ACCEPTANCE,
+            interaction_created_at=now,
+            max_age_seconds=300,
+            expires_at=now + timedelta(minutes=4),
+            nonce=f"assertion-nonce-{uuid4()}",
+            anti_replay_id=f"owner-event-{uuid4()}",
+            signature="",
+        )
+    )
+    policy_signer = Ed25519ContractSigner(
+        Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33))),
+        key_id="policy-notary.test.1",
+    )
+    permit = policy_signer.sign(
+        SensitiveActionPermitV2(
+            key_id="policy-notary.test.1",
+            issuer="lucy-policy.test",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=now,
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            permit_id=uuid4(),
+            action=action,
+            owner_subject="owner:synthetic",
+            owner_assertion_id=assertion.assertion_id,
+            owner_assertion_digest=assertion.unsigned_digest_hex(),
+            evidence_id=evidence_id,
+            reason=(
+                SensitiveReasonCode.OWNER_REVIEW
+                if action == SensitiveActionV2.EVIDENCE_RETRIEVE
+                else SensitiveReasonCode.OWNER_REQUEST
+            ),
+            max_records=1 if action == SensitiveActionV2.EVIDENCE_RETRIEVE else 90,
+            max_bytes=65_536 if action == SensitiveActionV2.EVIDENCE_RETRIEVE else 131_072,
+            record_version=1,
+            permit_claim_deadline=now + timedelta(minutes=5),
+            nonce=f"permit-nonce-{uuid4()}",
+            signature="",
+        )
+    )
+    return assertion, permit, policy_signer
+
+
+def _json_contract(value: Any) -> str:
+    return json.dumps(value.model_dump(mode="json"), separators=(",", ":"))
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _configure_executor(
+    role_db: dict[str, Any],
+    *,
+    action: SensitiveActionV2,
+    identity: str,
+    alias_arn: str,
+    receipt_key_id: str,
+) -> None:
+    with role_db["owner"].begin() as session:
+        session.add(
+            ExecutorBindingRow(
+                action=action,
+                environment=DeploymentEnvironment.TEST,
+                executor_identity=identity,
+                executor_alias_arn=alias_arn,
+                executor_version=12,
+                receipt_key_id=receipt_key_id,
+                active=True,
+                configured_at=datetime.now(UTC),
+            )
+        )
+
+
+def _sign_receipt(receipt: ExecutorReceiptV1) -> ExecutorReceiptV1:
+    private_key = ec.derive_private_key(1, ec.SECP256R1())
+    signature = private_key.sign(
+        bytes.fromhex(receipt.unsigned_digest_hex()),
+        ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+    )
+    return receipt.model_copy(update={"signature": base64.b64encode(signature).decode()})
+
+
+def test_v12_retrieval_uses_execute_only_claim_notary_and_receipt_path(
+    role_db: dict[str, Any],
+) -> None:
+    evidence_id = uuid4()
+    alias_arn = (
+        "arn:aws:lambda:us-east-1:123456789012:"
+        "function:lucy-evidence-executor:production"
+    )
+    receipt_key_id = (
+        "arn:aws:kms:us-east-1:123456789012:"
+        "key/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    )
+    _insert_v2_evidence(role_db, evidence_id)
+    _configure_executor(
+        role_db,
+        action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+        identity="lucy-evidence-executor",
+        alias_arn=alias_arn,
+        receipt_key_id=receipt_key_id,
+    )
+    assertion, permit, policy_signer = _signed_v2_authorization(
+        evidence_id, SensitiveActionV2.EVIDENCE_RETRIEVE
+    )
+    with role_db["sessions"]["policy"].begin() as session:
+        issued = session.scalar(
+            text(
+                "SELECT lucy.issue_sensitive_action_permit_v2("
+                "CAST(:assertion AS jsonb),CAST(:permit AS jsonb),:idempotency)"
+            ),
+            {
+                "assertion": _json_contract(assertion),
+                "permit": _json_contract(permit),
+                "idempotency": f"issue-retrieve-{uuid4()}",
+            },
+        )
+    assert issued == permit.permit_id
+    with role_db["sessions"]["evidence"].begin() as session:
+        claim = session.scalar(
+            text(
+                "SELECT lucy.claim_evidence_retrieval_v1("
+                "CAST(:permit AS jsonb),:idempotency)"
+            ),
+            {"permit": _json_contract(permit), "idempotency": f"retrieve-{uuid4()}"},
+        )
+    package = EncryptedEvidencePackageV1.model_validate(claim["package"])
+    assert package.package_digest_hex() == claim["package_digest"]
+    operation_id = package.operation_id
+    with role_db["sessions"]["policy"].begin() as session:
+        notary = session.scalar(
+            text("SELECT lucy.read_claim_digest_for_notary_v1(:operation_id)"),
+            {"operation_id": operation_id},
+        )
+    grant = policy_signer.sign(
+        SensitiveExecutionGrantV1(
+            key_id="policy-notary.test.1",
+            issuer="lucy-policy.test",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=datetime.now(UTC),
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            grant_id=uuid4(),
+            action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+            permit_id=permit.permit_id,
+            permit_nonce=permit.nonce,
+            operation_id=operation_id,
+            database_session_user="test_evidence",
+            evidence_id=evidence_id,
+            encrypted_package_digest=notary["package_digest"],
+            package_size_bytes=notary["package_size_bytes"],
+            idempotency_key=notary["idempotency_key"],
+            record_version=1,
+            executor_identity="lucy-evidence-executor",
+            executor_alias_arn=alias_arn,
+            executor_version=12,
+            permit_claim_deadline=_parse_time(notary["permit_claim_deadline"]),
+            execution_deadline=_parse_time(notary["execution_deadline"]),
+            signature="",
+        )
+    )
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.store_sensitive_execution_grant_v1("
+                ":operation_id,CAST(:grant AS jsonb))"
+            ),
+            {"operation_id": operation_id, "grant": _json_contract(grant)},
+        )
+    completed_at = datetime.now(UTC)
+    receipt = _sign_receipt(
+        ExecutorReceiptV1(
+            key_id=receipt_key_id,
+            issuer="lucy-evidence-executor",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=completed_at,
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            receipt_id=uuid4(),
+            action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+            executor_identity="lucy-evidence-executor",
+            executor_alias_arn=alias_arn,
+            executor_version=12,
+            operation_id=operation_id,
+            permit_id=permit.permit_id,
+            execution_grant_id=grant.grant_id,
+            package_digest=claim["package_digest"],
+            result=ExecutorResult.RETRIEVAL_SUCCEEDED,
+            lambda_request_id=f"lambda-{uuid4()}",
+            kms_request_id=f"kms-{uuid4()}",
+            execution_deadline=grant.execution_deadline,
+            completed_at=completed_at,
+            record_version=1,
+            signature="",
+        )
+    )
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.attest_executor_receipt_v1("
+                ":operation_id,CAST(:receipt AS jsonb))"
+            ),
+            {"operation_id": operation_id, "receipt": _json_contract(receipt)},
+        )
+    with role_db["sessions"]["evidence"].begin() as session:
+        assert session.scalar(
+            text("SELECT lucy.reconcile_evidence_retrieval_v1(:operation_id)"),
+            {"operation_id": operation_id},
+        ) == "EXECUTOR_RECEIPTED"
+        assert session.scalar(
+            text("SELECT lucy.record_evidence_delivery_v1(:operation_id,'accepted')"),
+            {"operation_id": operation_id},
+        ) == "DELIVERY_CONFIRMED"
+    with role_db["owner"]() as session:
+        assert session.scalar(
+            text("SELECT state FROM lucy.sensitive_operations_v1 WHERE id=:id"),
+            {"id": operation_id},
+        ) == "DELIVERY_CONFIRMED"
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.executor_receipt_attestations_v1 "
+                "WHERE operation_id=:id"
+            ),
+            {"id": operation_id},
+        ) == 1
+
+
+def test_v12_deletion_cascades_then_requires_metadata_verified_finality(
+    role_db: dict[str, Any],
+) -> None:
+    root_id = uuid4()
+    child_id = uuid4()
+    alias_arn = (
+        "arn:aws:lambda:us-east-1:123456789012:"
+        "function:lucy-deletion-executor:production"
+    )
+    receipt_key_id = (
+        "arn:aws:kms:us-east-1:123456789012:"
+        "key/bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+    )
+    _insert_v2_evidence(role_db, root_id)
+    _insert_v2_evidence(role_db, child_id, parent_id=root_id)
+    _configure_executor(
+        role_db,
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        identity="lucy-deletion-executor",
+        alias_arn=alias_arn,
+        receipt_key_id=receipt_key_id,
+    )
+    assertion, permit, policy_signer = _signed_v2_authorization(
+        root_id, SensitiveActionV2.EVIDENCE_DELETE
+    )
+    manifest_id = uuid4()
+    deletion_idempotency = f"delete-{uuid4()}"
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.issue_sensitive_action_permit_v2("
+                "CAST(:assertion AS jsonb),CAST(:permit AS jsonb),:idempotency)"
+            ),
+            {
+                "assertion": _json_contract(assertion),
+                "permit": _json_contract(permit),
+                "idempotency": f"issue-delete-{uuid4()}",
+            },
+        )
+        scope = session.scalar(
+            text(
+                "SELECT lucy.prepare_deletion_scope_v1("
+                ":manifest_id,:permit_id,:idempotency)"
+            ),
+            {
+                "manifest_id": manifest_id,
+                "permit_id": permit.permit_id,
+                "idempotency": deletion_idempotency,
+            },
+        )
+    targets = tuple(DeletionTargetReferenceV1.model_validate(item) for item in scope["targets"])
+    unsigned_manifest = DeletionTargetManifestV1(
+        key_id="policy-notary.test.1",
+        issuer="lucy-policy.test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=datetime.now(UTC),
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        manifest_id=manifest_id,
+        permit_id=permit.permit_id,
+        permit_nonce=permit.nonce,
+        root_evidence_id=root_id,
+        owner_assertion_id=assertion.assertion_id,
+        owner_assertion_digest=assertion.unsigned_digest_hex(),
+        idempotency_key=deletion_idempotency,
+        scope_version=scope["scope_version"],
+        root_record_version=scope["root_record_version"],
+        targets=targets,
+        target_count=scope["target_count"],
+        targets_digest=deletion_targets_digest(targets),
+        permit_claim_deadline=_parse_time(scope["permit_claim_deadline"]),
+        execution_deadline=_parse_time(scope["execution_deadline"]),
+        signature="",
+    )
+    manifest = policy_signer.sign(unsigned_manifest)
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.finalize_deletion_scope_v1("
+                ":manifest_id,CAST(:unsigned AS jsonb),CAST(:signed AS jsonb))"
+            ),
+            {
+                "manifest_id": manifest_id,
+                "unsigned": _json_contract(unsigned_manifest),
+                "signed": _json_contract(manifest),
+            },
+        )
+    with role_db["sessions"]["deletion"].begin() as session:
+        claim = session.scalar(
+            text(
+                "SELECT lucy.claim_evidence_deletion_v1("
+                "CAST(:permit AS jsonb),CAST(:manifest AS jsonb),:idempotency)"
+            ),
+            {
+                "permit": _json_contract(permit),
+                "manifest": _json_contract(manifest),
+                "idempotency": deletion_idempotency,
+            },
+        )
+    operation_id = claim["operation_id"]
+    with role_db["sessions"]["policy"].begin() as session:
+        notary = session.scalar(
+            text("SELECT lucy.read_claim_digest_for_notary_v1(:operation_id)"),
+            {"operation_id": operation_id},
+        )
+    grant = policy_signer.sign(
+        SensitiveExecutionGrantV1(
+            key_id="policy-notary.test.1",
+            issuer="lucy-policy.test",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=datetime.now(UTC),
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            grant_id=uuid4(),
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_id=permit.permit_id,
+            permit_nonce=permit.nonce,
+            operation_id=operation_id,
+            database_session_user="test_deletion",
+            evidence_id=root_id,
+            deletion_manifest_id=manifest_id,
+            deletion_manifest_digest=notary["manifest_digest"],
+            encrypted_package_digest=notary["package_digest"],
+            package_size_bytes=notary["package_size_bytes"],
+            idempotency_key=deletion_idempotency,
+            record_version=1,
+            executor_identity="lucy-deletion-executor",
+            executor_alias_arn=alias_arn,
+            executor_version=12,
+            permit_claim_deadline=_parse_time(notary["permit_claim_deadline"]),
+            execution_deadline=_parse_time(notary["execution_deadline"]),
+            signature="",
+        )
+    )
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.store_sensitive_execution_grant_v1("
+                ":operation_id,CAST(:grant AS jsonb))"
+            ),
+            {"operation_id": operation_id, "grant": _json_contract(grant)},
+        )
+    completed_at = datetime.now(UTC)
+    receipt = _sign_receipt(
+        ExecutorReceiptV1(
+            key_id=receipt_key_id,
+            issuer="lucy-deletion-executor",
+            environment=DeploymentEnvironment.TEST,
+            issued_at=completed_at,
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            receipt_id=uuid4(),
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            executor_identity="lucy-deletion-executor",
+            executor_alias_arn=alias_arn,
+            executor_version=12,
+            operation_id=operation_id,
+            permit_id=permit.permit_id,
+            execution_grant_id=grant.grant_id,
+            deletion_manifest_id=manifest_id,
+            package_digest=claim["package_digest"],
+            result=ExecutorResult.DELETION_SUCCEEDED,
+            lambda_request_id=f"lambda-{uuid4()}",
+            transaction_client_token=f"delete-token-{uuid4()}",
+            execution_deadline=grant.execution_deadline,
+            completed_at=completed_at,
+            record_version=1,
+            signature="",
+        )
+    )
+    with role_db["sessions"]["policy"].begin() as session:
+        session.scalar(
+            text(
+                "SELECT lucy.attest_executor_receipt_v1("
+                ":operation_id,CAST(:receipt AS jsonb))"
+            ),
+            {"operation_id": operation_id, "receipt": _json_contract(receipt)},
+        )
+    with role_db["sessions"]["deletion"].begin() as session:
+        result = session.scalar(
+            text("SELECT lucy.reconcile_evidence_deletion_v1(:operation_id)"),
+            {"operation_id": operation_id},
+        )
+    assert result["state"] == "FINALITY_PENDING"
+    with role_db["owner"]() as session:
+        assert session.scalar(
+            text("SELECT count(*) FROM lucy.evidence_payloads WHERE evidence_id IN (:a,:b)"),
+            {"a": root_id, "b": child_id},
+        ) == 0
+        assert session.scalar(
+            text("SELECT count(*) FROM lucy.evidence_tombstones WHERE evidence_id IN (:a,:b)"),
+            {"a": root_id, "b": child_id},
+        ) == 2
+        assert session.scalar(
+            text(
+                "SELECT bool_and(state='EFFECTIVE') FROM lucy.evidence_deletion_fences_v1 "
+                "WHERE operation_id=:id"
+            ),
+            {"id": operation_id},
+        ) is True
+    finality_engine = create_engine(role_db["urls"]["finality"])
+    try:
+        observed = datetime.now(UTC)
+        with finality_engine.begin() as connection:
+            assert connection.scalar(
+                text(
+                    "SELECT lucy.record_finality_verification_v1("
+                    ":operation_id,CAST(:metadata AS jsonb))"
+                ),
+                {
+                    "operation_id": operation_id,
+                    "metadata": json.dumps(
+                        {
+                            "contract_version": "1",
+                            "object_type": "lucy.deletion-recovery-inventory.v1",
+                            "operation_id": str(operation_id),
+                            "metadata_observed_at": observed.isoformat(),
+                            "pitr_status": "ENABLED",
+                            "pitr_recovery_period_days": 30,
+                            "pitr_earliest_restorable_at": (
+                                observed - timedelta(days=29)
+                            ).isoformat(),
+                            "pitr_latest_restorable_at": observed.isoformat(),
+                            "on_demand_backup_count": 0,
+                            "aws_backup_recovery_point_count": 0,
+                            "export_count": 0,
+                            "import_count": 0,
+                            "global_replica_count": 0,
+                            "quarantine_table_count": 0,
+                            "stream_enabled": False,
+                            "exceptional_earliest_restorable_at": None,
+                            "exceptional_latest_restorable_at": None,
+                            "metadata_inventory_digest": "e" * 64,
+                        }
+                    ),
+                },
+            ) == "EXTENDED"
+        # The verifier reports only AWS facts. PostgreSQL alone combines those
+        # facts with its authoritative deletion time to derive VERIFIED.
+        with role_db["owner"].begin() as session:
+            session.execute(
+                text(
+                    "UPDATE lucy.deletion_finality_v1 SET "
+                    "deletion_effective_at=:effective,finality_not_before=:lower "
+                    "WHERE operation_id=:operation_id"
+                ),
+                {
+                    "effective": observed - timedelta(days=40),
+                    "lower": observed - timedelta(days=10),
+                    "operation_id": operation_id,
+                },
+            )
+        verified_observed = observed + timedelta(seconds=1)
+        with finality_engine.begin() as connection:
+            assert connection.scalar(
+                text(
+                    "SELECT lucy.record_finality_verification_v1("
+                    ":operation_id,CAST(:metadata AS jsonb))"
+                ),
+                {
+                    "operation_id": operation_id,
+                    "metadata": json.dumps(
+                        {
+                            "contract_version": "1",
+                            "object_type": "lucy.deletion-recovery-inventory.v1",
+                            "operation_id": str(operation_id),
+                            "metadata_observed_at": verified_observed.isoformat(),
+                            "pitr_status": "ENABLED",
+                            "pitr_recovery_period_days": 30,
+                            "pitr_earliest_restorable_at": (
+                                observed - timedelta(days=29)
+                            ).isoformat(),
+                            "pitr_latest_restorable_at": verified_observed.isoformat(),
+                            "on_demand_backup_count": 0,
+                            "aws_backup_recovery_point_count": 0,
+                            "export_count": 0,
+                            "import_count": 0,
+                            "global_replica_count": 0,
+                            "quarantine_table_count": 0,
+                            "stream_enabled": False,
+                            "exceptional_earliest_restorable_at": None,
+                            "exceptional_latest_restorable_at": None,
+                            "metadata_inventory_digest": "f" * 64,
+                        }
+                    ),
+                },
+            ) == "VERIFIED"
+        with pytest.raises(DBAPIError), finality_engine.connect() as connection:
+            connection.execute(text("SELECT * FROM lucy.deletion_finality_v1"))
+    finally:
+        finality_engine.dispose()
 
 
 @pytest.mark.parametrize("mode", SERVICE_ROLES)
@@ -480,22 +1149,43 @@ def test_quarantine_blocks_previously_constructed_session_factory(role_db: dict[
 
 
 @pytest.mark.parametrize(
-    ("grant", "revoke", "diagnostic"),
+    ("mode", "grant", "revoke", "diagnostic"),
     [
         (
+            "routine",
             "GRANT SELECT (ciphertext) ON lucy.evidence_payloads TO test_routine",
             "REVOKE SELECT (ciphertext) ON lucy.evidence_payloads FROM test_routine",
             "exceeds its reviewed capabilities",
         ),
         (
+            "routine",
             "GRANT lucy_policy TO test_routine",
             "REVOKE lucy_policy FROM test_routine",
-            "compound capability",
+            "inherited capability membership",
+        ),
+        (
+            "evidence",
+            "GRANT SELECT (ciphertext) ON lucy.evidence_payloads TO test_evidence",
+            "REVOKE SELECT (ciphertext) ON lucy.evidence_payloads FROM test_evidence",
+            "exceeds its reviewed capabilities",
+        ),
+        (
+            "deletion",
+            "GRANT SELECT ON lucy.evidence TO test_deletion",
+            "REVOKE SELECT ON lucy.evidence FROM test_deletion",
+            "exceeds its reviewed capabilities",
+        ),
+        (
+            "policy",
+            "GRANT SELECT ON lucy.sensitive_action_permits_v2 TO test_policy",
+            "REVOKE SELECT ON lucy.sensitive_action_permits_v2 FROM test_policy",
+            "exceeds its reviewed capabilities",
         ),
     ],
 )
 def test_accidental_extra_capabilities_reject_service_startup(
     role_db: dict[str, Any],
+    mode: str,
     grant: str,
     revoke: str,
     diagnostic: str,
@@ -506,8 +1196,8 @@ def test_accidental_extra_capabilities_reject_service_startup(
             connection.execute(text(grant))
         with pytest.raises(ReadinessError, match=diagnostic):
             ServiceReadiness(
-                role_db["sessions"]["routine"],
-                mode="routine",
+                role_db["sessions"][mode],
+                mode=mode,
                 storage_epoch=role_db["epoch"],
             ).check()
     finally:

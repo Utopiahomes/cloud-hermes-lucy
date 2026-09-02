@@ -1,0 +1,86 @@
+-- Security Baseline v1.2 production binding checkpoint.
+--
+-- Run only as the reviewed migration/security owner after migrations 0017-0019
+-- and the AWS stack exist. Replace every __PLACEHOLDER__ from immutable stack
+-- outputs. This script deliberately leaves runtime admission quarantined and
+-- never enables transcript capture.
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+SELECT pg_advisory_xact_lock(5495877265902424391);
+
+DO $configure$
+DECLARE
+  v_retrieval_alias text := '__RETRIEVAL_EXECUTOR_ALIAS_ARN__';
+  v_deletion_alias text := '__DELETION_EXECUTOR_ALIAS_ARN__';
+  v_retrieval_receipt_key text := '__RETRIEVAL_RECEIPT_KEY_ARN__';
+  v_deletion_receipt_key text := '__DELETION_RECEIPT_KEY_ARN__';
+  v_retrieval_version bigint := '__RETRIEVAL_EXECUTOR_VERSION__';
+  v_deletion_version bigint := '__DELETION_EXECUTOR_VERSION__';
+  v_storage_epoch bigint := '__SECURITY_STORAGE_EPOCH__';
+  v_registry_epoch bigint := '__SECURITY_REGISTRY_EPOCH__';
+  v_key_epoch bigint := '__SECURITY_KEY_EPOCH__';
+BEGIN
+  IF current_setting('server_version_num')::integer < 160000 THEN
+    RAISE EXCEPTION 'PostgreSQL 16 or newer is required';
+  END IF;
+  IF EXISTS (SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled)
+     OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled) THEN
+    RAISE EXCEPTION 'transcript capture must remain disabled during v1.2 configuration';
+  END IF;
+  IF EXISTS (SELECT 1 FROM lucy.sensitive_operations_v1) THEN
+    RAISE EXCEPTION 'executor rebinding requires an empty pre-activation operation ledger';
+  END IF;
+  IF least(v_storage_epoch,v_registry_epoch,v_key_epoch,v_retrieval_version,
+           v_deletion_version) < 1 THEN
+    RAISE EXCEPTION 'security epochs and executor versions must be positive';
+  END IF;
+  IF v_retrieval_alias !~ '^arn:aws:lambda:us-east-1:[0-9]{12}:function:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,128}$'
+     OR v_deletion_alias !~ '^arn:aws:lambda:us-east-1:[0-9]{12}:function:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,128}$'
+     OR v_retrieval_alias = v_deletion_alias THEN
+    RAISE EXCEPTION 'exact, disjoint us-east-1 Lambda aliases are required';
+  END IF;
+  IF v_retrieval_receipt_key !~ '^arn:aws:kms:us-east-1:[0-9]{12}:key/[0-9a-f-]{36}$'
+     OR v_deletion_receipt_key !~ '^arn:aws:kms:us-east-1:[0-9]{12}:key/[0-9a-f-]{36}$'
+     OR v_retrieval_receipt_key = v_deletion_receipt_key THEN
+    RAISE EXCEPTION 'exact, disjoint us-east-1 KMS receipt keys are required';
+  END IF;
+
+  UPDATE lucy.runtime_admission
+    SET state='quarantined',updated_at=clock_timestamp()
+    WHERE singleton;
+  INSERT INTO lucy.security_contract_epochs(
+    singleton,storage_epoch,registry_epoch,key_epoch,updated_at
+  ) VALUES (
+    true,v_storage_epoch,v_registry_epoch,v_key_epoch,clock_timestamp()
+  ) ON CONFLICT (singleton) DO UPDATE SET
+    storage_epoch=EXCLUDED.storage_epoch,
+    registry_epoch=EXCLUDED.registry_epoch,
+    key_epoch=EXCLUDED.key_epoch,
+    updated_at=EXCLUDED.updated_at;
+
+  DELETE FROM lucy.executor_bindings_v1 WHERE environment='production';
+  INSERT INTO lucy.executor_bindings_v1(
+    action,environment,executor_identity,executor_alias_arn,executor_version,
+    receipt_key_id,active,configured_at
+  ) VALUES
+    ('evidence.retrieve','production','lucy-evidence-executor',v_retrieval_alias,
+     v_retrieval_version,v_retrieval_receipt_key,true,clock_timestamp()),
+    ('evidence.delete','production','lucy-deletion-executor',v_deletion_alias,
+     v_deletion_version,v_deletion_receipt_key,true,clock_timestamp());
+END
+$configure$;
+
+-- A content-free checkpoint only. Admission must remain quarantined until the
+-- synthetic cloud suite and an explicit operator maintenance review pass.
+SELECT
+  (SELECT state FROM lucy.runtime_admission WHERE singleton) AS admission_state,
+  (SELECT count(*) FROM lucy.executor_bindings_v1
+   WHERE environment='production' AND active) AS active_executor_bindings,
+  (SELECT storage_epoch::text || ':' || registry_epoch::text || ':' || key_epoch::text
+   FROM lucy.security_contract_epochs WHERE singleton) AS configured_epoch_tuple;
+
+COMMIT;

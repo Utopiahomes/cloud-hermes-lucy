@@ -77,6 +77,8 @@ See:
 - [`docs/telegram-transcript-retention.md`](docs/telegram-transcript-retention.md) for encrypted default capture, owner deletion, and its deployment gate
 - [`docs/render-aws-kms-acceptance.md`](docs/render-aws-kms-acceptance.md) for the Render OIDC, AWS KMS, and deletion-aware wrapped-key boundary
 - [`docs/security-baseline-v1.1.md`](docs/security-baseline-v1.1.md) for the approved execution-identity, permit, memory-confidentiality, and recovery baseline
+- [`docs/security-baseline-v1.2-plan.md`](docs/security-baseline-v1.2-plan.md) for the approved execute-only Render/AWS executor architecture and acceptance gates
+- [`docs/security-baseline-v1.2-implementation-checkpoint.md`](docs/security-baseline-v1.2-implementation-checkpoint.md) for current local proof and remaining cloud/recovery blockers
 - [`docs/retention-hardening-2026-08-31.md`](docs/retention-hardening-2026-08-31.md) for the first gap-remediation batch, isolated PostgreSQL tests, and remaining capture blockers
 - [`docs/service-boundaries-2026-08-31.md`](docs/service-boundaries-2026-08-31.md) for read-only startup, four-role PostgreSQL proof, operator quarantine, and the current startup/verification procedure
 - [`docs/deletion-provenance-2026-08-31.md`](docs/deletion-provenance-2026-08-31.md) for multi-source deletion closure, observed tool provenance, and remaining interruption/history-reset blockers
@@ -93,8 +95,10 @@ Use the separate, temporary `lucy_test` and `lucy_roles_test` databases from
 commands in [`docs/service-boundaries-2026-08-31.md`](docs/service-boundaries-2026-08-31.md).
 After migration 0014, a fresh application database starts quarantined and needs
 an explicit operator maintenance run; restarting the API never performs recovery.
-Current head 0016 adds the independent journal binding/completion receipts and
-closes admission for review. See the recovery checkpoint for the expanded test command.
+Current head 0019 adds Security Baseline v1.2's execute-only claims, independent
+AWS executor receipts, deletion reconciliation, and metadata-derived finality,
+and closes admission for review. See the v1.2 implementation checkpoint and the
+recovery checkpoint for the expanded test command.
 
 ## Planned layout
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 from lucy.db.models import LifecycleRow, RuntimeAdmissionRow
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
-SCHEMA_REVISION = "0016_deletion_journal"
+SCHEMA_REVISION = "0019_security_v1_2_reconcile"
 SERVICE_ROLES = {
     "routine": "lucy_routine",
     "policy": "lucy_policy",
@@ -90,7 +90,7 @@ class ServiceReadiness:
             lifecycle = session.get(LifecycleRow, True)
             if lifecycle is None or lifecycle.state != "ready":
                 raise ReadinessError("control-plane recovery is not ready")
-            if self._mode != "policy":
+            if self._mode in {"routine", "all-local"}:
                 check_journal_admission(session.connection(), self._journal)
 
     def _check_identity(self, session: Session) -> None:
@@ -112,8 +112,8 @@ class ServiceReadiness:
                 )
             )
         )
-        if memberships != {SERVICE_ROLES[self._mode]}:
-            raise ReadinessError("service login has wrong or compound capability membership")
+        if memberships:
+            raise ReadinessError("v1.2 service login has inherited capability membership")
         elevated_storage = session.scalar(
             text(
                 "SELECT has_database_privilege(current_user, current_database(), 'CREATE') "
@@ -158,6 +158,61 @@ class ServiceReadiness:
                     "correction_sources",
                 )
             )
+        v12_direct_access_forbidden = (
+            "security_contract_epochs",
+            "owner_interaction_assertions_v1",
+            "sensitive_action_permits_v2",
+            "deletion_target_manifests_v1",
+            "deletion_manifest_targets_v1",
+            "executor_bindings_v1",
+            "sensitive_operations_v1",
+            "sensitive_execution_grants_v1",
+            "executor_receipt_attestations_v1",
+            "deletion_finality_v1",
+            "sensitive_operation_events_v1",
+        )
+        forbidden.extend(
+            (f"lucy.{table}", "SELECT,INSERT,UPDATE,DELETE,TRUNCATE")
+            for table in v12_direct_access_forbidden
+        )
+        if self._mode != "routine":
+            # V1.2 policy/evidence/deletion are execute-only boundaries. All
+            # application data access is inside their exact security-definer
+            # functions; even a future accidental column grant must close
+            # admission before the service accepts work.
+            nonroutine_direct_access_forbidden = (
+                "operations",
+                "budget_accounts",
+                "budget_reservations",
+                "approval_requests",
+                "memory_claims",
+                "memory_entities",
+                "memory_relationships",
+                "working_contexts",
+                "memory_corrections",
+                "memory_write_proposals",
+                "action_executions",
+                "conversation_capture_states",
+                "conversation_turns",
+                "capture_receipts",
+                "evidence",
+                "evidence_payloads",
+                "evidence_tombstones",
+                "evidence_derivations",
+                "claim_sources",
+                "proposal_sources",
+                "correction_sources",
+                "audit_head",
+                "audit_events",
+                "startup_runs",
+                "deletion_journal_binding",
+                "deletion_journal_receipts",
+                "evidence_deletion_fences_v1",
+            )
+            forbidden.extend(
+                (f"lucy.{table}", "SELECT,INSERT,UPDATE,DELETE,TRUNCATE")
+                for table in nonroutine_direct_access_forbidden
+            )
         for table, privileges in forbidden:
             table_grant = session.scalar(
                 text("SELECT has_table_privilege(current_user, :table, :privileges)"),
@@ -172,6 +227,31 @@ class ServiceReadiness:
             )
             if table_grant or column_grant:
                 raise ReadinessError("service login exceeds its reviewed capabilities")
+        required_functions = {
+            "policy": (
+                "lucy.issue_sensitive_action_permit_v2(jsonb,jsonb,text)",
+                "lucy.prepare_deletion_scope_v1(uuid,uuid,text)",
+                "lucy.finalize_deletion_scope_v1(uuid,jsonb,jsonb)",
+                "lucy.read_claim_digest_for_notary_v1(uuid)",
+                "lucy.store_sensitive_execution_grant_v1(uuid,jsonb)",
+                "lucy.attest_executor_receipt_v1(uuid,jsonb)",
+            ),
+            "evidence": (
+                "lucy.claim_evidence_retrieval_v1(jsonb,text)",
+                "lucy.reconcile_evidence_retrieval_v1(uuid)",
+                "lucy.record_evidence_delivery_v1(uuid,text)",
+            ),
+            "deletion": (
+                "lucy.claim_evidence_deletion_v1(jsonb,jsonb,text)",
+                "lucy.reconcile_evidence_deletion_v1(uuid)",
+            ),
+        }
+        for function in required_functions.get(self._mode, ()):
+            if not session.scalar(
+                text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),
+                {"function": function},
+            ):
+                raise ReadinessError("service login lacks its exact v1.2 function grants")
         # The actual service-operation matrix is exercised with separate logins
         # in PostgreSQL tests; these are the common minimum readiness grants.
         for table in ("lucy.lifecycle", "lucy.runtime_admission", "public.alembic_version"):
