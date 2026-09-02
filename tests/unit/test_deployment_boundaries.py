@@ -120,3 +120,21 @@ def test_local_maintenance_is_explicit_and_owner_credential_never_reaches_http()
         assert "LUCY_STORAGE_EPOCH" in _env_keys(service)
         assert "LUCY_ENVIRONMENT" in _env_keys(service)
         assert "LUCY_MAINTENANCE_DATABASE_URL" not in _env_keys(service)
+
+
+def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "python:3.12.11-slim@sha256:" in dockerfile
+    assert "COPY deploy/render/requirements.lock" in dockerfile
+    assert "pip install --no-cache-dir --require-hashes" in dockerfile
+    assert "pip install --no-cache-dir ." not in dockerfile
+
+    lock = (ROOT / "deploy" / "render" / "requirements.lock").read_text(
+        encoding="utf-8"
+    )
+    requirements = [
+        line for line in lock.splitlines() if line and not line.startswith(("#", " "))
+    ]
+    assert requirements
+    assert all("==" in requirement for requirement in requirements)
+    assert lock.count("--hash=sha256:") >= len(requirements)

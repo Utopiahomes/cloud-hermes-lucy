@@ -9,10 +9,11 @@ RUN groupadd --system --gid 10001 lucy \
 
 WORKDIR /app
 COPY pyproject.toml ./
+COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
 COPY alembic.ini hermes.lock ./
 COPY migrations ./migrations
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --require-hashes -r deploy/render/requirements.lock
 
 USER 10001:10001
 CMD ["python", "-m", "lucy.runtime"]

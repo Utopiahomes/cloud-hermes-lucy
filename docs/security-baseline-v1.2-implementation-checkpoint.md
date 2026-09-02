@@ -24,6 +24,9 @@ not authorized.**
 - Four private Render backends plus a separate non-continuous finality utility;
   policy has no AWS identity, while evidence/deletion have no KMS/DynamoDB
   variables or authority.
+- A Blueprint-managed PostgreSQL 18 instance in the same protected, network-
+  isolated production environment, with no external IP allowlist. Its generated
+  owner is migration-only; each runtime receives a distinct post-bootstrap URL.
 - A metadata-only finality utility. It reports observed recovery facts; it
   cannot supply a finality verdict. PostgreSQL derives `EXTENDED` or `VERIFIED`
   from its authoritative deletion time and the observed PITR/backup/export/
@@ -32,7 +35,8 @@ not authorized.**
   protected DynamoDB ledgers, exact Render OIDC callers, published Lambda
   versions and aliases, deployer/recovery/finality identities, CloudTrail,
   alarms, and owner alerts.
-- Hash-pinned Linux AMD64 Lambda dependencies and deterministic zip packaging.
+- Hash-pinned Linux AMD64 Lambda dependencies and deterministic zip packaging,
+  plus hash-pinned Linux runtime dependencies for the Render Docker image.
 - Exact production-login and post-stack epoch/executor binding SQL templates.
 
 ## Local evidence
@@ -40,17 +44,24 @@ not authorized.**
 - Ruff: passed across `src`, `tests`, and the artifact builder.
 - Strict MyPy: passed for 41 source files.
 - CloudFormation schema/lint validation: passed.
-- Unit tests: 208 passed.
+- Unit tests: 210 passed locally and again inside the exact Linux deployment
+  image.
 - PostgreSQL integration tests: 175 passed, 1 explicitly quarantined backup
   drill skipped. This includes real separate LOGINs and the metadata-derived
   `EXTENDED` to `VERIFIED` transition.
-- Combined suite: 383 passed, 1 explicitly quarantined backup drill skipped.
+- Combined suite: 385 passed, 1 explicitly quarantined backup drill skipped.
 - The clean executor artifact was rebuilt twice byte-for-byte identically from
   commit `0f25e85c9b1da5b0bf87ad15b954dcd6d0e76fa0` (`source_state=clean`):
   SHA-256 hex `05236e5e19cb92ba57600c59ebb0b24d0df9b62d0730a0f7dcbe5d9b27183e8e`
   and base64 `BSNuXhnLkrpXYAxZ67CyTQ35ti0HMKD33L5dmycYPo4=`. The Linux AMD64 ZIP is
   23,567,559 bytes with 2,506 files. Upload/version identity and the final
   deployed Lambda version remain cloud acceptance evidence, not local claims.
+- The hash-locked Render dependency inventory has SHA-256
+  `29dcc6d96c8ad72d2db123a78dc02333df2207119c8483935f5b04a372f4e8e0`.
+  A local Linux AMD64 preflight build ran as UID/GID 10001 and passed all 210
+  unit tests; its local BuildKit manifest digest is
+  `sha256:b6c8ea0c9e1f33cd8c5470798f0d2810bfc53100aecbd7d99f1a047089a98528`.
+  This is build evidence, not the final Render-deployed artifact digest.
 
 No test used a real transcript, Telegram capture, production database, AWS key,
 or Render secret.
@@ -65,26 +76,30 @@ PostgreSQL derives the monotonic verdict. This closes a false-finality path.
 
 ## Cloud gate still required
 
-1. Sign in through IAM Identity Center as the user assigned the
-   `LucySecurityAdministrator` permission set; do not use root for routine work.
-2. Create/confirm the protected Render production environment and immutable IDs
-   for the four private services plus the finality utility base.
-3. Generate the policy-notary key, retain its private seed only as the Render
+Read-only preflight confirmed account `fortisanima` in `us-east-1` through the
+`LucySecurityAdministrator` Identity Center assignment and a Render Pro
+workspace. No v1.2 CloudFormation stacks, customer KMS keys, DynamoDB tables,
+Lambda functions, S3 buckets, or Render OIDC provider existed at that check.
+
+1. Create the protected Render production environment, private PostgreSQL
+   database, and immutable IDs for the four private services plus the finality
+   utility base.
+2. Generate the policy-notary key, retain its private seed only as the Render
    policy secret, and use only its reviewed public inventory in AWS executors.
-4. Upload the clean release artifact to a private versioned S3 bucket and record
+3. Upload the clean release artifact to a private versioned S3 bucket and record
    the object version together with the verified local SHA-256 representations.
-5. Deploy `deploy/aws/security-baseline-v1.2.yaml` in `us-east-1`; confirm the
+4. Deploy `deploy/aws/security-baseline-v1.2.yaml` in `us-east-1`; confirm the
    alert subscription and record all stack outputs.
-6. Obtain the two KMS receipt public keys, construct the pinned policy receipt
+5. Obtain the two KMS receipt public keys, construct the pinned policy receipt
    trust inventory, and populate only the matching Render service variables.
-7. Apply migrations, exact production LOGIN grants, and
+6. Apply migrations, exact production LOGIN grants, and
    `deploy/postgres/configure_security_v1.2.sql.example`. Keep admission
    quarantined.
-8. Run positive, negative, crash/retry, permission, cost, log-scrub, and network
+7. Run positive, negative, crash/retry, permission, cost, log-scrub, and network
    acceptance using synthetic evidence only.
-9. Perform the quarantined unauthorized-deletion PITR recovery drill and prove
+8. Perform the quarantined unauthorized-deletion PITR recovery drill and prove
    that an authorized deletion is not restored. Measure RPO/RTO.
-10. Produce the final deployed acceptance report and request a separate owner
+9. Produce the final deployed acceptance report and request a separate owner
     decision. Do not set `LUCY_TRANSCRIPT_CAPTURE_ENABLED=true` before that
     approval.
 

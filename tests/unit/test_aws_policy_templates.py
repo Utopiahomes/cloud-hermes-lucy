@@ -47,6 +47,15 @@ def _v12_render_services() -> dict[str, dict[str, Any]]:
     return {service["name"]: service for service in configured}
 
 
+def _v12_render_environment() -> dict[str, Any]:
+    render = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.2.yaml.example").read_text(
+            encoding="utf-8"
+        )
+    )
+    return render["projects"][0]["environments"][0]
+
+
 def _environment_keys(service: dict[str, Any]) -> set[str]:
     return {item["key"] for item in service["envVars"]}
 
@@ -385,6 +394,26 @@ def test_v12_render_has_four_continuous_backends_and_one_finality_utility() -> N
     assert finality["dockerCommand"] == "python -m lucy.finality --scheduled-sentinel"
     assert finality["schedule"] == "0 0 1 1 *"
     assert all(service["region"] == "virginia" for service in services.values())
+
+
+def test_v12_render_database_is_private_paid_and_migration_owned() -> None:
+    environment = _v12_render_environment()
+    assert environment["networking"] == {"isolation": "enabled"}
+    assert environment["permissions"] == {"protection": "enabled"}
+    assert environment["databases"] == [
+        {
+            "name": "lucy-postgres",
+            "region": "virginia",
+            "plan": "0.5c-1g",
+            "diskSizeGB": 5,
+            "storageAutoscalingEnabled": False,
+            "postgresMajorVersion": "18",
+            "databaseName": "lucy",
+            "user": "lucy_migration",
+            "connectionPool": "none",
+            "ipAllowList": [],
+        }
+    ]
 
 
 def test_v12_render_capture_is_explicitly_disabled_and_credentials_are_oidc_only() -> None:
