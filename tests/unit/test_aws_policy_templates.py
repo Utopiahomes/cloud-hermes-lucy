@@ -396,6 +396,24 @@ def test_v12_render_has_four_continuous_backends_and_one_finality_utility() -> N
     assert all(service["region"] == "virginia" for service in services.values())
 
 
+def test_v12_render_private_services_start_in_inert_resource_id_hold() -> None:
+    services = _v12_render_services()
+    private_services = {
+        name: service for name, service in services.items() if service["type"] == "pserv"
+    }
+    for service in private_services.values():
+        assert service["dockerCommand"] == "python -m lucy.provisioning_hold"
+        marker = next(
+            item
+            for item in service["envVars"]
+            if item["key"] == "LUCY_RESOURCE_ID_BOOTSTRAP_HOLD"
+        )
+        assert marker == {
+            "key": "LUCY_RESOURCE_ID_BOOTSTRAP_HOLD",
+            "value": "resource-id-only",
+        }
+
+
 def test_v12_render_database_is_private_paid_and_migration_owned() -> None:
     environment = _v12_render_environment()
     assert environment["networking"] == {"isolation": "enabled"}
@@ -442,6 +460,12 @@ def test_v12_render_aws_and_database_boundaries_are_service_exact() -> None:
     finality = _environment_keys(services["lucy-finality-utility"])
 
     assert {"LUCY_AWS_KMS_KEY_ARN", "LUCY_AWS_DYNAMODB_KEY_TABLE"} <= routine
+    assert {
+        "LUCY_ARCHIVE_REGISTRY_ID",
+        "LUCY_DELETION_JOURNAL_ID",
+        "LUCY_AWS_DELETION_HEAD_TABLE",
+        "LUCY_AWS_DELETION_INTENT_TABLE",
+    } <= routine
     assert "AWS_ROLE_ARN" in routine
     assert not any(key.startswith("AWS_") or "LUCY_AWS_" in key for key in policy)
     assert {
