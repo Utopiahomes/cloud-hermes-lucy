@@ -45,10 +45,12 @@ not authorized.**
   drill skipped. This includes real separate LOGINs and the metadata-derived
   `EXTENDED` to `VERIFIED` transition.
 - Combined suite: 383 passed, 1 explicitly quarantined backup drill skipped.
-- Dirty-tree local executor artifact was rebuilt twice byte-for-byte identically:
-  SHA-256 `05236e5e19cb92ba57600c59ebb0b24d0df9b62d0730a0f7dcbe5d9b27183e8e`.
-  It is labeled `dirty-local-test` and is **not deployable**. A clean committed
-  source tree must produce the release digest recorded in the final report.
+- The clean executor artifact was rebuilt twice byte-for-byte identically from
+  commit `0f25e85c9b1da5b0bf87ad15b954dcd6d0e76fa0` (`source_state=clean`):
+  SHA-256 hex `05236e5e19cb92ba57600c59ebb0b24d0df9b62d0730a0f7dcbe5d9b27183e8e`
+  and base64 `BSNuXhnLkrpXYAxZ67CyTQ35ti0HMKD33L5dmycYPo4=`. The Linux AMD64 ZIP is
+  23,567,559 bytes with 2,506 files. Upload/version identity and the final
+  deployed Lambda version remain cloud acceptance evidence, not local claims.
 
 No test used a real transcript, Telegram capture, production database, AWS key,
 or Render secret.
@@ -69,8 +71,8 @@ PostgreSQL derives the monotonic verdict. This closes a false-finality path.
    for the four private services plus the finality utility base.
 3. Generate the policy-notary key, retain its private seed only as the Render
    policy secret, and use only its reviewed public inventory in AWS executors.
-4. Build the clean release artifact, upload it to a private versioned S3 bucket,
-   and record the object version and both SHA-256 representations.
+4. Upload the clean release artifact to a private versioned S3 bucket and record
+   the object version together with the verified local SHA-256 representations.
 5. Deploy `deploy/aws/security-baseline-v1.2.yaml` in `us-east-1`; confirm the
    alert subscription and record all stack outputs.
 6. Obtain the two KMS receipt public keys, construct the pinned policy receipt
