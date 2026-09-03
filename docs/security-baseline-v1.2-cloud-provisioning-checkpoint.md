@@ -88,8 +88,9 @@ shaped separate-login integration suite passed all 106 cases.
 3. Recreate and inspect the v1.2 CloudFormation change set, then deploy it.
 4. Record stack outputs and receipt public keys; populate only the matching
    Render service variables.
-5. Apply migrations and exact PostgreSQL LOGIN grants, keeping admission
-   quarantined.
+5. Generate the exact PostgreSQL LOGIN grants and immutable AWS bindings with
+   `deploy/postgres/render_security_v1_2_sql.py`, review their reported hashes,
+   then apply them after migrations while keeping admission quarantined.
 6. Run the synthetic positive, negative, crash/retry, recovery, and finality
    acceptance suite.
 7. Produce the final deployed acceptance report. Live capture still requires a

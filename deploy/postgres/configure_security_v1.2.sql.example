@@ -1,7 +1,7 @@
 -- Security Baseline v1.2 production binding checkpoint.
 --
 -- Run only as the reviewed migration/security owner after migrations 0017-0019
--- and the AWS stack exist. Replace every __PLACEHOLDER__ from immutable stack
+-- and the AWS stack exist. Render every named marker below from immutable stack
 -- outputs. This script deliberately leaves runtime admission quarantined and
 -- never enables transcript capture.
 

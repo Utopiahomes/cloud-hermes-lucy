@@ -1,6 +1,7 @@
 -- Security Baseline v1.2 exact-LOGIN grants. Apply after migrations as the
--- database/schema owner. Replace each quoted placeholder with the exact Render
--- PostgreSQL LOGIN identifier. Do not replace it with a capability role.
+-- database/schema owner. Render this reviewed template with
+-- render_security_v1_2_sql.py; do not edit deployment values into it by hand.
+-- Each value must be an exact Render PostgreSQL LOGIN, not a capability role.
 --
 -- Required replacements:
 --   __LUCY_ROUTINE_LOGIN__
