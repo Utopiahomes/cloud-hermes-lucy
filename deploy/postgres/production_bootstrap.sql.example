@@ -9,6 +9,7 @@ CREATE ROLE lucy_evidence_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOI
 CREATE ROLE lucy_evidence_deleter NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 CREATE ROLE lucy_security_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
   NOINHERIT NOREPLICATION NOBYPASSRLS;
--- The fixed production migration identity may install/re-own reviewed functions.
+-- The fixed production migration identity from the v1.2 Render Blueprint may
+-- install/re-own reviewed functions.
 -- Runtime logins are never members of this role.
-GRANT lucy_security_function_owner TO lucy_migrator;
+GRANT lucy_security_function_owner TO lucy_migration;

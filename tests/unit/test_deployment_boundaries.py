@@ -85,7 +85,15 @@ def test_production_database_roles_have_no_ddl_or_role_administration() -> None:
     assert bootstrap.count("NOINHERIT") == 6
     assert "CREATE ROLE lucy_app NOLOGIN" in bootstrap
     assert "CREATE ROLE lucy_security_function_owner NOLOGIN" in bootstrap
-    assert "GRANT lucy_security_function_owner TO lucy_migrator" in bootstrap
+    blueprint = yaml.safe_load(
+        (
+            ROOT / "deploy" / "render" / "security-baseline-v1.2.yaml.example"
+        ).read_text(encoding="utf-8")
+    )
+    migration_login = blueprint["projects"][0]["environments"][0]["databases"][0][
+        "user"
+    ]
+    assert f"GRANT lucy_security_function_owner TO {migration_login}" in bootstrap
     assert "lucy.runtime_admission" in executable.lower()
 
 

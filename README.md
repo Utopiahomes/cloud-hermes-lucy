@@ -79,6 +79,7 @@ See:
 - [`docs/security-baseline-v1.1.md`](docs/security-baseline-v1.1.md) for the approved execution-identity, permit, memory-confidentiality, and recovery baseline
 - [`docs/security-baseline-v1.2-plan.md`](docs/security-baseline-v1.2-plan.md) for the approved execute-only Render/AWS executor architecture and acceptance gates
 - [`docs/security-baseline-v1.2-implementation-checkpoint.md`](docs/security-baseline-v1.2-implementation-checkpoint.md) for current local proof and remaining cloud/recovery blockers
+- [`docs/security-baseline-v1.2-cloud-provisioning-checkpoint.md`](docs/security-baseline-v1.2-cloud-provisioning-checkpoint.md) for the inert Render bootstrap, immutable AWS inputs, failed-stack cleanup, and current Lambda quota hold
 - [`docs/retention-hardening-2026-08-31.md`](docs/retention-hardening-2026-08-31.md) for the first gap-remediation batch, isolated PostgreSQL tests, and remaining capture blockers
 - [`docs/service-boundaries-2026-08-31.md`](docs/service-boundaries-2026-08-31.md) for read-only startup, four-role PostgreSQL proof, operator quarantine, and the current startup/verification procedure
 - [`docs/deletion-provenance-2026-08-31.md`](docs/deletion-provenance-2026-08-31.md) for multi-source deletion closure, observed tool provenance, and remaining interruption/history-reset blockers

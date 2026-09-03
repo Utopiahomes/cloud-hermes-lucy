@@ -108,7 +108,7 @@ def role_urls() -> Iterator[dict[str, str]]:
             is False
         )
     owner_url = parsed.set(
-        username="lucy_migrator", password="synthetic-migrator-only"
+        username="lucy_migration", password="synthetic-migrator-only"
     ).render_as_string(hide_password=False)
     # Migrate as a NON-superuser database/schema owner, not the bootstrap admin.
     with pytest.MonkeyPatch.context() as patch:
