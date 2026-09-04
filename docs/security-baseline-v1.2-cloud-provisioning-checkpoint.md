@@ -96,9 +96,15 @@ bytes: SHA-256
 `bdfbf88350d21a6d44f90631c03ed0778f86e216fec5f991aa995feebfe3d8a4`.
 The reviewed CloudFormation template SHA-256 is
 `99922ee906da2de847a24bcf0c914eeb24f85c825fc23ec63f4131a23abdd8be`.
-These are local release-candidate facts only until all three objects are
-uploaded under new non-overwriting keys and their S3 version identities are
-recorded. The earlier artifact remains preserved as the rollback candidate.
+All three objects were subsequently uploaded under new content-addressed keys;
+their distinct S3 version identities, ETags, S3 checksums, sizes, and local
+SHA-256 values are recorded only in the git-ignored controlled release record.
+The live bucket policy now denies `PutObject` against the three new exact keys
+as well as the two earlier pinned keys. Block All Public Access, TLS-only
+access, bucket-owner-enforced ownership, server-side encryption, and versioning
+remain in effect. A read-only preflight must still retrieve and hash the exact
+artifact version before its local SHA-256 becomes cloud-verified acceptance
+evidence. The earlier artifact remains preserved as the rollback candidate.
 
 Deployed-state verification is now also prepared before the retry. The first
 read-only verifier checks stack completion and termination protection, exact
