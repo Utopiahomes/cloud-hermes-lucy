@@ -131,7 +131,8 @@ def role_urls() -> Iterator[dict[str, str]]:
             ):
                 connection.exec_driver_sql(
                     f"CREATE ROLE {login} LOGIN PASSWORD 'synthetic-service-only' "
-                    "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
+                    "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                    "NOREPLICATION NOBYPASSRLS",
                 )
             urls[mode] = parsed.set(
                 username=login, password="synthetic-service-only"
@@ -141,7 +142,8 @@ def role_urls() -> Iterator[dict[str, str]]:
         ):
             connection.exec_driver_sql(
                 f"CREATE ROLE {finality_login} LOGIN PASSWORD 'synthetic-service-only' "
-                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                "NOREPLICATION NOBYPASSRLS",
             )
         urls["finality"] = parsed.set(
             username=finality_login, password="synthetic-service-only"
@@ -196,6 +198,45 @@ def role_db(role_urls: dict[str, str]) -> Iterator[dict[str, Any]]:
         admitted_session_factory(role_urls[mode], epoch).kw["bind"].dispose()
     admitted_session_factory.cache_clear()
     owner_engine.dispose()
+
+
+def test_v12_service_logins_are_noninheriting_and_membership_free(
+    role_urls: dict[str, str],
+) -> None:
+    expected = {*(f"test_{mode}" for mode in SERVICE_ROLES), "test_finality"}
+    admin = create_engine(role_urls["admin"])
+    with admin.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,"
+                "rolreplication,rolbypassrls FROM pg_roles WHERE rolname = ANY(:roles)"
+            ),
+            {"roles": sorted(expected)},
+        ).mappings()
+        observed = {row["rolname"]: row for row in rows}
+        memberships = connection.execute(
+            text(
+                "SELECT member.rolname FROM pg_auth_members membership "
+                "JOIN pg_roles member ON member.oid=membership.member "
+                "WHERE member.rolname = ANY(:roles)"
+            ),
+            {"roles": sorted(expected)},
+        ).scalars()
+        assert set(observed) == expected
+        for row in observed.values():
+            assert not any(
+                row[attribute]
+                for attribute in (
+                    "rolsuper",
+                    "rolinherit",
+                    "rolcreaterole",
+                    "rolcreatedb",
+                    "rolreplication",
+                    "rolbypassrls",
+                )
+            )
+        assert list(memberships) == []
+    admin.dispose()
 
 
 @pytest.mark.parametrize("mode", SERVICE_ROLES)

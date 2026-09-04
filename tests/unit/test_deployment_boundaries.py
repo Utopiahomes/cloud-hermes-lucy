@@ -110,6 +110,7 @@ def test_v12_database_grants_are_direct_execute_only_for_sensitive_logins() -> N
     assert "GRANT lucy_evidence_reader TO" not in sql
     assert "GRANT lucy_evidence_deleter TO" not in sql
     assert "pg_auth_members" in sql
+    assert "NOT rolinherit" in sql
     assert "record_finality_verification_v1" in sql
 
 
