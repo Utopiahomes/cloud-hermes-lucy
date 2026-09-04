@@ -699,3 +699,25 @@ def test_v12_cloudformation_dependency_graph_is_acyclic() -> None:
     assert order.index("EvidenceKey") < order.index("RetrievalExecutorFunction")
     assert order.index("RetrievalExecutorFunction") < order.index("RetrievalExecutorVersion")
     assert order.index("RetrievalExecutorVersion") < order.index("RetrievalExecutorAlias")
+
+
+def test_v12_outputs_expose_every_identity_and_control_for_deployed_verification() -> None:
+    outputs = _cloudformation_named("security-baseline-v1.2.yaml")["Outputs"]
+    assert {
+        "ArchiveRoleArn",
+        "EvidenceCallerRoleArn",
+        "DeletionCallerRoleArn",
+        "FinalityVerifierRoleArn",
+        "RecoveryAdministratorRoleArn",
+        "LambdaDeployerRoleArn",
+        "RetrievalExecutorRuntimeRoleArn",
+        "DeletionExecutorRuntimeRoleArn",
+        "RetrievalLogGroupName",
+        "DeletionLogGroupName",
+        "AuditBucketName",
+        "AuditTrailName",
+        "SecurityAlertTopicArn",
+        "SecurityAdministrationAlertName",
+        "RetrievalErrorAlarmName",
+        "DeletionInvocationAlarmName",
+    } <= outputs.keys()

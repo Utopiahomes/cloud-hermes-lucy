@@ -86,6 +86,20 @@ read-only AWS preflight prevents a stack retry unless the SSO identity, account,
 OIDC provider, full versioned artifact digest, encryption, and Lambda
 concurrency all match the reviewed deployment.
 
+Deployed-state verification is now also prepared before the retry. The first
+read-only verifier checks stack completion and termination protection, exact
+published Lambda versions and environments, public-only policy trust stores,
+KMS key purpose separation, and DynamoDB schemas/protection. The second checks
+all eight live IAM roles and three KMS resource policies against the approved
+contract and runs the critical IAM allow/deny simulation matrix. Both emit
+content-free, non-overwriting acceptance artifacts.
+
+That review exposed and fixed a pre-deployment Lambda logging defect: the
+CloudWatch Logs `Arn` returned by CloudFormation already ends in `:*`, so the
+runtime policies must use it directly. The earlier template appended another
+`:*`, which would have produced an unusable `:*:*` resource. No AWS workload
+resources were deployed with the faulty policy.
+
 ## Next gated sequence
 
 1. Wait for the effective Lambda concurrency limit to reach at least 13.
@@ -97,12 +111,14 @@ concurrency all match the reviewed deployment.
    immutable registry/journal identifiers without exporting the policy private
    seed.
 3. Recreate and inspect the v1.2 CloudFormation change set, then deploy it.
-4. Record stack outputs and receipt public keys; populate only the matching
+4. Run both read-only deployed-state verifiers and preserve their acceptance
+   reports. Any failed core, IAM, or KMS-policy check keeps the rollout on hold.
+5. Record stack outputs and receipt public keys; populate only the matching
    Render service variables.
-5. Generate the exact PostgreSQL LOGIN grants and immutable AWS bindings with
+6. Generate the exact PostgreSQL LOGIN grants and immutable AWS bindings with
    `deploy/postgres/render_security_v1_2_sql.py`, review their reported hashes,
    then apply them after migrations while keeping admission quarantined.
-6. Run the synthetic positive, negative, crash/retry, recovery, and finality
+7. Run the synthetic positive, negative, crash/retry, recovery, and finality
    acceptance suite.
-7. Produce the final deployed acceptance report. Live capture still requires a
+8. Produce the final deployed acceptance report. Live capture still requires a
    separate owner approval after that review.

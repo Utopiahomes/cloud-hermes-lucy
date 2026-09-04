@@ -953,6 +953,8 @@ Outputs:
   FinalityVerifierRoleArn: {Value: !GetAtt FinalityVerifierRole.Arn}
   RecoveryAdministratorRoleArn: {Value: !GetAtt KmsRecoveryAdministratorRole.Arn}
   LambdaDeployerRoleArn: {Value: !GetAtt LambdaDeployerRole.Arn}
+  RetrievalExecutorRuntimeRoleArn: {Value: !GetAtt RetrievalExecutorRuntimeRole.Arn}
+  DeletionExecutorRuntimeRoleArn: {Value: !GetAtt DeletionExecutorRuntimeRole.Arn}
   RetrievalExecutorAliasArn: {Value: !Ref RetrievalExecutorAlias}
   RetrievalExecutorVersion: {Value: !GetAtt RetrievalExecutorVersion.Version}
   RetrievalExecutorIdentity: {Value: lucy-evidence-executor}
@@ -967,5 +969,13 @@ Outputs:
   RegistryEpoch: {Value: !Ref RegistryEpoch}
   KeyEpoch: {Value: !Ref KeyEpoch}
   ArchiveRecordVersion: {Value: !Ref ArchiveRecordVersion}
+  RetrievalLogGroupName: {Value: !Ref RetrievalLogGroup}
+  DeletionLogGroupName: {Value: !Ref DeletionLogGroup}
+  AuditBucketName: {Value: !Ref AuditBucket}
+  AuditTrailName: {Value: !Ref AuditTrail}
+  SecurityAlertTopicArn: {Value: !Ref SecurityAlertTopic}
+  SecurityAdministrationAlertName: {Value: !Ref SecurityAdministrationAlert}
+  RetrievalErrorAlarmName: {Value: !Ref RetrievalErrorAlarm}
+  DeletionInvocationAlarmName: {Value: !Ref DeletionInvocationAlarm}
   FinalityQuarantineTablePrefix:
     Value: !Sub ${ResourceNamespace}-quarantine-

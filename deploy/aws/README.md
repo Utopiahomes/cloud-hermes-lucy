@@ -57,3 +57,23 @@ through STS, CloudFormation, Lambda, KMS, and DynamoDB. It does not invoke an
 executor, inspect archive content, read DynamoDB records, or change AWS state.
 IAM-policy simulation, audit/alert validation, synthetic executor operations,
 and recovery testing remain separate acceptance gates.
+
+Then verify the deployed trust policies, inline policies, KMS resource
+policies, and critical IAM simulator decisions:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\verify_security_v1_2_iam.py `
+  --stack-name lucy-security-baseline-v1-2 `
+  --expected-account-id <12-digit-target-account> `
+  --report secrets\generated\aws-iam-v1.2.json
+```
+
+This second verifier requires `iam:GetRole`, `iam:GetRolePolicy`,
+`iam:ListRolePolicies`, `iam:ListAttachedRolePolicies`,
+`iam:SimulatePrincipalPolicy`, and `kms:GetKeyPolicy` in addition to the STS
+and CloudFormation reads. It requires every role to have exactly one reviewed
+inline policy, no attached managed policy, and no permissions boundary; it
+also checks the exact trust/resource policies and critical positive and
+negative simulator decisions. It never assumes a workload role. Real denied
+API calls under temporary workload sessions remain part of synthetic cloud
+acceptance rather than this read-only inspection.

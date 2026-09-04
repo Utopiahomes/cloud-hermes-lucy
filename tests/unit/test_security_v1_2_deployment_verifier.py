@@ -41,6 +41,28 @@ def _outputs() -> dict[str, str]:
         "DeletionJournalIntentTableName": "lucy-prod-v12-deletion-journal-intents",
         "RetrievalQuotaTableName": "lucy-prod-v12-retrieval-quotas",
         "DeletionQuotaTableName": "lucy-prod-v12-deletion-quotas",
+        "ArchiveRoleArn": f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-render-archive",
+        "EvidenceCallerRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-render-evidence-caller"
+        ),
+        "DeletionCallerRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-render-deletion-caller"
+        ),
+        "FinalityVerifierRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-finality-verifier"
+        ),
+        "RecoveryAdministratorRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-recovery-administrator"
+        ),
+        "LambdaDeployerRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-lambda-deployer"
+        ),
+        "RetrievalExecutorRuntimeRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-retrieval-runtime"
+        ),
+        "DeletionExecutorRuntimeRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-deletion-runtime"
+        ),
         "RetrievalExecutorAliasArn": (
             f"arn:aws:lambda:us-east-1:{ACCOUNT}:function:lucy-evidence-executor-v12:production"
         ),
@@ -57,6 +79,19 @@ def _outputs() -> dict[str, str]:
         "RegistryEpoch": "1",
         "KeyEpoch": "1",
         "ArchiveRecordVersion": "1",
+        "ArchiveRegistryId": "archive-registry.production.1",
+        "DeletionJournalId": "deletion-journal.production.1",
+        "RetrievalLogGroupName": "/aws/lambda/lucy-evidence-executor-v12",
+        "DeletionLogGroupName": "/aws/lambda/lucy-deletion-executor-v12",
+        "AuditBucketName": "lucy-prod-v12-audit-example",
+        "AuditTrailName": "lucy-prod-v12-security-audit",
+        "SecurityAlertTopicArn": (
+            f"arn:aws:sns:us-east-1:{ACCOUNT}:lucy-prod-v12-security-alerts"
+        ),
+        "SecurityAdministrationAlertName": "lucy-prod-v12-security-change",
+        "RetrievalErrorAlarmName": "lucy-prod-v12-retrieval-errors",
+        "DeletionInvocationAlarmName": "lucy-prod-v12-deletion-invocations",
+        "FinalityQuarantineTablePrefix": "lucy-prod-v12-quarantine-",
     }
 
 
