@@ -9,7 +9,6 @@ from uuid import UUID
 from sqlalchemy import Connection, create_engine, event, text
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
-from lucy.db.models import LifecycleRow, RuntimeAdmissionRow
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0019_security_v1_2_reconcile"
@@ -82,13 +81,24 @@ class ServiceReadiness:
             )
             if revisions != [SCHEMA_REVISION]:
                 raise ReadinessError("database schema is not the reviewed revision")
-            admission = session.get(RuntimeAdmissionRow, True)
-            if admission is None or admission.state != "ready":
+            admission = session.execute(
+                text(
+                    "SELECT state, storage_epoch FROM lucy.runtime_admission "
+                    "WHERE singleton IS TRUE"
+                )
+            ).one_or_none()
+            if admission is None:
+                raise ReadinessError("storage admission row is unavailable")
+            if admission.state != "ready":
                 raise ReadinessError("storage is quarantined")
             if self._epoch is not None and admission.storage_epoch != self._epoch:
                 raise ReadinessError("storage epoch mismatch")
-            lifecycle = session.get(LifecycleRow, True)
-            if lifecycle is None or lifecycle.state != "ready":
+            lifecycle = session.execute(
+                text("SELECT state FROM lucy.lifecycle WHERE singleton IS TRUE")
+            ).one_or_none()
+            if lifecycle is None:
+                raise ReadinessError("control-plane recovery row is unavailable")
+            if lifecycle.state != "ready":
                 raise ReadinessError("control-plane recovery is not ready")
             if self._mode in {"routine", "all-local"}:
                 check_journal_admission(session.connection(), self._journal)
