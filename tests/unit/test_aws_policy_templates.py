@@ -364,6 +364,12 @@ def test_v12_cloudformation_has_two_exact_executors_and_no_function_urls() -> No
         assert function["Runtime"] == "python3.12"
         assert function["Architectures"] == ["x86_64"]
         assert version["CodeSha256"] == {"Ref": "ExecutorArtifactCodeSha256"}
+        assert version["Description"] == {
+            "Fn::Sub": (
+                "Security Baseline v1.2 ${ExecutorArtifactCodeSha256} "
+                "trust-${PolicyTrustStoreSha256}"
+            )
+        }
         assert alias["Name"] == "production"
         assert alias["FunctionVersion"] == {
             "Fn::GetAtt": f"{prefix}ExecutorVersion.Version"
@@ -735,6 +741,7 @@ def test_v12_outputs_expose_every_identity_and_control_for_deployed_verification
         "LambdaDeployerRoleArn",
         "RetrievalExecutorRuntimeRoleArn",
         "DeletionExecutorRuntimeRoleArn",
+        "PolicyTrustStoreSha256",
         "RetrievalLogGroupName",
         "DeletionLogGroupName",
         "AuditBucketName",

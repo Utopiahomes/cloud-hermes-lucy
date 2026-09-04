@@ -229,6 +229,10 @@ def verify_trail(
         {
             "IncludeManagementEvents": True,
             "ReadWriteType": "All",
+            # CloudTrail returns this optional member even when its value is
+            # empty.  An empty list preserves the reviewed contract: no
+            # management-event sources are excluded.
+            "ExcludeManagementEventSources": [],
             "DataResources": [
                 {"Type": "AWS::DynamoDB::Table", "Values": table_arns},
                 {"Type": "AWS::Lambda::Function", "Values": function_arns},

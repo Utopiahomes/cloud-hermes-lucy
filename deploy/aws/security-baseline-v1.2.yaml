@@ -65,6 +65,10 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Reviewed public Ed25519 policy-notary verification-key inventory
+  PolicyTrustStoreSha256:
+    Type: String
+    AllowedPattern: "[0-9a-f]{64}"
+    Description: SHA-256 of the exact UTF-8 PolicyTrustStoreJson parameter
   ExecutorArtifactBucket:
     Type: String
   ExecutorArtifactKey:
@@ -669,14 +673,14 @@ Resources:
     Properties:
       FunctionName: !Ref RetrievalExecutorFunction
       CodeSha256: !Ref ExecutorArtifactCodeSha256
-      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256}
+      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256} trust-${PolicyTrustStoreSha256}
 
   DeletionExecutorVersion:
     Type: AWS::Lambda::Version
     Properties:
       FunctionName: !Ref DeletionExecutorFunction
       CodeSha256: !Ref ExecutorArtifactCodeSha256
-      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256}
+      Description: !Sub Security Baseline v1.2 ${ExecutorArtifactCodeSha256} trust-${PolicyTrustStoreSha256}
 
   RetrievalExecutorAlias:
     Type: AWS::Lambda::Alias
@@ -1250,6 +1254,7 @@ Outputs:
   DeletionExecutorVersion: {Value: !GetAtt DeletionExecutorVersion.Version}
   DeletionExecutorIdentity: {Value: lucy-deletion-executor}
   ExecutorArtifactCodeSha256: {Value: !Ref ExecutorArtifactCodeSha256}
+  PolicyTrustStoreSha256: {Value: !Ref PolicyTrustStoreSha256}
   ArchiveRegistryId: {Value: !Ref ArchiveRegistryId}
   DeletionJournalId: {Value: !Ref DeletionJournalId}
   SecurityEnvironment: {Value: !Ref SecurityEnvironment}

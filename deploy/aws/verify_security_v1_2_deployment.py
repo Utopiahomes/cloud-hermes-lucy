@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import re
 import sys
@@ -53,6 +54,7 @@ _REQUIRED_OUTPUTS = {
     "DeletionExecutorVersion",
     "DeletionExecutorIdentity",
     "ExecutorArtifactCodeSha256",
+    "PolicyTrustStoreSha256",
     "SecurityEnvironment",
     "StorageEpoch",
     "RegistryEpoch",
@@ -131,7 +133,7 @@ def verify_caller(identity: Mapping[str, Any], expected_account_id: str) -> list
 
 
 def verify_stack(
-    stack: Mapping[str, Any], termination: Mapping[str, Any]
+    stack: Mapping[str, Any],
 ) -> tuple[list[Check], dict[str, str], dict[str, str]]:
     outputs = _values(stack.get("Outputs"), "OutputKey", "OutputValue")
     parameters = _values(stack.get("Parameters"), "ParameterKey", "ParameterValue")
@@ -144,7 +146,7 @@ def verify_stack(
         ),
         Check(
             "cloudformation.termination_protection",
-            termination.get("EnableTerminationProtection") is True,
+            stack.get("EnableTerminationProtection") is True,
             "stack termination protection must be enabled",
         ),
         Check(
@@ -164,6 +166,14 @@ def verify_stack(
             and parameters.get("ExecutorArtifactCodeSha256")
             == outputs.get("ExecutorArtifactCodeSha256"),
             "artifact digest parameter and stack output must match",
+        ),
+        Check(
+            "cloudformation.policy_trust_store_digest",
+            re.fullmatch(r"[0-9a-f]{64}", outputs.get("PolicyTrustStoreSha256", ""))
+            is not None
+            and parameters.get("PolicyTrustStoreSha256")
+            == outputs.get("PolicyTrustStoreSha256"),
+            "policy trust-store digest parameter and stack output must match",
         ),
     ]
     return checks, outputs, parameters
@@ -315,6 +325,13 @@ def verify_executor(
             f"lambda.{kind}.policy_trust_store",
             verify_policy_trust_store(trust_store),
             "executor must contain only valid production policy-notary public keys",
+        ),
+        Check(
+            f"lambda.{kind}.policy_trust_store_digest",
+            isinstance(trust_store, str)
+            and hashlib.sha256(trust_store.encode("utf-8")).hexdigest()
+            == outputs.get("PolicyTrustStoreSha256"),
+            "executor trust-store bytes must match the reviewed deployment digest",
         ),
         Check(
             f"lambda.{kind}.no_static_credentials",
@@ -601,8 +618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         cloudformation = session.client("cloudformation")
         stack = cloudformation.describe_stacks(StackName=args.stack_name)["Stacks"][0]
-        termination = cloudformation.describe_termination_protection(StackName=args.stack_name)
-        stack_checks, outputs, parameters = verify_stack(stack, termination)
+        stack_checks, outputs, parameters = verify_stack(stack)
         checks.extend(stack_checks)
 
         lambdas = session.client("lambda")

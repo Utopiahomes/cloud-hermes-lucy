@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import sys
@@ -10,6 +11,27 @@ from typing import Any
 
 ROOT = Path(__file__).parents[2]
 ACCOUNT = "123456789012"
+
+
+def _policy_trust_store() -> str:
+    return json.dumps(
+        [
+            {
+                "algorithm": "Ed25519",
+                "contract_version": "1",
+                "environment": "production",
+                "issuance_not_after": "2027-09-01T00:00:00Z",
+                "issuer": "lucy-policy",
+                "key_id": "policy-notary.production.1",
+                "object_type": "lucy.verification-key.v1",
+                "public_key_b64": base64.b64encode(b"p" * 32).decode("ascii"),
+                "purpose": "policy_notary",
+                "status": "active",
+                "valid_from": "2026-09-01T00:00:00Z",
+                "verify_not_after": "2027-09-02T00:00:00Z",
+            }
+        ]
+    )
 
 
 def _verifier() -> ModuleType:
@@ -74,6 +96,9 @@ def _outputs() -> dict[str, str]:
         "DeletionExecutorVersion": "4",
         "DeletionExecutorIdentity": "lucy-deletion-executor",
         "ExecutorArtifactCodeSha256": "reviewed-base64-digest",
+        "PolicyTrustStoreSha256": hashlib.sha256(
+            _policy_trust_store().encode("utf-8")
+        ).hexdigest(),
         "SecurityEnvironment": "production",
         "StorageEpoch": "1",
         "RegistryEpoch": "1",
@@ -119,6 +144,9 @@ def _parameters() -> dict[str, str]:
     return {
         "SecurityEnvironment": "production",
         "ExecutorArtifactCodeSha256": "reviewed-base64-digest",
+        "PolicyTrustStoreSha256": hashlib.sha256(
+            _policy_trust_store().encode("utf-8")
+        ).hexdigest(),
         "EvidenceDatabaseSessionUser": "lucy_evidence_workflow",
         "DeletionDatabaseSessionUser": "lucy_deletion_workflow",
         "RetrievalMinuteLimit": "5",
@@ -136,12 +164,11 @@ def test_stack_requires_complete_protected_production_with_every_output() -> Non
     module = _verifier()
     stack = {
         "StackStatus": "CREATE_COMPLETE",
+        "EnableTerminationProtection": True,
         "Outputs": _stack_items(_outputs(), "OutputKey", "OutputValue"),
         "Parameters": _stack_items(_parameters(), "ParameterKey", "ParameterValue"),
     }
-    checks, outputs, parameters = module.verify_stack(
-        stack, {"EnableTerminationProtection": True}
-    )
+    checks, outputs, parameters = module.verify_stack(stack)
     assert all(check.passed for check in checks)
     assert outputs["SecurityEnvironment"] == parameters["SecurityEnvironment"] == "production"
 
@@ -198,24 +225,7 @@ def _executor_fixture(kind: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
             if retrieval
             else parameters["DeletionDayLimit"]
         ),
-        "LUCY_POLICY_TRUST_STORE_JSON": json.dumps(
-            [
-                {
-                    "algorithm": "Ed25519",
-                    "contract_version": "1",
-                    "environment": "production",
-                    "issuance_not_after": "2027-09-01T00:00:00Z",
-                    "issuer": "lucy-policy",
-                    "key_id": "policy-notary.production.1",
-                    "object_type": "lucy.verification-key.v1",
-                    "public_key_b64": base64.b64encode(b"p" * 32).decode("ascii"),
-                    "purpose": "policy_notary",
-                    "status": "active",
-                    "valid_from": "2026-09-01T00:00:00Z",
-                    "verify_not_after": "2027-09-02T00:00:00Z",
-                }
-            ]
-        ),
+        "LUCY_POLICY_TRUST_STORE_JSON": _policy_trust_store(),
     }
     if retrieval:
         variables["LUCY_AWS_EVIDENCE_KEY_ARN"] = outputs["EvidenceKeyArn"]

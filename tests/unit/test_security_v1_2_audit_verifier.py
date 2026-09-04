@@ -201,6 +201,7 @@ def test_trail_requires_active_dual_delivery_and_exact_data_events() -> None:
                 {
                     "IncludeManagementEvents": True,
                     "ReadWriteType": "All",
+                    "ExcludeManagementEventSources": [],
                     "DataResources": [
                         {"Type": "AWS::DynamoDB::Table", "Values": table_arns},
                         {"Type": "AWS::Lambda::Function", "Values": function_arns},
@@ -212,6 +213,37 @@ def test_trail_requires_active_dual_delivery_and_exact_data_events() -> None:
         account=ACCOUNT,
     )
     assert all(check.passed for check in checks)
+
+    selectors = {
+        "EventSelectors": [
+            {
+                "IncludeManagementEvents": True,
+                "ReadWriteType": "All",
+                "ExcludeManagementEventSources": ["kms.amazonaws.com"],
+                "DataResources": [
+                    {"Type": "AWS::DynamoDB::Table", "Values": table_arns},
+                    {"Type": "AWS::Lambda::Function", "Values": function_arns},
+                ],
+            }
+        ]
+    }
+    failed = module.verify_trail(
+        trail={
+            "Name": outputs["AuditTrailName"],
+            "S3BucketName": outputs["AuditBucketName"],
+            "HomeRegion": "us-east-1",
+            "IncludeGlobalServiceEvents": True,
+            "IsMultiRegionTrail": False,
+            "LogFileValidationEnabled": True,
+            "CloudWatchLogsLogGroupArn": log_arn,
+            "CloudWatchLogsRoleArn": outputs["CloudTrailLogsRoleArn"],
+        },
+        status={"IsLogging": True},
+        selectors=selectors,
+        outputs=outputs,
+        account=ACCOUNT,
+    )
+    assert not next(check for check in failed if check.name == "cloudtrail.selectors").passed
 
 
 def test_metric_filter_requires_exact_content_free_transformation() -> None:
