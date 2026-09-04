@@ -82,6 +82,10 @@ shaped separate-login integration suite passed all 106 cases.
 ## Next gated sequence
 
 1. Wait for the effective Lambda concurrency limit to reach at least 13.
+   Before retrying the stack, run the read-only
+   `deploy/aws/preflight_security_v1_2.py`; it also re-verifies the exact SSO
+   administrator, target account, Render OIDC provider, and full versioned S3
+   artifact bytes against the clean release manifest.
 2. Reconstruct and review the non-secret policy verification-key inventory and
    immutable registry/journal identifiers without exporting the policy private
    seed.
