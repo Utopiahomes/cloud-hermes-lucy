@@ -77,7 +77,14 @@ The v1.2 Render Blueprint names the database migration owner
 with the Blueprint, and the unit test derives the expected login from the
 Blueprint so the two contracts cannot silently drift. The corrected bootstrap
 migrated a fresh disposable database through revision `0019`; the production-
-shaped separate-login integration suite passed all 106 cases.
+shaped separate-login integration suite passed all 107 cases.
+
+Additional hold-time hardening removed manual production SQL substitution,
+binds generated AWS configuration to an explicit target account, and requires
+all five service LOGINs to be `NOINHERIT` as well as membership-free. A separate
+read-only AWS preflight prevents a stack retry unless the SSO identity, account,
+OIDC provider, full versioned artifact digest, encryption, and Lambda
+concurrency all match the reviewed deployment.
 
 ## Next gated sequence
 
