@@ -359,10 +359,13 @@ def test_v12_cloudformation_has_two_exact_executors_and_no_function_urls() -> No
     assert not any(resource["Type"] == "AWS::Lambda::Url" for resource in resources.values())
     for prefix in ("Retrieval", "Deletion"):
         function = resources[f"{prefix}ExecutorFunction"]["Properties"]
-        version = resources[f"{prefix}ExecutorVersion"]["Properties"]
+        version_resource = resources[f"{prefix}ExecutorVersion"]
+        version = version_resource["Properties"]
         alias = resources[f"{prefix}ExecutorAlias"]["Properties"]
         assert function["Runtime"] == "python3.12"
         assert function["Architectures"] == ["x86_64"]
+        assert version_resource["DeletionPolicy"] == "Retain"
+        assert version_resource["UpdateReplacePolicy"] == "Retain"
         assert version["CodeSha256"] == {"Ref": "ExecutorArtifactCodeSha256"}
         assert version["Description"] == {
             "Fn::Sub": (

@@ -670,6 +670,8 @@ Resources:
 
   RetrievalExecutorVersion:
     Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Ref RetrievalExecutorFunction
       CodeSha256: !Ref ExecutorArtifactCodeSha256
@@ -677,6 +679,8 @@ Resources:
 
   DeletionExecutorVersion:
     Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Ref DeletionExecutorFunction
       CodeSha256: !Ref ExecutorArtifactCodeSha256

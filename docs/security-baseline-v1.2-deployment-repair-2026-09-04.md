@@ -48,9 +48,11 @@ The CloudFormation template now accepts a non-secret
 
 The description binding causes CloudFormation to publish replacement immutable
 executor versions whenever the reviewed trust-store bytes change, while the
-production aliases remain controlled pointers. The deployment verifier checks
-both the valid trust-store contract and the exact raw-byte digest in each
-published version.
+production aliases remain controlled pointers. Both version resources retain
+their replaced and deleted versions, preserving the reviewed rollback evidence
+until acceptance and explicit cleanup. The deployment verifier checks both the
+valid trust-store contract and the exact raw-byte digest in each published
+version.
 
 The cloud repair will therefore:
 
