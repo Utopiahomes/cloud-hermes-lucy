@@ -2,9 +2,10 @@
 
 Date: 2026-09-04
 
-Status: **AWS control-plane deployment and bootstrap accepted. Render runtime,
-synthetic cloud behavior, and recovery/finality acceptance remain. Live
-Telegram transcript capture is disabled and not authorized.**
+Status: **AWS control-plane deployment and the private Render PostgreSQL
+boundary are accepted. Render runtime, synthetic cloud behavior, and
+recovery/finality acceptance remain. Live Telegram transcript capture is
+disabled and not authorized.**
 
 ## Completed cloud controls
 
@@ -38,7 +39,45 @@ All detailed reports and generated deployment artifacts remain under the
 git-ignored controlled acceptance directory. They contain no transcript or
 private signing material.
 
-## Render observation and prepared transition
+## Private Render database acceptance
+
+The private migration utility built and ran on Render from reviewed commit
+`f30de15`. Its successful run reported:
+
+- migration head `0019_security_v1_2_reconcile`;
+- TLS-protected connections for the migration identity and all five runtime
+  identities;
+- five distinct `NOINHERIT` runtime logins with no elevated flags or inherited
+  role memberships;
+- two active immutable production executor bindings;
+- runtime admission `quarantined`;
+- transcript capture `false`;
+- direct-role SQL digest
+  `bc57b4c0124326362fbb6eb9f6e7e0f68bdc1bb79e95e561017d400eab24a1db`;
+  and
+- executor-binding SQL digest
+  `d88b584add9469e3fd8ac46408d38a59a8efb83b18afa28ee8b6ad22378cfe90`.
+
+The initial verifier incorrectly attempted to read `runtime_admission` through
+the finality identity. That access was correctly denied by PostgreSQL. Commit
+`f30de15` changed the verifier to require that denial while continuing to
+require the four request-processing identities to observe the quarantined
+state. The subsequent idempotent run passed.
+
+Each generated database URL was then saved only to its matching permanent
+service: routine, policy, evidence, deletion, or finality. No service received
+the migration URL and no credential was shared between services. Settings were
+saved without deploying the still-quarantined services.
+
+The temporary cron resource `crn-dadcccv10e5c73ea7m7g`, including its migration
+credential and bootstrap environment, was deleted after the successful run.
+The protected environment returned to its six permanent resources. Generated
+credentials were never written to the repository or local filesystem.
+
+The post-fix local regression is also green: 273 unit tests, Ruff, and strict
+MyPy across 44 source files.
+
+## Render observation and next transition
 
 The existing Render project contains the four private backends, the inert
 finality cron base, and PostgreSQL 18 in the protected production environment.
@@ -62,15 +101,15 @@ The manual sync must occur only after production database logins, migrations,
 direct grants, immutable executor bindings, and matching service environment
 values are ready.
 
-The database remains private during that transition. The reviewed deployment
-path uses a temporary migration-only Render resource with no AWS identity.
+The database remained private during that transition. The reviewed deployment
+path used a temporary migration-only Render resource with no AWS identity.
 `deploy/postgres/bootstrap_cloud_v1_2.py` validates the private Render host and
 disabled-capture authorization, creates or safely rotates the five exact
 `NOINHERIT` logins, migrates through `0019`, applies the reviewed grants and
 version-2 executor bindings, then verifies TLS, quarantine, disabled capture,
 and every runtime login. It emits no credential material. The temporary
-resource and its migration-owner environment are removed immediately after the
-verified run; no normal Lucy service receives migration authority.
+resource and its migration-owner environment were removed immediately after
+the verified run; no normal Lucy service received migration authority.
 
 Read-only inspection also reconciled the Blueprint with the database's
 immutable generated identity: the existing production database is
@@ -85,11 +124,10 @@ all public database traffic.
 Only release-blocking security work remains before returning to feature
 development:
 
-1. **Database and Render wiring.** Create five distinct `NOINHERIT` database
-   logins, apply migrations through `0019`, apply the reviewed direct grants and
-   immutable version-2 bindings, and populate each Render service with only its
-   matching database URL, OIDC role, and public/non-secret AWS bindings. Runtime
-   admission stays quarantined and capture stays false.
+1. **Complete runtime configuration.** Rotate the policy-notary acceptance key
+   as one coordinated AWS/Render change, verify each service's exact OIDC role
+   and public binding inventory, and keep runtime admission quarantined and
+   capture false.
 2. **One synthetic runtime bundle.** Manually sync the Blueprint to the reviewed
    commit, then prove startup, actual OIDC, one end-to-end synthetic archive →
    retrieval → deletion path, the highest-value cross-role/API denials, and
