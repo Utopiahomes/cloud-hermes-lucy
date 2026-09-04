@@ -385,9 +385,24 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             _assert_runtime_role(login, rows[login])
             if _has_membership(connection, login):
                 raise BootstrapError(f"{mode} runtime login has inherited membership")
-            state = _scalar(connection, "SELECT state FROM lucy.runtime_admission WHERE singleton")
-            if state != "quarantined":
-                raise BootstrapError(f"{mode} did not observe quarantined admission")
+            can_read_admission = bool(
+                _scalar(
+                    connection,
+                    "SELECT has_table_privilege(current_user, "
+                    "'lucy.runtime_admission', 'SELECT')",
+                )
+            )
+            if mode == "finality":
+                if can_read_admission:
+                    raise BootstrapError("finality can read the runtime admission boundary")
+            else:
+                if not can_read_admission:
+                    raise BootstrapError(f"{mode} cannot read the runtime admission boundary")
+                state = _scalar(
+                    connection, "SELECT state FROM lucy.runtime_admission WHERE singleton"
+                )
+                if state != "quarantined":
+                    raise BootstrapError(f"{mode} did not observe quarantined admission")
         verified_logins.append(login)
     return {
         "migration_revision": revision,
