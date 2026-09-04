@@ -32,6 +32,7 @@ def main() -> None:
     if observed != _expected_commit():
         raise SystemExit("Lucy startup gate failed: Hermes pin mismatch")
     mode = service_mode_from_environment()
+    print(f"Lucy startup admission check beginning for isolated {mode} identity")
     try:
         # V1.2 evidence/deletion callers have no DynamoDB credentials. Only the
         # routine/archive boundary reads the bounded journal head at admission.
@@ -48,9 +49,16 @@ def main() -> None:
         raise SystemExit(
             "Lucy startup gate failed: storage or permission check unavailable"
         ) from None
+    print("Lucy startup admission check passed")
     # No lifecycle writes, pending-operation scans, KMS calls, registry scans,
     # migrations, or recovery occur when any HTTP service starts/restarts.
-    uvicorn.run("lucy.api:app", host="0.0.0.0", port=8080, access_log=False)
+    # Import the application only after admission and pass the object directly.
+    # This keeps Uvicorn from resolving an import string after the fail-closed
+    # gate and guarantees that the admitted process is the serving process.
+    from lucy.api import app
+
+    print("Lucy admitted ASGI listener starting")
+    uvicorn.run(app, host="0.0.0.0", port=8080, access_log=False)
 
 
 if __name__ == "__main__":

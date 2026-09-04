@@ -37,9 +37,9 @@ def test_service_startup_only_reads_admission_and_never_runs_recovery(
         ),
     )
     monkeypatch.setattr(RejoiningService, "run", lambda *_a, **_k: pytest.fail("must not recover"))
-    monkeypatch.setattr(runtime.uvicorn, "run", lambda *_a, **_k: calls.append("serve"))
+    monkeypatch.setattr(runtime.uvicorn, "run", lambda app, **_k: calls.append(app.title))
     runtime.main()
-    assert calls == ["read_only_check", "serve"]
+    assert calls == ["read_only_check", "Lucy Companion API"]
 
 
 @pytest.mark.parametrize("mode", [None, "all-local", "unknown"])
