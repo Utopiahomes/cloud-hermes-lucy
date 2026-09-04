@@ -532,6 +532,12 @@ def test_v12_runtime_roles_have_disjoint_exact_data_and_signing_permissions() ->
     resources = _cloudformation_named("security-baseline-v1.2.yaml")["Resources"]
     retrieval = json.dumps(resources["RetrievalRuntimePolicy"])
     deletion = json.dumps(resources["DeletionRuntimePolicy"])
+    assert resources["RetrievalRuntimePolicy"]["Properties"]["PolicyDocument"]["Statement"][
+        0
+    ]["Resource"] == {"Fn::GetAtt": "RetrievalLogGroup.Arn"}
+    assert resources["DeletionRuntimePolicy"]["Properties"]["PolicyDocument"]["Statement"][
+        0
+    ]["Resource"] == {"Fn::GetAtt": "DeletionLogGroup.Arn"}
     assert "kms:Decrypt" in retrieval and "EvidenceKey.Arn" in retrieval
     assert "kms:Sign" in retrieval and "RetrievalReceiptKey.Arn" in retrieval
     assert "DeletionReceiptKey" not in retrieval

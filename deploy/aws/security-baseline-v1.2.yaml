@@ -517,7 +517,7 @@ Resources:
         Statement:
           - Effect: Allow
             Action: [logs:CreateLogStream, logs:PutLogEvents]
-            Resource: !Sub ${RetrievalLogGroup.Arn}:*
+            Resource: !GetAtt RetrievalLogGroup.Arn
           - Effect: Allow
             Action: dynamodb:GetItem
             Resource:
@@ -567,7 +567,7 @@ Resources:
         Statement:
           - Effect: Allow
             Action: [logs:CreateLogStream, logs:PutLogEvents]
-            Resource: !Sub ${DeletionLogGroup.Arn}:*
+            Resource: !GetAtt DeletionLogGroup.Arn
           - Effect: Allow
             Action: dynamodb:GetItem
             Resource: !GetAtt DeletionReceiptLedger.Arn
