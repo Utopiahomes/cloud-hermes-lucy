@@ -1391,6 +1391,51 @@ def test_successful_controlled_recovery_rotates_epoch_and_rejects_stale_clients(
         fresh.kw["bind"].dispose()
 
 
+def test_completed_maintenance_epoch_replay_is_idempotent_and_stays_ready(
+    role_db: dict[str, Any],
+) -> None:
+    maintenance = MaintenanceService(role_db["owner"])
+    epoch = uuid4()
+    maintenance.prepare(
+        storage_epoch=epoch,
+        expected_commit=PIN,
+        observed_commit=PIN,
+        executors_stopped=True,
+    )
+    with role_db["owner"]() as session:
+        before = session.scalar(select(func.count()).select_from(StartupRunRow))
+
+    maintenance.prepare(
+        storage_epoch=epoch,
+        expected_commit=PIN,
+        observed_commit=PIN,
+        executors_stopped=True,
+    )
+
+    with role_db["owner"]() as session:
+        admission = session.get(RuntimeAdmissionRow, True)
+        assert admission.state == "ready"
+        assert admission.storage_epoch == epoch
+        assert session.scalar(select(func.count()).select_from(StartupRunRow)) == before
+
+
+def test_completed_epoch_replay_cannot_bypass_hermes_pin(
+    role_db: dict[str, Any],
+) -> None:
+    maintenance = MaintenanceService(role_db["owner"])
+    with pytest.raises(ReadinessError, match="Hermes pin mismatch"):
+        maintenance.prepare(
+            storage_epoch=role_db["epoch"],
+            expected_commit=PIN,
+            observed_commit="f" * 40,
+            executors_stopped=True,
+        )
+    with role_db["owner"]() as session:
+        admission = session.get(RuntimeAdmissionRow, True)
+        assert admission.state == "ready"
+        assert admission.storage_epoch == role_db["epoch"]
+
+
 def test_ambiguous_recovery_stays_closed_even_when_prepare_is_retried(
     role_db: dict[str, Any],
 ) -> None:

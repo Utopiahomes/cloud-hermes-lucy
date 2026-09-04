@@ -111,6 +111,21 @@ class MaintenanceService:
     ) -> None:
         if not executors_stopped:
             raise ReadinessError("operator must confirm all executors are stopped")
+        with self._sessions() as session:
+            admission = session.get(RuntimeAdmissionRow, True)
+            if admission is None:
+                raise ReadinessError("storage admission row is missing")
+            if admission.storage_epoch == storage_epoch:
+                if admission.state != "ready":
+                    raise ReadinessError(
+                        "maintenance requires a fresh independently configured epoch"
+                    )
+                if observed_commit != expected_commit:
+                    raise ReadinessError("Hermes pin mismatch")
+                # Render can restart a successfully completed one-shot command.
+                # An exact epoch replay is already durable and must not close
+                # admission again merely to rediscover that it completed.
+                return
         self._quarantine()
         with self._sessions() as session:
             # Idle connection pools count: stop the services, not just requests.
