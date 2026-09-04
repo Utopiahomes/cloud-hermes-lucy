@@ -477,7 +477,7 @@ def test_retrieval_signing_failure_never_persists_or_returns_plaintext() -> None
         _identity(SensitiveActionV2.EVIDENCE_RETRIEVE),
         clock=lambda: NOW + timedelta(minutes=2),
     )
-    with pytest.raises(ExecutorRejected, match="receipt_persistence_failed"):
+    with pytest.raises(ExecutorRejected, match="receipt_signing_failed"):
         executor.execute(
             RetrievalExecutorInvocationV1(
                 permit=permit,
@@ -872,6 +872,7 @@ def test_lambda_runtime_rejects_unqualified_alias_and_wrong_published_version() 
 def test_lambda_handler_sanitizes_unexpected_failures_without_request_material(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     signer, _ = _policy()
     permit, package, grant = _retrieval(signer)
@@ -908,7 +909,13 @@ def test_lambda_handler_sanitizes_unexpected_failures_without_request_material(
         "error": "executor_unavailable",
         "code": "internal_failure",
     }
-    rendered = caplog.text + json.dumps(response)
+    metric = json.loads(capsys.readouterr().out)
+    assert metric["Action"] == "evidence.retrieve"
+    assert metric["Failed"] == 1
+    assert metric["_aws"]["CloudWatchMetrics"][0]["Namespace"] == (
+        "CloudLucy/SecurityV1_2"
+    )
+    rendered = caplog.text + json.dumps(response) + json.dumps(metric)
     assert PLAINTEXT.decode() not in rendered
     assert package.ciphertext_b64 not in rendered
     assert "RuntimeError" in caplog.text
@@ -917,6 +924,7 @@ def test_lambda_handler_sanitizes_unexpected_failures_without_request_material(
 def test_lambda_handler_returns_content_free_alias_denial(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     signer, _ = _policy()
     permit, package, grant = _retrieval(signer)
@@ -949,4 +957,19 @@ def test_lambda_handler_returns_content_free_alias_denial(
         "error": "request_rejected",
         "code": "invoked_alias_mismatch",
     }
-    assert package.ciphertext_b64 not in caplog.text
+    metric = json.loads(capsys.readouterr().out)
+    assert metric["Denied"] == metric["IntegrityDenied"] == 1
+    assert "Failed" not in metric
+    rendered = caplog.text + json.dumps(metric)
+    assert package.ciphertext_b64 not in rendered
+    assert PLAINTEXT.decode() not in rendered
+
+
+def test_embedded_metrics_record_acceptance_and_replay_without_identifiers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    handlers._emit_metrics(SensitiveActionV2.EVIDENCE_DELETE, ["Accepted", "Replayed"])
+    metric = json.loads(capsys.readouterr().out)
+    assert metric["Action"] == "evidence.delete"
+    assert metric["Accepted"] == metric["Replayed"] == 1
+    assert set(metric) == {"_aws", "Action", "Accepted", "Replayed"}

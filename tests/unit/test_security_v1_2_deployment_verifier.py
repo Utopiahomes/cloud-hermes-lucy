@@ -91,6 +91,14 @@ def _outputs() -> dict[str, str]:
         "SecurityAdministrationAlertName": "lucy-prod-v12-security-change",
         "RetrievalErrorAlarmName": "lucy-prod-v12-retrieval-errors",
         "DeletionInvocationAlarmName": "lucy-prod-v12-deletion-invocations",
+        "RetrievalFailedAlarmName": "lucy-prod-v12-retrieval-failed",
+        "DeletionFailedAlarmName": "lucy-prod-v12-deletion-failed",
+        "RetrievalIntegrityDeniedAlarmName": "lucy-prod-v12-retrieval-integrity",
+        "DeletionIntegrityDeniedAlarmName": "lucy-prod-v12-deletion-integrity",
+        "RetrievalReceiptFailureAlarmName": "lucy-prod-v12-retrieval-receipt-failed",
+        "DeletionReceiptFailureAlarmName": "lucy-prod-v12-deletion-receipt-failed",
+        "RetrievalThrottleAlarmName": "lucy-prod-v12-retrieval-throttled",
+        "DeletionThrottleAlarmName": "lucy-prod-v12-deletion-throttled",
         "FinalityQuarantineTablePrefix": "lucy-prod-v12-quarantine-",
     }
 

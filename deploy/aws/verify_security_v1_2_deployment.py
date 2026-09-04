@@ -68,6 +68,14 @@ _REQUIRED_OUTPUTS = {
     "SecurityAdministrationAlertName",
     "RetrievalErrorAlarmName",
     "DeletionInvocationAlarmName",
+    "RetrievalFailedAlarmName",
+    "DeletionFailedAlarmName",
+    "RetrievalIntegrityDeniedAlarmName",
+    "DeletionIntegrityDeniedAlarmName",
+    "RetrievalReceiptFailureAlarmName",
+    "DeletionReceiptFailureAlarmName",
+    "RetrievalThrottleAlarmName",
+    "DeletionThrottleAlarmName",
     "FinalityQuarantineTablePrefix",
 }
 

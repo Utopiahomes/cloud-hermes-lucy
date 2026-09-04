@@ -720,4 +720,35 @@ def test_v12_outputs_expose_every_identity_and_control_for_deployed_verification
         "SecurityAdministrationAlertName",
         "RetrievalErrorAlarmName",
         "DeletionInvocationAlarmName",
+        "RetrievalFailedAlarmName",
+        "DeletionFailedAlarmName",
+        "RetrievalIntegrityDeniedAlarmName",
+        "DeletionIntegrityDeniedAlarmName",
+        "RetrievalReceiptFailureAlarmName",
+        "DeletionReceiptFailureAlarmName",
+        "RetrievalThrottleAlarmName",
+        "DeletionThrottleAlarmName",
     } <= outputs.keys()
+
+
+def test_v12_content_free_executor_metrics_have_immediate_action_scoped_alarms() -> None:
+    resources = _cloudformation_named("security-baseline-v1.2.yaml")["Resources"]
+    expected = {
+        "RetrievalFailedAlarm": ("Failed", "evidence.retrieve"),
+        "DeletionFailedAlarm": ("Failed", "evidence.delete"),
+        "RetrievalIntegrityDeniedAlarm": ("IntegrityDenied", "evidence.retrieve"),
+        "DeletionIntegrityDeniedAlarm": ("IntegrityDenied", "evidence.delete"),
+        "RetrievalReceiptFailureAlarm": ("ReceiptFailure", "evidence.retrieve"),
+        "DeletionReceiptFailureAlarm": ("ReceiptFailure", "evidence.delete"),
+        "RetrievalThrottleAlarm": ("Throttled", "evidence.retrieve"),
+        "DeletionThrottleAlarm": ("Throttled", "evidence.delete"),
+    }
+    for name, (metric, action) in expected.items():
+        properties = resources[name]["Properties"]
+        assert properties["Namespace"] == "CloudLucy/SecurityV1_2"
+        assert properties["MetricName"] == metric
+        assert properties["Dimensions"] == [{"Name": "Action", "Value": action}]
+        assert properties["Period"] == 300
+        assert properties["EvaluationPeriods"] == properties["Threshold"] == 1
+        assert properties["TreatMissingData"] == "notBreaching"
+        assert properties["AlarmActions"] == [{"Ref": "SecurityAlertTopic"}]

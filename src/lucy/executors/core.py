@@ -365,7 +365,10 @@ class RetrievalExecutor(_ExecutorBase):
         )
         try:
             signed = self._backend.sign_receipt(unsigned)
-            self._require_exact_signed_receipt(unsigned, signed)
+        except Exception as exc:
+            raise ExecutorRejected("receipt_signing_failed") from exc
+        self._require_exact_signed_receipt(unsigned, signed)
+        try:
             stored = self._backend.commit_retrieval_receipt(signed)
         except Exception as exc:
             raise ExecutorRejected("receipt_persistence_failed") from exc
@@ -441,7 +444,10 @@ class DeletionExecutor(_ExecutorBase):
         )
         try:
             signed = self._backend.sign_receipt(unsigned)
-            self._require_exact_signed_receipt(unsigned, signed)
+        except Exception as exc:
+            raise ExecutorRejected("receipt_signing_failed") from exc
+        self._require_exact_signed_receipt(unsigned, signed)
+        try:
             committed = self._backend.commit_deletion(
                 manifest=manifest,
                 receipt=signed,

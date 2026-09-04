@@ -39,6 +39,44 @@ from lucy.executors.models import (
 )
 
 _LOGGER = logging.getLogger("lucy.executor")
+_METRIC_NAMESPACE = "CloudLucy/SecurityV1_2"
+_INTEGRITY_DENIAL_CODES = frozenset(
+    {
+        "action_mismatch",
+        "authorization_signature_invalid",
+        "claim_deadline_mismatch",
+        "contract_invalid",
+        "database_caller_mismatch",
+        "deployment_epoch_or_record_mismatch",
+        "durable_receipt_binding_mismatch",
+        "encrypted_package_binding_mismatch",
+        "encrypted_package_digest_mismatch",
+        "environment_mismatch",
+        "epoch_or_record_mismatch",
+        "evidence_binding_mismatch",
+        "executor_action_misconfigured",
+        "executor_binding_mismatch",
+        "invoked_alias_mismatch",
+        "manifest_binding_mismatch",
+        "manifest_digest_mismatch",
+        "manifest_signature_invalid",
+        "permit_binding_mismatch",
+        "published_version_mismatch",
+        "receipt_signer_changed_contract",
+        "unpublished_executor_version",
+        "wrapped_key_version_mismatch",
+    }
+)
+_RECEIPT_FAILURE_CODES = frozenset(
+    {
+        "deletion_state_ambiguous",
+        "deletion_transaction_failed",
+        "receipt_persistence_ambiguous",
+        "receipt_persistence_failed",
+        "receipt_signer_changed_contract",
+        "receipt_signing_failed",
+    }
+)
 _AWS_CLIENT_CONFIG = Config(
     connect_timeout=2,
     read_timeout=15,
@@ -88,6 +126,10 @@ def _handle(
             action.value,
             result.replayed,
         )
+        metrics = ["Accepted"]
+        if result.replayed:
+            metrics.append("Replayed")
+        _emit_metrics(action, metrics)
         return {"ok": True, "result": result.model_dump(mode="json")}
     except ExecutorRejected as exc:
         _LOGGER.warning(
@@ -95,12 +137,21 @@ def _handle(
             action.value,
             exc.code,
         )
+        metrics = ["Denied"]
+        if exc.code in _INTEGRITY_DENIAL_CODES:
+            metrics.append("IntegrityDenied")
+        if exc.code == "quota_denied":
+            metrics.append("Throttled")
+        if exc.code in _RECEIPT_FAILURE_CODES:
+            metrics.append("ReceiptFailure")
+        _emit_metrics(action, metrics)
         return {"ok": False, "error": "request_rejected", "code": exc.code}
     except (ValidationError, TypeError, ValueError, UnicodeError):
         _LOGGER.warning(
             "lucy_executor_outcome action=%s outcome=denied code=contract_invalid",
             action.value,
         )
+        _emit_metrics(action, ["Denied", "IntegrityDenied"])
         return {"ok": False, "error": "request_rejected", "code": "contract_invalid"}
     except Exception as exc:
         # Never log exception text: provider errors can contain resource identifiers
@@ -110,7 +161,26 @@ def _handle(
             action.value,
             type(exc).__name__,
         )
+        _emit_metrics(action, ["Failed"])
         return {"ok": False, "error": "executor_unavailable", "code": "internal_failure"}
+
+
+def _emit_metrics(action: SensitiveActionV2, names: list[str]) -> None:
+    metrics = [{"Name": name, "Unit": "Count"} for name in names]
+    payload: dict[str, Any] = {
+        "_aws": {
+            "CloudWatchMetrics": [
+                {
+                    "Namespace": _METRIC_NAMESPACE,
+                    "Dimensions": [["Action"]],
+                    "Metrics": metrics,
+                }
+            ]
+        },
+        "Action": action.value,
+    }
+    payload.update(dict.fromkeys(names, 1))
+    print(json.dumps(payload, separators=(",", ":"), sort_keys=True), flush=True)
 
 
 class _ExecutorRuntime:

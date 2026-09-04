@@ -935,6 +935,126 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref SecurityAlertTopic]
 
+  RetrievalFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy retrieval executor returned an internal failure
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: Failed
+      Dimensions: [{Name: Action, Value: evidence.retrieve}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  DeletionFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy deletion executor returned an internal failure
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: Failed
+      Dimensions: [{Name: Action, Value: evidence.delete}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  RetrievalIntegrityDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy retrieval executor rejected an integrity binding
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: IntegrityDenied
+      Dimensions: [{Name: Action, Value: evidence.retrieve}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  DeletionIntegrityDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy deletion executor rejected an integrity binding
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: IntegrityDenied
+      Dimensions: [{Name: Action, Value: evidence.delete}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  RetrievalReceiptFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy retrieval receipt signing or persistence failed
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: ReceiptFailure
+      Dimensions: [{Name: Action, Value: evidence.retrieve}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  DeletionReceiptFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy deletion receipt signing or transaction failed
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: ReceiptFailure
+      Dimensions: [{Name: Action, Value: evidence.delete}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  RetrievalThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy retrieval executor reached a durable quota
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: Throttled
+      Dimensions: [{Name: Action, Value: evidence.retrieve}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
+  DeletionThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lucy deletion executor reached a durable quota
+      Namespace: CloudLucy/SecurityV1_2
+      MetricName: Throttled
+      Dimensions: [{Name: Action, Value: evidence.delete}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityAlertTopic]
+
 Outputs:
   EvidenceKeyArn: {Value: !GetAtt EvidenceKey.Arn}
   RetrievalReceiptKeyArn: {Value: !GetAtt RetrievalReceiptKey.Arn}
@@ -977,5 +1097,13 @@ Outputs:
   SecurityAdministrationAlertName: {Value: !Ref SecurityAdministrationAlert}
   RetrievalErrorAlarmName: {Value: !Ref RetrievalErrorAlarm}
   DeletionInvocationAlarmName: {Value: !Ref DeletionInvocationAlarm}
+  RetrievalFailedAlarmName: {Value: !Ref RetrievalFailedAlarm}
+  DeletionFailedAlarmName: {Value: !Ref DeletionFailedAlarm}
+  RetrievalIntegrityDeniedAlarmName: {Value: !Ref RetrievalIntegrityDeniedAlarm}
+  DeletionIntegrityDeniedAlarmName: {Value: !Ref DeletionIntegrityDeniedAlarm}
+  RetrievalReceiptFailureAlarmName: {Value: !Ref RetrievalReceiptFailureAlarm}
+  DeletionReceiptFailureAlarmName: {Value: !Ref DeletionReceiptFailureAlarm}
+  RetrievalThrottleAlarmName: {Value: !Ref RetrievalThrottleAlarm}
+  DeletionThrottleAlarmName: {Value: !Ref DeletionThrottleAlarm}
   FinalityQuarantineTablePrefix:
     Value: !Sub ${ResourceNamespace}-quarantine-
