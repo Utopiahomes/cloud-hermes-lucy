@@ -72,6 +72,14 @@ and every runtime login. It emits no credential material. The temporary
 resource and its migration-owner environment are removed immediately after the
 verified run; no normal Lucy service receives migration authority.
 
+Read-only inspection also reconciled the Blueprint with the database's
+immutable generated identity: the existing production database is
+`lucy_6tns`. The source now names that exact database, avoiding an invalid rename
+attempt during manual sync. Its service ID remains
+`dpg-daca8gafngtc73clvafg-a`, and its PostgreSQL-specific inbound rule set is
+empty, overriding the broader workspace and environment defaults and blocking
+all public database traffic.
+
 ## Reprioritized completion path
 
 Only release-blocking security work remains before returning to feature

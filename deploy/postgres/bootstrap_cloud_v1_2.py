@@ -42,6 +42,7 @@ CAPABILITY_ROLES = {
     "lucy_security_function_owner",
 }
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
+_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
 
 
 class BootstrapError(RuntimeError):
@@ -80,7 +81,11 @@ class BootstrapConfig:
             raise BootstrapError("the migration URL must use lucy_migration")
         if migration.host is None or _PRIVATE_RENDER_HOST.fullmatch(migration.host) is None:
             raise BootstrapError("the migration URL must use the private Render database host")
-        if migration.database != "lucy" or migration.port not in (None, 5432):
+        if (
+            migration.database is None
+            or _LUCY_DATABASE.fullmatch(migration.database) is None
+            or migration.port not in (None, 5432)
+        ):
             raise BootstrapError("the migration URL must target the reviewed Lucy database")
 
         runtime_urls: dict[str, URL] = {}

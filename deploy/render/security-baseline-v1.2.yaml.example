@@ -34,7 +34,9 @@ projects:
             diskSizeGB: 5
             storageAutoscalingEnabled: false
             postgresMajorVersion: "18"
-            databaseName: lucy
+            # Render database names are immutable. This is the exact generated
+            # name of the existing Blueprint-managed production database.
+            databaseName: lucy_6tns
             user: lucy_migration
             connectionPool: none
             # The database remains reachable only over Render's private network.

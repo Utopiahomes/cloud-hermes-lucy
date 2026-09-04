@@ -28,12 +28,15 @@ def _module() -> ModuleType:
 
 def _environment() -> dict[str, str]:
     host = "dpg-daca8gafngtc73clvafg-a"
+    database = "lucy_6tns"
     result = {
         "RENDER": "true",
         "LUCY_ENVIRONMENT": "production",
         "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
         "LUCY_DATABASE_BOOTSTRAP_AUTHORIZATION": "security-v1.2-private-quarantined",
-        "LUCY_MIGRATION_DATABASE_URL": f"postgresql://lucy_migration:migration@{host}:5432/lucy",
+        "LUCY_MIGRATION_DATABASE_URL": (
+            f"postgresql://lucy_migration:migration@{host}:5432/{database}"
+        ),
         "LUCY_AWS_ACCOUNT_ID": "429870640638",
         "LUCY_RETRIEVAL_EXECUTOR_ALIAS_ARN": (
             "arn:aws:lambda:us-east-1:429870640638:function:lucy-evidence-executor-v12:production"
@@ -61,7 +64,7 @@ def _environment() -> dict[str, str]:
         "finality": "lucy_finality_verifier",
     }.items():
         result[f"LUCY_{mode.upper()}_DATABASE_URL"] = (
-            f"postgresql+psycopg://{login}:{mode}-secret@{host}:5432/lucy?sslmode=require"
+            f"postgresql+psycopg://{login}:{mode}-secret@{host}:5432/{database}?sslmode=require"
         )
     return result
 
@@ -81,12 +84,12 @@ def test_bootstrap_config_requires_private_render_and_exact_logins() -> None:
         ("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true", "capture must remain disabled"),
         (
             "LUCY_MIGRATION_DATABASE_URL",
-            "postgresql://lucy_migration:secret@public.example.com:5432/lucy",
+            "postgresql://lucy_migration:secret@public.example.com:5432/lucy_6tns",
             "private Render database host",
         ),
         (
             "LUCY_EVIDENCE_DATABASE_URL",
-            "postgresql://wrong:secret@dpg-daca8gafngtc73clvafg-a:5432/lucy",
+            "postgresql://wrong:secret@dpg-daca8gafngtc73clvafg-a:5432/lucy_6tns",
             "exact password-bearing login",
         ),
     ],

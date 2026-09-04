@@ -427,7 +427,7 @@ def test_v12_render_database_is_private_paid_and_migration_owned() -> None:
             "diskSizeGB": 5,
             "storageAutoscalingEnabled": False,
             "postgresMajorVersion": "18",
-            "databaseName": "lucy",
+            "databaseName": "lucy_6tns",
             "user": "lucy_migration",
             "connectionPool": "none",
             "ipAllowList": [],
