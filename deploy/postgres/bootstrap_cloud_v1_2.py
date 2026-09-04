@@ -297,8 +297,20 @@ def _apply_reviewed_security(config: BootstrapConfig) -> tuple[str, str]:
         security_key_epoch=config.key_epoch,
     )
     with psycopg.connect(_conninfo(config.migration_url), autocommit=True) as connection:
-        connection.execute(f"BEGIN;\n{roles_sql}\nCOMMIT;", prepare=False)
-        connection.execute(_strip_reviewed_psql_header(bindings_sql), prepare=False)
+        try:
+            connection.execute(f"BEGIN;\n{roles_sql}\nCOMMIT;", prepare=False)
+        except psycopg.Error as exc:
+            primary = exc.diag.message_primary or type(exc).__name__
+            raise BootstrapError(
+                f"reviewed runtime grants failed ({exc.sqlstate or 'unknown'}): {primary}"
+            ) from exc
+        try:
+            connection.execute(_strip_reviewed_psql_header(bindings_sql), prepare=False)
+        except psycopg.Error as exc:
+            primary = exc.diag.message_primary or type(exc).__name__
+            raise BootstrapError(
+                f"reviewed executor bindings failed ({exc.sqlstate or 'unknown'}): {primary}"
+            ) from exc
     return _digest(roles_sql), _digest(bindings_sql)
 
 
