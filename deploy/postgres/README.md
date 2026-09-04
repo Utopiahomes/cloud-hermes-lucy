@@ -9,7 +9,8 @@ the controlled acceptance record.
 The renderer accepts no passwords, tokens, signing seeds, transcript data, or
 other secret material. It fails closed on unsafe or duplicate PostgreSQL LOGIN
 names, non-alias Lambda ARNs, `$LATEST`, cross-account AWS bindings, invalid KMS
-key ARNs, non-positive versions/epochs, unresolved markers, and overwrites.
+key ARNs, bindings outside the explicit target AWS account, non-positive
+versions/epochs, unresolved markers, and overwrites.
 
 ## 1. Render exact service-role grants
 
@@ -44,6 +45,7 @@ reviewed security epochs:
 
 ```powershell
 .\.venv\Scripts\python.exe deploy\postgres\render_security_v1_2_sql.py bindings `
+  --aws-account-id <12-digit-target-account> `
   --retrieval-alias-arn <retrieval-alias-arn> `
   --deletion-alias-arn <deletion-alias-arn> `
   --retrieval-receipt-key-arn <retrieval-receipt-key-arn> `

@@ -58,6 +58,7 @@ def test_roles_renderer_rejects_duplicate_logins() -> None:
 
 def _bindings(module: ModuleType, *, account: str = "123456789012") -> str:
     return module.render_bindings(
+        aws_account_id=account,
         retrieval_alias_arn=(
             f"arn:aws:lambda:us-east-1:{account}:function:lucy-evidence-executor-v12:live"
         ),
@@ -91,8 +92,9 @@ def test_binding_renderer_replaces_every_reviewed_marker() -> None:
 
 def test_binding_renderer_rejects_cross_account_resources() -> None:
     module = _renderer()
-    with pytest.raises(ValueError, match="share one AWS account"):
+    with pytest.raises(ValueError, match="match the target AWS account"):
         module.render_bindings(
+            aws_account_id="123456789012",
             retrieval_alias_arn=(
                 "arn:aws:lambda:us-east-1:123456789012:"
                 "function:lucy-evidence-executor-v12:live"
@@ -122,6 +124,7 @@ def test_binding_renderer_requires_a_named_lambda_alias(qualifier: str) -> None:
     module = _renderer()
     with pytest.raises(ValueError, match="Lambda alias ARNs"):
         module.render_bindings(
+            aws_account_id="123456789012",
             retrieval_alias_arn=(
                 "arn:aws:lambda:us-east-1:123456789012:"
                 f"function:lucy-evidence-executor-v12:{qualifier}"
@@ -151,6 +154,7 @@ def test_binding_renderer_rejects_non_positive_or_boolean_epochs() -> None:
     for value in (0, -1, True):
         with pytest.raises(ValueError, match="must be a positive integer"):
             module.render_bindings(
+                aws_account_id="123456789012",
                 retrieval_alias_arn=(
                     "arn:aws:lambda:us-east-1:123456789012:"
                     "function:lucy-evidence-executor-v12:live"
@@ -173,6 +177,35 @@ def test_binding_renderer_rejects_non_positive_or_boolean_epochs() -> None:
                 security_registry_epoch=1,
                 security_key_epoch=1,
             )
+
+
+def test_binding_renderer_rejects_a_consistent_but_wrong_aws_account() -> None:
+    module = _renderer()
+    with pytest.raises(ValueError, match="match the target AWS account"):
+        module.render_bindings(
+            aws_account_id="999999999999",
+            retrieval_alias_arn=(
+                "arn:aws:lambda:us-east-1:123456789012:"
+                "function:lucy-evidence-executor-v12:live"
+            ),
+            deletion_alias_arn=(
+                "arn:aws:lambda:us-east-1:123456789012:"
+                "function:lucy-deletion-executor-v12:live"
+            ),
+            retrieval_receipt_key_arn=(
+                "arn:aws:kms:us-east-1:123456789012:"
+                "key/00000000-0000-4000-8000-000000000001"
+            ),
+            deletion_receipt_key_arn=(
+                "arn:aws:kms:us-east-1:123456789012:"
+                "key/00000000-0000-4000-8000-000000000002"
+            ),
+            retrieval_version=1,
+            deletion_version=1,
+            security_storage_epoch=1,
+            security_registry_epoch=1,
+            security_key_epoch=1,
+        )
 
 
 def test_renderer_refuses_to_overwrite_output(tmp_path: Path) -> None:

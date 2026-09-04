@@ -51,6 +51,7 @@ def render_roles(
 
 def render_bindings(
     *,
+    aws_account_id: str,
     retrieval_alias_arn: str,
     deletion_alias_arn: str,
     retrieval_receipt_key_arn: str,
@@ -62,6 +63,8 @@ def render_bindings(
     security_key_epoch: int,
 ) -> str:
     """Render immutable executor and epoch bindings while admission stays closed."""
+    if re.fullmatch(r"[0-9]{12}", aws_account_id) is None:
+        raise ValueError("AWS account ID must contain exactly 12 digits")
     alias_matches = [
         _LAMBDA_ALIAS.fullmatch(retrieval_alias_arn),
         _LAMBDA_ALIAS.fullmatch(deletion_alias_arn),
@@ -83,8 +86,8 @@ def render_bindings(
         for match in [*alias_matches, *key_matches]
         if match is not None
     }
-    if len(accounts) != 1:
-        raise ValueError("executor aliases and receipt keys must share one AWS account")
+    if accounts != {aws_account_id}:
+        raise ValueError("executor aliases and receipt keys must match the target AWS account")
     numbers = {
         "retrieval executor version": retrieval_version,
         "deletion executor version": deletion_version,
@@ -155,6 +158,7 @@ def _parser() -> argparse.ArgumentParser:
     roles.add_argument("--overwrite", action="store_true")
 
     bindings = subparsers.add_parser("bindings", help="render AWS executor bindings")
+    bindings.add_argument("--aws-account-id", required=True)
     bindings.add_argument("--retrieval-alias-arn", required=True)
     bindings.add_argument("--deletion-alias-arn", required=True)
     bindings.add_argument("--retrieval-receipt-key-arn", required=True)
@@ -181,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     else:
         content = render_bindings(
+            aws_account_id=args.aws_account_id,
             retrieval_alias_arn=args.retrieval_alias_arn,
             deletion_alias_arn=args.deletion_alias_arn,
             retrieval_receipt_key_arn=args.retrieval_receipt_key_arn,
