@@ -12,13 +12,12 @@
 #   4. populate each sync:false value in the Render dashboard; and
 #   5. leave LUCY_TRANSCRIPT_CAPTURE_ENABLED exactly "false".
 #
-# After the first sync, copy the immutable workspace, environment, routine,
-# evidence, deletion, and finality utility service IDs into the v1.2 AWS stack.
-# Then copy only the resulting exact AWS role/alias/table outputs back into the
-# corresponding Render services, remove each pserv dockerCommand bootstrap
-# override and LUCY_RESOURCE_ID_BOOTSTRAP_HOLD marker, and resync. Never set
-# AWS_WEB_IDENTITY_TOKEN_FILE or a static AWS access key: Render supplies the
-# short-lived OIDC token.
+# The immutable Render identities are now bound by the v1.2 AWS stack. Before a
+# manual sync, populate only the exact reviewed AWS/DB bindings and keep runtime
+# admission quarantined. The four private services use the Dockerfile's
+# fail-closed runtime; the finality cron retains its inert scheduled sentinel.
+# Never set AWS_WEB_IDENTITY_TOKEN_FILE or a static AWS access key: Render
+# supplies the short-lived OIDC token.
 
 projects:
   - name: cloud-lucy
@@ -52,11 +51,6 @@ projects:
             autoDeployTrigger: "off"
             dockerfilePath: ./Dockerfile
             dockerContext: .
-            # Resource IDs are required to build the exact AWS OIDC subjects.
-            # Until those AWS and PostgreSQL boundaries exist, expose only the
-            # inert 503 provisioning socket. Remove this override and its marker
-            # before cloud acceptance so the Dockerfile's fail-closed runtime runs.
-            dockerCommand: python -m lucy.provisioning_hold
             envVars:
               - key: LUCY_SERVICE_MODE
                 value: routine
@@ -64,8 +58,6 @@ projects:
                 value: production
               - key: LUCY_SECURITY_ENVIRONMENT
                 value: production
-              - key: LUCY_RESOURCE_ID_BOOTSTRAP_HOLD
-                value: resource-id-only
               - key: LUCY_STORAGE_EPOCH
                 sync: false
               - key: LUCY_SECURITY_STORAGE_EPOCH
@@ -114,7 +106,6 @@ projects:
             autoDeployTrigger: "off"
             dockerfilePath: ./Dockerfile
             dockerContext: .
-            dockerCommand: python -m lucy.provisioning_hold
             envVars:
               - key: LUCY_SERVICE_MODE
                 value: policy
@@ -122,8 +113,6 @@ projects:
                 value: production
               - key: LUCY_SECURITY_ENVIRONMENT
                 value: production
-              - key: LUCY_RESOURCE_ID_BOOTSTRAP_HOLD
-                value: resource-id-only
               - key: LUCY_STORAGE_EPOCH
                 sync: false
               - key: LUCY_SECURITY_STORAGE_EPOCH
@@ -174,7 +163,6 @@ projects:
             autoDeployTrigger: "off"
             dockerfilePath: ./Dockerfile
             dockerContext: .
-            dockerCommand: python -m lucy.provisioning_hold
             envVars:
               - key: LUCY_SERVICE_MODE
                 value: evidence
@@ -182,8 +170,6 @@ projects:
                 value: production
               - key: LUCY_SECURITY_ENVIRONMENT
                 value: production
-              - key: LUCY_RESOURCE_ID_BOOTSTRAP_HOLD
-                value: resource-id-only
               - key: LUCY_STORAGE_EPOCH
                 sync: false
               - key: LUCY_SECURITY_STORAGE_EPOCH
@@ -223,7 +209,6 @@ projects:
             autoDeployTrigger: "off"
             dockerfilePath: ./Dockerfile
             dockerContext: .
-            dockerCommand: python -m lucy.provisioning_hold
             envVars:
               - key: LUCY_SERVICE_MODE
                 value: deletion
@@ -231,8 +216,6 @@ projects:
                 value: production
               - key: LUCY_SECURITY_ENVIRONMENT
                 value: production
-              - key: LUCY_RESOURCE_ID_BOOTSTRAP_HOLD
-                value: resource-id-only
               - key: LUCY_STORAGE_EPOCH
                 sync: false
               - key: LUCY_SECURITY_STORAGE_EPOCH

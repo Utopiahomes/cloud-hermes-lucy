@@ -405,22 +405,14 @@ def test_v12_render_has_four_continuous_backends_and_one_finality_utility() -> N
     assert all(service["region"] == "virginia" for service in services.values())
 
 
-def test_v12_render_private_services_start_in_inert_resource_id_hold() -> None:
+def test_v12_render_private_services_leave_resource_id_hold_for_acceptance() -> None:
     services = _v12_render_services()
     private_services = {
         name: service for name, service in services.items() if service["type"] == "pserv"
     }
     for service in private_services.values():
-        assert service["dockerCommand"] == "python -m lucy.provisioning_hold"
-        marker = next(
-            item
-            for item in service["envVars"]
-            if item["key"] == "LUCY_RESOURCE_ID_BOOTSTRAP_HOLD"
-        )
-        assert marker == {
-            "key": "LUCY_RESOURCE_ID_BOOTSTRAP_HOLD",
-            "value": "resource-id-only",
-        }
+        assert "dockerCommand" not in service
+        assert "LUCY_RESOURCE_ID_BOOTSTRAP_HOLD" not in _environment_keys(service)
 
 
 def test_v12_render_database_is_private_paid_and_migration_owned() -> None:
