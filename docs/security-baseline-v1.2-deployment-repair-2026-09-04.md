@@ -2,9 +2,9 @@
 
 Date: 2026-09-04
 
-Status: **repair implemented and locally verified; cloud change set not yet
-created or executed. Live Telegram transcript capture remains disabled and is
-not authorized.**
+Status: **repair implemented, locally verified, and represented by an available
+but unexecuted cloud change set. Live Telegram transcript capture remains
+disabled and is not authorized.**
 
 ## Acceptance findings
 
@@ -80,3 +80,27 @@ must pass afterward.
 
 These results are implementation evidence only. They do not complete real-cloud
 acceptance and do not authorize live capture.
+
+## Prepared cloud change set
+
+The reviewed source is commit `e4d213a`. Its CloudFormation template SHA-256 is
+`d8761baeb00bb0c091d99dac08f91cd47d8a740f41f4dfc70ef351a92e569294`.
+The exact content-addressed template was uploaded, read back byte-for-byte, and
+added to the artifact bucket's overwrite-deny policy. The protected object has
+one recorded version identity in the controlled, git-ignored acceptance record.
+
+Stack termination protection is now enabled. The resulting UPDATE change set
+is `CREATE_COMPLETE` and `AVAILABLE`, but has not been executed. It contains no
+add or remove action and proposes only eight modifications:
+
+- environment updates for the retrieval and deletion functions;
+- retained replacement versions for those two functions;
+- production-alias moves to the two replacement versions;
+- derived re-evaluation of the exact CloudTrail function selectors; and
+- derived re-evaluation of the Lambda deployer's exact function/alias policy.
+
+The two derived modifications are caused by references to the changed function
+and alias resources. Their resolved Lambda function ARNs, qualified alias ARNs,
+CloudTrail table/function inventory, allowed actions, and IAM resources remain
+the same. The post-deployment IAM and audit verifiers must prove this again
+before executor invocation or Render activation.
