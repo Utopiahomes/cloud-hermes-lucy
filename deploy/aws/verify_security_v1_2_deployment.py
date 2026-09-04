@@ -76,6 +76,16 @@ _REQUIRED_OUTPUTS = {
     "DeletionReceiptFailureAlarmName",
     "RetrievalThrottleAlarmName",
     "DeletionThrottleAlarmName",
+    "AuditCloudTrailLogGroupName",
+    "CloudTrailLogsRoleArn",
+    "KmsDecryptMetricFilterName",
+    "RuntimeAccessDeniedMetricFilterName",
+    "RecoveryUseMetricFilterName",
+    "FinalityUseMetricFilterName",
+    "KmsDecryptVolumeAlarmName",
+    "RuntimeAccessDeniedAlarmName",
+    "RecoveryAdministratorUseAlarmName",
+    "FinalityVerifierUseAlarmName",
     "FinalityQuarantineTablePrefix",
 }
 

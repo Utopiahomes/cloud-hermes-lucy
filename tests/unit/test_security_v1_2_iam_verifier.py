@@ -42,6 +42,7 @@ def _outputs() -> dict[str, str]:
         ),
         "RetrievalLogGroupName": "/aws/lambda/lucy-retrieval",
         "DeletionLogGroupName": "/aws/lambda/lucy-deletion",
+        "AuditCloudTrailLogGroupName": "/aws/cloudtrail/lucy-prod-v12-security-audit",
         "ArchiveRoleArn": f"arn:aws:iam::{ACCOUNT}:role/{prefix}-render-archive",
         "EvidenceCallerRoleArn": (
             f"arn:aws:iam::{ACCOUNT}:role/{prefix}-render-evidence-caller"
@@ -60,6 +61,7 @@ def _outputs() -> dict[str, str]:
         "DeletionExecutorRuntimeRoleArn": (
             f"arn:aws:iam::{ACCOUNT}:role/{prefix}-deletion-runtime"
         ),
+        "CloudTrailLogsRoleArn": f"arn:aws:iam::{ACCOUNT}:role/{prefix}-cloudtrail-logs",
     }
 
 

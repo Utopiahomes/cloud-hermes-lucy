@@ -99,6 +99,18 @@ def _outputs() -> dict[str, str]:
         "DeletionReceiptFailureAlarmName": "lucy-prod-v12-deletion-receipt-failed",
         "RetrievalThrottleAlarmName": "lucy-prod-v12-retrieval-throttled",
         "DeletionThrottleAlarmName": "lucy-prod-v12-deletion-throttled",
+        "AuditCloudTrailLogGroupName": "/aws/cloudtrail/lucy-prod-v12-security-audit",
+        "CloudTrailLogsRoleArn": (
+            f"arn:aws:iam::{ACCOUNT}:role/lucy-prod-v12-cloudtrail-logs"
+        ),
+        "KmsDecryptMetricFilterName": "lucy-prod-v12-kms-decrypt",
+        "RuntimeAccessDeniedMetricFilterName": "lucy-prod-v12-runtime-access-denied",
+        "RecoveryUseMetricFilterName": "lucy-prod-v12-recovery-use",
+        "FinalityUseMetricFilterName": "lucy-prod-v12-finality-use",
+        "KmsDecryptVolumeAlarmName": "lucy-prod-v12-kms-decrypt-volume",
+        "RuntimeAccessDeniedAlarmName": "lucy-prod-v12-runtime-access-denied",
+        "RecoveryAdministratorUseAlarmName": "lucy-prod-v12-recovery-use",
+        "FinalityVerifierUseAlarmName": "lucy-prod-v12-finality-use",
         "FinalityQuarantineTablePrefix": "lucy-prod-v12-quarantine-",
     }
 

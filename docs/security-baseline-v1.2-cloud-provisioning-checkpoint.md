@@ -90,9 +90,19 @@ Deployed-state verification is now also prepared before the retry. The first
 read-only verifier checks stack completion and termination protection, exact
 published Lambda versions and environments, public-only policy trust stores,
 KMS key purpose separation, and DynamoDB schemas/protection. The second checks
-all eight live IAM roles and three KMS resource policies against the approved
+all nine live IAM roles and three KMS resource policies against the approved
 contract and runs the critical IAM allow/deny simulation matrix. Both emit
 content-free, non-overwriting acceptance artifacts.
+
+The audit plane is now similarly testable before activation: CloudTrail retains
+validated logs in the versioned TLS-only S3 bucket and also delivers to a
+dedicated 90-day CloudWatch log group. Content-free filters and alarms cover
+direct evidence-key decrypt volume, denied AWS calls by either executor,
+quarantined recovery use, and finality-verifier use. Executor-emitted metrics
+separately cover internal failure, binding/integrity denial, receipt failure,
+and durable quota exhaustion. A third read-only verifier checks those routes,
+all fourteen alarms, and the confirmed owner email subscription without
+reading any audit event or publishing a notification.
 
 That review exposed and fixed a pre-deployment Lambda logging defect: the
 CloudWatch Logs `Arn` returned by CloudFormation already ends in `:*`, so the
@@ -111,8 +121,9 @@ resources were deployed with the faulty policy.
    immutable registry/journal identifiers without exporting the policy private
    seed.
 3. Recreate and inspect the v1.2 CloudFormation change set, then deploy it.
-4. Run both read-only deployed-state verifiers and preserve their acceptance
-   reports. Any failed core, IAM, or KMS-policy check keeps the rollout on hold.
+4. Run all three read-only deployed-state verifiers and preserve their
+   acceptance reports. Any failed core, IAM, KMS-policy, audit, or alert-route
+   check keeps the rollout on hold.
 5. Record stack outputs and receipt public keys; populate only the matching
    Render service variables.
 6. Generate the exact PostgreSQL LOGIN grants and immutable AWS bindings with

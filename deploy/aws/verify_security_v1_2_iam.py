@@ -218,6 +218,19 @@ def _lambda_trust() -> dict[str, Any]:
     }
 
 
+def _service_trust(service: str) -> dict[str, Any]:
+    return {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": service},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+
+
 def _context_condition(environment: str) -> dict[str, Any]:
     fields = [
         "application",
@@ -539,6 +552,23 @@ def expected_role_contracts(
                             "StringEquals": {"kms:SigningAlgorithm": "ECDSA_SHA_256"}
                         },
                     },
+                ],
+            },
+        ),
+        "cloudtrail_logs": (
+            f"{namespace}-cloudtrail-logs-only",
+            _service_trust("cloudtrail.amazonaws.com"),
+            {
+                "Version": version,
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+                        "Resource": (
+                            f"arn:aws:logs:{region}:{account}:log-group:"
+                            f"{outputs['AuditCloudTrailLogGroupName']}:*"
+                        ),
+                    }
                 ],
             },
         ),
@@ -892,6 +922,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "deployer": "LambdaDeployerRoleArn",
             "retrieval_runtime": "RetrievalExecutorRuntimeRoleArn",
             "deletion_runtime": "DeletionExecutorRuntimeRoleArn",
+            "cloudtrail_logs": "CloudTrailLogsRoleArn",
         }
         iam = session.client("iam")
         for label, output_name in role_outputs.items():

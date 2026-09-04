@@ -585,7 +585,7 @@ def test_v12_evidence_context_is_exact_seven_field_and_environment_bound() -> No
         assert set(condition["Null"].values()) == {"false"}
 
 
-def test_v12_security_change_alert_is_limited_to_reviewed_aws_sources() -> None:
+def test_v12_security_change_alert_covers_data_and_monitoring_control_planes() -> None:
     resources = _cloudformation_named("security-baseline-v1.2.yaml")["Resources"]
     pattern = resources["SecurityAdministrationAlert"]["Properties"]["EventPattern"]
     assert set(pattern["source"]) == {
@@ -594,6 +594,12 @@ def test_v12_security_change_alert_is_limited_to_reviewed_aws_sources() -> None:
         "aws.iam",
         "aws.dynamodb",
         "aws.backup",
+        "aws.cloudtrail",
+        "aws.logs",
+        "aws.events",
+        "aws.cloudwatch",
+        "aws.sns",
+        "aws.s3",
     }
     assert set(pattern["detail"]["eventSource"]) == {
         "kms.amazonaws.com",
@@ -601,7 +607,24 @@ def test_v12_security_change_alert_is_limited_to_reviewed_aws_sources() -> None:
         "iam.amazonaws.com",
         "dynamodb.amazonaws.com",
         "backup.amazonaws.com",
+        "cloudtrail.amazonaws.com",
+        "logs.amazonaws.com",
+        "events.amazonaws.com",
+        "monitoring.amazonaws.com",
+        "sns.amazonaws.com",
+        "s3.amazonaws.com",
     }
+    assert {
+        "StopLogging",
+        "DeleteTrail",
+        "DeleteLogGroup",
+        "DeleteMetricFilter",
+        "PutMetricAlarm",
+        "DisableRule",
+        "DeleteTopic",
+        "DeleteBucketPolicy",
+        "PutBucketVersioning",
+    } <= set(pattern["detail"]["eventName"])
 
 
 def test_v12_recovery_window_receipts_and_intents_are_retained() -> None:
@@ -728,6 +751,16 @@ def test_v12_outputs_expose_every_identity_and_control_for_deployed_verification
         "DeletionReceiptFailureAlarmName",
         "RetrievalThrottleAlarmName",
         "DeletionThrottleAlarmName",
+        "AuditCloudTrailLogGroupName",
+        "CloudTrailLogsRoleArn",
+        "KmsDecryptMetricFilterName",
+        "RuntimeAccessDeniedMetricFilterName",
+        "RecoveryUseMetricFilterName",
+        "FinalityUseMetricFilterName",
+        "KmsDecryptVolumeAlarmName",
+        "RuntimeAccessDeniedAlarmName",
+        "RecoveryAdministratorUseAlarmName",
+        "FinalityVerifierUseAlarmName",
     } <= outputs.keys()
 
 
@@ -752,3 +785,67 @@ def test_v12_content_free_executor_metrics_have_immediate_action_scoped_alarms()
         assert properties["EvaluationPeriods"] == properties["Threshold"] == 1
         assert properties["TreatMissingData"] == "notBreaching"
         assert properties["AlarmActions"] == [{"Ref": "SecurityAlertTopic"}]
+
+
+def test_v12_cloudtrail_metrics_cover_decrypt_denials_recovery_and_finality() -> None:
+    resources = _cloudformation_named("security-baseline-v1.2.yaml")["Resources"]
+    bucket_policy = resources["AuditBucketPolicy"]["Properties"]["PolicyDocument"]
+    tls_deny = next(
+        item for item in bucket_policy["Statement"] if item.get("Sid") == "DenyInsecureTransport"
+    )
+    assert tls_deny["Effect"] == "Deny"
+    assert tls_deny["Action"] == "s3:*"
+    assert tls_deny["Condition"] == {"Bool": {"aws:SecureTransport": "false"}}
+    trail = resources["AuditTrail"]
+    assert set(trail["DependsOn"]) == {"AuditBucketPolicy", "CloudTrailLogsPolicy"}
+    assert trail["Properties"]["CloudWatchLogsLogGroupArn"] == {
+        "Fn::GetAtt": "AuditCloudTrailLogGroup.Arn"
+    }
+    assert trail["Properties"]["CloudWatchLogsRoleArn"] == {
+        "Fn::GetAtt": "CloudTrailLogsRole.Arn"
+    }
+    assert resources["AuditCloudTrailLogGroup"]["Properties"]["RetentionInDays"] == 90
+
+    delivery = resources["CloudTrailLogsPolicy"]["Properties"]["PolicyDocument"][
+        "Statement"
+    ]
+    assert delivery == [
+        {
+            "Effect": "Allow",
+            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+            "Resource": {"Fn::GetAtt": "AuditCloudTrailLogGroup.Arn"},
+        }
+    ]
+
+    expected_filters = {
+        "KmsDecryptMetricFilter": "KmsDecryptCalls",
+        "RuntimeAccessDeniedMetricFilter": "RuntimeAccessDenied",
+        "RecoveryUseMetricFilter": "RecoveryAdministratorUse",
+        "FinalityUseMetricFilter": "FinalityVerifierUse",
+    }
+    for name, metric in expected_filters.items():
+        properties = resources[name]["Properties"]
+        assert properties["LogGroupName"] == {"Ref": "AuditCloudTrailLogGroup"}
+        transformation = properties["MetricTransformations"]
+        assert transformation == [
+            {
+                "MetricNamespace": "CloudLucy/SecurityV1_2",
+                "MetricName": metric,
+                "MetricValue": "1",
+                "DefaultValue": 0,
+            }
+        ]
+        assert "transcript" not in json.dumps(properties).lower()
+
+    expected_alarms = {
+        "KmsDecryptVolumeAlarm": "KmsDecryptCalls",
+        "RuntimeAccessDeniedAlarm": "RuntimeAccessDenied",
+        "RecoveryAdministratorUseAlarm": "RecoveryAdministratorUse",
+        "FinalityVerifierUseAlarm": "FinalityVerifierUse",
+    }
+    for name, metric in expected_alarms.items():
+        properties = resources[name]["Properties"]
+        assert properties["Namespace"] == "CloudLucy/SecurityV1_2"
+        assert properties["MetricName"] == metric
+        assert properties["AlarmActions"] == [{"Ref": "SecurityAlertTopic"}]
+        assert properties["TreatMissingData"] == "notBreaching"

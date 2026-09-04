@@ -77,3 +77,24 @@ also checks the exact trust/resource policies and critical positive and
 negative simulator decisions. It never assumes a workload role. Real denied
 API calls under temporary workload sessions remain part of synthetic cloud
 acceptance rather than this read-only inspection.
+
+Finally, verify the audit-delivery and alerting plane after confirming the SNS
+email subscription:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\verify_security_v1_2_audit.py `
+  --stack-name lucy-security-baseline-v1-2 `
+  --expected-account-id <12-digit-target-account> `
+  --expected-alert-email <reviewed-alert-mailbox> `
+  --report secrets\generated\aws-audit-v1.2.json
+```
+
+This read-only gate checks the three 90-day log groups; versioned, encrypted,
+TLS-only, non-public CloudTrail bucket; live S3 and CloudWatch trail delivery;
+exact management and data-event selectors; content-free metric filters; all
+fourteen alarm routes; the single confirmed email subscription; and the
+enabled security-change EventBridge target. It requires only describe/get/list
+operations across CloudWatch Logs, S3, CloudTrail, CloudWatch, SNS, and
+EventBridge. It neither publishes a test alert nor reads any log event or S3
+object. Alert receipt is exercised later with a non-destructive synthetic
+event.
