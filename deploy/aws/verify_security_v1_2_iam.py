@@ -310,7 +310,9 @@ def expected_role_contracts(
                         "Resource": journal_head,
                         "Condition": {
                             "ForAllValues:StringEquals": {
+                                "dynamodb:LeadingKeys": ["HEAD"],
                                 "dynamodb:Attributes": [
+                                    "journal_key",
                                     "journal_id",
                                     "registry_id",
                                     "sequence",

@@ -245,7 +245,10 @@ Resources:
             Resource: !GetAtt DeletionJournalHead.Arn
             Condition:
               ForAllValues:StringEquals:
+                dynamodb:LeadingKeys:
+                  - HEAD
                 dynamodb:Attributes:
+                  - journal_key
                   - journal_id
                   - registry_id
                   - sequence
@@ -290,7 +293,10 @@ Resources:
             Resource: !GetAtt DeletionJournalHead.Arn
             Condition:
               ForAllValues:StringEquals:
+                dynamodb:LeadingKeys:
+                  - HEAD
                 dynamodb:Attributes:
+                  - journal_key
                   - journal_id
                   - registry_id
                   - sequence

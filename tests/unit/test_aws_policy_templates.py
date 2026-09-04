@@ -253,7 +253,14 @@ def test_head_readers_can_request_only_identity_and_chain_metadata() -> None:
         )
         assert statement["Condition"] == {
             "ForAllValues:StringEquals": {
-                "dynamodb:Attributes": ["journal_id", "registry_id", "sequence", "digest"]
+                "dynamodb:LeadingKeys": ["HEAD"],
+                "dynamodb:Attributes": [
+                    "journal_key",
+                    "journal_id",
+                    "registry_id",
+                    "sequence",
+                    "digest",
+                ],
             }
         }
 

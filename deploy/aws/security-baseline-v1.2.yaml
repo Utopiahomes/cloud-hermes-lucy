@@ -493,7 +493,8 @@ Resources:
             Resource: !GetAtt DeletionJournalHead.Arn
             Condition:
               "ForAllValues:StringEquals":
-                dynamodb:Attributes: [journal_id, registry_id, sequence, digest]
+                dynamodb:LeadingKeys: [HEAD]
+                dynamodb:Attributes: [journal_key, journal_id, registry_id, sequence, digest]
 
   RetrievalLogGroup:
     Type: AWS::Logs::LogGroup
