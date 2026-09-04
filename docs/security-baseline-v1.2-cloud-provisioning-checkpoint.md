@@ -86,6 +86,20 @@ read-only AWS preflight prevents a stack retry unless the SSO identity, account,
 OIDC provider, full versioned artifact digest, encryption, and Lambda
 concurrency all match the reviewed deployment.
 
+The hold-time executor and audit hardening produced a refreshed deterministic
+Linux AMD64 release candidate from clean commit
+`b8056897cec063d3ee593d10178b78956593a949`. It was rebuilt twice with identical
+bytes: SHA-256
+`235bd12254a61433e81e767b5a686561aff8ad48533cc52d7786a02d2b42b9ce`
+(`I1vRIlSmFDPoHnZ7WmhlYa/4rUhTPMUtd4agLStCuc4=`), 23,568,213 bytes and
+2,506 files. Its manifest SHA-256 is
+`bdfbf88350d21a6d44f90631c03ed0778f86e216fec5f991aa995feebfe3d8a4`.
+The reviewed CloudFormation template SHA-256 is
+`99922ee906da2de847a24bcf0c914eeb24f85c825fc23ec63f4131a23abdd8be`.
+These are local release-candidate facts only until all three objects are
+uploaded under new non-overwriting keys and their S3 version identities are
+recorded. The earlier artifact remains preserved as the rollback candidate.
+
 Deployed-state verification is now also prepared before the retry. The first
 read-only verifier checks stack completion and termination protection, exact
 published Lambda versions and environments, public-only policy trust stores,

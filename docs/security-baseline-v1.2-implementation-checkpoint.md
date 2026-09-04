@@ -56,6 +56,18 @@ not authorized.**
   and base64 `BSNuXhnLkrpXYAxZ67CyTQ35ti0HMKD33L5dmycYPo4=`. The Linux AMD64 ZIP is
   23,567,559 bytes with 2,506 files. Upload/version identity and the final
   deployed Lambda version remain cloud acceptance evidence, not local claims.
+- After the executor outcome metrics, deployed-state verifiers, and audit-plane
+  hardening were completed, the release artifact was refreshed twice
+  byte-for-byte identically from clean commit
+  `b8056897cec063d3ee593d10178b78956593a949`: SHA-256
+  `235bd12254a61433e81e767b5a686561aff8ad48533cc52d7786a02d2b42b9ce`
+  (`I1vRIlSmFDPoHnZ7WmhlYa/4rUhTPMUtd4agLStCuc4=`), 23,568,213 bytes and
+  2,506 files. The artifact manifest SHA-256 is
+  `bdfbf88350d21a6d44f90631c03ed0778f86e216fec5f991aa995feebfe3d8a4`;
+  the reviewed CloudFormation template SHA-256 is
+  `99922ee906da2de847a24bcf0c914eeb24f85c825fc23ec63f4131a23abdd8be`.
+  This refreshed candidate has not yet been represented as uploaded or
+  deployed evidence.
 - The hash-locked Render dependency inventory has SHA-256
   `29dcc6d96c8ad72d2db123a78dc02333df2207119c8483935f5b04a372f4e8e0`.
   A local Linux AMD64 preflight build ran as UID/GID 10001 and passed all 210
