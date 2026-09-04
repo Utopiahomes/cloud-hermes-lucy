@@ -38,6 +38,15 @@ from lucy.runtime import _expected_commit
 MAINTENANCE_LOCK = 0x4C5543594D53
 
 
+def _permit_verifier_for_recovery(
+    *, recover_deletions: bool
+) -> SensitiveActionPermitVerifier | None:
+    """Load legacy permit trust only when replaying accepted deletions."""
+    if not recover_deletions:
+        return None
+    return SensitiveActionPermitVerifier.from_environment()
+
+
 class MaintenanceService:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -281,7 +290,9 @@ def main() -> None:
             key_store=key_store,
             journal=deletion_journal_from_environment(),
             recover_deletions=args.recover_deletions,
-            permit_verifier=SensitiveActionPermitVerifier.from_environment(),
+            permit_verifier=_permit_verifier_for_recovery(
+                recover_deletions=args.recover_deletions
+            ),
         )
     print(f"Storage maintenance {args.action} completed; no model or user messages were replayed.")
 
