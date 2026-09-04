@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -161,6 +161,36 @@ def _strip_reviewed_psql_header(script: str) -> str:
 
 def _digest(script: str) -> str:
     return hashlib.sha256(script.encode("utf-8")).hexdigest()
+
+
+def _postgres_diagnostic(exc: BaseException) -> tuple[str, str] | None:
+    """Extract only PostgreSQL's code and primary message, never SQL or parameters."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, psycopg.Error):
+            primary = current.diag.message_primary or type(current).__name__
+            return current.sqlstate or "unknown", primary
+        original = getattr(current, "orig", None)
+        if isinstance(original, BaseException) and id(original) not in seen:
+            current = original
+            continue
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _bootstrap_stage[T](name: str, operation: Callable[[], T]) -> T:
+    try:
+        return operation()
+    except BootstrapError:
+        raise
+    except Exception as exc:
+        diagnostic = _postgres_diagnostic(exc)
+        if diagnostic is None:
+            raise
+        sqlstate, primary = diagnostic
+        raise BootstrapError(f"{name} failed ({sqlstate}): {primary}") from exc
 
 
 def _role_rows(connection: psycopg.Connection[Any], names: set[str]) -> dict[str, tuple[Any, ...]]:
@@ -369,10 +399,12 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
 
 
 def run(config: BootstrapConfig) -> dict[str, Any]:
-    _bootstrap_roles(config)
-    _run_migrations(config)
-    roles_digest, bindings_digest = _apply_reviewed_security(config)
-    report = _verify(config)
+    _bootstrap_stage("role bootstrap", lambda: _bootstrap_roles(config))
+    _bootstrap_stage("migration", lambda: _run_migrations(config))
+    roles_digest, bindings_digest = _bootstrap_stage(
+        "security grant application", lambda: _apply_reviewed_security(config)
+    )
+    report = _bootstrap_stage("verification", lambda: _verify(config))
     report.update(
         {
             "contract": "lucy.security-database-bootstrap.v1.2",
