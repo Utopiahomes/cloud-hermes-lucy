@@ -62,6 +62,16 @@ The manual sync must occur only after production database logins, migrations,
 direct grants, immutable executor bindings, and matching service environment
 values are ready.
 
+The database remains private during that transition. The reviewed deployment
+path uses a temporary migration-only Render resource with no AWS identity.
+`deploy/postgres/bootstrap_cloud_v1_2.py` validates the private Render host and
+disabled-capture authorization, creates or safely rotates the five exact
+`NOINHERIT` logins, migrates through `0019`, applies the reviewed grants and
+version-2 executor bindings, then verifies TLS, quarantine, disabled capture,
+and every runtime login. It emits no credential material. The temporary
+resource and its migration-owner environment are removed immediately after the
+verified run; no normal Lucy service receives migration authority.
+
 ## Reprioritized completion path
 
 Only release-blocking security work remains before returning to feature

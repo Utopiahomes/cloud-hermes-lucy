@@ -66,3 +66,41 @@ resource from another account, or a new epoch that has not been reviewed.
 The renderer refuses to replace existing output unless `--overwrite` is
 explicitly supplied. Prefer a new reviewed filename for a new deployment rather
 than overwriting an acceptance artifact.
+
+## Private Render bootstrap
+
+Production PostgreSQL must remain closed to the public internet. Do not place
+the migration-owner URL on any of the four Lucy services or the finality
+utility. A Render one-off job inherits the complete environment snapshot of its
+base service, so none of those services is an acceptable migration base.
+
+For a fresh private Render database, create a temporary migration-only service
+from the reviewed repository image and run:
+
+```text
+python deploy/postgres/bootstrap_cloud_v1_2.py
+```
+
+The temporary service has no AWS role. Supply its migration-owner URL through a
+private `fromDatabase.connectionString` binding, and supply the exact five
+runtime URLs and immutable non-secret AWS binding values as environment
+variables. It additionally requires:
+
+```text
+RENDER=true
+LUCY_ENVIRONMENT=production
+LUCY_TRANSCRIPT_CAPTURE_ENABLED=false
+LUCY_DATABASE_BOOTSTRAP_AUTHORIZATION=security-v1.2-private-quarantined
+```
+
+The utility refuses external database hosts, non-production execution, missing
+or elevated logins, inherited role memberships, non-TLS connections, incorrect
+executor bindings, and any capture-enabled or admitted result. It applies the
+role bootstrap, migrations through `0019`, the direct grants, and the immutable
+executor bindings, then connects with each runtime URL to verify the boundary.
+Its JSON result contains no database URL or password.
+
+After a successful run, put only each service's matching runtime URL on that
+service, remove the temporary migration resource and its environment snapshot,
+and verify the database inbound allowlist is still empty. Never retain the
+migration-owner URL on a continuously running service.

@@ -147,3 +147,18 @@ def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
     assert requirements
     assert all("==" in requirement for requirement in requirements)
     assert lock.count("--hash=sha256:") >= len(requirements)
+
+
+def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files() -> None:
+    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert {".env", ".env.*", "secrets", "data", "archives"} <= set(ignored)
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY deploy/postgres ./deploy/postgres" not in dockerfile
+    for artifact in (
+        "bootstrap_cloud_v1_2.py",
+        "render_security_v1_2_sql.py",
+        "production_bootstrap.sql.example",
+        "production_roles_v1.2.sql.example",
+        "configure_security_v1.2.sql.example",
+    ):
+        assert f"COPY deploy/postgres/{artifact}" in dockerfile
