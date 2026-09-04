@@ -91,6 +91,23 @@ def test_policy_startup_never_requests_an_aws_journal(
     runtime.main()
 
 
+def test_runtime_uses_the_platform_assigned_listener_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PORT", "10000")
+    assert runtime._listener_port() == 10000
+
+
+@pytest.mark.parametrize("value", ["not-a-port", "0", "65536"])
+def test_runtime_rejects_an_invalid_listener_port(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("PORT", value)
+    with pytest.raises(SystemExit, match="invalid listener port"):
+        runtime._listener_port()
+
+
 def test_service_requires_external_storage_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LUCY_STORAGE_EPOCH", raising=False)
     with pytest.raises(ReadinessError):

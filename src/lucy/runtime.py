@@ -25,6 +25,16 @@ def _expected_commit() -> str:
     return values["commit"]
 
 
+def _listener_port() -> int:
+    try:
+        port = int(os.getenv("PORT", "8080"))
+    except ValueError:
+        raise SystemExit("Lucy startup gate failed: invalid listener port") from None
+    if not 1 <= port <= 65_535:
+        raise SystemExit("Lucy startup gate failed: invalid listener port")
+    return port
+
+
 def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
@@ -58,7 +68,7 @@ def main() -> None:
     from lucy.api import app
 
     print("Lucy admitted ASGI listener starting")
-    uvicorn.run(app, host="0.0.0.0", port=8080, access_log=False)
+    uvicorn.run(app, host="0.0.0.0", port=_listener_port(), access_log=False)
 
 
 if __name__ == "__main__":

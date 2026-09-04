@@ -281,7 +281,10 @@ def _policy_permit(
     finally:
         connection.close()
     if response.status != 201 or len(raw) > 262_144:
-        raise CloudAcceptanceError("private policy rejected the synthetic owner assertion")
+        raise CloudAcceptanceError(
+            "private policy rejected the synthetic owner assertion "
+            f"(HTTP {response.status})"
+        )
     try:
         return SensitiveActionPermitV2.model_validate_json(raw)
     except ValueError as exc:
