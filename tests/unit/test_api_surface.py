@@ -3,6 +3,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 import lucy.api as api
 from lucy.api import app
@@ -144,6 +145,21 @@ def test_production_v12_hides_superseded_sensitive_v1_endpoints(
     with pytest.raises(HTTPException) as caught:
         api._require_legacy_sensitive_api_allowed()
     assert caught.value.status_code == 404
+
+
+def test_policy_storage_failure_logging_uses_only_an_allowlisted_code() -> None:
+    class Diagnostic:
+        message_primary = "authorization environment or epoch mismatch"
+
+    class Original:
+        diag = Diagnostic()
+
+    error = SQLAlchemyError()
+    error.orig = Original()  # type: ignore[attr-defined]
+    assert api._policy_permit_storage_failure_code(error) == "authorization_epoch_mismatch"
+
+    Diagnostic.message_primary = "synthetic detail that must not enter logs"
+    assert api._policy_permit_storage_failure_code(error) == "unclassified_database_error"
 
 
 def test_recall_text_is_sent_in_body_not_url(monkeypatch: pytest.MonkeyPatch) -> None:

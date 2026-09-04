@@ -737,6 +737,39 @@ class DeliveryOutcomeV2Input(BaseModel):
     accepted: bool
 
 
+_POLICY_PERMIT_STORAGE_FAILURE_CODES = {
+    "invalid permit issuance idempotency key": "invalid_idempotency_key",
+    "signed authorization contracts must be JSON objects": "invalid_contract_container",
+    "owner assertion contains unknown fields": "assertion_unknown_fields",
+    "V2 permit contains unknown fields": "permit_unknown_fields",
+    "invalid owner assertion contract domain": "assertion_domain_invalid",
+    "invalid V2 permit contract domain": "permit_domain_invalid",
+    "owner assertion and permit bindings differ": "assertion_permit_binding_mismatch",
+    "authorization environment or epoch mismatch": "authorization_epoch_mismatch",
+    "owner assertion is outside its freshness window": "assertion_freshness_invalid",
+    "permit is outside its claim window": "permit_freshness_invalid",
+    "authorization nonce length is invalid": "nonce_length_invalid",
+    "retrieval permit scope is invalid": "retrieval_scope_invalid",
+    "deletion permit scope is invalid": "deletion_scope_invalid",
+    "unsupported sensitive action": "action_invalid",
+    "evidence is unavailable for new authorization": "evidence_unavailable",
+    "permit issuance idempotency conflict": "idempotency_conflict",
+    "malformed v1.2 authorization contract": "contract_malformed",
+}
+
+
+def _policy_permit_storage_failure_code(error: SQLAlchemyError) -> str:
+    original = getattr(error, "orig", None)
+    diagnostic = getattr(original, "diag", None)
+    primary = getattr(diagnostic, "message_primary", None)
+    if not isinstance(primary, str):
+        return "unclassified_database_error"
+    return _POLICY_PERMIT_STORAGE_FAILURE_CODES.get(
+        primary,
+        "unclassified_database_error",
+    )
+
+
 @app.post(
     "/owner/v2/security/permits",
     tags=["owner"],
@@ -768,7 +801,12 @@ def issue_sensitive_action_permit_v2(
         raise HTTPException(status_code=403, detail="owner assertion not authorized") from exc
     except WorkflowRejected as exc:
         raise HTTPException(status_code=403, detail="sensitive action not authorized") from exc
-    except (ValueError, SQLAlchemyError) as exc:
+    except ValueError as exc:
+        print("Lucy policy permit failed closed: contract_value_error", flush=True)
+        raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
+    except SQLAlchemyError as exc:
+        failure_code = _policy_permit_storage_failure_code(exc)
+        print(f"Lucy policy permit failed closed: {failure_code}", flush=True)
         raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
 
 
