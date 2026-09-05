@@ -197,7 +197,7 @@ def _target_state(connection: psycopg.Connection[Any], config: RecoveryConfig) -
         "  AND a.issuer='owner-broker.synthetic-acceptance'),"
         "EXISTS(SELECT 1 FROM lucy.evidence e WHERE e.id=s.evidence_id "
         " AND e.source='hermes' "
-        " AND e.source_conversation_id LIKE 'telegram:cloud-acceptance-%' "
+        " AND e.source_conversation_id LIKE 'telegram:cloud-acceptance-%%' "
         " AND EXISTS(SELECT 1 FROM lucy.evidence_payloads p WHERE p.evidence_id=e.id) "
         " AND NOT EXISTS(SELECT 1 FROM lucy.evidence_tombstones t WHERE t.evidence_id=e.id)) "
         "FROM lucy.operations o JOIN lucy.sensitive_operations_v1 s ON s.id=o.id "

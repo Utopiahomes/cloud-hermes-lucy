@@ -173,3 +173,9 @@ def test_capture_gate_allows_only_evidence_linked_synthetic_receipts() -> None:
     assert "^cloud-acceptance-" in query
     assert "source_turn_id=regexp_replace" in query
     assert "e.source_conversation_id='telegram:' || r.source_conversation_id" in query
+
+
+def test_parameterized_target_query_escapes_literal_like_wildcard() -> None:
+    source = recovery._target_state.__code__.co_consts
+    statements = [value for value in source if isinstance(value, str)]
+    assert any("telegram:cloud-acceptance-%%" in statement for statement in statements)
