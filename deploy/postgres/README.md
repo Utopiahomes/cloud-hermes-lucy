@@ -67,6 +67,15 @@ The renderer refuses to replace existing output unless `--overwrite` is
 explicitly supplied. Prefer a new reviewed filename for a new deployment rather
 than overwriting an acceptance artifact.
 
+The rendered binding SQL is an **initial activation** artifact and deliberately
+requires an empty sensitive-operation ledger. After synthetic or live history
+exists, a reviewed Lambda publication must instead use
+`rebind_executors_cloud_v1_2.py`. That utility requires quarantined admission,
+the exact prior aliases, identities, receipt keys, versions, and security epochs,
+and no unresolved operations. It changes only the two executor-version fields
+and their configuration timestamps in one locked transaction; it never deletes
+or recreates bindings, evidence, permits, grants, receipts, or operation history.
+
 ## Private Render bootstrap
 
 Production PostgreSQL must remain closed to the public internet. Do not place

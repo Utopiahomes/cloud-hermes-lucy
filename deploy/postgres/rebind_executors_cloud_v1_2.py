@@ -2,13 +2,13 @@
 
 Run only from a temporary Render migration utility after a policy trust-store
 rotation. The utility accepts no runtime database passwords, transcript data,
-or private signing material. It verifies the exact prior binding, applies the
-reviewed SQL while admission remains quarantined, and emits content-free facts.
+or private signing material. It verifies the exact prior binding and security
+epochs, changes only the two bound executor versions in one transaction while
+admission remains quarantined, and emits content-free facts.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -19,14 +19,11 @@ from typing import Any
 import psycopg
 from sqlalchemy.engine import URL, make_url
 
-try:
-    from . import render_security_v1_2_sql as renderer
-except ImportError:  # Direct script execution places deploy/postgres on sys.path.
-    import render_security_v1_2_sql as renderer
-
 AUTHORIZATION = "security-v1.2-executor-rebind"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
+_MAINTENANCE_LOCK = 0x4C5543594D53
+_ADMISSION_LOCK = 0x4C5543594144
 
 
 class RebindError(RuntimeError):
@@ -133,18 +130,11 @@ def _conninfo(url: URL) -> str:
     return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
-def _strip_reviewed_psql_header(script: str) -> str:
-    lines = script.splitlines()
-    meta = [line.strip() for line in lines if line.lstrip().startswith("\\")]
-    if meta not in ([], [r"\set ON_ERROR_STOP on"]):
-        raise RebindError("unexpected psql meta-command in reviewed SQL")
-    return "\n".join(line for line in lines if not line.lstrip().startswith("\\")) + "\n"
-
-
 def _binding_rows(connection: psycopg.Connection[Any]) -> list[tuple[Any, ...]]:
     return list(
         connection.execute(
-            "SELECT action,executor_alias_arn,executor_version,receipt_key_id,active "
+            "SELECT action,executor_identity,executor_alias_arn,executor_version,"
+            "receipt_key_id,active "
             "FROM lucy.executor_bindings_v1 WHERE environment='production' ORDER BY action"
         ).fetchall()
     )
@@ -159,6 +149,7 @@ def _expected_rows(config: RebindConfig, *, target: bool) -> list[tuple[Any, ...
         [
             (
                 "evidence.retrieve",
+                "lucy-evidence-executor",
                 config.retrieval_alias_arn,
                 retrieval_version,
                 config.retrieval_receipt_key_arn,
@@ -166,6 +157,7 @@ def _expected_rows(config: RebindConfig, *, target: bool) -> list[tuple[Any, ...
             ),
             (
                 "evidence.delete",
+                "lucy-deletion-executor",
                 config.deletion_alias_arn,
                 deletion_version,
                 config.deletion_receipt_key_arn,
@@ -176,19 +168,17 @@ def _expected_rows(config: RebindConfig, *, target: bool) -> list[tuple[Any, ...
 
 
 def run(config: RebindConfig) -> dict[str, Any]:
-    rendered = renderer.render_bindings(
-        aws_account_id=config.aws_account_id,
-        retrieval_alias_arn=config.retrieval_alias_arn,
-        deletion_alias_arn=config.deletion_alias_arn,
-        retrieval_receipt_key_arn=config.retrieval_receipt_key_arn,
-        deletion_receipt_key_arn=config.deletion_receipt_key_arn,
-        retrieval_version=config.retrieval_version,
-        deletion_version=config.deletion_version,
-        security_storage_epoch=config.storage_epoch,
-        security_registry_epoch=config.registry_epoch,
-        security_key_epoch=config.key_epoch,
-    )
-    with psycopg.connect(_conninfo(config.migration_url), autocommit=True) as connection:
+    with psycopg.connect(_conninfo(config.migration_url)) as connection:
+        connection.execute("SET LOCAL lock_timeout = '10s'")
+        connection.execute("SET LOCAL statement_timeout = '60s'")
+        connection.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (_MAINTENANCE_LOCK,),
+        )
+        connection.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (_ADMISSION_LOCK,),
+        )
         tls = connection.execute(
             "SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()"
         ).fetchone()
@@ -199,9 +189,33 @@ def run(config: RebindConfig) -> dict[str, Any]:
         ).fetchone()
         if admission != ("quarantined",):
             raise RebindError("runtime admission must remain quarantined")
+        epochs = connection.execute(
+            "SELECT storage_epoch,registry_epoch,key_epoch "
+            "FROM lucy.security_contract_epochs WHERE singleton"
+        ).fetchone()
+        if epochs != (config.storage_epoch, config.registry_epoch, config.key_epoch):
+            raise RebindError("security contract epochs differ from the reviewed state")
         if _binding_rows(connection) != _expected_rows(config, target=False):
             raise RebindError("existing executor bindings differ from the reviewed prior state")
-        connection.execute(_strip_reviewed_psql_header(rendered), prepare=False)
+        unresolved = connection.execute(
+            "SELECT count(*) FROM lucy.operations "
+            "WHERE outcome NOT IN ('succeeded','failed')"
+        ).fetchone()
+        if unresolved is None or unresolved[0] != 0:
+            raise RebindError("unresolved operations prevent executor rebinding")
+        updates = (
+            ("evidence.retrieve", config.retrieval_version),
+            ("evidence.delete", config.deletion_version),
+        )
+        for action, version in updates:
+            result = connection.execute(
+                "UPDATE lucy.executor_bindings_v1 "
+                "SET executor_version=%s,configured_at=clock_timestamp() "
+                "WHERE action=%s AND environment='production'",
+                (version, action),
+            )
+            if result.rowcount != 1:
+                raise RebindError("executor binding update cardinality differed")
         if _binding_rows(connection) != _expected_rows(config, target=True):
             raise RebindError("executor bindings did not reach the reviewed target state")
         capture = connection.execute(
@@ -224,7 +238,8 @@ def run(config: RebindConfig) -> dict[str, Any]:
             "retrieval": config.retrieval_version,
             "deletion": config.deletion_version,
         },
-        "bindings_sql_sha256": hashlib.sha256(rendered.encode()).hexdigest(),
+        "binding_fields_changed": ["executor_version", "configured_at"],
+        "historical_operation_rows_preserved": True,
         "runtime_admission": "quarantined",
         "capture_enabled": False,
     }
