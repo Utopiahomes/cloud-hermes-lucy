@@ -186,7 +186,7 @@ def collect(config: InventoryConfig) -> dict[str, Any]:
 def serve(config: InventoryConfig) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path == "/health":
+            if self.path in {"/", "/health", "/ready"}:
                 status, response = 200, b'{"ok":true}'
             elif (
                 self.path == "/diagnostic"
