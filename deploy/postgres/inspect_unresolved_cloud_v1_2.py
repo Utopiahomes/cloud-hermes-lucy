@@ -27,6 +27,26 @@ _SENSITIVE_KEY = re.compile(
     r"cloud-acceptance-(?P<action>retrieve|delete):"
     r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
+_CAPTURE_SAFETY_QUERY = r"""
+SELECT
+  EXISTS(SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled),
+  EXISTS(
+    SELECT 1 FROM lucy.capture_receipts r
+    WHERE r.capture_enabled AND NOT (
+      r.platform='telegram'
+      AND r.source_conversation_id ~
+        '^cloud-acceptance-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      AND r.source_turn_id=regexp_replace(
+        r.source_conversation_id,'^cloud-acceptance-','turn-'
+      )
+      AND EXISTS(
+        SELECT 1 FROM lucy.evidence e
+        WHERE e.source='hermes'
+          AND e.source_conversation_id='telegram:' || r.source_conversation_id
+      )
+    )
+  )
+"""
 
 QUERY = """
 SELECT o.id::text,o.idempotency_key,o.outcome,o.created_at::text,o.completed_at::text,
@@ -78,9 +98,7 @@ class InventoryConfig:
     port: int
 
     @classmethod
-    def from_environment(
-        cls, environment: Mapping[str, str] | None = None
-    ) -> InventoryConfig:
+    def from_environment(cls, environment: Mapping[str, str] | None = None) -> InventoryConfig:
         values = os.environ if environment is None else environment
         if values.get("RENDER") != "true" or values.get("LUCY_ENVIRONMENT") != "production":
             raise InventoryError("inventory requires the Render production runtime")
@@ -172,12 +190,8 @@ def collect(config: InventoryConfig) -> dict[str, Any]:
         admission = connection.execute(
             "SELECT state FROM lucy.runtime_admission WHERE singleton"
         ).fetchone()
-        capture = connection.execute(
-            "SELECT EXISTS (SELECT 1 FROM lucy.conversation_capture_states "
-            "WHERE capture_enabled) OR EXISTS (SELECT 1 FROM lucy.capture_receipts "
-            "WHERE capture_enabled)"
-        ).fetchone()
-        if tls != (True,) or admission != ("quarantined",) or capture != (False,):
+        capture = connection.execute(_CAPTURE_SAFETY_QUERY).fetchone()
+        if tls != (True,) or admission != ("quarantined",) or capture != (False, False):
             raise InventoryError("database safety state differs from the reviewed boundary")
         rows = connection.execute(QUERY).fetchall()
     return {"count": len(rows), "operations": [sanitize_row(row) for row in rows]}
@@ -186,9 +200,10 @@ def collect(config: InventoryConfig) -> dict[str, Any]:
 def serve(port: int, bearer_token: str) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path == "/diagnostic" and self.headers.get(
-                "Authorization"
-            ) == f"Bearer {bearer_token}":
+            if (
+                self.path == "/diagnostic"
+                and self.headers.get("Authorization") == f"Bearer {bearer_token}"
+            ):
                 try:
                     config = InventoryConfig.from_environment()
                     response = json.dumps(

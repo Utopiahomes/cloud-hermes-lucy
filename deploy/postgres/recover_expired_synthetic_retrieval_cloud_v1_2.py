@@ -31,6 +31,26 @@ _SYNTHETIC_KEY = re.compile(
 _MAINTENANCE_LOCK = 0x4C5543594D53
 _ADMISSION_LOCK = 0x4C5543594144
 _EVENT_TYPE = "sensitive.retrieval_expired_without_receipt"
+_CAPTURE_SAFETY_QUERY = r"""
+SELECT
+  EXISTS(SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled),
+  EXISTS(
+    SELECT 1 FROM lucy.capture_receipts r
+    WHERE r.capture_enabled AND NOT (
+      r.platform='telegram'
+      AND r.source_conversation_id ~
+        '^cloud-acceptance-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      AND r.source_turn_id=regexp_replace(
+        r.source_conversation_id,'^cloud-acceptance-','turn-'
+      )
+      AND EXISTS(
+        SELECT 1 FROM lucy.evidence e
+        WHERE e.source='hermes'
+          AND e.source_conversation_id='telegram:' || r.source_conversation_id
+      )
+    )
+  )
+"""
 _RESULT = {
     "state": "FAILED_FINAL",
     "recovery_disposition": "expired_without_executor_receipt",
@@ -129,17 +149,14 @@ def _safety_state(connection: psycopg.Connection[Any], config: RecoveryConfig) -
     admission = connection.execute(
         "SELECT state FROM lucy.runtime_admission WHERE singleton"
     ).fetchone()
-    capture = connection.execute(
-        "SELECT EXISTS (SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled) "
-        "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)"
-    ).fetchone()
+    capture = connection.execute(_CAPTURE_SAFETY_QUERY).fetchone()
     epochs = connection.execute(
         "SELECT storage_epoch,registry_epoch,key_epoch "
         "FROM lucy.security_contract_epochs WHERE singleton"
     ).fetchone()
     if tls != (True,):
         raise RecoveryError("database connection is not TLS protected")
-    if admission != ("quarantined",) or capture != (False,):
+    if admission != ("quarantined",) or capture != (False, False):
         raise RecoveryError("database safety state differs from the reviewed quarantine")
     if epochs != (config.storage_epoch, config.registry_epoch, config.key_epoch):
         raise RecoveryError("security contract epochs differ from the reviewed state")

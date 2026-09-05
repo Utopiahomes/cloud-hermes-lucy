@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from deploy.postgres.inspect_unresolved_cloud_v1_2 import (
+    _CAPTURE_SAFETY_QUERY,
     AUTHORIZATION,
     InventoryConfig,
     InventoryError,
@@ -18,9 +19,7 @@ def environment() -> dict[str, str]:
         "LUCY_ENVIRONMENT": "production",
         "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
         "LUCY_UNRESOLVED_DIAGNOSTIC_AUTHORIZATION": AUTHORIZATION,
-        "LUCY_MAINTENANCE_DATABASE_URL": (
-            "postgresql://lucy_migration:secret@dpg-example-a/lucy"
-        ),
+        "LUCY_MAINTENANCE_DATABASE_URL": ("postgresql://lucy_migration:secret@dpg-example-a/lucy"),
         "LUCY_DIAGNOSTIC_TOKEN": "x" * 32,
         "PORT": "10000",
     }
@@ -74,3 +73,11 @@ def test_inventory_sanitizes_idempotency_and_omits_sensitive_values() -> None:
     assert row[1] not in serialized
     for forbidden in ("encrypted_package", "serialized_permit", "ciphertext", "wrapped_key"):
         assert forbidden not in result
+
+
+def test_inventory_capture_gate_rejects_non_synthetic_historical_receipts() -> None:
+    query = " ".join(_CAPTURE_SAFETY_QUERY.split())
+    assert "WHERE r.capture_enabled AND NOT" in query
+    assert "^cloud-acceptance-" in query
+    assert "source_turn_id=regexp_replace" in query
+    assert "e.source_conversation_id='telegram:' || r.source_conversation_id" in query

@@ -79,7 +79,7 @@ class _Connection:
             ]
             return _Result(rowcount=1)
         if "FROM lucy.conversation_capture_states" in normalized:
-            return _Result(one=(False,))
+            return _Result(one=(False, False))
         raise AssertionError(f"unexpected SQL: {normalized}")
 
 
@@ -137,9 +137,7 @@ def test_rebind_configuration_accepts_only_private_quarantined_render() -> None:
         ("LUCY_RETRIEVAL_EXECUTOR_VERSION", "2", "monotonically"),
     ],
 )
-def test_rebind_configuration_rejects_unsafe_inputs(
-    name: str, value: str, diagnostic: str
-) -> None:
+def test_rebind_configuration_rejects_unsafe_inputs(name: str, value: str, diagnostic: str) -> None:
     environment = _environment()
     environment[name] = value
 
@@ -183,3 +181,11 @@ def test_rebind_refuses_unresolved_operations_before_any_update(
         statement.startswith("UPDATE lucy.executor_bindings_v1")
         for statement in connection.statements
     )
+
+
+def test_rebind_capture_gate_rejects_non_synthetic_historical_receipts() -> None:
+    query = " ".join(rebind._CAPTURE_SAFETY_QUERY.split())
+    assert "WHERE r.capture_enabled AND NOT" in query
+    assert "^cloud-acceptance-" in query
+    assert "source_turn_id=regexp_replace" in query
+    assert "e.source_conversation_id='telegram:' || r.source_conversation_id" in query

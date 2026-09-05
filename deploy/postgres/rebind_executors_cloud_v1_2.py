@@ -24,6 +24,26 @@ _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
 _MAINTENANCE_LOCK = 0x4C5543594D53
 _ADMISSION_LOCK = 0x4C5543594144
+_CAPTURE_SAFETY_QUERY = r"""
+SELECT
+  EXISTS(SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled),
+  EXISTS(
+    SELECT 1 FROM lucy.capture_receipts r
+    WHERE r.capture_enabled AND NOT (
+      r.platform='telegram'
+      AND r.source_conversation_id ~
+        '^cloud-acceptance-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      AND r.source_turn_id=regexp_replace(
+        r.source_conversation_id,'^cloud-acceptance-','turn-'
+      )
+      AND EXISTS(
+        SELECT 1 FROM lucy.evidence e
+        WHERE e.source='hermes'
+          AND e.source_conversation_id='telegram:' || r.source_conversation_id
+      )
+    )
+  )
+"""
 
 
 class RebindError(RuntimeError):
@@ -141,9 +161,7 @@ def _binding_rows(connection: psycopg.Connection[Any]) -> list[tuple[Any, ...]]:
 
 
 def _expected_rows(config: RebindConfig, *, target: bool) -> list[tuple[Any, ...]]:
-    retrieval_version = (
-        config.retrieval_version if target else config.expected_retrieval_version
-    )
+    retrieval_version = config.retrieval_version if target else config.expected_retrieval_version
     deletion_version = config.deletion_version if target else config.expected_deletion_version
     return sorted(
         [
@@ -198,8 +216,7 @@ def run(config: RebindConfig) -> dict[str, Any]:
         if _binding_rows(connection) != _expected_rows(config, target=False):
             raise RebindError("existing executor bindings differ from the reviewed prior state")
         unresolved = connection.execute(
-            "SELECT count(*) FROM lucy.operations "
-            "WHERE outcome NOT IN ('succeeded','failed')"
+            "SELECT count(*) FROM lucy.operations WHERE outcome NOT IN ('succeeded','failed')"
         ).fetchone()
         if unresolved is None or unresolved[0] != 0:
             raise RebindError("unresolved operations prevent executor rebinding")
@@ -218,14 +235,11 @@ def run(config: RebindConfig) -> dict[str, Any]:
                 raise RebindError("executor binding update cardinality differed")
         if _binding_rows(connection) != _expected_rows(config, target=True):
             raise RebindError("executor bindings did not reach the reviewed target state")
-        capture = connection.execute(
-            "SELECT EXISTS (SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled) "
-            "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)"
-        ).fetchone()
+        capture = connection.execute(_CAPTURE_SAFETY_QUERY).fetchone()
         final_admission = connection.execute(
             "SELECT state FROM lucy.runtime_admission WHERE singleton"
         ).fetchone()
-        if capture != (False,) or final_admission != ("quarantined",):
+        if capture != (False, False) or final_admission != ("quarantined",):
             raise RebindError("rebind changed capture or admission safety state")
     return {
         "contract": "lucy.security-executor-rebind.v1.2",

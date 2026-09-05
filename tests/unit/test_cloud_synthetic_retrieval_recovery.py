@@ -53,7 +53,7 @@ class _Connection:
         if "FROM lucy.runtime_admission" in normalized:
             return _Result(("quarantined",))
         if "FROM lucy.conversation_capture_states" in normalized:
-            return _Result((False,))
+            return _Result((False, False))
         if "FROM lucy.security_contract_epochs" in normalized:
             return _Result(
                 (self.config.storage_epoch, self.config.registry_epoch, self.config.key_epoch)
@@ -165,3 +165,11 @@ def test_recovery_refuses_non_retrieval_before_mutation(
         recovery.run(config)
 
     assert not any(statement.startswith("UPDATE ") for statement in connection.statements)
+
+
+def test_capture_gate_allows_only_evidence_linked_synthetic_receipts() -> None:
+    query = " ".join(recovery._CAPTURE_SAFETY_QUERY.split())
+    assert "WHERE r.capture_enabled AND NOT" in query
+    assert "^cloud-acceptance-" in query
+    assert "source_turn_id=regexp_replace" in query
+    assert "e.source_conversation_id='telegram:' || r.source_conversation_id" in query
