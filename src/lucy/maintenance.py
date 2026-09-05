@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -36,6 +37,40 @@ from lucy.retention import retention_fence
 from lucy.runtime import _expected_commit
 
 MAINTENANCE_LOCK = 0x4C5543594D53
+
+
+def _require_executor_bound_registry_environment(
+    environment: Mapping[str, str],
+) -> None:
+    if (
+        environment.get("LUCY_ENVIRONMENT") != "production"
+        or environment.get("LUCY_SECURITY_ENVIRONMENT") != "production"
+        or environment.get("LUCY_SERVICE_MODE") != "routine"
+        or environment.get("LUCY_ARCHIVE_BACKEND") != "aws-kms-dynamodb"
+        or environment.get("LUCY_TRANSCRIPT_CAPTURE_ENABLED") != "false"
+    ):
+        raise ReadinessError(
+            "executor-bound registry verification requires the quarantined v1.2 boundary"
+        )
+
+
+def _verify_archive_registry_refs(
+    refs: Sequence[UUID],
+    key_store: ArchiveKeyStore | None,
+    journal: DeletionJournal | None,
+    *,
+    executor_bound: bool,
+) -> None:
+    if executor_bound:
+        if key_store is None or journal is None:
+            raise ReadinessError(
+                "executor-bound registry verification requires archive and journal identities"
+            )
+        return
+    if refs and key_store is None:
+        raise ReadinessError("archive registry verification is required")
+    if key_store is not None and any(key_store.get(ref) is None for ref in refs):
+        raise ReadinessError("archive registry mismatch; storage remains quarantined")
 
 
 def _permit_verifier_for_recovery(
@@ -78,6 +113,7 @@ class MaintenanceService:
         journal: DeletionJournal | None = None,
         recover_deletions: bool = False,
         permit_verifier: SensitiveActionPermitVerifier | None = None,
+        executor_bound_registry_verification: bool = False,
     ) -> None:
         # Keep a separate lock-only transaction alive across the durable close,
         # verification, recovery, and reopen commits. A crash releases its lock
@@ -94,6 +130,7 @@ class MaintenanceService:
                 journal=journal,
                 recover_deletions=recover_deletions,
                 permit_verifier=permit_verifier,
+                executor_bound_registry_verification=executor_bound_registry_verification,
             )
 
     def _prepare(
@@ -108,6 +145,7 @@ class MaintenanceService:
         journal: DeletionJournal | None,
         recover_deletions: bool,
         permit_verifier: SensitiveActionPermitVerifier | None,
+        executor_bound_registry_verification: bool,
     ) -> None:
         if not executors_stopped:
             raise ReadinessError("operator must confirm all executors are stopped")
@@ -174,10 +212,12 @@ class MaintenanceService:
                     "archive provenance review required; storage quarantined"
                 ) from exc
             refs = list(session.scalars(select(EvidencePayloadRow.key_ref)))
-            if refs and key_store is None:
-                raise ReadinessError("archive registry verification is required")
-            if key_store is not None and any(key_store.get(ref) is None for ref in refs):
-                raise ReadinessError("archive registry mismatch; storage remains quarantined")
+            _verify_archive_registry_refs(
+                refs,
+                key_store,
+                journal,
+                executor_bound=executor_bound_registry_verification,
+            )
         result = RejoiningService(self._sessions, expected_hermes_commit=expected_commit).run(
             observed_hermes_commit=observed_commit,
         )
@@ -285,6 +325,7 @@ def main() -> None:
     parser.add_argument("--confirm-executors-stopped", action="store_true")
     parser.add_argument("--recover-ambiguous", action="store_true")
     parser.add_argument("--recover-deletions", action="store_true")
+    parser.add_argument("--executor-bound-registry-verification", action="store_true")
     args = parser.parse_args()
     sessions = create_session_factory(os.environ["LUCY_MAINTENANCE_DATABASE_URL"])
     maintenance = MaintenanceService(sessions)
@@ -296,6 +337,8 @@ def main() -> None:
         key_store = (
             archive_key_store_from_environment() if os.getenv("LUCY_ARCHIVE_BACKEND") else None
         )
+        if args.executor_bound_registry_verification:
+            _require_executor_bound_registry_environment(os.environ)
         maintenance.prepare(
             storage_epoch=args.storage_epoch,
             expected_commit=_expected_commit(),
@@ -305,9 +348,8 @@ def main() -> None:
             key_store=key_store,
             journal=deletion_journal_from_environment(),
             recover_deletions=args.recover_deletions,
-            permit_verifier=_permit_verifier_for_recovery(
-                recover_deletions=args.recover_deletions
-            ),
+            permit_verifier=_permit_verifier_for_recovery(recover_deletions=args.recover_deletions),
+            executor_bound_registry_verification=args.executor_bound_registry_verification,
         )
     print(f"Storage maintenance {args.action} completed; no model or user messages were replayed.")
 

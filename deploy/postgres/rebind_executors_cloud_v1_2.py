@@ -213,26 +213,31 @@ def run(config: RebindConfig) -> dict[str, Any]:
         ).fetchone()
         if epochs != (config.storage_epoch, config.registry_epoch, config.key_epoch):
             raise RebindError("security contract epochs differ from the reviewed state")
-        if _binding_rows(connection) != _expected_rows(config, target=False):
-            raise RebindError("existing executor bindings differ from the reviewed prior state")
         unresolved = connection.execute(
             "SELECT count(*) FROM lucy.operations WHERE outcome NOT IN ('succeeded','failed')"
         ).fetchone()
         if unresolved is None or unresolved[0] != 0:
             raise RebindError("unresolved operations prevent executor rebinding")
-        updates = (
-            ("evidence.retrieve", config.retrieval_version),
-            ("evidence.delete", config.deletion_version),
-        )
-        for action, version in updates:
-            result = connection.execute(
-                "UPDATE lucy.executor_bindings_v1 "
-                "SET executor_version=%s,configured_at=clock_timestamp() "
-                "WHERE action=%s AND environment='production'",
-                (version, action),
+        bindings = _binding_rows(connection)
+        if bindings == _expected_rows(config, target=True):
+            replayed = True
+        elif bindings == _expected_rows(config, target=False):
+            updates = (
+                ("evidence.retrieve", config.retrieval_version),
+                ("evidence.delete", config.deletion_version),
             )
-            if result.rowcount != 1:
-                raise RebindError("executor binding update cardinality differed")
+            for action, version in updates:
+                result = connection.execute(
+                    "UPDATE lucy.executor_bindings_v1 "
+                    "SET executor_version=%s,configured_at=clock_timestamp() "
+                    "WHERE action=%s AND environment='production'",
+                    (version, action),
+                )
+                if result.rowcount != 1:
+                    raise RebindError("executor binding update cardinality differed")
+            replayed = False
+        else:
+            raise RebindError("existing executor bindings differ from the reviewed states")
         if _binding_rows(connection) != _expected_rows(config, target=True):
             raise RebindError("executor bindings did not reach the reviewed target state")
         capture = connection.execute(_CAPTURE_SAFETY_QUERY).fetchone()
@@ -256,6 +261,7 @@ def run(config: RebindConfig) -> dict[str, Any]:
         "historical_operation_rows_preserved": True,
         "runtime_admission": "quarantined",
         "capture_enabled": False,
+        "replayed": replayed,
     }
 
 

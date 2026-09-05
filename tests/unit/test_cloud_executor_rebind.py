@@ -156,6 +156,7 @@ def test_rebind_updates_only_versions_and_preserves_historical_rows(
 
     assert connection.bindings == rebind._expected_rows(config, target=True)
     assert report["historical_operation_rows_preserved"] is True
+    assert report["replayed"] is False
     assert report["binding_fields_changed"] == ["executor_version", "configured_at"]
     update_count = sum(
         statement.startswith("UPDATE lucy.executor_bindings_v1")
@@ -177,6 +178,23 @@ def test_rebind_refuses_unresolved_operations_before_any_update(
     with pytest.raises(RebindError, match="unresolved operations"):
         rebind.run(config)
 
+    assert not any(
+        statement.startswith("UPDATE lucy.executor_bindings_v1")
+        for statement in connection.statements
+    )
+
+
+def test_rebind_replays_an_exact_completed_target_without_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = RebindConfig.from_environment(_environment())
+    connection = _Connection(config)
+    connection.bindings = rebind._expected_rows(config, target=True)
+    monkeypatch.setattr(rebind.psycopg, "connect", lambda *_args, **_kwargs: connection)
+
+    report = rebind.run(config)
+
+    assert report["replayed"] is True
     assert not any(
         statement.startswith("UPDATE lucy.executor_bindings_v1")
         for statement in connection.statements

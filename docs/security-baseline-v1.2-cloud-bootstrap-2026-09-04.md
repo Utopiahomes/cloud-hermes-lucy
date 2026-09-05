@@ -143,3 +143,20 @@ development:
 
 Passing these gates does not itself enable live capture. Activation remains a
 separate owner decision.
+
+## Executor-bound registry verification
+
+The v1.2 archive identity deliberately has wrapped-key `PutItem` but no
+wrapped-key `GetItem`, Scan, Query, or KMS decrypt authority. Storage
+maintenance therefore must not reuse the older direct-registry verification
+path, which would require weakening that identity. The production maintenance
+command uses the explicit `--executor-bound-registry-verification` mode while
+admission is quarantined and all runtime clients are stopped. That mode still
+verifies PostgreSQL provenance, the independent journal/registry identity, and
+all ordinary recovery invariants; it does not enumerate or read wrapped keys.
+
+Exact wrapped-key access is proven immediately afterward through the bounded,
+permit-driven retrieval and deletion executors in the synthetic cloud
+acceptance bundle. This split is intentional: maintenance is not represented
+as proof that every historical wrapped key exists, and any real (non-synthetic)
+enabled capture receipt still blocks the pre-activation recovery/rebind path.
