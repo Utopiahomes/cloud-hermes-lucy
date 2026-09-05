@@ -183,16 +183,14 @@ def collect(config: InventoryConfig) -> dict[str, Any]:
     return {"count": len(rows), "operations": [sanitize_row(row) for row in rows]}
 
 
-def serve(config: InventoryConfig) -> None:
+def serve(port: int, bearer_token: str) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path in {"/", "/health", "/ready"}:
-                status, response = 200, b'{"ok":true}'
-            elif (
-                self.path == "/diagnostic"
-                and self.headers.get("Authorization") == f"Bearer {config.bearer_token}"
-            ):
+            if self.path == "/diagnostic" and self.headers.get(
+                "Authorization"
+            ) == f"Bearer {bearer_token}":
                 try:
+                    config = InventoryConfig.from_environment()
                     response = json.dumps(
                         collect(config), separators=(",", ":"), sort_keys=True
                     ).encode()
@@ -218,8 +216,10 @@ def serve(config: InventoryConfig) -> None:
                     response = json.dumps(
                         {"error": "inventory_failed", "error_type": type(exc).__name__}
                     ).encode()
-            else:
+            elif self.path == "/diagnostic":
                 status, response = 404, b'{"error":"not_found"}'
+            else:
+                status, response = 200, b'{"ok":true}'
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(response)))
@@ -229,12 +229,18 @@ def serve(config: InventoryConfig) -> None:
         def log_message(self, _format: str, *args: Any) -> None:
             return
 
-    ThreadingHTTPServer(("0.0.0.0", config.port), Handler).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
 
 def main() -> None:
-    config = InventoryConfig.from_environment()
-    serve(config)
+    try:
+        port = int(os.environ.get("PORT", ""))
+    except ValueError as exc:
+        raise InventoryError("diagnostic port is invalid") from exc
+    token = os.environ.get("LUCY_DIAGNOSTIC_TOKEN", "").strip()
+    if port not in range(1, 65_536) or len(token) < 32:
+        raise InventoryError("diagnostic listener configuration is invalid")
+    serve(port, token)
 
 
 if __name__ == "__main__":
