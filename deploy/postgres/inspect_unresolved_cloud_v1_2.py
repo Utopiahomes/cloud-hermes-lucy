@@ -183,11 +183,7 @@ def collect(config: InventoryConfig) -> dict[str, Any]:
     return {"count": len(rows), "operations": [sanitize_row(row) for row in rows]}
 
 
-def serve(config: InventoryConfig, payload: dict[str, Any]) -> None:
-    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    if len(body) > 262_144:
-        raise InventoryError("content-free inventory exceeds its fixed response bound")
-
+def serve(config: InventoryConfig) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/health":
@@ -196,7 +192,32 @@ def serve(config: InventoryConfig, payload: dict[str, Any]) -> None:
                 self.path == "/diagnostic"
                 and self.headers.get("Authorization") == f"Bearer {config.bearer_token}"
             ):
-                status, response = 200, body
+                try:
+                    response = json.dumps(
+                        collect(config), separators=(",", ":"), sort_keys=True
+                    ).encode()
+                    if len(response) > 262_144:
+                        raise InventoryError(
+                            "content-free inventory exceeds its fixed response bound"
+                        )
+                    status = 200
+                except InventoryError as exc:
+                    status = 503
+                    response = json.dumps({"error": str(exc)}).encode()
+                except psycopg.Error as exc:
+                    status = 503
+                    response = json.dumps(
+                        {
+                            "error": "postgresql_inventory_failed",
+                            "sqlstate": exc.sqlstate or "unknown",
+                            "primary": exc.diag.message_primary or type(exc).__name__,
+                        }
+                    ).encode()
+                except Exception as exc:
+                    status = 503
+                    response = json.dumps(
+                        {"error": "inventory_failed", "error_type": type(exc).__name__}
+                    ).encode()
             else:
                 status, response = 404, b'{"error":"not_found"}'
             self.send_response(status)
@@ -213,7 +234,7 @@ def serve(config: InventoryConfig, payload: dict[str, Any]) -> None:
 
 def main() -> None:
     config = InventoryConfig.from_environment()
-    serve(config, collect(config))
+    serve(config)
 
 
 if __name__ == "__main__":
