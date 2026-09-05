@@ -76,6 +76,14 @@ and no unresolved operations. It changes only the two executor-version fields
 and their configuration timestamps in one locked transaction; it never deletes
 or recreates bindings, evidence, permits, grants, receipts, or operation history.
 
+If that guard discovers unresolved work,
+`inspect_unresolved_cloud_v1_2.py` provides a temporary authenticated inventory
+while every normal PostgreSQL client stays suspended. It exposes only operation
+IDs, state labels, timestamps, event names, and reference counts. It never
+selects evidence content, encrypted packages, permits, ciphertext, wrapped
+keys, credentials, or messages. Remove its migration URL, authorization value,
+bearer token, and Docker command immediately after review.
+
 ## Private Render bootstrap
 
 Production PostgreSQL must remain closed to the public internet. Do not place
