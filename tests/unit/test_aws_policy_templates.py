@@ -670,6 +670,20 @@ def test_v12_finality_and_recovery_identities_have_no_kms_or_runtime_authority()
         for token in ("GetItem", "PutItem", "DeleteItem", "RestoreTable", "kms:")
     )
     assert "RestoreTableToPointInTime" in recovery
+    recovery_policy = resources["RecoveryAdministratorPolicy"]["Properties"][
+        "PolicyDocument"
+    ]
+    restore_resources = {
+        json.dumps(statement["Resource"], sort_keys=True)
+        for statement in recovery_policy["Statement"]
+        if "dynamodb:RestoreTableToPointInTime"
+        in (
+            statement["Action"]
+            if isinstance(statement["Action"], list)
+            else [statement["Action"]]
+        )
+    }
+    assert len(restore_resources) == 2
     assert "GetItem" in recovery and "PutItem" in recovery
     assert "kms:" not in recovery
 

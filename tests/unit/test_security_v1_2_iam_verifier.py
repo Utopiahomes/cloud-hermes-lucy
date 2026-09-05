@@ -214,6 +214,8 @@ def test_simulation_matrix_covers_critical_positive_and_negative_boundaries() ->
         "deletion_decrypt",
         "finality_no_data",
         "recovery_no_kms",
+        "recovery_restore_source",
+        "recovery_restore_quarantine_target",
         "deployer_no_invoke",
     } <= names
     assert any(case.allowed for case in cases)

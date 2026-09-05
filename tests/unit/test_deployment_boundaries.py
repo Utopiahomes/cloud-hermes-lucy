@@ -147,6 +147,9 @@ def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
     assert requirements
     assert all("==" in requirement for requirement in requirements)
     assert lock.count("--hash=sha256:") >= len(requirements)
+    # Compile this lock in the pinned Linux image: a Windows resolution silently
+    # omits uvloop even though uvicorn[standard] requires it in Render.
+    assert "\nuvloop==" in lock
 
 
 def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files() -> None:

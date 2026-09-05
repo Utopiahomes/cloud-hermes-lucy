@@ -411,6 +411,7 @@ def expected_role_contracts(
                             "dynamodb:UntagResource",
                             "dynamodb:GetItem",
                             "dynamodb:DeleteTable",
+                            "dynamodb:RestoreTableToPointInTime",
                         ],
                         "Resource": quarantine,
                     },
@@ -672,6 +673,10 @@ def simulation_cases(
 ) -> tuple[SimulationCase, ...]:
     region = "us-east-1"
     wrapped = f"arn:aws:dynamodb:{region}:{account}:table/{outputs['WrappedKeyTableName']}"
+    quarantine = (
+        f"arn:aws:dynamodb:{region}:{account}:table/"
+        f"{outputs['FinalityQuarantineTablePrefix']}iam-simulation"
+    )
     retrieval_function = outputs["RetrievalExecutorAliasArn"].rsplit(":", 1)[0]
     context = (
         {
@@ -859,6 +864,20 @@ def simulation_cases(
             "kms:Decrypt",
             outputs["EvidenceKeyArn"],
             False,
+        ),
+        SimulationCase(
+            "recovery_restore_source",
+            "RecoveryAdministratorRoleArn",
+            "dynamodb:RestoreTableToPointInTime",
+            wrapped,
+            True,
+        ),
+        SimulationCase(
+            "recovery_restore_quarantine_target",
+            "RecoveryAdministratorRoleArn",
+            "dynamodb:RestoreTableToPointInTime",
+            quarantine,
+            True,
         ),
         SimulationCase(
             "deployer_update_exact_function",

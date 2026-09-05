@@ -765,7 +765,7 @@ Resources:
             Action: [dynamodb:DescribeTable, dynamodb:DescribeContinuousBackups, dynamodb:RestoreTableToPointInTime]
             Resource: !GetAtt WrappedKeyRegistry.Arn
           - Effect: Allow
-            Action: [dynamodb:DescribeTable, dynamodb:TagResource, dynamodb:UntagResource, dynamodb:GetItem, dynamodb:DeleteTable]
+            Action: [dynamodb:DescribeTable, dynamodb:TagResource, dynamodb:UntagResource, dynamodb:GetItem, dynamodb:DeleteTable, dynamodb:RestoreTableToPointInTime]
             Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourceNamespace}-quarantine-*
           - Effect: Allow
             Action: dynamodb:PutItem
