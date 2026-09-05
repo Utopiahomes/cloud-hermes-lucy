@@ -156,6 +156,7 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
     assert "COPY deploy/postgres ./deploy/postgres" not in dockerfile
     for artifact in (
         "bootstrap_cloud_v1_2.py",
+        "inspect_unresolved_cloud_v1_2.py",
         "render_security_v1_2_sql.py",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",
