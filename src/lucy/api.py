@@ -12,7 +12,7 @@ import boto3  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -757,6 +757,20 @@ _POLICY_PERMIT_STORAGE_FAILURE_CODES = {
     "malformed v1.2 authorization contract": "contract_malformed",
 }
 
+_POLICY_PERMIT_VALUE_FAILURE_CODES = {
+    "verification-key inventory is invalid": "verification_key_inventory_invalid",
+    "verification-key inventory is empty": "verification_key_inventory_empty",
+    "verification-key inventory contains duplicate key IDs": "verification_key_id_duplicate",
+    "policy signing key is invalid": "policy_signing_key_invalid",
+    "signing key ID is invalid": "policy_signing_key_id_invalid",
+    "policy requires one exact binding for each sensitive action": "executor_binding_set_invalid",
+    "policy executor binding environment differs": "executor_binding_environment_invalid",
+    "Ed25519 signer cannot sign this contract algorithm": "permit_algorithm_invalid",
+    "contract key ID does not match the signer": "permit_signing_key_mismatch",
+    "unsigned contract unexpectedly contains a signature": "permit_signature_state_invalid",
+    "security workflow function returned no result": "permit_store_no_result",
+}
+
 
 def _policy_permit_storage_failure_code(error: SQLAlchemyError) -> str:
     original = getattr(error, "orig", None)
@@ -767,6 +781,13 @@ def _policy_permit_storage_failure_code(error: SQLAlchemyError) -> str:
     return _POLICY_PERMIT_STORAGE_FAILURE_CODES.get(
         primary,
         "unclassified_database_error",
+    )
+
+
+def _policy_permit_value_failure_code(error: ValueError) -> str:
+    return _POLICY_PERMIT_VALUE_FAILURE_CODES.get(
+        str(error),
+        "unclassified_value_error",
     )
 
 
@@ -791,7 +812,16 @@ def issue_sensitive_action_permit_v2(
     if not owner_subject or request.assertion.owner_subject != owner_subject:
         raise HTTPException(status_code=403, detail="owner subject does not match")
     try:
-        return _policy_notary().issue_permit(
+        notary = _policy_notary()
+    except ValidationError as exc:
+        print("Lucy policy permit failed closed: policy_configuration_validation_error", flush=True)
+        raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
+    except ValueError as exc:
+        failure_code = _policy_permit_value_failure_code(exc)
+        print(f"Lucy policy permit failed closed: {failure_code}", flush=True)
+        raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
+    try:
+        return notary.issue_permit(
             request.assertion,
             reason=request.reason,
             record_version=request.record_version,
@@ -801,8 +831,12 @@ def issue_sensitive_action_permit_v2(
         raise HTTPException(status_code=403, detail="owner assertion not authorized") from exc
     except WorkflowRejected as exc:
         raise HTTPException(status_code=403, detail="sensitive action not authorized") from exc
+    except ValidationError as exc:
+        print("Lucy policy permit failed closed: permit_contract_validation_error", flush=True)
+        raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
     except ValueError as exc:
-        print("Lucy policy permit failed closed: contract_value_error", flush=True)
+        failure_code = _policy_permit_value_failure_code(exc)
+        print(f"Lucy policy permit failed closed: {failure_code}", flush=True)
         raise HTTPException(status_code=409, detail="permit issuance failed closed") from exc
     except SQLAlchemyError as exc:
         failure_code = _policy_permit_storage_failure_code(exc)

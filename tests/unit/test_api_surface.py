@@ -162,6 +162,21 @@ def test_policy_storage_failure_logging_uses_only_an_allowlisted_code() -> None:
     assert api._policy_permit_storage_failure_code(error) == "unclassified_database_error"
 
 
+def test_policy_value_failure_logging_uses_only_an_allowlisted_code() -> None:
+    assert (
+        api._policy_permit_value_failure_code(
+            ValueError("security workflow function returned no result")
+        )
+        == "permit_store_no_result"
+    )
+    assert (
+        api._policy_permit_value_failure_code(
+            ValueError("synthetic detail that must not enter logs")
+        )
+        == "unclassified_value_error"
+    )
+
+
 def test_recall_text_is_sent_in_body_not_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LUCY_ADAPTER_TOKEN", "test-token")
     monkeypatch.setenv("LUCY_SERVICE_MODE", "routine")
