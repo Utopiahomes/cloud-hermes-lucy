@@ -15,6 +15,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from lucy.authorized_deletion_recovery import (
+    AuthorizedDeletionRecoveryError,
+    build_authorized_deletion_recovery_contract,
+    verify_authorized_deletion_recovery,
+)
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
     ContractTrustStore,
@@ -35,6 +40,7 @@ from lucy.contracts.security_v1_2 import (
     VerificationKeyStatus,
     VerificationKeyV1,
     deletion_targets_digest,
+    ecdsa_public_key_der_b64,
 )
 from lucy.executors import handlers
 from lucy.executors.aws import AwsExecutorBackend, AwsExecutorTables
@@ -141,6 +147,8 @@ class FakeBackend:
     def commit_deletion(
         self,
         *,
+        permit: SensitiveActionPermitV2,
+        grant: SensitiveExecutionGrantV1,
         manifest: DeletionTargetManifestV1,
         receipt: ExecutorReceiptV1,
         transaction_token: str,
@@ -148,6 +156,8 @@ class FakeBackend:
         quota: ExecutorQuotaV1,
     ) -> bool:
         assert transaction_token == str(OPERATION_ID)
+        assert permit.permit_id == receipt.permit_id
+        assert grant.grant_id == receipt.execution_grant_id
         assert now == NOW + timedelta(minutes=2)
         assert quota.action == SensitiveActionV2.EVIDENCE_DELETE
         if self.fail_deletion_without_receipt:
@@ -561,6 +571,88 @@ def test_deletion_commits_only_the_signed_exact_manifest_and_replays_receipt() -
     assert replay.replayed is True and replay.receipt == result.receipt
 
 
+def test_authorized_deletion_recovery_binds_all_durable_contracts() -> None:
+    signer, policy_trust = _policy()
+    permit, manifest, grant = _manifest(signer)
+    backend = FakeBackend()
+    result = DeletionExecutor(
+        backend,
+        policy_trust,
+        _identity(SensitiveActionV2.EVIDENCE_DELETE),
+        clock=lambda: NOW + timedelta(minutes=2),
+    ).execute(
+        DeletionExecutorInvocationV1(
+            permit=permit,
+            execution_grant=grant,
+            manifest=manifest,
+        ),
+        lambda_request_id="lambda-request-delete-recovery",
+    )
+    receipt_trust = ContractTrustStore(
+        (
+            VerificationKeyV1(
+                key_id=RECEIPT_KEY,
+                issuer="lucy-deletion-executor",
+                purpose=SigningKeyPurpose.DELETION_RECEIPT,
+                algorithm=SignatureAlgorithm.ECDSA_SHA_256,
+                environment=DeploymentEnvironment.TEST,
+                public_key_b64=ecdsa_public_key_der_b64(
+                    backend.receipt_private_key.public_key()
+                ),
+                valid_from=NOW - timedelta(hours=1),
+                issuance_not_after=NOW + timedelta(hours=1),
+                verify_not_after=NOW + timedelta(hours=2),
+                status=VerificationKeyStatus.ACTIVE,
+            ),
+        )
+    )
+
+    proof = verify_authorized_deletion_recovery(
+        permit=permit,
+        manifest=manifest,
+        grant=grant,
+        receipt=result.receipt,
+        policy_trust_store=policy_trust,
+        receipt_trust_store=receipt_trust,
+        environment=DeploymentEnvironment.TEST,
+        executor_identity="lucy-deletion-executor",
+        executor_alias_arn=DELETION_ALIAS,
+        executor_version=13,
+        receipt_key_id=RECEIPT_KEY,
+    )
+
+    assert proof.operation_id == str(OPERATION_ID)
+    assert proof.target_count == 2
+    assert len(proof.recovery_digest) == 64
+    recovery_contract = build_authorized_deletion_recovery_contract(
+        proof=proof,
+        permit=permit,
+        manifest=manifest,
+        receipt=result.receipt,
+        recovered_storage_epoch=2,
+        authority_evidence_digest="f" * 64,
+    )
+    assert recovery_contract["targets"] == [
+        target.model_dump(mode="json") for target in manifest.targets
+    ]
+    assert recovery_contract["reason_category"] == "owner_request"
+
+    with pytest.raises(AuthorizedDeletionRecoveryError, match="executor binding"):
+        verify_authorized_deletion_recovery(
+            permit=permit,
+            manifest=manifest,
+            grant=grant,
+            receipt=result.receipt,
+            policy_trust_store=policy_trust,
+            receipt_trust_store=receipt_trust,
+            environment=DeploymentEnvironment.TEST,
+            executor_identity="lucy-deletion-executor",
+            executor_alias_arn=RETRIEVAL_ALIAS,
+            executor_version=13,
+            receipt_key_id=RECEIPT_KEY,
+        )
+
+
 def test_deletion_missing_key_without_matching_receipt_fails_closed() -> None:
     signer, trust = _policy()
     permit, manifest, grant = _manifest(signer)
@@ -756,6 +848,8 @@ def test_aws_deletion_adapter_commits_intent_receipt_quotas_and_exact_keys_atomi
         day_limit=10,
     )
     assert adapter.commit_deletion(
+        permit=permit,
+        grant=grant,
         manifest=manifest,
         receipt=result.receipt,
         transaction_token=str(OPERATION_ID),
@@ -771,6 +865,12 @@ def test_aws_deletion_adapter_commits_intent_receipt_quotas_and_exact_keys_atomi
         "lucy-deletion-intents-v12-test",
         "lucy-deletion-receipts-test",
     ]
+    durable_intent = actions[0]["Put"]["Item"]
+    assert set(("permit_json", "permit_digest", "grant_json", "grant_digest")) <= set(
+        durable_intent
+    )
+    assert SensitiveActionPermitV2.model_validate_json(durable_intent["permit_json"]["S"]) == permit
+    assert SensitiveExecutionGrantV1.model_validate_json(durable_intent["grant_json"]["S"]) == grant
     assert all("Update" in action for action in actions[2:4])
     deleted = {
         UUID(action["Delete"]["Key"]["key_ref"]["S"])
@@ -835,6 +935,8 @@ def test_aws_adapter_surfaces_idempotent_conditional_conflicts_as_false(
     else:
         assert (
             adapter.commit_deletion(
+                permit=permit,
+                grant=grant,
                 manifest=manifest,
                 receipt=result.receipt,
                 transaction_token=str(OPERATION_ID),

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
-SCHEMA_REVISION = "0019_security_v1_2_reconcile"
+SCHEMA_REVISION = "0020_authorized_delete_recovery"
 SERVICE_ROLES = {
     "routine": "lucy_routine",
     "policy": "lucy_policy",

@@ -24,7 +24,7 @@ from psycopg import sql
 from sqlalchemy.engine import URL, make_url
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_REVISION = "0019_security_v1_2_reconcile"
+EXPECTED_REVISION = "0020_authorized_delete_recovery"
 AUTHORIZATION = "security-v1.2-private-quarantined"
 LOGIN_NAMES = {
     "routine": "lucy_routine_workflow",

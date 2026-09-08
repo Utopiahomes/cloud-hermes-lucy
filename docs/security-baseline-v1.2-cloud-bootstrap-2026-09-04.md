@@ -44,7 +44,7 @@ private signing material.
 The private migration utility built and ran on Render from reviewed commit
 `f30de15`. Its successful run reported:
 
-- migration head `0019_security_v1_2_reconcile`;
+- migration head `0020_authorized_delete_recovery`;
 - TLS-protected connections for the migration identity and all five runtime
   identities;
 - five distinct `NOINHERIT` runtime logins with no elevated flags or inherited

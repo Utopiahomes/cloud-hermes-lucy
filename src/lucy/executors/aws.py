@@ -22,6 +22,8 @@ from lucy.contracts.security_v1_2 import (
     DeletionTargetManifestV1,
     ExecutorQuotaV1,
     ExecutorReceiptV1,
+    SensitiveActionPermitV2,
+    SensitiveExecutionGrantV1,
 )
 from lucy.executors.models import WrappedKeyMaterial
 
@@ -180,6 +182,8 @@ class AwsExecutorBackend:
     def commit_deletion(
         self,
         *,
+        permit: SensitiveActionPermitV2,
+        grant: SensitiveExecutionGrantV1,
         manifest: DeletionTargetManifestV1,
         receipt: ExecutorReceiptV1,
         transaction_token: str,
@@ -191,6 +195,8 @@ class AwsExecutorBackend:
         if len(transaction_token) > 36:
             raise ValueError("DynamoDB client request token exceeds its hard limit")
         manifest_json = canonical_json_bytes(manifest).decode("utf-8")
+        permit_json = canonical_json_bytes(permit).decode("utf-8")
+        grant_json = canonical_json_bytes(grant).decode("utf-8")
         actions: list[dict[str, Any]] = [
             {
                 "Put": {
@@ -201,6 +207,10 @@ class AwsExecutorBackend:
                         "manifest_id": {"S": str(manifest.manifest_id)},
                         "manifest_digest": {"S": manifest.unsigned_digest_hex()},
                         "manifest_json": {"S": manifest_json},
+                        "permit_digest": {"S": permit.unsigned_digest_hex()},
+                        "permit_json": {"S": permit_json},
+                        "grant_digest": {"S": grant.unsigned_digest_hex()},
+                        "grant_json": {"S": grant_json},
                         "accepted_at": {"S": _utc_text(now)},
                     },
                     "ConditionExpression": "attribute_not_exists(operation_id)",

@@ -66,6 +66,8 @@ class ExecutorBackend(Protocol):
     def commit_deletion(
         self,
         *,
+        permit: SensitiveActionPermitV2,
+        grant: SensitiveExecutionGrantV1,
         manifest: DeletionTargetManifestV1,
         receipt: ExecutorReceiptV1,
         transaction_token: str,
@@ -449,6 +451,8 @@ class DeletionExecutor(_ExecutorBase):
         self._require_exact_signed_receipt(unsigned, signed)
         try:
             committed = self._backend.commit_deletion(
+                permit=permit,
+                grant=grant,
                 manifest=manifest,
                 receipt=signed,
                 transaction_token=transaction_token,

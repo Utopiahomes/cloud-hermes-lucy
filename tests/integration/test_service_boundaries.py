@@ -1555,3 +1555,145 @@ def test_admitted_transactions_override_stale_snapshot_isolation_defaults(
                 )
             )
         admin.dispose()
+
+
+def test_authorized_deletion_recovery_reapplies_exact_restored_payload_once(
+    role_db: dict[str, Any],
+) -> None:
+    capture_operation_id = uuid4()
+    recovery_operation_id = uuid4()
+    evidence_id = uuid4()
+    key_ref = uuid4()
+    now = datetime.now(UTC)
+    contract = {
+        "contract_version": "1",
+        "object_type": "lucy.authorized-deletion-recovery.v1",
+        "operation_id": str(recovery_operation_id),
+        "permit_id": str(uuid4()),
+        "manifest_id": str(uuid4()),
+        "receipt_id": str(uuid4()),
+        "permit_digest": "1" * 64,
+        "manifest_digest": "2" * 64,
+        "grant_digest": "3" * 64,
+        "receipt_digest": "4" * 64,
+        "targets_digest": "5" * 64,
+        "target_count": 1,
+        "storage_epoch": 1,
+        "registry_epoch": 1,
+        "key_epoch": 1,
+        "executor_identity": "lucy-deletion-executor",
+        "executor_alias_arn": (
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-deletion-executor:production"
+        ),
+        "executor_version": 13,
+        "receipt_key_id": (
+            "arn:aws:kms:us-east-1:123456789012:"
+            "key/bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+        ),
+        "completed_at": now.isoformat(),
+        "reason_category": "owner_request",
+        "recovery_digest": "6" * 64,
+        "authority_evidence_digest": "7" * 64,
+        "recovered_storage_epoch": 1,
+        "targets": [
+            {
+                "evidence_id": str(evidence_id),
+                "key_ref": str(key_ref),
+                "record_version": 1,
+                "key_epoch": 1,
+            }
+        ],
+    }
+    with role_db["owner"].begin() as session:
+        session.add(
+            OperationRow(
+                id=capture_operation_id,
+                idempotency_key=f"capture:{capture_operation_id}",
+                outcome="succeeded",
+                result={},
+                created_at=now,
+                completed_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            EvidenceRow(
+                id=evidence_id,
+                source="hermes",
+                source_conversation_id=f"telegram:recovery-{evidence_id}",
+                captured_at=now,
+                content={"encrypted": True},
+                content_commitment="8" * 64,
+                operation_id=capture_operation_id,
+            )
+        )
+        # These mappings intentionally do not expose ORM relationships. Flush
+        # the evidence row before its restored payload so the database FK, not
+        # unit-of-work mapper ordering, defines the test setup.
+        session.flush()
+        session.add(
+            EvidencePayloadRow(
+                evidence_id=evidence_id,
+                ciphertext=b"synthetic-ciphertext",
+                content_nonce=b"synthetic-12",
+                key_ref=key_ref,
+                algorithm="AES-256-GCM+AWS-KMS",
+                encryption_context_version=2,
+                record_version=1,
+                storage_epoch=1,
+                registry_epoch=1,
+                key_epoch=1,
+                created_at=now,
+            )
+        )
+    MaintenanceService(role_db["owner"]).quarantine()
+    with role_db["owner"].begin() as session:
+        result = session.scalar(
+            text("SELECT lucy.apply_authorized_deletion_recovery_v1(CAST(:c AS jsonb))"),
+            {"c": json.dumps(contract)},
+        )
+        assert result["state"] == "FINALITY_PENDING"
+        assert result["replayed"] is False
+    with role_db["owner"].begin() as session:
+        assert session.get(EvidencePayloadRow, evidence_id) is None
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.evidence_tombstones "
+                "WHERE evidence_id=:e AND deletion_operation_id=:o"
+            ),
+            {"e": evidence_id, "o": recovery_operation_id},
+        ) == 1
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.authorized_deletion_recovery_targets_v1 "
+                "WHERE operation_id=:o"
+            ),
+            {"o": recovery_operation_id},
+        ) == 1
+        replay = session.scalar(
+            text("SELECT lucy.apply_authorized_deletion_recovery_v1(CAST(:c AS jsonb))"),
+            {"c": json.dumps(contract)},
+        )
+        assert replay["replayed"] is True
+
+    for role in ("routine", "policy", "evidence", "deletion", "finality"):
+        engine = create_engine(role_db["urls"][role])
+        try:
+            with engine.begin() as connection:
+                assert not connection.scalar(
+                    text(
+                        "SELECT has_function_privilege(current_user,"
+                        "'lucy.apply_authorized_deletion_recovery_v1(jsonb)','EXECUTE')"
+                    )
+                )
+        finally:
+            engine.dispose()
+
+    with role_db["owner"].begin() as session:
+        assert not session.scalar(
+            text(
+                "SELECT has_schema_privilege("
+                "'lucy_security_function_owner','lucy','CREATE')"
+            )
+        )

@@ -320,6 +320,58 @@ class DeletionFinalityRow(Base):
     metadata_inventory_digest: Mapped[str | None] = mapped_column(String(64))
 
 
+class AuthorizedDeletionRecoveryRow(Base):
+    __tablename__ = "authorized_deletion_recoveries_v1"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.operations.id"), primary_key=True
+    )
+    permit_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    manifest_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    receipt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    permit_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    manifest_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    grant_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    receipt_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    targets_digest: Mapped[str] = mapped_column(String(64))
+    target_count: Mapped[int] = mapped_column(BigInteger)
+    original_storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    original_registry_epoch: Mapped[int] = mapped_column(BigInteger)
+    original_key_epoch: Mapped[int] = mapped_column(BigInteger)
+    recovered_storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    executor_identity: Mapped[str] = mapped_column(Text)
+    executor_alias_arn: Mapped[str] = mapped_column(Text)
+    executor_version: Mapped[int] = mapped_column(BigInteger)
+    receipt_key_id: Mapped[str] = mapped_column(Text)
+    deletion_effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_status: Mapped[str] = mapped_column(Text)
+    finality_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    earliest_restorable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_restorable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recoverable_copy_count: Mapped[int | None] = mapped_column(BigInteger)
+    metadata_inventory_digest: Mapped[str | None] = mapped_column(String(64))
+    recovery_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    authority_evidence_digest: Mapped[str] = mapped_column(String(64))
+    recovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    derived_summary: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class AuthorizedDeletionRecoveryTargetRow(Base):
+    __tablename__ = "authorized_deletion_recovery_targets_v1"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.authorized_deletion_recoveries_v1.operation_id"), primary_key=True
+    )
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.evidence.id"), primary_key=True
+    )
+    key_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    record_version: Mapped[int] = mapped_column(BigInteger)
+    key_epoch: Mapped[int] = mapped_column(BigInteger)
+
+
 class SensitiveOperationEventRow(Base):
     __tablename__ = "sensitive_operation_events_v1"
     __table_args__ = {"schema": "lucy"}

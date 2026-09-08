@@ -313,3 +313,145 @@ finality identity (resolve the successful diagnostic job's output first), withou
 another blind full drill or permission widening. All cleanup completed; capture
 remains disabled. Nine focused operator regression tests passed. Keep prior
 passing application/audit evidence; final acceptance remains open.
+
+### Finality diagnostic publication gate
+
+The standard finality command returned EXTENDED/copy_count=1 after cleanup
+(`job-dag3n9p594qs73fo33ng`), versus 2 with the quarantine table present.
+Saved `finality-post-cleanup-20260908.json`. The persistent category is still
+unidentified. Two custom read-only category jobs succeeded but yielded no logs
+through CLI or explicit-time API queries; stop repeating that custom path.
+
+Added content-free category counts to the standard finality CLI JSON output,
+without changing collection, DB verdict or aggregate arithmetic. Five targeted
+finality tests and focused Ruff passed. Local commit `a2468a0` includes this
+diagnostic, the already-deployed SNS fix, verifier tests and checkpoint. All five
+Render services have autoDeploy=no. No diagnostic deployment occurred.
+
+Pushing this commit to origin/main was rejected by tool auto-review because
+explicit authorization for that external/default-branch publication and repository
+trust was not established. Do not bypass. Next required owner decision: approve
+publishing this tested commit to Lucy's origin/main and deploying only finality
+to obtain the category breakdown. Other services and Lambda versions stay put;
+capture stays disabled. The local changes are complete but not published.
+
+### 2026-09-08 recovery and epoch evidence
+
+Commit `a2468a0` was explicitly approved, pushed to `origin/main`, and first
+deployed only to finality. Its standard output identified the persistent copy as
+one DynamoDB deleted-table `SYSTEM` backup created 2026-09-03 and expiring
+2026-10-03. It reports zero bytes and no AWS Backup vault or lifecycle. This is
+the exceptional deleted-table recovery window already described in Section 10.2;
+finality correctly remains `EXTENDED`. No backup plan, export, import, replica,
+stream, on-demand backup, or quarantine table remains.
+
+Recovery drill `7a1bf879-285d-4227-ab9b-37a1393cffb7` reached hardened
+quarantine and exposed a false-positive KMS denial probe. IAM simulation and the
+live KMS authorization-only dry run (`DryRun=true`,
+`DryRunModifiers=IGNORE_CIPHERTEXT`) both proved `kms:Decrypt` is denied to the
+Recovery Administrator. The operator probe now uses that AWS-supported mode.
+
+Drill `1f33e5a8-ce47-4403-8011-a7b0ccd1452cd` then proved the synthetic PITR
+restore, exact recovered item, owner-authorized target absence, normal-role
+denials, KMS denial, and CloudTrail `DeleteItem`/`GetItem` delivery. It stopped
+at PostgreSQL maintenance because the operator command incorrectly requested
+legacy v1 deletion replay in a v1.2 deployment. Cleanup removed the exact
+temporary grant, synthetic item, quarantine table, CloudTrail selector, and
+temporary database authority.
+
+The already-passed recovery evidence was reused. A focused controlled epoch
+transition omitted legacy replay, waited for suspended-service PostgreSQL
+sessions to drain, and succeeded on retry job `job-dag4stv40ujc73eam7j0`.
+All five Render identities now share storage epoch
+`90c8860d-a48c-4f0e-90d9-a1986db94e42` on commit `a2468a0`; all four private
+services passed `/ready` in job `job-dag5045bedkc73fisd6g`; capture is false;
+temporary maintenance authority is absent. Finality job
+`job-dag50f9594qs73fskaf0` returned `EXTENDED`, aggregate 1, with only the
+reviewed deleted-table system backup category nonzero.
+
+One activation blocker remains: this controlled epoch transition used current
+PostgreSQL state. It does not prove forward reapplication of v1.2 deletion
+receipts/manifests to a PostgreSQL backup taken before that deletion. The legacy
+journal cannot provide that proof and must not be silently reused. Live capture
+therefore remains disabled. Do not repeat the PITR drill; next either implement
+the v1.2 PostgreSQL deletion-replay fence and test a pre-deletion restore, or
+record it as an explicit failed activation gate. Astra read-only review confirmed
+that suppressing verification for nonempty legacy history would weaken the
+baseline; empty legacy history alone is not v1.2 completeness.
+
+### Authorized-deletion restore fence implementation, September 8
+
+Work started on the single remaining activation blocker without repeating any
+passing AWS or Render checks. Future deletion transactions now commit the exact
+signed permit and execution grant into the immutable DynamoDB deletion-intent
+record alongside the already-persisted manifest and executor receipt. The new
+`authorized_deletion_recovery` verifier checks all four historical signatures,
+their environment and epoch bindings, every permit/manifest/grant/receipt ID and
+digest, and the exact reviewed deletion executor before producing a content-free
+recovery contract.
+
+Migration `0020_authorized_delete_recovery` adds a quarantined, migration-only
+PostgreSQL gate. It refuses active capture, non-quarantined storage, changed
+targets, duplicate or conflicting operation IDs, malformed digests, and target
+cardinality changes. An accepted recovery records immutable authority/target
+metadata, reapplies the deletion cascade, deletes exactly the restored payloads,
+writes tombstones, and is idempotent only for the same recovery and authority
+evidence digests. Normal Lucy, policy, evidence, deletion, and finality logins
+receive no execute or table authority for this path.
+
+Focused Ruff and mypy passed. The complete unit suite passed: 313 tests, with
+one pre-existing Starlette deprecation warning. Alembic reports exactly one head,
+`0020_authorized_delete_recovery`. Docker Desktop failed before its engine became
+available with the known `sailor-ingest.sock` startup error, so no container,
+volume, or database was changed and the PostgreSQL integration test is still
+not executed. Do not deploy this migration or executor change until that exact
+integration test passes. Live capture remains disabled.
+
+Follow-up added recovery-runner boundary and idempotency tests; the complete unit
+suite now passes 315 tests. The PostgreSQL 18 grammar parser accepts both SQL
+blocks in migration 0020 (22,521 bytes), and Alembic still reports exactly one
+head. This is syntax evidence only, not database-execution evidence.
+
+Docker diagnosis found normal ACLs but stale Windows socket/reparse points dated
+August 31. The original `Docker/run` directory was preserved as
+`Docker/run.stale-20260908-1445`; a second failed-start `Docker/run` directory was
+preserved as `Docker/run.failed-20260908-1458`; and the separate stale
+`docker-secrets-engine` directory was preserved as
+`docker-secrets-engine.stale-20260908-1458`. Empty runtime directories were
+recreated, but Docker still did not expose its engine pipe after the bounded
+restart and was stopped to prevent further popups. Images, containers, volumes,
+settings, project files, and database state were not moved. Do not repeat socket
+cleanup; the next Docker step is an application/WSL diagnostic or host reboot.
+
+### Authorized-deletion restore fence database gate, September 8
+
+Docker Desktop was upgraded in place from 4.88.1 to 4.90.0. The engine then
+started normally (Engine 29.7.2). This matches Docker's 4.89.0 release note for
+the stuck-socket startup fix. Local diagnostic bundle
+`lucy-docker-afunix-20260908.zip` remains in the Windows temporary directory and
+was not uploaded. No factory reset was performed.
+
+The disposable PostgreSQL 16 role-test cluster exposed and prevented one real
+migration defect: migration 0019 had correctly closed schema `CREATE`, so 0020
+now grants it temporarily to the dedicated no-login security function owner and
+revokes it again after installation. Test setup was also corrected to establish
+the explicit operation -> evidence -> restored-payload foreign-key order and to
+enter quarantine before replay.
+
+The focused database gate now passes. It proves migration 0020 installs through
+the non-superuser migration identity, removes exactly the resurrected payload,
+writes one tombstone and one recovery target, replays the same authority
+idempotently, denies the recovery function to routine, policy, evidence,
+deletion, and finality logins, and leaves the security function owner without
+schema `CREATE`. Focused Ruff, `git diff --check`, recovery unit tests, and the
+database gate passed together: 22 tests. The two warnings are pre-existing
+Starlette and Alembic deprecations.
+
+This completes the previously blocked local PostgreSQL execution gate. Prior
+AWS/Render evidence remains valid because deployed commit, configuration, and
+environment were not changed. Live Telegram transcript capture remains disabled.
+Next: publish the reviewed restore-fence revision, deploy the affected
+quarantined components, run one synthetic pre-deletion PostgreSQL restore replay,
+then assemble the final v1.2 acceptance report. Do not repeat the already-passed
+AWS identity, DynamoDB PITR, KMS denial, CloudTrail, readiness, or exceptional
+backup inventory checks unless deployment drift invalidates them.
