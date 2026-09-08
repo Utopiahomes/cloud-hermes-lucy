@@ -42,7 +42,7 @@ CAPABILITY_ROLES = {
     "lucy_security_function_owner",
 }
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
-_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
+_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 
 
 class BootstrapError(RuntimeError):

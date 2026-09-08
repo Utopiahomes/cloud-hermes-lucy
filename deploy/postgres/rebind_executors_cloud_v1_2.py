@@ -21,7 +21,7 @@ from sqlalchemy.engine import URL, make_url
 
 AUTHORIZATION = "security-v1.2-executor-rebind"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
-_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
+_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 _MAINTENANCE_LOCK = 0x4C5543594D53
 _ADMISSION_LOCK = 0x4C5543594144
 _CAPTURE_SAFETY_QUERY = r"""

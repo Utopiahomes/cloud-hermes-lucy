@@ -22,7 +22,7 @@ from sqlalchemy.engine import URL, make_url
 
 AUTHORIZATION = "security-v1.2-unresolved-inventory"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
-_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)?\Z")
+_LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 _SENSITIVE_KEY = re.compile(
     r"cloud-acceptance-(?P<action>retrieve|delete):"
     r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"

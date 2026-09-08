@@ -77,6 +77,15 @@ def test_bootstrap_config_requires_private_render_and_exact_logins() -> None:
     assert all(url.query["sslmode"] == "require" for url in config.runtime_urls.values())
 
 
+def test_bootstrap_config_accepts_render_pitr_database_suffix() -> None:
+    environment = {
+        key: value.replace("lucy_6tns", "lucy_6tns_eymz")
+        for key, value in _environment().items()
+    }
+    config = _module().BootstrapConfig.from_environment(environment)
+    assert config.migration_url.database == "lucy_6tns_eymz"
+
+
 @pytest.mark.parametrize(
     ("key", "value", "diagnostic"),
     [
@@ -91,6 +100,11 @@ def test_bootstrap_config_requires_private_render_and_exact_logins() -> None:
             "LUCY_EVIDENCE_DATABASE_URL",
             "postgresql://wrong:secret@dpg-daca8gafngtc73clvafg-a:5432/lucy_6tns",
             "exact password-bearing login",
+        ),
+        (
+            "LUCY_MIGRATION_DATABASE_URL",
+            "postgresql://lucy_migration:secret@dpg-example-a/lucy_6tns-unsafe",
+            "reviewed Lucy database",
         ),
     ],
 )
