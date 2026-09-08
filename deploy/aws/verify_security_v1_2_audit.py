@@ -192,8 +192,7 @@ def verify_trail(
     account: str,
 ) -> list[Check]:
     expected_log_arn = (
-        f"arn:aws:logs:us-east-1:{account}:log-group:"
-        f"{outputs['AuditCloudTrailLogGroupName']}:*"
+        f"arn:aws:logs:us-east-1:{account}:log-group:{outputs['AuditCloudTrailLogGroupName']}:*"
     )
     state = (
         trail.get("Name") == outputs["AuditTrailName"]
@@ -454,6 +453,7 @@ def verify_sns(
     attributes: Mapping[str, Any],
     subscriptions: Mapping[str, Any],
     expected_email: str,
+    stack_name: str,
 ) -> list[Check]:
     attrs = attributes.get("Attributes")
     attrs = attrs if isinstance(attrs, Mapping) else {}
@@ -473,7 +473,7 @@ def verify_sns(
         policy = None
     statements = policy.get("Statement") if isinstance(policy, Mapping) else None
     policy_ok = False
-    if isinstance(statements, list) and len(statements) == 1:
+    if isinstance(statements, list) and len(statements) == 2:
         statement = statements[0]
         policy_ok = (
             isinstance(statement, Mapping)
@@ -482,6 +482,23 @@ def verify_sns(
             and statement.get("Action") == "sns:Publish"
             and statement.get("Resource") == topic
         )
+        parts = topic.split(":")
+        expected_cloudwatch = {
+            "Sid": "CloudWatchAlarmPublish",
+            "Effect": "Allow",
+            "Principal": {"Service": "cloudwatch.amazonaws.com"},
+            "Action": "sns:Publish",
+            "Resource": topic,
+            "Condition": {
+                "StringEquals": {"aws:SourceAccount": parts[4]},
+                "ArnLike": {
+                    "aws:SourceArn": (
+                        f"arn:{parts[1]}:cloudwatch:{parts[3]}:{parts[4]}:alarm:{stack_name}-*"
+                    )
+                },
+            },
+        }
+        policy_ok = policy_ok and statements[1] == expected_cloudwatch
     return [
         Check(
             "sns.topic",
@@ -489,7 +506,7 @@ def verify_sns(
             and attrs.get("SubscriptionsConfirmed") == "1"
             and attrs.get("SubscriptionsPending") == "0"
             and policy_ok,
-            "alert topic must have one confirmed email route and scoped EventBridge policy",
+            "confirmed email and scoped EventBridge/CloudWatch publishing are required",
         ),
         Check(
             "sns.subscription",
@@ -560,8 +577,7 @@ def verify_event_rule(
         Check(
             "eventbridge.security_target",
             targets.get("NextToken") in {None, ""}
-            and target_items
-            == [{"Id": "lucy-security-change-alert", "Arn": expected_topic}],
+            and target_items == [{"Id": "lucy-security-change-alert", "Arn": expected_topic}],
             "security-change rule must target only the reviewed SNS topic",
         ),
     ]
@@ -723,6 +739,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 attributes=sns.get_topic_attributes(TopicArn=topic),
                 subscriptions=sns.list_subscriptions_by_topic(TopicArn=topic),
                 expected_email=args.expected_alert_email,
+                stack_name=args.stack_name,
             )
         )
         events = session.client("events")

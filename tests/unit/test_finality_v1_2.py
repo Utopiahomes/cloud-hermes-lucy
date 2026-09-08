@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -168,3 +169,28 @@ def test_scheduled_sentinel_never_contacts_aws_or_postgresql(
     )
     assert finality.main(["--scheduled-sentinel"]) == 0
     assert "no operation authorized" in capsys.readouterr().out
+
+
+def test_finality_output_explains_count_without_changing_verdict(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dynamodb = FakeDynamoDb(exceptional=True)
+    monkeypatch.setattr(
+        finality.boto3, "client",
+        lambda name, **_kw: dynamodb if name == "dynamodb" else FakeBackup(),
+    )
+    for key, value in {
+        "LUCY_SERVICE_MODE": "finality", "AWS_REGION": "us-east-1",
+        "LUCY_AWS_WRAPPED_KEY_TABLE": TABLE,
+        "LUCY_FINALITY_QUARANTINE_TABLE_PREFIX": "cloud-lucy-quarantine-",
+        "LUCY_DATABASE_URL": "test-only",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(finality, "record_finality_inventory", lambda *_a: "EXTENDED")
+    assert finality.main(["--operation-id", str(OPERATION_ID)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "EXTENDED"
+    assert result["recoverable_copy_count"] == 2
+    assert sum(result["recovery_copy_counts"].values()) == 2
+    assert result["recovery_copy_counts"]["on_demand_backups"] == 1
+    assert result["recovery_copy_counts"]["quarantine_tables"] == 1

@@ -972,6 +972,16 @@ Resources:
             Principal: {Service: events.amazonaws.com}
             Action: sns:Publish
             Resource: !Ref SecurityAlertTopic
+          - Sid: CloudWatchAlarmPublish
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: sns:Publish
+            Resource: !Ref SecurityAlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-*
 
   SecurityAdministrationAlert:
     Type: AWS::Events::Rule

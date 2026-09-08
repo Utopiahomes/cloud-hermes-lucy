@@ -389,6 +389,15 @@ def main(argv: list[str] | None = None) -> int:
                     "operation_id": str(operation_id),
                     "status": status,
                     "metadata_inventory_digest": inventory.metadata_inventory_digest,
+                    "recovery_copy_counts": {
+                        "on_demand_backups": inventory.on_demand_backup_count,
+                        "aws_backup_recovery_points": inventory.aws_backup_recovery_point_count,
+                        "exports": inventory.export_count,
+                        "imports": inventory.import_count,
+                        "global_replicas": inventory.global_replica_count,
+                        "quarantine_tables": inventory.quarantine_table_count,
+                        "streams": int(inventory.stream_enabled),
+                    },
                     "recoverable_copy_count": (
                         inventory.on_demand_backup_count
                         + inventory.aws_backup_recovery_point_count

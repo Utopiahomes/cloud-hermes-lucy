@@ -143,9 +143,7 @@ def test_audit_bucket_requires_exact_delivery_policy() -> None:
         versioning={"Status": "Enabled"},
         encryption={
             "ServerSideEncryptionConfiguration": {
-                "Rules": [
-                    {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
-                ]
+                "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
             }
         },
         public_access={
@@ -166,8 +164,7 @@ def test_trail_requires_active_dual_delivery_and_exact_data_events() -> None:
     module = _verifier()
     outputs = _outputs()
     log_arn = (
-        f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:"
-        f"{outputs['AuditCloudTrailLogGroupName']}:*"
+        f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:{outputs['AuditCloudTrailLogGroupName']}:*"
     )
     table_arns = [
         f"arn:aws:dynamodb:us-east-1:{ACCOUNT}:table/{outputs[key]}"
@@ -297,7 +294,7 @@ def test_all_fourteen_alarm_contracts_are_exact() -> None:
     assert any(not check.passed for check in failed)
 
 
-def test_sns_requires_confirmed_exact_email_and_eventbridge_only_policy() -> None:
+def test_sns_requires_confirmed_email_and_scoped_alarm_publishing() -> None:
     module = _verifier()
     topic = _outputs()["SecurityAlertTopicArn"]
     policy = {
@@ -311,6 +308,24 @@ def test_sns_requires_confirmed_exact_email_and_eventbridge_only_policy() -> Non
             }
         ],
     }
+    parts = topic.split(":")
+    policy["Statement"].append(
+        {
+            "Effect": "Allow",
+            "Sid": "CloudWatchAlarmPublish",
+            "Principal": {"Service": "cloudwatch.amazonaws.com"},
+            "Action": "sns:Publish",
+            "Resource": topic,
+            "Condition": {
+                "StringEquals": {"aws:SourceAccount": parts[4]},
+                "ArnLike": {
+                    "aws:SourceArn": (
+                        f"arn:{parts[1]}:cloudwatch:{parts[3]}:{parts[4]}:alarm:test-stack-*"
+                    )
+                },
+            },
+        }
+    )
     subscription = {
         "TopicArn": topic,
         "Protocol": "email",
@@ -329,8 +344,26 @@ def test_sns_requires_confirmed_exact_email_and_eventbridge_only_policy() -> Non
         },
         subscriptions={"Subscriptions": [subscription]},
         expected_email="alerts@example.com",
+        stack_name="test-stack",
     )
     assert all(check.passed for check in checks)
+
+    policy["Statement"][1]["Condition"]["ArnLike"]["aws:SourceArn"] = "*"
+    denied = module.verify_sns(
+        topic=topic,
+        attributes={
+            "Attributes": {
+                "TopicArn": topic,
+                "SubscriptionsConfirmed": "1",
+                "SubscriptionsPending": "0",
+                "Policy": json.dumps(policy),
+            }
+        },
+        subscriptions={"Subscriptions": [subscription]},
+        expected_email="alerts@example.com",
+        stack_name="test-stack",
+    )
+    assert not denied[0].passed
 
     subscription["SubscriptionArn"] = "PendingConfirmation"
     failed = module.verify_sns(
@@ -338,6 +371,7 @@ def test_sns_requires_confirmed_exact_email_and_eventbridge_only_policy() -> Non
         attributes={"Attributes": {"TopicArn": topic, "Policy": json.dumps(policy)}},
         subscriptions={"Subscriptions": [subscription]},
         expected_email="alerts@example.com",
+        stack_name="test-stack",
     )
     assert all(not check.passed for check in failed)
 
@@ -379,9 +413,7 @@ def test_security_change_rule_must_be_enabled_and_single_targeted() -> None:
         rule={
             "Name": outputs["SecurityAdministrationAlertName"],
             "State": "ENABLED",
-            "EventPattern": json.dumps(
-                {"source": sources, "detail": {"eventName": events}}
-            ),
+            "EventPattern": json.dumps({"source": sources, "detail": {"eventName": events}}),
         },
         targets={
             "Targets": [
