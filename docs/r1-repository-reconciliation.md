@@ -1,7 +1,7 @@
 # R1 repository reconciliation
 
-Status: R1-0 and the R1-1 synthetic local slice are complete. Production provisioning
-remains disabled.
+Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contract and
+realm-session implementation has begun. Production provisioning remains disabled.
 
 ## Frozen baseline
 
@@ -76,6 +76,27 @@ durability claim.
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
+| V1.3 scope, KMS context, permit deadlines, purpose-pinned signature | `tests/unit/test_security_contracts_v1_3.py` | V1.3 contract/canonicalization change |
+| Verified workload selects one fixed private-realm credential | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
+
+## R1-2 checkpoint
+
+`contracts/security_v1_3.py` adds new wire identities rather than extending or
+reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
+context, owner assertion V2, permit V3, KMS encryption context V2, and v1.3
+verification keys. New signatures retain the already reviewed `lucy-cjson-1`
+canonicalizer, include their object type/version as a domain separator, and pin a
+distinct v1.3 key purpose. Permit admission is at most 60 seconds while execution
+completion remains a separate bounded deadline. A historical realm/storage mismatch
+requires an exact restore-mapping ID.
+
+`realm_sessions.py` selects database credentials only from a deployment-owned mapping
+after workload identity has been verified. A request may supply a realm/workspace hint
+only for conflict detection; it cannot select a credential. Unknown subjects/actions,
+conflicting hints, duplicate subjects, and shared private-realm credentials fail
+closed. The next R1-2 increment is the parallel scoped-memory schema and execute-only
+PostgreSQL operations for Raymond/Utopia/Alpha test logins; legacy v1.2 rows remain in
+their explicit enclave.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
