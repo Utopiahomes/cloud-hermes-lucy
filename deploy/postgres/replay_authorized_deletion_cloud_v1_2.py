@@ -194,8 +194,7 @@ def run(config: RecoveryReplayConfig) -> dict[str, Any]:
         ).fetchone()
         boundary = connection.execute(
             "SELECT (SELECT state FROM lucy.runtime_admission WHERE singleton),"
-            "NOT EXISTS(SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled) "
-            "AND NOT EXISTS(SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)"
+            "lucy.capture_boundary_safe_v1()"
         ).fetchone()
         if tls != (True,) or boundary != ("quarantined", True):
             raise RecoveryReplayError("database is outside the reviewed recovery boundary")

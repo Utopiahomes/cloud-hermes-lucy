@@ -181,3 +181,10 @@ def test_run_uses_only_locked_quarantined_database_gate(
         )
         == 1
     )
+    assert any(
+        "lucy.capture_boundary_safe_v1()" in item for item in connection.statements
+    )
+    assert all(
+        "NOT EXISTS(SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)" not in item
+        for item in connection.statements
+    )
