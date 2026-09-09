@@ -1,8 +1,9 @@
 # R1 repository reconciliation
 
 Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
-realm-session selection, and the first scoped-memory PostgreSQL boundary are
-implemented locally. Production provisioning remains disabled.
+single-realm process sessions, authenticated-admission interfaces, and the first
+scoped-memory PostgreSQL boundary are implemented locally. Production provisioning
+remains disabled.
 
 ## Frozen baseline
 
@@ -78,8 +79,9 @@ durability claim.
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
 | V1.3 scope, KMS context, permit deadlines, purpose-pinned signature | `tests/unit/test_security_contracts_v1_3.py` | V1.3 contract/canonicalization change |
-| Verified workload selects one fixed private-realm credential | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
+| One process holds exactly one fixed private-realm credential; verified workload and scope conflicts fail closed | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
 | Raymond/Utopia/Alpha execute-only memory isolation, direct-table denial, idempotent replay/conflict, unbound-login denial | `tests/integration/test_r1_scoped_memory.py` on disposable PostgreSQL 16; 2 passed | Scoped-memory schema/functions, bootstrap roles, or client change |
+| Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
 
 ## R1-2 checkpoint
 
@@ -108,10 +110,19 @@ the backing tables. Cross-realm reads return no rows, unknown bindings fail clos
 and idempotency conflicts do not write data. Legacy v1.2 rows remain in their
 explicit enclave.
 
-The next R1-2 increment is authenticated internal request admission and workspace-
-level authorization over this database-enforced realm boundary. Sensitive-chain
-parameterization, OTR/deletion closure, and revocation-race/receipt evidence remain
-later R1-2 gates; this checkpoint does not claim R1-2 completion.
+`internal_admission.py` now defines the realm-local side of authenticated admission.
+Only a verifier may produce identity facts; the verifier is required to bind the
+configured issuer and realm-specific audience. The directory request and decision
+contain authorization metadata only—no bearer token, database credential, prompt,
+query, response, or private content. The realm process cross-checks every returned
+scope/binding/action before constructing a server-only, canonically digest-bound
+`ResolvedExecutionContextV1`. No production IdP implementation or network broker is
+claimed yet.
+
+The next R1-2 increment is the database-backed directory authorizer and synthetic
+Utopia/Raymond workspace slice using separate single-binding process fixtures.
+Sensitive-chain parameterization, OTR/deletion closure, and revocation-race/receipt
+evidence remain later R1-2 gates; this checkpoint does not claim R1-2 completion.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

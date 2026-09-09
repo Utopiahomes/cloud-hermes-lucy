@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.orm import Session, sessionmaker
 
-from lucy.contracts.security_v1_3 import OriginScopeV1
+from lucy.contracts.security_v1_3 import AuthenticationStrength, OriginScopeV1
 from lucy.db import create_session_factory
 
 
@@ -24,13 +24,21 @@ class RealmRuntimeBindingV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     contract_version: str = Field(default="1", pattern="^1$")
     workload_subject: str = Field(min_length=1, max_length=512)
+    service_principal_id: UUID
     service_binding_id: UUID
     target_scope: OriginScopeV1
     workspace_id: UUID
     deployment_id: UUID
+    channel_binding_id: UUID
+    identity_issuer: str = Field(min_length=1, max_length=512)
+    identity_audience: str = Field(min_length=1, max_length=512)
+    context_issuer: str = Field(min_length=1, max_length=512)
     database_url: SecretStr
     allowed_actions: frozenset[str] = Field(min_length=1)
+    allowed_authentication_strengths: frozenset[AuthenticationStrength] = Field(min_length=1)
     binding_generation: int = Field(ge=1)
+    policy_version: int = Field(ge=1)
+    lucy_instance_id: UUID | None = None
 
 
 @dataclass(frozen=True)

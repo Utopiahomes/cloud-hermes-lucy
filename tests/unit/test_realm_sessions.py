@@ -4,7 +4,7 @@ from uuid import UUID
 
 import pytest
 
-from lucy.contracts.security_v1_3 import OriginScopeV1
+from lucy.contracts.security_v1_3 import AuthenticationStrength, OriginScopeV1
 from lucy.realm_sessions import (
     RealmAccessDenied,
     RealmBindingConfigurationError,
@@ -22,6 +22,7 @@ FOUR = UUID("00000000-0000-4000-8000-000000000004")
 def _binding(name: str, realm: UUID, database_url: str) -> RealmRuntimeBindingV1:
     return RealmRuntimeBindingV1(
         workload_subject=f"render:{name}:routine",
+        service_principal_id=TWO,
         service_binding_id=ONE,
         target_scope=OriginScopeV1(
             tenant_account_id=ZERO,
@@ -33,9 +34,15 @@ def _binding(name: str, realm: UUID, database_url: str) -> RealmRuntimeBindingV1
         ),
         workspace_id=FOUR,
         deployment_id=ONE,
+        channel_binding_id=THREE,
+        identity_issuer="https://identity.test",
+        identity_audience=f"lucy:{name}:internal",
+        context_issuer=f"lucy:{name}:admission",
         database_url=database_url,
         allowed_actions=frozenset({"memory.read", "memory.write"}),
+        allowed_authentication_strengths=frozenset({AuthenticationStrength.MFA}),
         binding_generation=1,
+        policy_version=1,
     )
 
 

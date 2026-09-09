@@ -8,16 +8,22 @@ reviewed ``lucy-cjson-1`` canonicalizer.
 from __future__ import annotations
 
 import base64
+import secrets
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Annotated, Literal, Self, TypeVar
+from typing import Annotated, Any, Literal, Self, TypeVar, cast
 from uuid import UUID
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lucy.contracts.canonical import canonical_signed_bytes, signed_contract_sha256
+from lucy.contracts.canonical import (
+    canonical_sha256,
+    canonical_signed_bytes,
+    signed_contract_sha256,
+)
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
     SensitiveActionV2,
@@ -30,6 +36,7 @@ V1_3_CONTEXT_MAX_SECONDS = 300
 V1_3_PERMIT_CLAIM_MAX_SECONDS = 60
 V1_3_EXECUTION_MAX_SECONDS = 600
 V1_3_OWNER_ASSERTION_MAX_SECONDS = 300
+RESOLVED_CONTEXT_DIGEST_PREFIX = b"LUCY-RESOLVED-EXECUTION-CONTEXT-V1\0"
 
 _SAFE_IDENTIFIER = r"^[A-Za-z0-9][A-Za-z0-9._:/@+=-]*$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -150,6 +157,9 @@ class ResolvedExecutionContextV1(StrictV13Contract):
             raise ValueError("ordinary context target and active realm must match")
         if (self.grant_id is None) != (self.grant_generation is None):
             raise ValueError("grant ID and generation must appear together")
+        expected_digest = resolved_execution_context_digest(self)
+        if not secrets.compare_digest(self.context_digest, expected_digest):
+            raise ValueError("resolved context digest is invalid")
         return self
 
 
@@ -397,6 +407,37 @@ class KmsEncryptionContextV2(StrictV13Contract):
             "evidence_id": str(self.evidence_id),
             "purpose": self.purpose,
         }
+
+
+def resolved_execution_context_digest(
+    value: Mapping[str, object] | ResolvedExecutionContextV1,
+) -> str:
+    """Commit to every context field except the digest itself."""
+
+    if isinstance(value, ResolvedExecutionContextV1):
+        payload = value.model_dump(mode="python", exclude={"context_digest"})
+    else:
+        payload = dict(value)
+        payload.pop("context_digest", None)
+    return canonical_sha256(payload, prefix=RESOLVED_CONTEXT_DIGEST_PREFIX)
+
+
+def build_resolved_execution_context_v1(
+    payload: Mapping[str, object],
+) -> ResolvedExecutionContextV1:
+    """Build a context with a verified, non-self-referential digest."""
+
+    values = dict(payload)
+    values.pop("context_digest", None)
+    unknown = set(values).difference(ResolvedExecutionContextV1.model_fields)
+    if unknown:
+        raise ValueError("resolved context contains unknown fields")
+    complete = ResolvedExecutionContextV1.model_construct(
+        **cast(dict[str, Any], values),
+        context_digest="0" * 64,
+    ).model_dump(mode="python")
+    complete["context_digest"] = resolved_execution_context_digest(complete)
+    return ResolvedExecutionContextV1.model_validate(complete)
 
 
 def _aware(value: datetime, field: str) -> None:
