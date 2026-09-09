@@ -414,6 +414,22 @@ class SensitiveActionPermitV3(SignedV13Contract):
             self.max_records != 1 or self.max_bytes > 65_536
         ):
             raise ValueError("retrieval remains a bounded single-record operation")
+        retrieval_reasons = {
+            SensitiveReasonCode.VERIFY_EXACT_WORDING,
+            SensitiveReasonCode.RESOLVE_AMBIGUITY,
+            SensitiveReasonCode.RECOVER_MISSING_CONTEXT,
+            SensitiveReasonCode.OWNER_REVIEW,
+        }
+        deletion_reasons = {
+            SensitiveReasonCode.OWNER_REQUEST,
+            SensitiveReasonCode.SENSITIVE_DATA,
+            SensitiveReasonCode.RETENTION_EXPIRED,
+        }
+        if self.action == SensitiveActionV2.EVIDENCE_RETRIEVE:
+            if self.reason not in retrieval_reasons:
+                raise ValueError("retrieval permit uses a deletion reason code")
+        elif self.reason not in deletion_reasons:
+            raise ValueError("deletion permit uses a retrieval reason code")
         return self
 
 
@@ -803,7 +819,6 @@ class ExecutorReceiptV2(SignedV13Contract):
                 or self.deletion_manifest_digest is None
                 or self.transaction_client_token is None
                 or self.kms_request_id is not None
-                or self.finality_state != "operationally_deleted"
             ):
                 raise ValueError("deletion receipt contains invalid action-specific fields")
             if self.result not in {
@@ -812,6 +827,13 @@ class ExecutorReceiptV2(SignedV13Contract):
                 ExecutorResult.REJECTED,
             }:
                 raise ValueError("deletion receipt uses a retrieval result")
+            expected_finality = (
+                "not_applicable"
+                if self.result == ExecutorResult.REJECTED
+                else "operationally_deleted"
+            )
+            if self.finality_state != expected_finality:
+                raise ValueError("deletion receipt finality state contradicts its result")
         return self
 
 
@@ -889,8 +911,6 @@ def _live_deadline(contract: SignedV13Contract) -> datetime | None:
     if isinstance(contract, SensitiveActionPermitV3):
         return contract.permit_claim_deadline
     if isinstance(contract, SensitiveExecutionGrantV2):
-        return contract.execution_completion_deadline
-    if isinstance(contract, ExecutorReceiptV2):
         return contract.execution_completion_deadline
     if isinstance(contract, DeletionTargetManifestV2):
         return contract.execution_completion_deadline

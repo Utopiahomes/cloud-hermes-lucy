@@ -291,6 +291,8 @@ def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
         _permit(max_records=2)
     with pytest.raises(ValidationError, match="literal_error"):
         _permit(signing_key_purpose=V13SigningKeyPurpose.OWNER_BROKER)
+    with pytest.raises(ValidationError, match="deletion reason"):
+        _permit(reason="owner_request")
 
 
 def test_historical_scope_mismatch_requires_exact_restore_mapping() -> None:
@@ -368,6 +370,31 @@ def test_executor_receipt_v2_pins_scope_action_fields_and_ecdsa_key() -> None:
         expected_purpose=V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
         checked_at=NOW + timedelta(seconds=31),
     )
+    V13ContractVerifier((key,)).verify(
+        signed,
+        expected_purpose=V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
+        checked_at=NOW + timedelta(seconds=130),
+    )
+
+
+def test_rejected_deletion_receipt_cannot_claim_operational_deletion() -> None:
+    values = {
+        **_receipt().model_dump(mode="python"),
+        "signing_key_purpose": V13SigningKeyPurpose.DELETION_RECEIPT,
+        "action": SensitiveActionV2.EVIDENCE_DELETE,
+        "deletion_manifest_id": TWO,
+        "deletion_manifest_digest": DIGEST,
+        "kms_request_id": None,
+        "transaction_client_token": "deletion-transaction-one",
+        "result": ExecutorResult.REJECTED,
+        "finality_state": "not_applicable",
+    }
+    rejected = ExecutorReceiptV2.model_validate(values)
+    assert rejected.finality_state == "not_applicable"
+    with pytest.raises(ValidationError, match="contradicts"):
+        ExecutorReceiptV2.model_validate(
+            {**values, "finality_state": "operationally_deleted"}
+        )
 
 
 def test_encrypted_package_v2_separates_payload_and_wrapper_scope() -> None:
