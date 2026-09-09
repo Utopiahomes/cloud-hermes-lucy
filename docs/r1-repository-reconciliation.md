@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0035` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0036` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -99,6 +99,7 @@ durability claim.
 | Receipt-only deletion reconciliation to 30-day `FINALITY_PENDING`, foreign/wrong-reconciler denial, recall suppression, and post-fence retrieval-package denial | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0034; 3 passed in the file | Migration 0034, reconciliation state, deletion effects, memory search, or package/grant fence guards |
 | Realm-bound metadata-only finality observation, database-derived `EXTENDED` result while PITR can recover the deleted key, exact replay, foreign-operation denial, and no direct deletion-effect access | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0035; 3 passed in the file; finality and deployment-boundary unit checks included in a separate 14-test pass | Migration 0035, finality collector, finality actor bindings, production grants, or recovery-inventory contract |
 | Historical V1.3 deletion recovery proof verifies retired-but-uncompromised policy/receipt keys and binds realm scope, permit, exact closure, grant, caller, executor, receipt, outcome, and digests; revoked keys and substituted callers fail closed | `tests/unit/test_security_contracts_v1_3.py` plus unchanged v1.2 recovery tests; 20 passed | V1.3 contracts/verifier, historical-key semantics, recovery-proof binding, canonicalization, or v1.2 recovery compatibility |
+| Quarantined V1.3 restore replay revalidates scope/target/recovery digests and exact restored artifacts, creates one immutable recovery fence, suppresses restored recall, blocks new derivation, and replays exactly once; wrong scope and ready storage fail closed | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0036; 3 passed in the file | Migration 0036, recovery contract/proof, capture-off admission, scoped archive/provenance, or recall/package fence logic |
 
 ## R1-2 checkpoint
 
@@ -293,8 +294,19 @@ retired verification key only for evidence issued during its valid issuance wind
 revoked keys and contracts in a declared suspected-compromise interval fail closed.
 It then binds the permit, canonical deletion closure, post-claim grant, exact
 realm-bound caller and qualified executor, and successful operational-deletion
-receipt into one recovery digest. This proof does not itself mutate a restored
-database; the next increment consumes it only through a quarantined replay gate.
+receipt into one recovery digest. The proof does not itself mutate a restored
+database; migration 0036 consumes it only through a quarantined replay gate.
+
+Migration `0036_r1_scoped_deletion_recovery` consumes that proof only while storage
+is quarantined and the centralized transcript-capture boundary is off. It rederives
+the realm, scope, manifest-target and recovery digests; requires every restored
+archive and derived-memory artifact to match the authorized closure; and writes one
+immutable recovery record, target set, and root-evidence fence. A simulated older
+restore made the derived claim visible after its newer ordinary fence was removed;
+the recovery replay suppressed it again, blocked subsequent derivation, and an exact
+retry made no second write. Ciphertext remains immutable in PostgreSQL, while the
+externally destroyed wrapped key and enforced fence preserve crypto-shredding and
+ordinary-recall deletion semantics.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

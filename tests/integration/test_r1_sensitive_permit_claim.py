@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -12,7 +13,11 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from lucy.contracts.canonical import canonical_json_bytes
+from lucy.authorized_deletion_recovery import (
+    AuthorizedDeletionRecoveryProofV2,
+    build_authorized_deletion_recovery_contract_v2,
+)
+from lucy.contracts.canonical import canonical_json_bytes, canonical_sha256
 from lucy.contracts.security_v1_2 import (
     DeletionRecoveryInventoryV1,
     DeploymentEnvironment,
@@ -69,7 +74,10 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.scoped_finality_observations_v2, "
+                "TRUNCATE lucy.scoped_authorized_deletion_recovery_targets_v2, "
+                "lucy.scoped_recovery_deletion_fences_v2, "
+                "lucy.scoped_authorized_deletion_recoveries_v2, "
+                "lucy.scoped_finality_observations_v2, "
                 "lucy.scoped_evidence_deletion_fences_v2, "
                 "lucy.scoped_deletion_manifest_targets_v2, "
                 "lucy.scoped_deletion_manifests_v2, "
@@ -1275,3 +1283,150 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
             "deletion_succeeded",
             deletion_receipt.unsigned_digest_hex(),
         )
+    with owner.begin() as connection:
+        connection.execute(text("SET LOCAL session_replication_role='replica'"))
+        connection.execute(
+            text(
+                "DELETE FROM lucy.scoped_evidence_deletion_fences_v2 "
+                "WHERE operation_id=:operation"
+            ),
+            {"operation": deletion_permit.operation_id},
+        )
+    with archive.connect() as connection:
+        assert len(
+            connection.execute(
+                text("SELECT lucy.search_scoped_memory_v1(:query,:limit)"),
+                {"query": "durable", "limit": 10},
+            ).scalar_one()
+        ) == 1
+    scope_digest = canonical_sha256(
+        deletion_permit.target_scope,
+        prefix=b"lucy:authorized-deletion-recovery-scope:v2\0",
+    )
+    recovery_bindings = {
+        "operation_id": str(deletion_permit.operation_id),
+        "permit_digest": deletion_permit.unsigned_digest_hex(),
+        "manifest_digest": manifest.unsigned_digest_hex(),
+        "grant_digest": deletion_grant.unsigned_digest_hex(),
+        "receipt_digest": deletion_receipt.unsigned_digest_hex(),
+        "targets_digest": manifest.targets_digest,
+        "scope_digest": scope_digest,
+    }
+    recovery_proof = AuthorizedDeletionRecoveryProofV2(
+        operation_id=str(deletion_permit.operation_id),
+        permit_id=str(deletion_permit.permit_id),
+        manifest_id=str(manifest.manifest_id),
+        permit_digest=deletion_permit.unsigned_digest_hex(),
+        manifest_digest=manifest.unsigned_digest_hex(),
+        grant_digest=deletion_grant.unsigned_digest_hex(),
+        receipt_digest=deletion_receipt.unsigned_digest_hex(),
+        targets_digest=manifest.targets_digest,
+        target_count=manifest.target_count,
+        scope_digest=scope_digest,
+        completed_at=deletion_receipt.completed_at.isoformat(),
+        recovery_digest=canonical_sha256(
+            recovery_bindings,
+            prefix=b"lucy:authorized-deletion-recovery:v2\0",
+        ),
+    )
+    recovery_contract = build_authorized_deletion_recovery_contract_v2(
+        proof=recovery_proof,
+        permit=deletion_permit,
+        manifest=manifest,
+        grant=deletion_grant,
+        receipt=deletion_receipt,
+        authority_evidence_digest="b" * 64,
+    )
+    with owner.begin() as connection:
+        recovered = connection.execute(
+            text(
+                "SELECT lucy.apply_scoped_authorized_deletion_recovery_v2("
+                "CAST(:recovery AS jsonb))"
+            ),
+            {"recovery": json.dumps(recovery_contract, separators=(",", ":"))},
+        ).scalar_one()
+        recovery_replay = connection.execute(
+            text(
+                "SELECT lucy.apply_scoped_authorized_deletion_recovery_v2("
+                "CAST(:recovery AS jsonb))"
+            ),
+            {"recovery": json.dumps(recovery_contract, separators=(",", ":"))},
+        ).scalar_one()
+    assert recovered["state"] == "FINALITY_PENDING"
+    assert recovered["replayed"] is False
+    assert recovered["derived_summary"]["claims_suppressed"] == 1
+    assert recovery_replay == {**recovered, "replayed": True}
+    wrong_scope_recovery = {
+        **recovery_contract,
+        "target_scope": {
+            **recovery_contract["target_scope"],
+            "security_realm_id": str(uuid4()),
+        },
+    }
+    with (
+        pytest.raises(DBAPIError, match="scope digest is invalid"),
+        owner.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.apply_scoped_authorized_deletion_recovery_v2("
+                "CAST(:recovery AS jsonb))"
+            ),
+            {"recovery": json.dumps(wrong_scope_recovery, separators=(",", ":"))},
+        )
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.runtime_admission SET state='ready',storage_epoch=:epoch,"
+                "updated_at=now() WHERE singleton"
+            ),
+            {"epoch": uuid4()},
+        )
+    with (
+        pytest.raises(DBAPIError, match="requires quarantined capture-off storage"),
+        owner.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.apply_scoped_authorized_deletion_recovery_v2("
+                "CAST(:recovery AS jsonb))"
+            ),
+            {"recovery": json.dumps(recovery_contract, separators=(",", ":"))},
+        )
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.runtime_admission SET state='quarantined',storage_epoch=NULL,"
+                "updated_at=now() WHERE singleton"
+            )
+        )
+    with archive.connect() as connection:
+        assert connection.execute(
+            text("SELECT lucy.search_scoped_memory_v1(:query,:limit)"),
+            {"query": "durable", "limit": 10},
+        ).scalar_one() == []
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                ":key,:subject,:predicate,:object,:confidence,:sources)"
+            ),
+            {
+                "key": "derived-after-recovery-fence",
+                "subject": "Ray",
+                "predicate": "prefers",
+                "object": "resurrected memory",
+                "confidence": 900_000,
+                "sources": [evidence_id],
+            },
+        )
+    with owner.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_authorized_deletion_recoveries_v2")
+        ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_recovery_deletion_fences_v2")
+        ).scalar_one() == 1

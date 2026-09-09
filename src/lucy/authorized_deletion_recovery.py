@@ -228,6 +228,62 @@ def verify_authorized_deletion_recovery_v2(
     )
 
 
+def build_authorized_deletion_recovery_contract_v2(
+    *,
+    proof: AuthorizedDeletionRecoveryProofV2,
+    permit: SensitiveActionPermitV3,
+    manifest: DeletionTargetManifestV2,
+    grant: SensitiveExecutionGrantV2,
+    receipt: ExecutorReceiptV2,
+    authority_evidence_digest: str,
+) -> dict[str, Any]:
+    """Build the strict content-free V1.3 contract for quarantined replay."""
+
+    if _DIGEST.fullmatch(authority_evidence_digest) is None:
+        raise ValueError("authority evidence digest must be lowercase SHA-256")
+    if (
+        proof.operation_id != str(permit.operation_id)
+        or proof.permit_id != str(permit.permit_id)
+        or proof.manifest_id != str(manifest.manifest_id)
+        or proof.grant_digest != grant.unsigned_digest_hex()
+        or proof.receipt_digest != receipt.unsigned_digest_hex()
+    ):
+        raise ValueError("scoped recovery proof does not bind the supplied contracts")
+    return {
+        "contract_version": "2",
+        "object_type": "lucy.authorized-deletion-recovery.v2",
+        "operation_id": proof.operation_id,
+        "permit_id": proof.permit_id,
+        "manifest_id": proof.manifest_id,
+        "grant_id": str(grant.grant_id),
+        "receipt_id": str(receipt.receipt_id),
+        "permit_digest": proof.permit_digest,
+        "manifest_digest": proof.manifest_digest,
+        "grant_digest": proof.grant_digest,
+        "receipt_digest": proof.receipt_digest,
+        "targets_digest": proof.targets_digest,
+        "target_count": proof.target_count,
+        "scope_digest": proof.scope_digest,
+        "target_scope": permit.target_scope.model_dump(mode="json"),
+        "workspace_id": str(permit.workspace_id),
+        "root_evidence_id": str(manifest.root_evidence_id),
+        "root_representation_id": str(manifest.root_representation_id),
+        "restore_mapping_id": (
+            str(permit.restore_mapping_id) if permit.restore_mapping_id is not None else None
+        ),
+        "caller_identity": receipt.caller_identity,
+        "executor_identity": receipt.executor_identity,
+        "executor_alias_arn": receipt.executor_alias_arn,
+        "executor_version": receipt.executor_version,
+        "receipt_key_id": receipt.key_id,
+        "completed_at": proof.completed_at,
+        "reason_category": permit.reason.value,
+        "recovery_digest": proof.recovery_digest,
+        "authority_evidence_digest": authority_evidence_digest,
+        "targets": [target.model_dump(mode="json") for target in manifest.targets],
+    }
+
+
 def verify_authorized_deletion_recovery(
     *,
     permit: SensitiveActionPermitV2,

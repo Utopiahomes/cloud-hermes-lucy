@@ -1214,6 +1214,66 @@ class ScopedFinalityObservationV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ScopedAuthorizedDeletionRecoveryV2Row(Base):
+    __tablename__ = "scoped_authorized_deletion_recoveries_v2"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    permit_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    manifest_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    grant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    receipt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
+    root_evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    root_representation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    restore_mapping_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    caller_identity: Mapped[str] = mapped_column(Text)
+    executor_identity: Mapped[str] = mapped_column(Text)
+    executor_alias_arn: Mapped[str] = mapped_column(Text)
+    executor_version: Mapped[int] = mapped_column(BigInteger)
+    receipt_key_id: Mapped[str] = mapped_column(Text)
+    reason_category: Mapped[str] = mapped_column(String(40))
+    permit_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    manifest_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    grant_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    receipt_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    targets_digest: Mapped[str] = mapped_column(String(64))
+    scope_digest: Mapped[str] = mapped_column(String(64))
+    target_count: Mapped[int] = mapped_column(BigInteger)
+    recovery_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    authority_evidence_digest: Mapped[str] = mapped_column(String(64))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    derived_summary: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+class ScopedAuthorizedDeletionRecoveryTargetV2Row(Base):
+    __tablename__ = "scoped_authorized_deletion_recovery_targets_v2"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_authorized_deletion_recoveries_v2.operation_id"),
+        primary_key=True,
+    )
+    artifact_class: Mapped[str] = mapped_column(String(40), primary_key=True)
+    artifact_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    artifact_version: Mapped[int] = mapped_column(BigInteger)
+    root_evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    disposition: Mapped[str] = mapped_column(String(40))
+    representation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    wrapped_key_ref: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+
+
+class ScopedRecoveryDeletionFenceV2Row(Base):
+    __tablename__ = "scoped_recovery_deletion_fences_v2"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_authorized_deletion_recoveries_v2.operation_id"), unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryEventRow(Base):
     __tablename__ = "scoped_memory_events_v1"
     __table_args__ = {"schema": "lucy"}

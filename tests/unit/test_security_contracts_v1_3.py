@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from lucy.authorized_deletion_recovery import (
     AuthorizedDeletionRecoveryError,
+    build_authorized_deletion_recovery_contract_v2,
     verify_authorized_deletion_recovery_v2,
 )
 from lucy.contracts.security_v1_2 import (
@@ -677,6 +678,18 @@ def test_v13_historical_deletion_recovery_binds_complete_scoped_chain() -> None:
     assert proof.operation_id == str(permit.operation_id)
     assert proof.target_count == 2
     assert len(proof.scope_digest) == len(proof.recovery_digest) == 64
+    recovery = build_authorized_deletion_recovery_contract_v2(
+        proof=proof,
+        permit=permit,
+        manifest=manifest,
+        grant=grant,
+        receipt=receipt,
+        authority_evidence_digest="a" * 64,
+    )
+    assert recovery["target_scope"] == permit.target_scope.model_dump(mode="json")
+    assert recovery["targets"] == [
+        target.model_dump(mode="json") for target in manifest.targets
+    ]
 
     wrong_grant = policy_signer.sign(
         grant.model_copy(update={"caller_identity": f"{caller}-wrong", "signature": ""})
