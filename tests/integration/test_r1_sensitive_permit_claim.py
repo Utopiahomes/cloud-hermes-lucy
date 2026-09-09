@@ -15,6 +15,7 @@ from sqlalchemy.exc import DBAPIError
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
+    ExecutorResult,
     SensitiveActionV2,
     SensitiveReasonCode,
 )
@@ -25,6 +26,7 @@ from lucy.contracts.security_v1_3 import (
     EvidenceWrapperBindingV2,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
+    ExecutorReceiptV2,
     KmsEncryptionContextV2,
     OriginScopeV1,
     SensitiveActionPermitV3,
@@ -60,7 +62,8 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.sensitive_execution_grants_v2, "
+                "TRUNCATE lucy.executor_receipt_attestations_v2, "
+                "lucy.sensitive_execution_grants_v2, "
                 "lucy.realm_executor_bindings_v2, lucy.sensitive_operation_packages_v2, "
                 "lucy.scoped_evidence_wrappers_v2, lucy.scoped_evidence_payloads_v2, "
                 "lucy.scoped_evidence_records_v2, lucy.sensitive_operation_events_v2, "
@@ -89,6 +92,8 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_sensitive_execution_grant_v2(uuid,jsonb) "
+                "TO lucy_utopia_policy; "
+                "GRANT EXECUTE ON FUNCTION lucy.attest_executor_receipt_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy"
             )
         )
@@ -208,7 +213,11 @@ def realm() -> dict[str, UUID]:
                     target_service_binding_id=service_binding_id,
                     content_scope_id=scope_id,
                     actor_role="policy_notary",
-                    allowed_actions=["sensitive.permit.issue", "sensitive.grant.issue"],
+                    allowed_actions=[
+                        "sensitive.permit.issue",
+                        "sensitive.grant.issue",
+                        "sensitive.receipt.attest",
+                    ],
                     binding_generation=1,
                     node_authz_epoch=1,
                     policy_version=1,
@@ -260,6 +269,7 @@ def realm() -> dict[str, UUID]:
         "channel": foundation.channel_binding_id,
         "owner": owner_id,
         "evidence": evidence_id,
+        "scope": scope_id,
         "service_binding": service_binding_id,
         "deployment": deployment_id,
     }
@@ -602,6 +612,67 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
             {"operation": permit.operation_id, "grant": grant.model_dump_json()},
         ).scalar_one()
     assert grant_digest == grant_replay == grant.unsigned_digest_hex()
+    completed_at = datetime.now(UTC)
+    unsigned_receipt = ExecutorReceiptV2(
+        key_id="utopia-retrieval-receipt-v13-test",
+        issuer="lucy-utopia-retrieval-executor-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=completed_at,
+        signing_key_purpose=V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
+        receipt_id=uuid4(),
+        action=permit.action,
+        executor_identity=grant.executor_identity,
+        executor_alias_arn=grant.executor_alias_arn,
+        executor_version=grant.executor_version,
+        caller_identity=grant.caller_identity,
+        target_scope=grant.target_scope,
+        execution_binding=grant.execution_binding,
+        operation_id=permit.operation_id,
+        permit_id=permit.permit_id,
+        permit_digest=permit.unsigned_digest_hex(),
+        execution_grant_id=grant.grant_id,
+        execution_grant_digest=grant.unsigned_digest_hex(),
+        package_digest=package.package_digest_hex(),
+        result=ExecutorResult.RETRIEVAL_SUCCEEDED,
+        lambda_request_id="synthetic-lambda-request",
+        kms_request_id="synthetic-kms-request",
+        execution_completion_deadline=permit.execution_completion_deadline,
+        completed_at=completed_at,
+        record_version=1,
+        journal_ref=f"retrieval/{permit.operation_id}",
+        finality_state="not_applicable",
+    )
+    receipt = unsigned_receipt.model_copy(
+        update={"signature": base64.b64encode(b"synthetic-ecdsa-signature").decode("ascii")}
+    )
+    wrong_receipt = receipt.model_copy(update={"package_digest": "f" * 64})
+    with (
+        pytest.raises(DBAPIError, match="verified executor receipt differs from stored grant"),
+        policy.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.attest_executor_receipt_v2(:operation,:receipt)"),
+            {"operation": permit.operation_id, "receipt": wrong_receipt.model_dump_json()},
+        )
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.realm_executor_bindings_v2 SET active=false, "
+                "binding_generation=binding_generation+1 WHERE content_scope_id=:scope "
+                "AND action='evidence.retrieve'"
+            ),
+            {"scope": realm["scope"]},
+        )
+    with policy.begin() as connection:
+        receipt_digest = connection.execute(
+            text("SELECT lucy.attest_executor_receipt_v2(:operation,:receipt)"),
+            {"operation": permit.operation_id, "receipt": receipt.model_dump_json()},
+        ).scalar_one()
+        receipt_replay = connection.execute(
+            text("SELECT lucy.attest_executor_receipt_v2(:operation,:receipt)"),
+            {"operation": permit.operation_id, "receipt": receipt.model_dump_json()},
+        ).scalar_one()
+    assert receipt_digest == receipt_replay == receipt.unsigned_digest_hex()
     with pytest.raises(DBAPIError, match="permission denied"), workflow.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
     with owner.connect() as connection:
@@ -610,4 +681,7 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one() == 1
         assert connection.execute(
             text("SELECT count(*) FROM lucy.sensitive_execution_grants_v2")
+        ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.executor_receipt_attestations_v2")
         ).scalar_one() == 1

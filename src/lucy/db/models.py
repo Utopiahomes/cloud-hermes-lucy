@@ -1057,6 +1057,30 @@ class SensitiveExecutionGrantV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ExecutorReceiptAttestationV2Row(Base):
+    __tablename__ = "executor_receipt_attestations_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), unique=True
+    )
+    execution_grant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_execution_grants_v2.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    executor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_executor_bindings_v2.id")
+    )
+    receipt_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    result: Mapped[str] = mapped_column(String(40))
+    serialized_receipt: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryClaimRow(Base):
     __tablename__ = "scoped_memory_claims_v1"
     __table_args__ = {"schema": "lucy"}
