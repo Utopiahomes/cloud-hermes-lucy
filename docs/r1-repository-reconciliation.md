@@ -115,6 +115,9 @@ durability claim.
 | Separate V1.3 Lambda entry points parse only V2 invocations, pin one realm/workspace/deployment/caller/qualified alias from environment, reject `$LATEST` or cross-scope configuration, emit content-free metrics, and scrub unexpected failure text | V1.3 handler and unchanged V1.2 executor unit suites; 45 passed plus Ruff and mypy | V1.3 handler/runtime configuration, environment contract, log/metric behavior, or V1.2 compatibility |
 | The repeatable V1.3 CloudFormation stamp is derived only from the exact accepted V1.2 template digest, requires one explicit realm identity, creates separate physical keys/tables/roles/executors per stack, pins realm scope and caller identity in Lambda configuration, and enforces the complete V2 realm context in KMS and IAM | `tests/unit/test_aws_security_v1_3_template.py`; 5 passed plus Ruff and mypy | Frozen V1.2 template, V1.3 renderer/template, executor environment, KMS context, IAM policies, or realm output contract |
 | The content-free stamp builder accepts exactly one complete termination-protected stack, cross-checks every realm parameter/output against the PostgreSQL binding description, rejects unknown fields and cross-account AWS bindings, and emits a validated canonical `RealmSecurityStampV1` with its digest | `tests/unit/test_realm_security_stamp_builder_v1_3.py`; 5 passed plus Ruff and mypy | CloudFormation realm outputs, stamp builder/model, AWS binding formats, or PostgreSQL realm-binding input contract |
+| The V1.3 realm archive encryptor pins one deployment-owned scope and exact evidence key, obtains a 256-bit DEK, authenticates bounded plaintext with the exact header, emits validated payload/wrapper contracts, and registers the wrapped DEK only after KMS response validation; it exposes no decrypt or delete capability | `tests/unit/test_realm_archive.py`; 5 passed plus Ruff and mypy | Realm archive encryptor/identity, V1.3 payload/wrapper/context contracts, AES-GCM binding, or commitment behavior |
+| The realm archive AWS adapter permits only exact-key `GenerateDataKey` and conditional wrapped-key `PutItem`, stores content-free realm/context metadata, exposes no read/decrypt/delete surface, and rejects collisions or malformed KMS responses | `tests/unit/test_realm_archive_aws.py`; 3 focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key metadata |
+| Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
 
 ## R1-2 checkpoint
 
@@ -195,6 +198,17 @@ the evidence ID remains dynamic but mandatory. A validated handoff builder combi
 the stack's read-only outputs with the reviewed PostgreSQL realm description and
 produces the canonical `RealmSecurityStampV1` plus digest. Deployed verification and
 synthetic cloud acceptance remain open gates.
+
+`realm_archive.py` and `realm_archive_aws.py` provide the encryption-only half of
+new-capture ingestion. The process receives one deployment-owned realm scope and
+exact KMS key, generates a data key, validates the KMS response, encrypts with
+AES-256-GCM and the supplied authenticated header, emits validated V2 payload and
+wrapper bindings, and conditionally stores the wrapped key with realm metadata. It
+has no decrypt or delete method. The environment factory requires the explicit V1.3
+backend and matches region/account/key before constructing AWS clients. This is not
+yet the complete archive workflow: durable idempotent coordination between the
+external wrapped-key write and PostgreSQL registration remains required before the
+path is connected to Telegram capture.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
