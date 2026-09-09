@@ -127,10 +127,13 @@ def test_reviewed_psql_header_filter_rejects_unexpected_commands() -> None:
 
 def test_bootstrap_uses_central_capture_boundary_and_new_migration_head() -> None:
     module = _module()
+    from lucy.readiness import SCHEMA_REVISION
+
     source = (ROOT / "deploy" / "postgres" / "bootstrap_cloud_v1_2.py").read_text(
         encoding="utf-8"
     )
     assert module.EXPECTED_REVISION == "0021_recovery_capture_safety"
+    assert SCHEMA_REVISION == module.EXPECTED_REVISION
     assert "SELECT lucy.capture_boundary_safe_v1()" in source
     assert "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)" not in source
 

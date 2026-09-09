@@ -30,9 +30,6 @@ BEGIN
   IF NOT lucy.capture_boundary_safe_v1() THEN
     RAISE EXCEPTION 'transcript capture must remain disabled during v1.2 configuration';
   END IF;
-  IF EXISTS (SELECT 1 FROM lucy.sensitive_operations_v1) THEN
-    RAISE EXCEPTION 'executor rebinding requires an empty pre-activation operation ledger';
-  END IF;
   IF least(v_storage_epoch,v_registry_epoch,v_key_epoch,v_retrieval_version,
            v_deletion_version) < 1 THEN
     RAISE EXCEPTION 'security epochs and executor versions must be positive';
@@ -46,6 +43,43 @@ BEGIN
      OR v_deletion_receipt_key !~ '^arn:aws:kms:us-east-1:[0-9]{12}:key/[0-9a-f-]{36}$'
      OR v_retrieval_receipt_key = v_deletion_receipt_key THEN
     RAISE EXCEPTION 'exact, disjoint us-east-1 KMS receipt keys are required';
+  END IF;
+
+  -- A restored, already-activated database contains immutable operation history.
+  -- In that case this is verification, never rebinding: every reviewed epoch
+  -- and executor field must already match exactly and configured_at is preserved.
+  IF EXISTS (SELECT 1 FROM lucy.sensitive_operations_v1) THEN
+    IF NOT EXISTS (
+         SELECT 1 FROM lucy.security_contract_epochs
+         WHERE singleton
+           AND storage_epoch=v_storage_epoch
+           AND registry_epoch=v_registry_epoch
+           AND key_epoch=v_key_epoch
+       )
+       OR (SELECT count(*) FROM lucy.executor_bindings_v1
+           WHERE environment='production') <> 2
+       OR NOT EXISTS (
+         SELECT 1 FROM lucy.executor_bindings_v1
+         WHERE action='evidence.retrieve' AND environment='production'
+           AND executor_identity='lucy-evidence-executor'
+           AND executor_alias_arn=v_retrieval_alias
+           AND executor_version=v_retrieval_version
+           AND receipt_key_id=v_retrieval_receipt_key AND active
+       )
+       OR NOT EXISTS (
+         SELECT 1 FROM lucy.executor_bindings_v1
+         WHERE action='evidence.delete' AND environment='production'
+           AND executor_identity='lucy-deletion-executor'
+           AND executor_alias_arn=v_deletion_alias
+           AND executor_version=v_deletion_version
+           AND receipt_key_id=v_deletion_receipt_key AND active
+       ) THEN
+      RAISE EXCEPTION 'existing security boundary does not match reviewed bindings';
+    END IF;
+    UPDATE lucy.runtime_admission
+      SET state='quarantined',updated_at=clock_timestamp()
+      WHERE singleton;
+    RETURN;
   END IF;
 
   UPDATE lucy.runtime_admission

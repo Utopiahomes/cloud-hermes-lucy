@@ -175,3 +175,9 @@ def test_security_configuration_uses_database_owned_capture_boundary() -> None:
     ).read_text(encoding="utf-8")
     assert "IF NOT lucy.capture_boundary_safe_v1() THEN" in script
     assert "SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled" not in script
+    assert "existing security boundary does not match reviewed bindings" in script
+    assert "executor rebinding requires an empty pre-activation operation ledger" not in script
+    assert "AND storage_epoch=v_storage_epoch" in script
+    assert "AND executor_alias_arn=v_retrieval_alias" in script
+    assert "AND executor_alias_arn=v_deletion_alias" in script
+    assert "RETURN;" in script
