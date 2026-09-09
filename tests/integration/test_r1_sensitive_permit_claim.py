@@ -111,6 +111,9 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.store_scoped_deletion_manifest_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_deletion_execution_grant_v2(uuid,jsonb) "
+                "TO lucy_utopia_policy; "
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.attest_deletion_executor_receipt_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy"
             )
         )
@@ -983,6 +986,72 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one()
     assert deletion_grant_digest == deletion_grant_replay
     assert deletion_grant_digest == deletion_grant.unsigned_digest_hex()
+    deletion_completed_at = datetime.now(UTC)
+    unsigned_deletion_receipt = ExecutorReceiptV2(
+        key_id="utopia-deletion-receipt-v13-test",
+        issuer="lucy-utopia-deletion-executor-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=deletion_completed_at,
+        signing_key_purpose=V13SigningKeyPurpose.DELETION_RECEIPT,
+        receipt_id=uuid4(),
+        action=deletion_permit.action,
+        executor_identity=deletion_grant.executor_identity,
+        executor_alias_arn=deletion_grant.executor_alias_arn,
+        executor_version=deletion_grant.executor_version,
+        caller_identity=deletion_grant.caller_identity,
+        target_scope=deletion_grant.target_scope,
+        execution_binding=deletion_grant.execution_binding,
+        operation_id=deletion_permit.operation_id,
+        permit_id=deletion_permit.permit_id,
+        permit_digest=deletion_permit.unsigned_digest_hex(),
+        execution_grant_id=deletion_grant.grant_id,
+        execution_grant_digest=deletion_grant.unsigned_digest_hex(),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        package_digest=manifest.unsigned_digest_hex(),
+        result=ExecutorResult.DELETION_SUCCEEDED,
+        lambda_request_id="synthetic-deletion-lambda-request",
+        transaction_client_token=f"delete-{deletion_permit.operation_id}",
+        execution_completion_deadline=deletion_permit.execution_completion_deadline,
+        completed_at=deletion_completed_at,
+        record_version=1,
+        journal_ref=f"deletion/{deletion_permit.operation_id}",
+        finality_state="operationally_deleted",
+    )
+    deletion_receipt = unsigned_deletion_receipt.model_copy(
+        update={"signature": base64.b64encode(b"synthetic-ecdsa-signature").decode("ascii")}
+    )
+    wrong_deletion_receipt = deletion_receipt.model_copy(
+        update={"deletion_manifest_digest": "e" * 64}
+    )
+    with (
+        pytest.raises(DBAPIError, match="verified deletion receipt differs from stored grant"),
+        policy.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.attest_deletion_executor_receipt_v2(:operation,:receipt)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "receipt": wrong_deletion_receipt.model_dump_json(),
+            },
+        )
+    with policy.begin() as connection:
+        deletion_receipt_digest = connection.execute(
+            text("SELECT lucy.attest_deletion_executor_receipt_v2(:operation,:receipt)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "receipt": deletion_receipt.model_dump_json(),
+            },
+        ).scalar_one()
+        deletion_receipt_replay = connection.execute(
+            text("SELECT lucy.attest_deletion_executor_receipt_v2(:operation,:receipt)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "receipt": deletion_receipt.model_dump_json(),
+            },
+        ).scalar_one()
+    assert deletion_receipt_digest == deletion_receipt_replay
+    assert deletion_receipt_digest == deletion_receipt.unsigned_digest_hex()
     with (
         pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
         archive.begin() as connection,
@@ -1012,7 +1081,7 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one() == 2
         assert connection.execute(
             text("SELECT count(*) FROM lucy.executor_receipt_attestations_v2")
-        ).scalar_one() == 1
+        ).scalar_one() == 2
         assert connection.execute(
             text("SELECT count(*) FROM lucy.scoped_memory_claim_sources_v2")
         ).scalar_one() == 1
