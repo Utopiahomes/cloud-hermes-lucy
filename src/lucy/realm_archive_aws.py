@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+from collections.abc import Mapping
 from typing import Any, Protocol, cast
 from uuid import UUID
 
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from pydantic import ValidationError
 
-from lucy.contracts.security_v1_3 import KmsEncryptionContextV2
-from lucy.realm_archive import GeneratedDataKeyV1
+from lucy.contracts.security_v1_3 import KmsEncryptionContextV2, OriginScopeV1
+from lucy.realm_archive import (
+    GeneratedDataKeyV1,
+    RealmArchiveEncryptor,
+    RealmArchiveIdentityV1,
+)
 
 _TABLE_NAME = re.compile(r"[A-Za-z0-9_.-]{3,255}\Z")
+_ACCOUNT_ID = re.compile(r"[0-9]{12}\Z")
 
 
 class KmsArchiveClient(Protocol):
@@ -121,3 +129,63 @@ class AwsRealmArchiveBackend:
             if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
                 raise ValueError("realm archive wrapped-key reference already exists") from exc
             raise
+
+
+def realm_archive_from_environment(
+    environment: Mapping[str, str] | None = None,
+) -> RealmArchiveEncryptor:
+    """Construct one deployment-owned realm encryptor without request-selected scope."""
+
+    values = os.environ if environment is None else environment
+    if values.get("LUCY_ARCHIVE_BACKEND", "").strip() != "aws-kms-dynamodb-v13":
+        raise ValueError("V1.3 realm archive backend is not selected")
+    region = values.get("AWS_REGION", "").strip()
+    account_id = values.get("LUCY_AWS_ACCOUNT_ID", "").strip()
+    key_arn = values.get("LUCY_AWS_EVIDENCE_KEY_ARN", "").strip()
+    key_match = re.fullmatch(
+        rf"arn:aws:kms:{re.escape(region)}:{re.escape(account_id)}:key/[0-9a-f-]{{36}}",
+        key_arn,
+    )
+    if (
+        region != "us-east-1"
+        or _ACCOUNT_ID.fullmatch(account_id) is None
+        or key_match is None
+    ):
+        raise ValueError("V1.3 realm archive AWS boundary is invalid")
+    try:
+        scope = OriginScopeV1.model_validate_json(
+            _required(values, "LUCY_V13_TARGET_SCOPE_JSON")
+        )
+        record_version = int(_required(values, "LUCY_ARCHIVE_RECORD_VERSION"))
+        commitment_key = base64.b64decode(
+            _required(values, "LUCY_ARCHIVE_COMMITMENT_KEY_B64"), validate=True
+        )
+    except (ValidationError, ValueError) as exc:
+        raise ValueError("V1.3 realm archive identity configuration is invalid") from exc
+    if record_version < 1 or len(commitment_key) != 32:
+        raise ValueError("V1.3 realm archive cryptographic configuration is invalid")
+
+    kms = cast(KmsArchiveClient, boto3.client("kms", region_name=region))
+    dynamodb = cast(DynamoArchiveClient, boto3.client("dynamodb", region_name=region))
+    backend = AwsRealmArchiveBackend(
+        kms,
+        dynamodb,
+        evidence_key_arn=key_arn,
+        wrapped_key_table=_required(values, "LUCY_AWS_WRAPPED_KEY_TABLE"),
+    )
+    return RealmArchiveEncryptor(
+        backend,
+        RealmArchiveIdentityV1(
+            target_scope=scope,
+            evidence_key_arn=key_arn,
+            record_version=record_version,
+        ),
+        commitment_key=commitment_key,
+    )
+
+
+def _required(values: Mapping[str, str], name: str) -> str:
+    value = values.get(name, "").strip()
+    if not value:
+        raise ValueError(f"required V1.3 realm archive configuration is missing: {name}")
+    return value

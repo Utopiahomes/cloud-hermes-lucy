@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 from uuid import UUID
@@ -8,7 +9,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from lucy.contracts.security_v1_3 import KmsEncryptionContextV2
-from lucy.realm_archive_aws import AwsRealmArchiveBackend
+from lucy.realm_archive_aws import AwsRealmArchiveBackend, realm_archive_from_environment
 
 ACCOUNT = "123456789012"
 KEY_ARN = (
@@ -126,3 +127,70 @@ def test_backend_fails_closed_on_collision_and_invalid_kms_response() -> None:
         _backend(kms=FakeKms({"Plaintext": b"short"})).generate_data_key(
             key_arn=KEY_ARN, encryption_context=_context().as_aws_context()
         )
+
+
+def _environment() -> dict[str, str]:
+    context = _context()
+    scope = {
+        "tenant_account_id": str(context.tenant_account_id),
+        "node_id": str(context.node_id),
+        "node_tenure_id": str(context.node_tenure_id),
+        "tenure_epoch": context.tenure_epoch,
+        "security_realm_id": str(context.security_realm_id),
+        "storage_epoch": context.storage_epoch,
+    }
+    return {
+        "LUCY_ARCHIVE_BACKEND": "aws-kms-dynamodb-v13",
+        "AWS_REGION": "us-east-1",
+        "LUCY_AWS_ACCOUNT_ID": ACCOUNT,
+        "LUCY_AWS_EVIDENCE_KEY_ARN": KEY_ARN,
+        "LUCY_AWS_WRAPPED_KEY_TABLE": "lucy-utopia-wrapped-keys",
+        "LUCY_V13_TARGET_SCOPE_JSON": json.dumps(scope),
+        "LUCY_ARCHIVE_RECORD_VERSION": "1",
+        "LUCY_ARCHIVE_COMMITMENT_KEY_B64": base64.b64encode(b"c" * 32).decode(),
+    }
+
+
+def test_environment_factory_pins_region_account_scope_and_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients = {"kms": FakeKms(), "dynamodb": FakeDynamo()}
+    monkeypatch.setattr(
+        "lucy.realm_archive_aws.boto3.client",
+        lambda service, **kwargs: clients[service],
+    )
+    encryptor = realm_archive_from_environment(_environment())
+    result = encryptor.encrypt(
+        evidence_id=UUID(int=5),
+        representation_id=UUID(int=6),
+        key_ref=UUID(int=7),
+        plaintext=b"synthetic",
+        authenticated_header=b"header",
+    )
+    assert result.wrapper_binding.wrapping_scope.security_realm_id == UUID(int=4)
+    assert len(clients["kms"].calls) == 1
+    assert len(clients["dynamodb"].calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb"),
+        ("AWS_REGION", "us-west-2"),
+        ("LUCY_AWS_ACCOUNT_ID", "999"),
+        ("LUCY_AWS_EVIDENCE_KEY_ARN", "alias/lucy"),
+        ("LUCY_ARCHIVE_RECORD_VERSION", "0"),
+        ("LUCY_ARCHIVE_COMMITMENT_KEY_B64", "not-base64"),
+    ),
+)
+def test_environment_factory_rejects_invalid_deployment_binding_before_aws(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setattr(
+        "lucy.realm_archive_aws.boto3.client",
+        lambda *_args, **_kwargs: pytest.fail("AWS client must not be constructed"),
+    )
+    environment = _environment()
+    environment[name] = value
+    with pytest.raises(ValueError):
+        realm_archive_from_environment(environment)
