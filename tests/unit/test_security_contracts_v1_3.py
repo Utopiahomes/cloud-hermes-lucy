@@ -10,6 +10,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from pydantic import ValidationError
 
+from lucy.authorized_deletion_recovery import (
+    AuthorizedDeletionRecoveryError,
+    verify_authorized_deletion_recovery_v2,
+)
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
     ExecutorResult,
@@ -551,6 +555,165 @@ def test_v13_signature_verification_pins_purpose_and_live_window() -> None:
             signed_grant,
             expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
             checked_at=NOW + timedelta(seconds=126),
+        )
+
+
+def test_v13_historical_deletion_recovery_binds_complete_scoped_chain() -> None:
+    policy_private = ed25519.Ed25519PrivateKey.generate()
+    policy_signer = Ed25519V13Signer(
+        policy_private,
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    permit = policy_signer.sign(
+        _permit(
+            permit_id=ONE,
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            reason="owner_request",
+            max_records=2,
+        )
+    )
+    manifest = policy_signer.sign(
+        _deletion_manifest(
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            owner_assertion_id=permit.owner_assertion_id,
+            owner_assertion_digest=permit.owner_assertion_digest,
+        )
+    )
+    caller = "arn:aws:iam::123456789012:role/utopia-deletion-workflow"
+    executor = "lucy-utopia-deletion-executor-v13"
+    alias = (
+        "arn:aws:lambda:us-east-1:123456789012:"
+        "function:lucy-utopia-deletion-executor-v13:production"
+    )
+    grant = policy_signer.sign(
+        _grant(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            caller_identity=caller,
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(manifest.canonical_unsigned_bytes()),
+            idempotency_key=manifest.idempotency_key,
+            executor_identity=executor,
+            executor_alias_arn=alias,
+            max_records=permit.max_records,
+        )
+    )
+    receipt_private = ec.generate_private_key(ec.SECP256R1())
+    unsigned_receipt = _receipt(
+        signing_key_purpose=V13SigningKeyPurpose.DELETION_RECEIPT,
+        key_id="utopia-deletion-receipt-v13-test",
+        issuer="lucy-utopia-deletion-executor-v13-test",
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        caller_identity=caller,
+        executor_identity=executor,
+        executor_alias_arn=alias,
+        permit_id=permit.permit_id,
+        permit_digest=permit.unsigned_digest_hex(),
+        execution_grant_id=grant.grant_id,
+        execution_grant_digest=grant.unsigned_digest_hex(),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        package_digest=manifest.unsigned_digest_hex(),
+        result=ExecutorResult.DELETION_SUCCEEDED,
+        kms_request_id=None,
+        transaction_client_token="delete-operation-four",
+        journal_ref="utopia-deletion-receipts/operation-four",
+        finality_state="operationally_deleted",
+    )
+    receipt_signature = receipt_private.sign(
+        bytes.fromhex(unsigned_receipt.unsigned_digest_hex()),
+        ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+    )
+    receipt = unsigned_receipt.model_copy(
+        update={"signature": base64.b64encode(receipt_signature).decode("ascii")}
+    )
+    policy_key = V13VerificationKeyV1(
+        key_id=permit.key_id,
+        issuer=permit.issuer,
+        environment=DeploymentEnvironment.TEST,
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+        public_key_b64=policy_signer.public_key_b64,
+        status=V13VerificationKeyStatus.RETIRED,
+        valid_from=NOW - timedelta(days=1),
+        issuance_not_after=NOW + timedelta(days=1),
+        verify_not_after=NOW + timedelta(days=2),
+    )
+    receipt_public_der = receipt_private.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    receipt_key = V13VerificationKeyV1(
+        key_id=receipt.key_id,
+        issuer=receipt.issuer,
+        environment=DeploymentEnvironment.TEST,
+        purpose=V13SigningKeyPurpose.DELETION_RECEIPT,
+        algorithm=receipt.signature_algorithm,
+        public_key_b64=base64.b64encode(receipt_public_der).decode("ascii"),
+        status=V13VerificationKeyStatus.RETIRED,
+        valid_from=NOW - timedelta(days=1),
+        issuance_not_after=NOW + timedelta(days=1),
+        verify_not_after=NOW + timedelta(days=2),
+    )
+    proof = verify_authorized_deletion_recovery_v2(
+        permit=permit,
+        manifest=manifest,
+        grant=grant,
+        receipt=receipt,
+        policy_verifier=V13ContractVerifier((policy_key,)),
+        receipt_verifier=V13ContractVerifier((receipt_key,)),
+        environment=DeploymentEnvironment.TEST,
+        caller_identity=caller,
+        executor_identity=executor,
+        executor_alias_arn=alias,
+        executor_version=1,
+        receipt_key_id=receipt.key_id,
+        checked_at=NOW + timedelta(days=90),
+    )
+    assert proof.operation_id == str(permit.operation_id)
+    assert proof.target_count == 2
+    assert len(proof.scope_digest) == len(proof.recovery_digest) == 64
+
+    wrong_grant = policy_signer.sign(
+        grant.model_copy(update={"caller_identity": f"{caller}-wrong", "signature": ""})
+    )
+    with pytest.raises(AuthorizedDeletionRecoveryError, match="receipt binding"):
+        verify_authorized_deletion_recovery_v2(
+            permit=permit,
+            manifest=manifest,
+            grant=wrong_grant,
+            receipt=receipt,
+            policy_verifier=V13ContractVerifier((policy_key,)),
+            receipt_verifier=V13ContractVerifier((receipt_key,)),
+            environment=DeploymentEnvironment.TEST,
+            caller_identity=caller,
+            executor_identity=executor,
+            executor_alias_arn=alias,
+            executor_version=1,
+            receipt_key_id=receipt.key_id,
+            checked_at=NOW + timedelta(days=90),
+        )
+    with pytest.raises(AuthorizedDeletionRecoveryError, match="historical v1.3"):
+        verify_authorized_deletion_recovery_v2(
+            permit=permit,
+            manifest=manifest,
+            grant=grant,
+            receipt=receipt,
+            policy_verifier=V13ContractVerifier(
+                (policy_key.model_copy(update={"status": V13VerificationKeyStatus.REVOKED}),)
+            ),
+            receipt_verifier=V13ContractVerifier((receipt_key,)),
+            environment=DeploymentEnvironment.TEST,
+            caller_identity=caller,
+            executor_identity=executor,
+            executor_alias_arn=alias,
+            executor_version=1,
+            receipt_key_id=receipt.key_id,
+            checked_at=NOW + timedelta(days=90),
         )
 
 

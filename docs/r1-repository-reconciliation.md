@@ -98,6 +98,7 @@ durability claim.
 | Deletion receipt exact grant/manifest/package binding, action-specific fields and key purpose, substitution denial, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on PostgreSQL 16; 3 passed in the file | Migration 0033, deletion receipt V2 contract, grant, manifest, or executor binding |
 | Receipt-only deletion reconciliation to 30-day `FINALITY_PENDING`, foreign/wrong-reconciler denial, recall suppression, and post-fence retrieval-package denial | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0034; 3 passed in the file | Migration 0034, reconciliation state, deletion effects, memory search, or package/grant fence guards |
 | Realm-bound metadata-only finality observation, database-derived `EXTENDED` result while PITR can recover the deleted key, exact replay, foreign-operation denial, and no direct deletion-effect access | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0035; 3 passed in the file; finality and deployment-boundary unit checks included in a separate 14-test pass | Migration 0035, finality collector, finality actor bindings, production grants, or recovery-inventory contract |
+| Historical V1.3 deletion recovery proof verifies retired-but-uncompromised policy/receipt keys and binds realm scope, permit, exact closure, grant, caller, executor, receipt, outcome, and digests; revoked keys and substituted callers fail closed | `tests/unit/test_security_contracts_v1_3.py` plus unchanged v1.2 recovery tests; 20 passed | V1.3 contracts/verifier, historical-key semantics, recovery-proof binding, canonicalization, or v1.2 recovery compatibility |
 
 ## R1-2 checkpoint
 
@@ -285,6 +286,15 @@ identical retry is replayed without another row, a foreign operation is invisibl
 and time alone cannot make a still-recoverable deletion cryptographically final.
 The operator finality utility now calls this scoped gate while the v1.2 gate remains
 granted for compatibility with the frozen enclave.
+
+`verify_authorized_deletion_recovery_v2` is the content-free recovery admission
+boundary for the scoped chain. It historically verifies every signature, allowing a
+retired verification key only for evidence issued during its valid issuance window;
+revoked keys and contracts in a declared suspected-compromise interval fail closed.
+It then binds the permit, canonical deletion closure, post-claim grant, exact
+realm-bound caller and qualified executor, and successful operational-deletion
+receipt into one recovery digest. This proof does not itself mutate a restored
+database; the next increment consumes it only through a quarantined replay gate.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

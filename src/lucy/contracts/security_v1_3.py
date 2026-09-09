@@ -202,6 +202,7 @@ class V13VerificationKeyV1(StrictV13Contract):
     valid_from: datetime
     issuance_not_after: datetime
     verify_not_after: datetime
+    compromise_suspected_from: datetime | None = None
 
     @model_validator(mode="after")
     def validate_key_window(self) -> Self:
@@ -210,6 +211,8 @@ class V13VerificationKeyV1(StrictV13Contract):
         _aware(self.verify_not_after, "verify_not_after")
         if not self.valid_from < self.issuance_not_after <= self.verify_not_after:
             raise ValueError("verification-key validity window is invalid")
+        if self.compromise_suspected_from is not None:
+            _aware(self.compromise_suspected_from, "compromise_suspected_from")
         try:
             raw = base64.b64decode(self.public_key_b64, validate=True)
             if self.algorithm == SignatureAlgorithm.ED25519:
@@ -271,6 +274,37 @@ class V13ContractVerifier:
         expected_purpose: V13SigningKeyPurpose,
         checked_at: datetime,
     ) -> None:
+        self._verify(
+            contract,
+            expected_purpose=expected_purpose,
+            checked_at=checked_at,
+            historical=False,
+        )
+
+    def verify_historical(
+        self,
+        contract: SignedV13Contract,
+        *,
+        expected_purpose: V13SigningKeyPurpose,
+        checked_at: datetime,
+    ) -> None:
+        """Verify durable evidence without treating it as live authorization."""
+
+        self._verify(
+            contract,
+            expected_purpose=expected_purpose,
+            checked_at=checked_at,
+            historical=True,
+        )
+
+    def _verify(
+        self,
+        contract: SignedV13Contract,
+        *,
+        expected_purpose: V13SigningKeyPurpose,
+        checked_at: datetime,
+        historical: bool,
+    ) -> None:
         _aware(checked_at, "checked_at")
         key = self._keys.get(contract.key_id)
         if key is None:
@@ -281,16 +315,26 @@ class V13ContractVerifier:
             raise PermissionError("v1.3 contract issuer or environment is not trusted")
         if contract.signature_algorithm != key.algorithm:
             raise PermissionError("v1.3 signature algorithm is not trusted")
-        if key.status != V13VerificationKeyStatus.ACTIVE:
+        if key.status == V13VerificationKeyStatus.REVOKED:
+            raise PermissionError("v1.3 signing key is revoked")
+        if (
+            key.compromise_suspected_from is not None
+            and contract.issued_at >= key.compromise_suspected_from
+        ):
+            raise PermissionError("v1.3 contract falls in a suspected compromise interval")
+        if not historical and key.status != V13VerificationKeyStatus.ACTIVE:
             raise PermissionError("v1.3 signing key cannot authorize live operations")
         skew = timedelta(seconds=V1_3_CLOCK_SKEW_SECONDS)
         if not key.valid_from - skew <= contract.issued_at <= key.issuance_not_after + skew:
             raise PermissionError("v1.3 contract falls outside the key issuance window")
-        if checked_at > key.verify_not_after + skew or contract.issued_at > checked_at + skew:
-            raise PermissionError("v1.3 contract is outside the live verification window")
-        deadline = _live_deadline(contract)
-        if deadline is not None and checked_at > deadline + skew:
-            raise PermissionError("v1.3 contract authorization has expired")
+        if contract.issued_at > checked_at + skew:
+            raise PermissionError("v1.3 contract was issued after verification time")
+        if not historical:
+            if checked_at > key.verify_not_after + skew:
+                raise PermissionError("v1.3 contract is outside the live verification window")
+            deadline = _live_deadline(contract)
+            if deadline is not None and checked_at > deadline + skew:
+                raise PermissionError("v1.3 contract authorization has expired")
         try:
             signature = base64.b64decode(contract.signature, validate=True)
             raw_key = base64.b64decode(key.public_key_b64, validate=True)
