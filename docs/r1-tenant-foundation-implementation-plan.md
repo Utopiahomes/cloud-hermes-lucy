@@ -2,7 +2,8 @@
 
 Status: approved; R1-0 and the R1-1 synthetic local slice are complete; R1-2 scoped
 contracts, single-realm credential selection, authenticated-admission interfaces,
-and the first execute-only memory boundary are implemented locally. No cloud
+database-backed Utopia/Raymond workspace authorization, and the first execute-only
+memory boundary are implemented locally. No cloud
 deployment, production data migration or activation performed. Read with the original
 Node/Tenancy v1.1 specification and correction addendum A1; A1 controls conflicts.
 

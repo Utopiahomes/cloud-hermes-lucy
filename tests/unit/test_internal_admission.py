@@ -117,6 +117,7 @@ def _decision(**changes: object) -> DirectoryAdmissionDecisionV1:
         "principal_type": PrincipalType.HUMAN,
         "target_scope": _scope(),
         "workspace_id": FOUR,
+        "deployment_id": FIVE,
         "service_principal_id": FOUR,
         "service_binding_id": FIVE,
         "service_binding_generation": 2,

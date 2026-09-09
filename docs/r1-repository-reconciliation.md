@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0023` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0024` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -82,6 +82,7 @@ durability claim.
 | One process holds exactly one fixed private-realm credential; verified workload and scope conflicts fail closed | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
 | Raymond/Utopia/Alpha execute-only memory isolation, direct-table denial, idempotent replay/conflict, unbound-login denial | `tests/integration/test_r1_scoped_memory.py` on disposable PostgreSQL 16; 2 passed | Scoped-memory schema/functions, bootstrap roles, or client change |
 | Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
+| Utopia/Raymond authenticated workspace resolution, foreign channel/stale binding denial, monotonic membership/channel/service/node authority, directory SQL least privilege | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 6 passed | Directory function/grants, authority-generation schema, tenancy, or admission client change |
 
 ## R1-2 checkpoint
 
@@ -119,10 +120,21 @@ scope/binding/action before constructing a server-only, canonically digest-bound
 `ResolvedExecutionContextV1`. No production IdP implementation or network broker is
 claimed yet.
 
-The next R1-2 increment is the database-backed directory authorizer and synthetic
-Utopia/Raymond workspace slice using separate single-binding process fixtures.
-Sensitive-chain parameterization, OTR/deletion closure, and revocation-race/receipt
-evidence remain later R1-2 gates; this checkpoint does not claim R1-2 completion.
+Migration `0024_r1_internal_admission` and
+`PostgresDirectoryAdmissionAuthorizer` implement the database-backed directory
+decision. A dedicated login has execute-only access to one security-definer function;
+its distinct function owner can read only authorization metadata and has no scoped-
+memory table or function authority. Utopia and Raymond use separate single-binding
+process fixtures and realm-specific audiences. Membership, channel, service-binding,
+principal, and node authority changes are monotonic: revocation/disable cannot be
+reversed, and generation or epoch changes invalidate stale admission.
+
+The next R1-2 increment is to place the admitted context in front of the scoped-memory
+client through an authenticated internal API fixture, proving that a valid context can
+read its own workspace while forged/stale contexts cannot reach the effect boundary.
+Sensitive-chain parameterization, durable revocation acknowledgement, OTR/deletion
+closure, and revocation-race/receipt evidence remain later R1-2 gates; this checkpoint
+does not claim R1-2 completion.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

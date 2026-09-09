@@ -62,6 +62,8 @@ def _provision(
         realm_slug=f"{slug}-realm",
         workspace_slug="private",
         hostname=f"{slug}.test",
+        workspace_kind="private",
+        channel_kind="internal",
     )
     principal_id = tenancy.create_principal(
         issuer="https://workload.invalid",

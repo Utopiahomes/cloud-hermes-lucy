@@ -667,6 +667,7 @@ class NodeRow(Base):
     slug: Mapped[str] = mapped_column(String(80), unique=True)
     display_name: Mapped[str] = mapped_column(Text)
     node_kind: Mapped[str] = mapped_column(String(40))
+    authz_epoch: Mapped[int] = mapped_column(BigInteger, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -707,6 +708,7 @@ class PrincipalRow(Base):
     issuer: Mapped[str] = mapped_column(Text)
     subject: Mapped[str] = mapped_column(Text)
     principal_kind: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="active")
     display_name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -730,6 +732,7 @@ class NodeMembershipRow(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
     role: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(20))
+    generation: Mapped[int] = mapped_column(BigInteger, default=1)
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -743,6 +746,7 @@ class ChannelBindingRow(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
     channel_kind: Mapped[str] = mapped_column(String(40))
     active: Mapped[bool] = mapped_column(Boolean)
+    generation: Mapped[int] = mapped_column(BigInteger, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -861,6 +865,7 @@ class RealmServiceBindingRow(Base):
     allowed_actions: Mapped[list[str]] = mapped_column(JSONB)
     binding_generation: Mapped[int] = mapped_column(BigInteger)
     node_authz_epoch: Mapped[int] = mapped_column(BigInteger)
+    policy_version: Mapped[int] = mapped_column(BigInteger, default=1)
     active: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

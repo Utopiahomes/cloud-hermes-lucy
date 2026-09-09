@@ -7,6 +7,9 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.contracts.security_v1_3 import (
     AudienceClass,
@@ -68,6 +71,7 @@ class DirectoryAdmissionRequestV1(BaseModel):
     principal_type: PrincipalType
     target_scope: OriginScopeV1
     workspace_id: UUID
+    deployment_id: UUID
     service_principal_id: UUID
     service_binding_id: UUID
     service_binding_generation: int = Field(ge=1)
@@ -86,6 +90,7 @@ class DirectoryAdmissionDecisionV1(BaseModel):
     principal_type: PrincipalType
     target_scope: OriginScopeV1
     workspace_id: UUID
+    deployment_id: UUID
     service_principal_id: UUID
     service_binding_id: UUID
     service_binding_generation: int = Field(ge=1)
@@ -106,6 +111,59 @@ class DirectoryAdmissionAuthorizer(Protocol):
         *,
         checked_at: datetime,
     ) -> DirectoryAdmissionDecisionV1: ...
+
+
+class PostgresDirectoryAdmissionAuthorizer:
+    """Execute-only client for the content-free directory decision function."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def authorize(
+        self,
+        request: DirectoryAdmissionRequestV1,
+        *,
+        checked_at: datetime,
+    ) -> DirectoryAdmissionDecisionV1:
+        scope = request.target_scope
+        selector = request.resource_selector
+        try:
+            with self._sessions() as session:
+                result = session.execute(
+                    text(
+                        "SELECT lucy.resolve_internal_admission_v1("
+                        ":identity_issuer,:identity_subject,:principal_type,"
+                        ":tenant_account_id,:node_id,:node_tenure_id,:tenure_epoch,"
+                        ":security_realm_id,:storage_epoch,:workspace_id,:deployment_id,"
+                        ":service_principal_id,:service_binding_id,"
+                        ":service_binding_generation,:channel_binding_id,:action,"
+                        ":resource_object_id,:resource_object_version,:checked_at)"
+                    ),
+                    {
+                        "identity_issuer": request.identity_issuer,
+                        "identity_subject": request.identity_subject,
+                        "principal_type": request.principal_type.value,
+                        "tenant_account_id": scope.tenant_account_id,
+                        "node_id": scope.node_id,
+                        "node_tenure_id": scope.node_tenure_id,
+                        "tenure_epoch": scope.tenure_epoch,
+                        "security_realm_id": scope.security_realm_id,
+                        "storage_epoch": scope.storage_epoch,
+                        "workspace_id": request.workspace_id,
+                        "deployment_id": request.deployment_id,
+                        "service_principal_id": request.service_principal_id,
+                        "service_binding_id": request.service_binding_id,
+                        "service_binding_generation": request.service_binding_generation,
+                        "channel_binding_id": request.channel_binding_id,
+                        "action": request.action,
+                        "resource_object_id": selector.object_id,
+                        "resource_object_version": selector.object_version,
+                        "checked_at": checked_at,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise InternalAdmissionDenied("internal request is not authorized") from exc
+        return DirectoryAdmissionDecisionV1.model_validate(result)
 
 
 class RealmInternalAdmissionService:
@@ -162,6 +220,7 @@ class RealmInternalAdmissionService:
                 principal_type=identity.principal_type,
                 target_scope=binding.target_scope,
                 workspace_id=binding.workspace_id,
+                deployment_id=binding.deployment_id,
                 service_principal_id=binding.service_principal_id,
                 service_binding_id=binding.service_binding_id,
                 service_binding_generation=binding.binding_generation,
@@ -225,6 +284,7 @@ class RealmInternalAdmissionService:
             or decision.principal_type != request.principal_type
             or decision.target_scope != request.target_scope
             or decision.workspace_id != request.workspace_id
+            or decision.deployment_id != request.deployment_id
             or decision.service_principal_id != request.service_principal_id
             or decision.service_binding_id != request.service_binding_id
             or decision.service_binding_generation != request.service_binding_generation

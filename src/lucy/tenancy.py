@@ -71,6 +71,8 @@ class TenancyService:
         realm_slug: str,
         workspace_slug: str,
         hostname: str,
+        workspace_kind: str = "public_projection",
+        channel_kind: str = "website_public",
     ) -> NodeFoundation:
         """Create one empty R1 node boundary; production seeding is deliberately separate."""
         now = datetime.now(UTC)
@@ -133,7 +135,7 @@ class TenancyService:
                         node_id=node_id,
                         tenure_id=tenure_id,
                         slug=workspace_slug,
-                        workspace_kind="public_projection",
+                        workspace_kind=workspace_kind,
                         created_at=now,
                     ),
                     WalletRegistrationRow(
@@ -153,7 +155,7 @@ class TenancyService:
                     node_id=node_id,
                     tenure_id=tenure_id,
                     workspace_id=workspace_id,
-                    channel_kind="website_public",
+                    channel_kind=channel_kind,
                     active=True,
                     created_at=now,
                 )
