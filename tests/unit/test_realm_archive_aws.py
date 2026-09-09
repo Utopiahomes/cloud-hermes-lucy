@@ -8,7 +8,12 @@ from uuid import UUID
 import pytest
 from botocore.exceptions import ClientError
 
-from lucy.contracts.security_v1_3 import KmsEncryptionContextV2
+from lucy.contracts.security_v1_3 import KmsEncryptionContextV2, OriginScopeV1
+from lucy.realm_archive import (
+    RealmArchiveEncryptor,
+    RealmArchiveEnvelopeV1,
+    RealmArchiveIdentityV1,
+)
 from lucy.realm_archive_aws import AwsRealmArchiveBackend, realm_archive_from_environment
 
 ACCOUNT = "123456789012"
@@ -45,15 +50,24 @@ class FakeKms:
 
 
 class FakeDynamo:
-    def __init__(self, error: ClientError | None = None) -> None:
+    def __init__(
+        self,
+        error: ClientError | None = None,
+        get_response: dict[str, Any] | None = None,
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.error = error
+        self.get_response = get_response or {}
 
     def put_item(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return {}
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        return self.get_response
 
 
 def _backend(
@@ -64,6 +78,37 @@ def _backend(
         dynamo or FakeDynamo(),
         evidence_key_arn=KEY_ARN,
         wrapped_key_table="lucy-utopia-wrapped-keys",
+    )
+
+
+def _encrypt(backend: AwsRealmArchiveBackend) -> RealmArchiveEnvelopeV1:
+    return RealmArchiveEncryptor(
+        backend,
+        RealmArchiveIdentityV1(
+            target_scope=_scope(),
+            evidence_key_arn=KEY_ARN,
+            record_version=1,
+        ),
+        commitment_key=b"c" * 32,
+    ).encrypt(
+        evidence_id=UUID(int=5),
+        representation_id=UUID(int=6),
+        key_ref=UUID(int=7),
+        plaintext=b"synthetic",
+        authenticated_header=b"header",
+        request_commitment="a" * 64,
+    )
+
+
+def _scope() -> OriginScopeV1:
+    context = _context()
+    return OriginScopeV1(
+        tenant_account_id=context.tenant_account_id,
+        node_id=context.node_id,
+        node_tenure_id=context.node_tenure_id,
+        tenure_epoch=context.tenure_epoch,
+        security_realm_id=context.security_realm_id,
+        storage_epoch=context.storage_epoch,
     )
 
 
@@ -92,22 +137,21 @@ def test_backend_generates_only_on_the_configured_key() -> None:
 def test_backend_stores_exact_realm_metadata_without_read_or_delete() -> None:
     dynamo = FakeDynamo()
     backend = _backend(dynamo=dynamo)
-    backend.put_wrapped_key(
-        key_ref=UUID(int=6),
-        wrapped_key=b"wrapped",
-        key_arn=KEY_ARN,
-        encryption_context=_context(),
-    )
+    envelope = _encrypt(backend)
     assert not hasattr(backend, "get_wrapped_key")
     assert not hasattr(backend, "delete_wrapped_key")
-    call = dynamo.calls[0]
+    call = dynamo.calls[-1]
     assert call["TableName"] == "lucy-utopia-wrapped-keys"
     assert call["ConditionExpression"] == "attribute_not_exists(key_ref)"
     item = call["Item"]
-    assert item["key_ref"] == {"S": str(UUID(int=6))}
+    assert item["key_ref"] == {"S": str(UUID(int=7))}
     assert item["security_realm_id"] == {"S": str(UUID(int=4))}
     assert item["storage_epoch"] == {"N": "2"}
     assert json.loads(item["encryption_context_json"]["S"]) == _context().as_aws_context()
+    replay = _backend(dynamo=FakeDynamo(get_response={"Item": item})).load_archive_envelope(
+        UUID(int=7)
+    )
+    assert replay == envelope
 
 
 def test_backend_fails_closed_on_collision_and_invalid_kms_response() -> None:
@@ -116,12 +160,7 @@ def test_backend_fails_closed_on_collision_and_invalid_kms_response() -> None:
         "PutItem",
     )
     with pytest.raises(ValueError, match="already exists"):
-        _backend(dynamo=FakeDynamo(collision)).put_wrapped_key(
-            key_ref=UUID(int=6),
-            wrapped_key=b"wrapped",
-            key_arn=KEY_ARN,
-            encryption_context=_context(),
-        )
+        _encrypt(_backend(dynamo=FakeDynamo(collision)))
 
     with pytest.raises(RuntimeError, match="response is invalid"):
         _backend(kms=FakeKms({"Plaintext": b"short"})).generate_data_key(
@@ -166,6 +205,7 @@ def test_environment_factory_pins_region_account_scope_and_backend(
         key_ref=UUID(int=7),
         plaintext=b"synthetic",
         authenticated_header=b"header",
+        request_commitment="a" * 64,
     )
     assert result.wrapper_binding.wrapping_scope.security_realm_id == UUID(int=4)
     assert len(clients["kms"].calls) == 1

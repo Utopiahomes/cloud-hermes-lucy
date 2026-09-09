@@ -170,3 +170,21 @@ def test_v13_each_stack_owns_separate_physical_security_resources() -> None:
             "Resource": {"Ref": "DeletionExecutorAlias"},
         }
     ]
+
+
+def test_v13_archive_role_can_reconcile_only_exact_wrapped_key_records() -> None:
+    _, template = _template()
+    statements = template["Resources"]["ArchivePolicy"]["Properties"][
+        "PolicyDocument"
+    ]["Statement"]
+    registry_statement = next(
+        statement
+        for statement in statements
+        if statement.get("Resource") == {"Fn::GetAtt": "WrappedKeyRegistry.Arn"}
+    )
+    assert registry_statement["Action"] == ["dynamodb:GetItem", "dynamodb:PutItem"]
+    serialized = str(registry_statement)
+    assert "Scan" not in serialized
+    assert "Query" not in serialized
+    assert "BatchGetItem" not in serialized
+    assert "DeleteItem" not in serialized

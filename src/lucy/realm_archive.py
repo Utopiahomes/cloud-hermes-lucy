@@ -8,10 +8,11 @@ import hmac
 import os
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lucy.contracts.security_v1_3 import (
     EvidencePayloadBindingV2,
@@ -39,13 +40,14 @@ class RealmArchiveBackend(Protocol):
         self, *, key_arn: str, encryption_context: dict[str, str]
     ) -> GeneratedDataKeyV1: ...
 
-    def put_wrapped_key(
+    def load_archive_envelope(self, key_ref: UUID) -> RealmArchiveEnvelopeV1 | None: ...
+
+    def put_archive_envelope(
         self,
         *,
-        key_ref: UUID,
+        envelope: RealmArchiveEnvelopeV1,
         wrapped_key: bytes,
         key_arn: str,
-        encryption_context: KmsEncryptionContextV2,
     ) -> None: ...
 
 
@@ -63,12 +65,31 @@ class RealmArchiveIdentityV1:
             raise ValueError("realm archive record version must be positive")
 
 
-@dataclass(frozen=True)
-class RealmArchiveEncryptionV1:
+class RealmArchiveEnvelopeV1(BaseModel):
+    """Encrypted, content-bearing outcome durably recoverable from DynamoDB."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract_version: Literal["1"] = "1"
+    object_type: Literal["lucy.realm-archive-envelope.v1"] = (
+        "lucy.realm-archive-envelope.v1"
+    )
     payload_binding: EvidencePayloadBindingV2
     wrapper_binding: EvidenceWrapperBindingV2
-    keyed_commitment: str
-    kms_request_id: str
+    keyed_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
+    kms_request_id: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_bindings(self) -> RealmArchiveEnvelopeV1:
+        if (
+            self.payload_binding.evidence_id
+            != self.wrapper_binding.encryption_context.evidence_id
+            or self.payload_binding.payload_ciphertext_digest
+            != self.wrapper_binding.payload_ciphertext_digest
+        ):
+            raise ValueError("realm archive envelope bindings differ")
+        return self
 
 
 class RealmArchiveEncryptor:
@@ -95,7 +116,8 @@ class RealmArchiveEncryptor:
         key_ref: UUID,
         plaintext: bytes,
         authenticated_header: bytes,
-    ) -> RealmArchiveEncryptionV1:
+        request_commitment: str,
+    ) -> RealmArchiveEnvelopeV1:
         if not plaintext or len(plaintext) > 65_536:
             raise ValueError("realm archive plaintext must contain 1 through 65536 bytes")
         if len(authenticated_header) > 24_576:
@@ -141,17 +163,18 @@ class RealmArchiveEncryptor:
             encryption_context=context,
             payload_ciphertext_digest=ciphertext_digest,
         )
-        self._backend.put_wrapped_key(
-            key_ref=key_ref,
-            wrapped_key=generated.ciphertext,
-            key_arn=generated.key_id,
-            encryption_context=context,
-        )
-        return RealmArchiveEncryptionV1(
+        envelope = RealmArchiveEnvelopeV1(
             payload_binding=payload,
             wrapper_binding=wrapper,
             keyed_commitment=hmac.new(
                 self._commitment_key, plaintext, hashlib.sha256
             ).hexdigest(),
+            request_commitment=request_commitment,
             kms_request_id=generated.request_id,
         )
+        self._backend.put_archive_envelope(
+            envelope=envelope,
+            wrapped_key=generated.ciphertext,
+            key_arn=generated.key_id,
+        )
+        return envelope

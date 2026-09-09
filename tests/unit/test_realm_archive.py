@@ -7,10 +7,11 @@ from uuid import UUID
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from lucy.contracts.security_v1_3 import KmsEncryptionContextV2, OriginScopeV1
+from lucy.contracts.security_v1_3 import OriginScopeV1
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
     RealmArchiveEncryptor,
+    RealmArchiveEnvelopeV1,
     RealmArchiveIdentityV1,
 )
 
@@ -51,20 +52,21 @@ class FakeBackend:
             request_id="kms-request-1",
         )
 
-    def put_wrapped_key(
+    def load_archive_envelope(self, key_ref: UUID) -> RealmArchiveEnvelopeV1 | None:
+        return None
+
+    def put_archive_envelope(
         self,
         *,
-        key_ref: UUID,
+        envelope: RealmArchiveEnvelopeV1,
         wrapped_key: bytes,
         key_arn: str,
-        encryption_context: KmsEncryptionContextV2,
     ) -> None:
         self.stored.append(
             {
-                "key_ref": key_ref,
+                "envelope": envelope,
                 "wrapped_key": wrapped_key,
                 "key_arn": key_arn,
-                "encryption_context": encryption_context,
             }
         )
 
@@ -90,6 +92,7 @@ def test_archive_encrypts_and_registers_one_exact_realm_wrapper() -> None:
         key_ref=key_ref,
         plaintext=plaintext,
         authenticated_header=header,
+        request_commitment="a" * 64,
     )
 
     assert backend.generated == [
@@ -101,10 +104,9 @@ def test_archive_encrypts_and_registers_one_exact_realm_wrapper() -> None:
         }
     ]
     assert backend.stored[0] == {
-        "key_ref": key_ref,
+        "envelope": result,
         "wrapped_key": b"wrapped-dek",
         "key_arn": KEY_ARN,
-        "encryption_context": result.wrapper_binding.encryption_context,
     }
     assert result.payload_binding.original_scope == _scope()
     assert result.wrapper_binding.wrapping_scope == _scope()
@@ -132,6 +134,7 @@ def test_archive_rejects_plaintext_outside_the_contract_before_aws(
             key_ref=UUID(int=8),
             plaintext=plaintext,
             authenticated_header=b"header",
+            request_commitment="a" * 64,
         )
     assert backend.generated == []
     assert backend.stored == []
@@ -151,6 +154,7 @@ def test_archive_rejects_wrong_kms_key_before_registry_write() -> None:
             key_ref=UUID(int=8),
             plaintext=b"synthetic evidence",
             authenticated_header=b"header",
+            request_commitment="a" * 64,
         )
     assert len(backend.generated) == 1
     assert backend.stored == []

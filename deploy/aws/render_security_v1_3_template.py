@@ -142,6 +142,41 @@ def derive_v1_3(source: bytes) -> str:
     if "\r\n" not in text:
         new_context = new_context.replace("\r\n", "\n")
     text = _replace(text, old_context, new_context, count=4)
+    text = _replace(
+        text,
+        "  ArchivePolicy:\n"
+        "    Type: AWS::IAM::Policy\n"
+        "    Properties:\n"
+        "      PolicyName: !Sub ${ResourceNamespace}-archive-only\n"
+        "      Roles: [!Ref ArchiveRole]\n"
+        "      PolicyDocument:\n"
+        "        Version: \"2012-10-17\"\n"
+        "        Statement:\n"
+        "          - Effect: Allow",
+        "  ArchivePolicy:\n"
+        "    Type: AWS::IAM::Policy\n"
+        "    Properties:\n"
+        "      PolicyName: !Sub ${ResourceNamespace}-archive-only\n"
+        "      Roles: [!Ref ArchiveRole]\n"
+        "      PolicyDocument:\n"
+        "        Version: \"2012-10-17\"\n"
+        "        Statement:\n"
+        "          - Effect: Allow",
+        count=1,
+    )
+    archive_marker = "  ArchivePolicy:\n"
+    archive_start = text.index(archive_marker)
+    archive_end = text.index("\n  RetrievalLogGroup:", archive_start)
+    archive = text[archive_start:archive_end]
+    archive = _replace(
+        archive,
+        "            Action: dynamodb:PutItem\n"
+        "            Resource: !GetAtt WrappedKeyRegistry.Arn",
+        "            Action: [dynamodb:GetItem, dynamodb:PutItem]\n"
+        "            Resource: !GetAtt WrappedKeyRegistry.Arn",
+        count=1,
+    )
+    text = text[:archive_start] + archive + text[archive_end:]
 
     text = _replace(
         text,

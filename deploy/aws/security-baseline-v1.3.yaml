@@ -522,7 +522,7 @@ Resources:
               "Null":
                 kms:EncryptionContext:evidence_id: "false"
           - Effect: Allow
-            Action: dynamodb:PutItem
+            Action: [dynamodb:GetItem, dynamodb:PutItem]
             Resource: !GetAtt WrappedKeyRegistry.Arn
           - Effect: Allow
             Action: dynamodb:GetItem

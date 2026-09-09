@@ -14,10 +14,12 @@ import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
-from lucy.contracts.security_v1_3 import KmsEncryptionContextV2, OriginScopeV1
+from lucy.contracts.canonical import canonical_sha256
+from lucy.contracts.security_v1_3 import OriginScopeV1
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
     RealmArchiveEncryptor,
+    RealmArchiveEnvelopeV1,
     RealmArchiveIdentityV1,
 )
 
@@ -31,6 +33,8 @@ class KmsArchiveClient(Protocol):
 
 class DynamoArchiveClient(Protocol):
     def put_item(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
 class AwsRealmArchiveBackend:
@@ -89,34 +93,69 @@ class AwsRealmArchiveBackend:
             raise RuntimeError("KMS generate-data-key response is invalid")
         return GeneratedDataKeyV1(plaintext, ciphertext, response_key, request_id)
 
-    def put_wrapped_key(
+    def load_archive_envelope(self, key_ref: UUID) -> RealmArchiveEnvelopeV1 | None:
+        response = self._dynamodb.get_item(
+            TableName=self._wrapped_key_table,
+            Key={"key_ref": {"S": str(key_ref)}},
+            ProjectionExpression=(
+                "key_ref, envelope_json, envelope_digest, kek_version, security_realm_id"
+            ),
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not isinstance(item, dict):
+            return None
+        try:
+            envelope = RealmArchiveEnvelopeV1.model_validate_json(
+                item["envelope_json"]["S"]
+            )
+            if (
+                item["key_ref"]["S"] != str(key_ref)
+                or envelope.wrapper_binding.wrapped_key_ref != key_ref
+                or item["envelope_digest"]["S"]
+                != canonical_sha256(envelope.model_dump(mode="python"))
+                or item["kek_version"]["S"] != self._evidence_key_arn
+                or item["security_realm_id"]["S"]
+                != str(envelope.wrapper_binding.wrapping_scope.security_realm_id)
+            ):
+                raise ValueError("realm archive envelope metadata changed")
+            return envelope
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("durable realm archive envelope is malformed") from exc
+
+    def put_archive_envelope(
         self,
         *,
-        key_ref: UUID,
+        envelope: RealmArchiveEnvelopeV1,
         wrapped_key: bytes,
         key_arn: str,
-        encryption_context: KmsEncryptionContextV2,
     ) -> None:
         if key_arn != self._evidence_key_arn or not wrapped_key:
             raise PermissionError("realm archive wrapped key is outside its configured key")
+        context = envelope.wrapper_binding.encryption_context
+        key_ref = envelope.wrapper_binding.wrapped_key_ref
         item = {
             "key_ref": {"S": str(key_ref)},
             "ciphertext": {"B": wrapped_key},
             "nonce": {"B": b"kms"},
             "kek_version": {"S": self._evidence_key_arn},
-            "tenant_account_id": {"S": str(encryption_context.tenant_account_id)},
-            "node_id": {"S": str(encryption_context.node_id)},
-            "node_tenure_id": {"S": str(encryption_context.node_tenure_id)},
-            "tenure_epoch": {"N": str(encryption_context.tenure_epoch)},
-            "security_realm_id": {"S": str(encryption_context.security_realm_id)},
-            "storage_epoch": {"N": str(encryption_context.storage_epoch)},
-            "evidence_id": {"S": str(encryption_context.evidence_id)},
+            "tenant_account_id": {"S": str(context.tenant_account_id)},
+            "node_id": {"S": str(context.node_id)},
+            "node_tenure_id": {"S": str(context.node_tenure_id)},
+            "tenure_epoch": {"N": str(context.tenure_epoch)},
+            "security_realm_id": {"S": str(context.security_realm_id)},
+            "storage_epoch": {"N": str(context.storage_epoch)},
+            "evidence_id": {"S": str(context.evidence_id)},
             "encryption_context_json": {
                 "S": json.dumps(
-                    encryption_context.as_aws_context(),
+                    context.as_aws_context(),
                     separators=(",", ":"),
                     sort_keys=True,
                 )
+            },
+            "envelope_json": {"S": envelope.model_dump_json()},
+            "envelope_digest": {
+                "S": canonical_sha256(envelope.model_dump(mode="python"))
             },
         }
         try:
