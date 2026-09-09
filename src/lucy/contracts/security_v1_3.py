@@ -17,7 +17,8 @@ from typing import Annotated, Any, Literal, Self, TypeVar, cast
 from uuid import UUID
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lucy.contracts.canonical import (
@@ -27,6 +28,7 @@ from lucy.contracts.canonical import (
 )
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
+    ExecutorResult,
     SensitiveActionV2,
     SensitiveReasonCode,
     SignatureAlgorithm,
@@ -170,7 +172,7 @@ class ResolvedExecutionContextV1(StrictV13Contract):
 
 class SignedV13Contract(StrictV13Contract):
     canonicalization_version: Literal["lucy-cjson-1"] = "lucy-cjson-1"
-    signature_algorithm: Literal[SignatureAlgorithm.ED25519] = SignatureAlgorithm.ED25519
+    signature_algorithm: SignatureAlgorithm = SignatureAlgorithm.ED25519
     signing_key_purpose: V13SigningKeyPurpose
     key_id: SafeIdentifier
     issuer: SafeIdentifier
@@ -192,7 +194,8 @@ class V13VerificationKeyV1(StrictV13Contract):
     issuer: SafeIdentifier
     environment: DeploymentEnvironment
     purpose: V13SigningKeyPurpose
-    public_key_b64: str = Field(min_length=40, max_length=64)
+    algorithm: SignatureAlgorithm = SignatureAlgorithm.ED25519
+    public_key_b64: str = Field(min_length=40, max_length=4096)
     status: V13VerificationKeyStatus
     valid_from: datetime
     issuance_not_after: datetime
@@ -207,9 +210,16 @@ class V13VerificationKeyV1(StrictV13Contract):
             raise ValueError("verification-key validity window is invalid")
         try:
             raw = base64.b64decode(self.public_key_b64, validate=True)
-            ed25519.Ed25519PublicKey.from_public_bytes(raw)
+            if self.algorithm == SignatureAlgorithm.ED25519:
+                ed25519.Ed25519PublicKey.from_public_bytes(raw)
+            else:
+                candidate = serialization.load_der_public_key(raw)
+                if not isinstance(candidate, ec.EllipticCurvePublicKey) or not isinstance(
+                    candidate.curve, ec.SECP256R1
+                ):
+                    raise ValueError("receipt key must use ECDSA P-256")
         except (ValueError, TypeError) as exc:
-            raise ValueError("v1.3 verification key is not valid Ed25519 material") from exc
+            raise ValueError("v1.3 verification key material is invalid") from exc
         return self
 
 
@@ -234,6 +244,8 @@ class Ed25519V13Signer:
         return base64.b64encode(raw).decode("ascii")
 
     def sign(self, contract: SignedV13T) -> SignedV13T:
+        if contract.signature_algorithm != SignatureAlgorithm.ED25519:
+            raise ValueError("Ed25519 signer cannot sign this contract algorithm")
         if contract.key_id != self._key_id or contract.signing_key_purpose != self._purpose:
             raise ValueError("contract does not match the v1.3 signing key")
         if contract.signature:
@@ -265,6 +277,8 @@ class V13ContractVerifier:
             raise PermissionError("v1.3 signing-key purpose is not trusted")
         if contract.issuer != key.issuer or contract.environment != key.environment:
             raise PermissionError("v1.3 contract issuer or environment is not trusted")
+        if contract.signature_algorithm != key.algorithm:
+            raise PermissionError("v1.3 signature algorithm is not trusted")
         if key.status != V13VerificationKeyStatus.ACTIVE:
             raise PermissionError("v1.3 signing key cannot authorize live operations")
         skew = timedelta(seconds=V1_3_CLOCK_SKEW_SECONDS)
@@ -278,9 +292,21 @@ class V13ContractVerifier:
         try:
             signature = base64.b64decode(contract.signature, validate=True)
             raw_key = base64.b64decode(key.public_key_b64, validate=True)
-            ed25519.Ed25519PublicKey.from_public_bytes(raw_key).verify(
-                signature, contract.canonical_unsigned_bytes()
-            )
+            if key.algorithm == SignatureAlgorithm.ED25519:
+                ed25519.Ed25519PublicKey.from_public_bytes(raw_key).verify(
+                    signature, contract.canonical_unsigned_bytes()
+                )
+            else:
+                candidate = serialization.load_der_public_key(raw_key)
+                if not isinstance(candidate, ec.EllipticCurvePublicKey) or not isinstance(
+                    candidate.curve, ec.SECP256R1
+                ):
+                    raise ValueError("receipt key must use ECDSA P-256")
+                candidate.verify(
+                    signature,
+                    bytes.fromhex(contract.unsigned_digest_hex()),
+                    ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+                )
         except (InvalidSignature, ValueError, TypeError) as exc:
             raise PermissionError("v1.3 contract signature is invalid") from exc
 
@@ -469,6 +495,95 @@ class SensitiveExecutionGrantV2(SignedV13Contract):
         return self
 
 
+class ExecutorReceiptV2(SignedV13Contract):
+    """Content-free, realm-scoped outcome from one exact executor invocation."""
+
+    contract_version: Literal["2"] = "2"
+    object_type: Literal["lucy.executor-receipt.v2"] = "lucy.executor-receipt.v2"
+    signature_algorithm: Literal[SignatureAlgorithm.ECDSA_SHA_256] = (
+        SignatureAlgorithm.ECDSA_SHA_256
+    )
+    signing_key_purpose: V13SigningKeyPurpose
+    receipt_id: UUID
+    action: SensitiveActionV2
+    executor_identity: SafeIdentifier
+    executor_alias_arn: str = Field(min_length=1, max_length=300)
+    executor_version: int = Field(ge=1)
+    caller_identity: SafeIdentifier
+    target_scope: OriginScopeV1
+    execution_binding: ExecutionBindingV1
+    operation_id: UUID
+    permit_id: UUID
+    permit_digest: DigestHex
+    execution_grant_id: UUID
+    execution_grant_digest: DigestHex
+    deletion_manifest_id: UUID | None = None
+    deletion_manifest_digest: DigestHex | None = None
+    package_digest: DigestHex
+    result: ExecutorResult
+    lambda_request_id: SafeIdentifier
+    kms_request_id: SafeIdentifier | None = None
+    transaction_client_token: SafeIdentifier | None = None
+    execution_completion_deadline: datetime
+    completed_at: datetime
+    record_version: int = Field(ge=1)
+    journal_ref: SafeIdentifier
+    finality_state: Literal["not_applicable", "operationally_deleted"]
+
+    @model_validator(mode="after")
+    def validate_receipt(self) -> Self:
+        _aware(self.issued_at, "issued_at")
+        _aware(self.execution_completion_deadline, "execution_completion_deadline")
+        _aware(self.completed_at, "completed_at")
+        if _QUALIFIED_LAMBDA_ALIAS_ARN.fullmatch(self.executor_alias_arn) is None:
+            raise ValueError("executor alias must be an exact qualified Lambda alias ARN")
+        skew = timedelta(seconds=V1_3_CLOCK_SKEW_SECONDS)
+        if self.completed_at > self.execution_completion_deadline + skew:
+            raise ValueError("executor completed after the accepted execution deadline")
+        if not self.completed_at - skew <= self.issued_at <= self.completed_at + skew:
+            raise ValueError("receipt issuance is not contemporaneous with completion")
+        if (
+            self.execution_binding.active_realm_id != self.target_scope.security_realm_id
+            or self.execution_binding.active_storage_epoch != self.target_scope.storage_epoch
+        ):
+            raise ValueError("receipt target and execution scope do not match")
+        if self.action == SensitiveActionV2.EVIDENCE_RETRIEVE:
+            if self.signing_key_purpose != V13SigningKeyPurpose.RETRIEVAL_RECEIPT:
+                raise ValueError("retrieval receipt uses the wrong signing-key purpose")
+            if (
+                self.deletion_manifest_id is not None
+                or self.deletion_manifest_digest is not None
+                or self.transaction_client_token is not None
+                or self.kms_request_id is None
+                or self.finality_state != "not_applicable"
+            ):
+                raise ValueError("retrieval receipt contains invalid action-specific fields")
+            if self.result not in {
+                ExecutorResult.RETRIEVAL_SUCCEEDED,
+                ExecutorResult.IDEMPOTENT_REPLAY,
+                ExecutorResult.REJECTED,
+            }:
+                raise ValueError("retrieval receipt uses a deletion result")
+        else:
+            if self.signing_key_purpose != V13SigningKeyPurpose.DELETION_RECEIPT:
+                raise ValueError("deletion receipt uses the wrong signing-key purpose")
+            if (
+                self.deletion_manifest_id is None
+                or self.deletion_manifest_digest is None
+                or self.transaction_client_token is None
+                or self.kms_request_id is not None
+                or self.finality_state != "operationally_deleted"
+            ):
+                raise ValueError("deletion receipt contains invalid action-specific fields")
+            if self.result not in {
+                ExecutorResult.DELETION_SUCCEEDED,
+                ExecutorResult.IDEMPOTENT_REPLAY,
+                ExecutorResult.REJECTED,
+            }:
+                raise ValueError("deletion receipt uses a retrieval result")
+        return self
+
+
 class KmsEncryptionContextV2(StrictV13Contract):
     contract_version: Literal["KmsEncryptionContextV2"] = "KmsEncryptionContextV2"
     tenant_account_id: UUID
@@ -537,6 +652,8 @@ def _live_deadline(contract: SignedV13Contract) -> datetime | None:
         return contract.permit_claim_deadline
     if isinstance(contract, SensitiveExecutionGrantV2):
         return contract.execution_completion_deadline
+    if isinstance(contract, ExecutorReceiptV2):
+        return contract.execution_completion_deadline
     return None
 
 
@@ -551,6 +668,7 @@ def security_v1_3_json_schemas() -> dict[str, dict[str, object]]:
         OwnerInteractionAssertionV2,
         SensitiveActionPermitV3,
         SensitiveExecutionGrantV2,
+        ExecutorReceiptV2,
         KmsEncryptionContextV2,
     )
     return {model.__name__: model.model_json_schema() for model in models}

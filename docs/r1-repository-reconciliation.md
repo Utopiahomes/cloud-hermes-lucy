@@ -89,8 +89,9 @@ durability claim.
 
 `contracts/security_v1_3.py` adds new wire identities rather than extending or
 reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
-context, owner assertion V2, permit V3, sensitive execution grant V2, KMS encryption
-context V2, and v1.3 verification keys. New signatures retain the already reviewed `lucy-cjson-1`
+context, owner assertion V2, permit V3, sensitive execution grant V2, executor receipt
+V2, KMS encryption context V2, and v1.3 verification keys. New signatures retain the
+already reviewed `lucy-cjson-1`
 canonicalizer, include their object type/version as a domain separator, and pin a
 distinct v1.3 key purpose. Permit admission is at most 60 seconds while execution
 completion remains a separate bounded deadline. A historical realm/storage mismatch
@@ -101,7 +102,15 @@ claims in PostgreSQL before policy signs a post-claim grant. It binds the permit
 digest, claim/admission times, operation and idempotency identity, target and active
 scope, exact qualified executor alias/version/caller, package digest, and action-
 specific record/byte ceilings. This is a typed local contract only at this checkpoint;
-no v1.3 database gate, executor, receipt, or cloud route claims implementation yet.
+no v1.3 database gate, deployed executor, or cloud route claims implementation yet.
+
+`ExecutorReceiptV2` preserves ECDSA P-256 for KMS-compatible executor signing while
+owner, permit, and grant contracts remain Ed25519. The v1.3 trust store pins the
+algorithm and action-specific receipt-key purpose. Receipts bind the exact permit and
+grant digests, scope/active execution binding, qualified executor and caller, package,
+deadline, outcome, content-free journal reference, and operational deletion state.
+Cryptographic finality remains a later independently verified record; an executor
+receipt cannot claim it.
 
 `realm_sessions.py` holds exactly one deployment-owned private-realm credential per
 process and selects it only after workload identity has been verified. A request may

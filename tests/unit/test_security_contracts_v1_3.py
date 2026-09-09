@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from pydantic import ValidationError
 
-from lucy.contracts.security_v1_2 import DeploymentEnvironment, SensitiveActionV2
+from lucy.contracts.security_v1_2 import (
+    DeploymentEnvironment,
+    ExecutorResult,
+    SensitiveActionV2,
+)
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
     Ed25519V13Signer,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
+    ExecutorReceiptV2,
     KmsEncryptionContextV2,
     OriginScopeV1,
     SensitiveActionPermitV3,
@@ -126,6 +133,43 @@ def _grant(**changes: object) -> SensitiveExecutionGrantV2:
     return SensitiveExecutionGrantV2.model_validate(values)
 
 
+def _receipt(**changes: object) -> ExecutorReceiptV2:
+    values: dict[str, object] = {
+        "signing_key_purpose": V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
+        "key_id": "utopia-retrieval-receipt-v13-test",
+        "issuer": "lucy-utopia-retrieval-executor-v13-test",
+        "environment": DeploymentEnvironment.TEST,
+        "issued_at": NOW + timedelta(seconds=30),
+        "receipt_id": TWO,
+        "action": SensitiveActionV2.EVIDENCE_RETRIEVE,
+        "executor_identity": "lucy-utopia-evidence-executor-v13",
+        "executor_alias_arn": (
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-evidence-executor-v13:production"
+        ),
+        "executor_version": 1,
+        "caller_identity": "arn:aws:iam::123456789012:role/utopia-evidence-workflow",
+        "target_scope": _scope(),
+        "execution_binding": _binding(),
+        "operation_id": FOUR,
+        "permit_id": ZERO,
+        "permit_digest": DIGEST,
+        "execution_grant_id": ONE,
+        "execution_grant_digest": DIGEST,
+        "package_digest": DIGEST,
+        "result": ExecutorResult.RETRIEVAL_SUCCEEDED,
+        "lambda_request_id": "lambda-request-one",
+        "kms_request_id": "kms-request-one",
+        "execution_completion_deadline": NOW + timedelta(seconds=120),
+        "completed_at": NOW + timedelta(seconds=30),
+        "record_version": 1,
+        "journal_ref": "utopia-retrieval-receipts/operation-four",
+        "finality_state": "not_applicable",
+    }
+    values.update(changes)
+    return ExecutorReceiptV2.model_validate(values)
+
+
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
     permit = _permit()
     assert permit.contract_version == "3"
@@ -181,6 +225,45 @@ def test_deletion_execution_grant_requires_exact_manifest() -> None:
     assert deletion.deletion_manifest_id == TWO
 
 
+def test_executor_receipt_v2_pins_scope_action_fields_and_ecdsa_key() -> None:
+    receipt = _receipt()
+    assert receipt.signature_algorithm.value == "ECDSA_SHA_256"
+    with pytest.raises(ValidationError, match="action-specific"):
+        _receipt(transaction_client_token="wrong-for-retrieval")
+    with pytest.raises(ValidationError, match="wrong signing-key purpose"):
+        _receipt(signing_key_purpose=V13SigningKeyPurpose.DELETION_RECEIPT)
+    with pytest.raises(ValidationError, match="execution scope"):
+        _receipt(execution_binding=_binding(realm=FOUR))
+
+    private = ec.generate_private_key(ec.SECP256R1())
+    signature = private.sign(
+        bytes.fromhex(receipt.unsigned_digest_hex()),
+        ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+    )
+    signed = receipt.model_copy(update={"signature": base64.b64encode(signature).decode("ascii")})
+    public_der = private.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    key = V13VerificationKeyV1(
+        key_id=receipt.key_id,
+        issuer=receipt.issuer,
+        environment=DeploymentEnvironment.TEST,
+        purpose=V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
+        algorithm=receipt.signature_algorithm,
+        public_key_b64=base64.b64encode(public_der).decode("ascii"),
+        status=V13VerificationKeyStatus.ACTIVE,
+        valid_from=NOW - timedelta(days=1),
+        issuance_not_after=NOW + timedelta(days=1),
+        verify_not_after=NOW + timedelta(days=2),
+    )
+    V13ContractVerifier((key,)).verify(
+        signed,
+        expected_purpose=V13SigningKeyPurpose.RETRIEVAL_RECEIPT,
+        checked_at=NOW + timedelta(seconds=31),
+    )
+
+
 def test_kms_context_has_only_fixed_nonsecret_keys() -> None:
     context = KmsEncryptionContextV2(
         tenant_account_id=ZERO,
@@ -209,6 +292,7 @@ def test_v13_schemas_and_models_reject_unknown_fields() -> None:
     schemas = security_v1_3_json_schemas()
     assert schemas["SensitiveActionPermitV3"]["additionalProperties"] is False
     assert schemas["SensitiveExecutionGrantV2"]["additionalProperties"] is False
+    assert schemas["ExecutorReceiptV2"]["additionalProperties"] is False
     with pytest.raises(ValidationError, match="extra_forbidden"):
         OriginScopeV1.model_validate({**_scope().model_dump(), "tenant_name": "secret"})
 
