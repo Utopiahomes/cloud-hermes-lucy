@@ -952,6 +952,68 @@ class SensitiveOperationEventV2Row(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ScopedEvidenceRecordV2Row(Base):
+    __tablename__ = "scoped_evidence_records_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    archive_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    content_classification: Mapped[str] = mapped_column(String(200))
+    lineage_refs: Mapped[list[str]] = mapped_column(JSONB)
+    idempotency_key: Mapped[str] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedEvidencePayloadV2Row(Base):
+    __tablename__ = "scoped_evidence_payloads_v2"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_records_v2.id"), primary_key=True
+    )
+    record_version: Mapped[int] = mapped_column(BigInteger)
+    payload_ciphertext_digest: Mapped[str] = mapped_column(String(64))
+    serialized_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedEvidenceWrapperV2Row(Base):
+    __tablename__ = "scoped_evidence_wrappers_v2"
+    __table_args__ = {"schema": "lucy"}
+    representation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.scoped_evidence_records_v2.id"))
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    wrapped_key_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    payload_ciphertext_digest: Mapped[str] = mapped_column(String(64))
+    serialized_wrapper: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    current: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SensitiveOperationPackageV2Row(Base):
+    __tablename__ = "sensitive_operation_packages_v2"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), primary_key=True
+    )
+    permit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_action_permits_v3.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    workflow_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    evidence_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.scoped_evidence_records_v2.id"))
+    representation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_wrappers_v2.representation_id")
+    )
+    package_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_package: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryClaimRow(Base):
     __tablename__ = "scoped_memory_claims_v1"
     __table_args__ = {"schema": "lucy"}

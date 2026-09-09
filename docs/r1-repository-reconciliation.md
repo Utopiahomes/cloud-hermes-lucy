@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0025` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0026` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -84,7 +84,8 @@ durability claim.
 | Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
 | Utopia/Raymond authenticated workspace resolution, foreign channel/stale binding denial, monotonic membership/channel/service/node authority, directory SQL least privilege | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 6 passed | Directory function/grants, authority-generation schema, tenancy, or admission client change |
 | Authenticated Utopia memory write/read, Raymond isolation, and current-authority recheck before every effect | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 7 passed total | Admission gateway, realm session binding, scoped-memory client/function, or authority transition change |
-| Policy-only V3 permit issue, workflow-only exact-once claim, canonical permit digest, cross-realm and direct-table denial, revocation before issue/claim | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 2 passed | V3 permit contract, migration 0025, actor/service bindings, authority generations, or bootstrap roles |
+| Policy-only V3 permit issue, workflow-only exact-once claim, canonical permit digest, cross-realm and direct-table denial, revocation before issue/claim | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16 | V3 permit contract, migration 0025, actor/service bindings, authority generations, or bootstrap roles |
+| Realm-scoped encrypted evidence registration and replay, archive/workflow direct-table denial, foreign-scope rejection, exact claimed-package freeze/replay, and Python/PostgreSQL package-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Encrypted evidence/package V2 contract, migration 0026, actor/service bindings, or authority generations |
 
 ## R1-2 checkpoint
 
@@ -185,6 +186,17 @@ the backing tables directly. PostgreSQL recomputes the same canonical unsigned
 contract digest used by the application. The policy process remains responsible for
 cryptographic signature verification before calling the issue gate; its scoped
 credential is therefore an explicit policy trust boundary.
+
+Migration `0026_r1_scoped_archive_package` makes the encrypted object referenced by a
+V3 permit concrete before an execution grant can exist. A fixed archive-writer login
+can register only new-capture payload/wrapper pairs in its own active content scope;
+PostgreSQL validates the AES-GCM payload digest, exact KMS context, lineage, realm and
+storage epochs, and idempotent replay. Neither the archive writer nor workflow login
+can enumerate the backing tables. After an exact V3 permit is claimed, the workflow
+can freeze only that active evidence version and current wrapper into an immutable
+`EncryptedEvidencePackageV2`; PostgreSQL and Python produce the same canonical
+package digest. Migration/rehost wrappers remain deliberately outside this initial
+slice and require their later receipt-gated path.
 
 The next R1-2 increment stores the post-claim execution grant and executor receipt,
 then adds receipt-only reconciliation. Durable revocation

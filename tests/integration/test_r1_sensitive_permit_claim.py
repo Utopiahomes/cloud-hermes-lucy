@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -17,8 +19,12 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.contracts.security_v1_3 import (
     Ed25519V13Signer,
+    EncryptedEvidencePackageV2,
+    EvidencePayloadBindingV2,
+    EvidenceWrapperBindingV2,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
+    KmsEncryptionContextV2,
     OriginScopeV1,
     SensitiveActionPermitV3,
     V13SigningKeyPurpose,
@@ -36,6 +42,7 @@ APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
 OWNER_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 POLICY_URL = os.getenv("LUCY_TEST_UTOPIA_POLICY_DATABASE_URL")
 WORKFLOW_URL = os.getenv("LUCY_TEST_UTOPIA_WORKFLOW_DATABASE_URL")
+ARCHIVE_URL = os.getenv("LUCY_TEST_UTOPIA_DATABASE_URL")
 RAYMOND_WORKFLOW_URL = os.getenv("LUCY_TEST_RAYMOND_WORKFLOW_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not APP_URL, reason="requires PostgreSQL integration database")
 
@@ -50,7 +57,9 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.sensitive_operation_events_v2, "
+                "TRUNCATE lucy.sensitive_operation_packages_v2, "
+                "lucy.scoped_evidence_wrappers_v2, lucy.scoped_evidence_payloads_v2, "
+                "lucy.scoped_evidence_records_v2, lucy.sensitive_operation_events_v2, "
                 "lucy.sensitive_operations_v2, lucy.sensitive_action_permits_v3, "
                 "lucy.realm_sensitive_actor_bindings_v1, lucy.scoped_memory_events_v1, "
                 "lucy.scoped_memory_claims_v1, lucy.realm_service_bindings_v1, "
@@ -69,6 +78,11 @@ def clean_sensitive_tables() -> None:
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.claim_sensitive_operation_v2(uuid,text) "
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.register_scoped_evidence_v2(jsonb,jsonb,text,jsonb,text) "
+                "TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
             )
         )
@@ -128,7 +142,8 @@ def realm() -> dict[str, UUID]:
             )
         ).scalar_one()
     scope_id, service_binding_id = uuid4(), uuid4()
-    policy_binding_id, workflow_binding_id, deployment_id = uuid4(), uuid4(), uuid4()
+    policy_binding_id, workflow_binding_id, archive_binding_id = uuid4(), uuid4(), uuid4()
+    deployment_id = uuid4()
     now = datetime.now(UTC)
     with owner_sessions.begin() as session:
         session.add(
@@ -154,7 +169,7 @@ def realm() -> dict[str, UUID]:
                 service_principal_id=evidence_id,
                 content_scope_id=scope_id,
                 service_role="realm_evidence",
-                allowed_actions=["evidence.retrieve"],
+                allowed_actions=["evidence.archive", "evidence.retrieve"],
                 binding_generation=1,
                 node_authz_epoch=1,
                 policy_version=1,
@@ -165,6 +180,20 @@ def realm() -> dict[str, UUID]:
         session.flush()
         session.add_all(
             [
+                RealmSensitiveActorBindingRow(
+                    id=archive_binding_id,
+                    session_login="lucy_utopia_routine",
+                    actor_principal_id=evidence_id,
+                    target_service_binding_id=service_binding_id,
+                    content_scope_id=scope_id,
+                    actor_role="archive_writer",
+                    allowed_actions=["evidence.archive"],
+                    binding_generation=1,
+                    node_authz_epoch=1,
+                    policy_version=1,
+                    active=True,
+                    created_at=now,
+                ),
                 RealmSensitiveActorBindingRow(
                     id=policy_binding_id,
                     session_login="lucy_utopia_policy",
@@ -209,7 +238,23 @@ def realm() -> dict[str, UUID]:
     }
 
 
-def _permit(realm: dict[str, UUID], *, permit_id: UUID | None = None) -> SensitiveActionPermitV3:
+def _scope(realm: dict[str, UUID]) -> OriginScopeV1:
+    return OriginScopeV1(
+        tenant_account_id=realm["account"],
+        node_id=realm["node"],
+        node_tenure_id=realm["tenure"],
+        tenure_epoch=1,
+        security_realm_id=realm["realm"],
+        storage_epoch=1,
+    )
+
+
+def _permit(
+    realm: dict[str, UUID],
+    *,
+    permit_id: UUID | None = None,
+    evidence_id: UUID | None = None,
+) -> SensitiveActionPermitV3:
     now = datetime.now(UTC)
     unsigned = SensitiveActionPermitV3(
         key_id="policy-v13-test",
@@ -224,16 +269,11 @@ def _permit(realm: dict[str, UUID], *, permit_id: UUID | None = None) -> Sensiti
         service_binding_id=realm["service_binding"],
         service_binding_generation=1,
         operation_id=uuid4(),
-        target_scope=OriginScopeV1(
-            tenant_account_id=realm["account"],
-            node_id=realm["node"],
-            node_tenure_id=realm["tenure"],
-            tenure_epoch=1,
-            security_realm_id=realm["realm"],
-            storage_epoch=1,
-        ),
+        target_scope=_scope(realm),
         workspace_id=realm["workspace"],
-        resource_selector=ExactObjectSelectorV1(object_id=uuid4(), object_version=1),
+        resource_selector=ExactObjectSelectorV1(
+            object_id=evidence_id or uuid4(), object_version=1
+        ),
         execution_binding=ExecutionBindingV1(
             deployment_id=realm["deployment"],
             active_realm_id=realm["realm"],
@@ -345,3 +385,129 @@ def test_current_authority_is_required_at_issue_and_claim(realm: dict[str, UUID]
             text("SELECT lucy.issue_sensitive_action_permit_v3(:permit,:key)"),
             {"permit": later.model_dump_json(), "key": "issue-after-revocation"},
         )
+
+
+def test_archive_registers_and_workflow_freezes_exact_claimed_package(
+    realm: dict[str, UUID],
+) -> None:
+    assert ARCHIVE_URL and POLICY_URL and WORKFLOW_URL and OWNER_URL
+    evidence_id, representation_id, key_ref = uuid4(), uuid4(), uuid4()
+    ciphertext = b"synthetic-realm-ciphertext-and-gcm-tag"
+    digest = hashlib.sha256(ciphertext).hexdigest()
+    scope = _scope(realm)
+    payload = EvidencePayloadBindingV2(
+        evidence_id=evidence_id,
+        original_scope=scope,
+        record_version=1,
+        ciphertext_b64=base64.b64encode(ciphertext).decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"123456789012").decode("ascii"),
+        authenticated_header_b64=base64.b64encode(b"synthetic-aad").decode("ascii"),
+        payload_ciphertext_digest=digest,
+    )
+    wrapper = EvidenceWrapperBindingV2(
+        representation_id=representation_id,
+        wrapping_scope=scope,
+        wrapped_key_ref=key_ref,
+        encryption_context=KmsEncryptionContextV2(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+            evidence_id=evidence_id,
+        ),
+        payload_ciphertext_digest=digest,
+    )
+    archive = create_engine(ARCHIVE_URL)
+    policy = create_engine(POLICY_URL)
+    workflow = create_engine(WORKFLOW_URL)
+    owner = create_engine(OWNER_URL)
+    with archive.begin() as connection:
+        first = connection.execute(
+            text(
+                "SELECT lucy.register_scoped_evidence_v2("
+                ":payload,:wrapper,:classification,:lineage,:key)"
+            ),
+            {
+                "payload": payload.model_dump_json(),
+                "wrapper": wrapper.model_dump_json(),
+                "classification": "owner_conversation",
+                "lineage": "[]",
+                "key": "archive-one",
+            },
+        ).scalar_one()
+        replay = connection.execute(
+            text(
+                "SELECT lucy.register_scoped_evidence_v2("
+                ":payload,:wrapper,:classification,:lineage,:key)"
+            ),
+            {
+                "payload": payload.model_dump_json(),
+                "wrapper": wrapper.model_dump_json(),
+                "classification": "owner_conversation",
+                "lineage": "[]",
+                "key": "archive-one",
+            },
+        ).scalar_one()
+    assert first["replayed"] is False
+    assert replay["replayed"] is True
+    foreign_wrapper = wrapper.model_copy(
+        update={
+            "wrapping_scope": scope.model_copy(
+                update={"security_realm_id": uuid4()}
+            )
+        }
+    )
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence realm binding is unavailable"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.register_scoped_evidence_v2("
+                ":payload,:wrapper,:classification,:lineage,:key)"
+            ),
+            {
+                "payload": payload.model_dump_json(),
+                "wrapper": foreign_wrapper.model_dump_json(),
+                "classification": "owner_conversation",
+                "lineage": "[]",
+                "key": "foreign-archive",
+            },
+        )
+    with pytest.raises(DBAPIError, match="permission denied"), archive.begin() as connection:
+        connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
+    permit = _permit(realm, evidence_id=evidence_id)
+    with policy.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.issue_sensitive_action_permit_v3(:permit,:key)"),
+            {"permit": permit.model_dump_json(), "key": "issue-archived"},
+        )
+    with workflow.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.claim_sensitive_operation_v2(:permit,:key)"),
+            {"permit": permit.permit_id, "key": "claim-archived"},
+        )
+        frozen = connection.execute(
+            text("SELECT lucy.freeze_claimed_evidence_package_v2(:operation)"),
+            {"operation": permit.operation_id},
+        ).scalar_one()
+        frozen_replay = connection.execute(
+            text("SELECT lucy.freeze_claimed_evidence_package_v2(:operation)"),
+            {"operation": permit.operation_id},
+        ).scalar_one()
+    package = EncryptedEvidencePackageV2.model_validate(frozen["package"])
+    assert package.operation_id == permit.operation_id
+    assert package.permit_id == permit.permit_id
+    assert package.payload_binding.evidence_id == evidence_id
+    assert package.wrapper_binding.representation_id == representation_id
+    assert frozen["package_digest"] == package.package_digest_hex()
+    assert frozen_replay["package_digest"] == frozen["package_digest"]
+    assert frozen_replay["replayed"] is True
+    with pytest.raises(DBAPIError, match="permission denied"), workflow.begin() as connection:
+        connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
+    with owner.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.sensitive_operation_packages_v2")
+        ).scalar_one() == 1
