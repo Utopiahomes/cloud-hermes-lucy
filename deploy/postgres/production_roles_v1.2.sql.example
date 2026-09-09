@@ -126,5 +126,7 @@ TO "__LUCY_DELETION_LOGIN__";
 
 -- The one-off verifier has metadata-only finality authority and no readiness,
 -- evidence, key, permit, manifest, grant, or receipt access.
-GRANT EXECUTE ON FUNCTION lucy.record_finality_verification_v1(uuid,jsonb)
+GRANT EXECUTE ON FUNCTION
+  lucy.record_finality_verification_v1(uuid,jsonb),
+  lucy.record_scoped_finality_inventory_v2(uuid,jsonb)
 TO "__LUCY_FINALITY_LOGIN__";

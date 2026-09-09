@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0034` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0035` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -97,6 +97,7 @@ durability claim.
 | Manifest-bound deletion grant, wrong-manifest denial, exact qualified executor/caller binding, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on a clean PostgreSQL 16 database; 3 passed in the file | Migration 0032, deletion manifest, permit ceilings, or executor binding |
 | Deletion receipt exact grant/manifest/package binding, action-specific fields and key purpose, substitution denial, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on PostgreSQL 16; 3 passed in the file | Migration 0033, deletion receipt V2 contract, grant, manifest, or executor binding |
 | Receipt-only deletion reconciliation to 30-day `FINALITY_PENDING`, foreign/wrong-reconciler denial, recall suppression, and post-fence retrieval-package denial | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0034; 3 passed in the file | Migration 0034, reconciliation state, deletion effects, memory search, or package/grant fence guards |
+| Realm-bound metadata-only finality observation, database-derived `EXTENDED` result while PITR can recover the deleted key, exact replay, foreign-operation denial, and no direct deletion-effect access | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0035; 3 passed in the file; finality and deployment-boundary unit checks included in a separate 14-test pass | Migration 0035, finality collector, finality actor bindings, production grants, or recovery-inventory contract |
 
 ## R1-2 checkpoint
 
@@ -274,6 +275,16 @@ replay is read-only. Once the deletion fence exists, provenance-linked claims ar
 excluded from ordinary scoped recall and no new retrieval package or retrieval grant
 can be admitted for that evidence. Cryptographic finality remains a later,
 independently verified record rather than a claim made by the executor receipt.
+
+Migration `0035_r1_scoped_finality` gives a realm-bound finality verifier one
+execute-only metadata operation. PostgreSQL resolves its scope from `session_user`,
+accepts no caller-supplied finality verdict, requires the scoped deletion to have an
+attested operational effect, and derives `EXTENDED` or `VERIFIED` from the actual
+PITR and exceptional-copy inventory. Observations are immutable and monotonic; an
+identical retry is replayed without another row, a foreign operation is invisible,
+and time alone cannot make a still-recoverable deletion cryptographically final.
+The operator finality utility now calls this scoped gate while the v1.2 gate remains
+granted for compatibility with the frozen enclave.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

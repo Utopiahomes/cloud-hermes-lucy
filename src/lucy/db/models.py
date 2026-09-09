@@ -1196,6 +1196,24 @@ class ScopedDeletionEffectV2Row(Base):
     finality_status: Mapped[str] = mapped_column(String(30))
 
 
+class ScopedFinalityObservationV2Row(Base):
+    __tablename__ = "scoped_finality_observations_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.sensitive_operations_v2.id"))
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    finality_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    metadata_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    inventory_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_inventory: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    recoverable_copy_count: Mapped[int] = mapped_column(BigInteger)
+    finality_not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_status: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryEventRow(Base):
     __tablename__ = "scoped_memory_events_v1"
     __table_args__ = {"schema": "lucy"}

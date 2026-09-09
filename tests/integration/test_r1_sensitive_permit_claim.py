@@ -14,6 +14,7 @@ from sqlalchemy.exc import DBAPIError
 
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
+    DeletionRecoveryInventoryV1,
     DeploymentEnvironment,
     ExecutorResult,
     SensitiveActionV2,
@@ -54,6 +55,7 @@ POLICY_URL = os.getenv("LUCY_TEST_UTOPIA_POLICY_DATABASE_URL")
 WORKFLOW_URL = os.getenv("LUCY_TEST_UTOPIA_WORKFLOW_DATABASE_URL")
 ARCHIVE_URL = os.getenv("LUCY_TEST_UTOPIA_DATABASE_URL")
 RAYMOND_WORKFLOW_URL = os.getenv("LUCY_TEST_RAYMOND_WORKFLOW_DATABASE_URL")
+FINALITY_URL = os.getenv("LUCY_TEST_UTOPIA_FINALITY_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not APP_URL, reason="requires PostgreSQL integration database")
 
 
@@ -67,7 +69,8 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.scoped_evidence_deletion_fences_v2, "
+                "TRUNCATE lucy.scoped_finality_observations_v2, "
+                "lucy.scoped_evidence_deletion_fences_v2, "
                 "lucy.scoped_deletion_manifest_targets_v2, "
                 "lucy.scoped_deletion_manifests_v2, "
                 "lucy.scoped_memory_claim_sources_v2, "
@@ -118,7 +121,9 @@ def clean_sensitive_tables() -> None:
                 "lucy.attest_deletion_executor_receipt_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.reconcile_scoped_deletion_v2(uuid) "
-                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
+                "GRANT EXECUTE ON FUNCTION lucy.record_scoped_finality_inventory_v2(uuid,jsonb) "
+                "TO lucy_utopia_finality"
             )
         )
     engine.dispose()
@@ -169,6 +174,12 @@ def realm() -> dict[str, UUID]:
         kind="service",
         display_name="Utopia sensitive workflow",
     )
+    finality_id = tenancy.create_principal(
+        issuer="https://workload.test",
+        subject="render:utopia:finality",
+        kind="service",
+        display_name="Utopia finality verifier",
+    )
     with app_sessions() as session:
         realm_binding = session.execute(
             select(RealmBindingRow).where(
@@ -178,6 +189,7 @@ def realm() -> dict[str, UUID]:
         ).scalar_one()
     scope_id, service_binding_id = uuid4(), uuid4()
     policy_binding_id, workflow_binding_id, archive_binding_id = uuid4(), uuid4(), uuid4()
+    finality_binding_id = uuid4()
     executor_binding_id, deletion_executor_binding_id = uuid4(), uuid4()
     deployment_id = uuid4()
     now = datetime.now(UTC)
@@ -230,6 +242,20 @@ def realm() -> dict[str, UUID]:
                     content_scope_id=scope_id,
                     actor_role="archive_writer",
                     allowed_actions=["evidence.archive"],
+                    binding_generation=1,
+                    node_authz_epoch=1,
+                    policy_version=1,
+                    active=True,
+                    created_at=now,
+                ),
+                RealmSensitiveActorBindingRow(
+                    id=finality_binding_id,
+                    session_login="lucy_utopia_finality",
+                    actor_principal_id=finality_id,
+                    target_service_binding_id=service_binding_id,
+                    content_scope_id=scope_id,
+                    actor_role="finality_verifier",
+                    allowed_actions=["sensitive.finality.record"],
                     binding_generation=1,
                     node_authz_epoch=1,
                     policy_version=1,
@@ -488,7 +514,14 @@ def test_current_authority_is_required_at_issue_and_claim(realm: dict[str, UUID]
 def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     realm: dict[str, UUID],
 ) -> None:
-    assert ARCHIVE_URL and POLICY_URL and WORKFLOW_URL and RAYMOND_WORKFLOW_URL and OWNER_URL
+    assert (
+        ARCHIVE_URL
+        and POLICY_URL
+        and WORKFLOW_URL
+        and RAYMOND_WORKFLOW_URL
+        and FINALITY_URL
+        and OWNER_URL
+    )
     evidence_id, representation_id, key_ref = uuid4(), uuid4(), uuid4()
     ciphertext = b"synthetic-realm-ciphertext-and-gcm-tag"
     digest = hashlib.sha256(ciphertext).hexdigest()
@@ -1086,6 +1119,66 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     assert deletion_reconciled["result"] == "deletion_succeeded"
     assert deletion_reconciled["finality_not_before"] is not None
     assert deletion_reconcile_replay == {**deletion_reconciled, "replayed": True}
+    with owner.connect() as connection:
+        deletion_effective_at = connection.execute(
+            text(
+                "SELECT effective_at FROM lucy.scoped_deletion_effects_v2 "
+                "WHERE operation_id=:operation"
+            ),
+            {"operation": deletion_permit.operation_id},
+        ).scalar_one()
+    observed_at = datetime.now(UTC)
+    recovery_inventory = DeletionRecoveryInventoryV1(
+        operation_id=deletion_permit.operation_id,
+        metadata_observed_at=observed_at,
+        pitr_status="ENABLED",
+        pitr_recovery_period_days=30,
+        pitr_earliest_restorable_at=deletion_effective_at - timedelta(seconds=1),
+        pitr_latest_restorable_at=observed_at,
+        on_demand_backup_count=0,
+        aws_backup_recovery_point_count=0,
+        export_count=0,
+        import_count=0,
+        global_replica_count=0,
+        quarantine_table_count=0,
+        stream_enabled=False,
+        metadata_inventory_digest="a" * 64,
+    )
+    finality = create_engine(FINALITY_URL)
+    with finality.begin() as connection:
+        finality_extended = connection.execute(
+            text("SELECT lucy.record_scoped_finality_inventory_v2(:operation,:inventory)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "inventory": recovery_inventory.model_dump_json(),
+            },
+        ).scalar_one()
+        finality_replay = connection.execute(
+            text("SELECT lucy.record_scoped_finality_inventory_v2(:operation,:inventory)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "inventory": recovery_inventory.model_dump_json(),
+            },
+        ).scalar_one()
+    assert finality_extended["status"] == "EXTENDED"
+    assert finality_extended["recoverable_copy_count"] == 1
+    assert finality_extended["replayed"] is False
+    assert finality_replay == {**finality_extended, "replayed": True}
+    with (
+        pytest.raises(DBAPIError, match="scoped finality operation unavailable"),
+        finality.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.record_scoped_finality_inventory_v2(:operation,:inventory)"),
+            {
+                "operation": permit.operation_id,
+                "inventory": recovery_inventory.model_copy(
+                    update={"operation_id": permit.operation_id}
+                ).model_dump_json(),
+            },
+        )
+    with pytest.raises(DBAPIError, match="permission denied"), finality.begin() as connection:
+        connection.execute(text("SELECT * FROM lucy.scoped_deletion_effects_v2"))
     with archive.connect() as connection:
         assert connection.execute(
             text("SELECT lucy.search_scoped_memory_v1(:query,:limit)"),
@@ -1154,6 +1247,9 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one() == 2
         assert connection.execute(
             text("SELECT count(*) FROM lucy.scoped_deletion_effects_v2")
+        ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_finality_observations_v2")
         ).scalar_one() == 1
         operation_state = connection.execute(
             text(

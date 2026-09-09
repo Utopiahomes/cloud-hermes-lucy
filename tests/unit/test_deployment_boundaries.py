@@ -112,6 +112,7 @@ def test_v12_database_grants_are_direct_execute_only_for_sensitive_logins() -> N
     assert "pg_auth_members" in sql
     assert "NOT rolinherit" in sql
     assert "record_finality_verification_v1" in sql
+    assert "record_scoped_finality_inventory_v2" in sql
 
 
 def test_local_maintenance_is_explicit_and_owner_credential_never_reaches_http() -> None:

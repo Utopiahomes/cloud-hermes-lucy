@@ -19,6 +19,8 @@ CREATE ROLE lucy_raymond_policy LOGIN PASSWORD 'synthetic-raymond-policy-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_raymond_sensitive_workflow LOGIN PASSWORD 'synthetic-raymond-workflow-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE lucy_utopia_finality LOGIN PASSWORD 'synthetic-utopia-finality-only'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_migration NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
   NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_security_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
@@ -35,7 +37,7 @@ GRANT CONNECT ON DATABASE lucy_test TO
   lucy_raymond_routine, lucy_utopia_routine, lucy_alpha_routine;
 GRANT CONNECT ON DATABASE lucy_test TO
   lucy_utopia_policy, lucy_utopia_sensitive_workflow,
-  lucy_raymond_policy, lucy_raymond_sensitive_workflow;
+  lucy_raymond_policy, lucy_raymond_sensitive_workflow, lucy_utopia_finality;
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA lucy AUTHORIZATION lucy_owner;
@@ -46,7 +48,7 @@ GRANT USAGE ON SCHEMA lucy TO
   lucy_raymond_routine, lucy_utopia_routine, lucy_alpha_routine;
 GRANT USAGE ON SCHEMA lucy TO
   lucy_utopia_policy, lucy_utopia_sensitive_workflow,
-  lucy_raymond_policy, lucy_raymond_sensitive_workflow;
+  lucy_raymond_policy, lucy_raymond_sensitive_workflow, lucy_utopia_finality;
 ALTER DEFAULT PRIVILEGES FOR ROLE lucy_owner IN SCHEMA lucy
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lucy_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE lucy_owner IN SCHEMA lucy
