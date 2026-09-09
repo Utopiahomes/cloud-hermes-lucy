@@ -44,6 +44,11 @@ from lucy.contracts.security_v1_3 import (
     deletion_targets_digest_v2,
     security_v1_3_json_schemas,
 )
+from lucy.executors.models import (
+    DeletionExecutorInvocationV2,
+    ExecutorInvocationResultV2,
+    RetrievalExecutorInvocationV2,
+)
 from lucy.scoped_deletion import (
     ScopedDeletionManifestResult,
     VerifiedScopedDeletionService,
@@ -285,6 +290,67 @@ def _deletion_manifest(**changes: object) -> DeletionTargetManifestV2:
     }
     values.update(changes)
     return DeletionTargetManifestV2.model_validate(values)
+
+
+def test_v13_executor_wire_types_are_additive_and_action_locked() -> None:
+    retrieval = RetrievalExecutorInvocationV2(
+        permit=_permit(),
+        execution_grant=_grant(),
+        package=_package(),
+    )
+    assert retrieval.object_type == "lucy.retrieval-executor-invocation.v2"
+    assert retrieval.contract_version == "2"
+
+    deletion_permit = _permit(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        reason="owner_request",
+        max_records=10,
+        max_bytes=131_072,
+    )
+    deletion_grant = _grant(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        deletion_manifest_id=TWO,
+        deletion_manifest_digest=DIGEST,
+        max_records=10,
+        max_bytes=131_072,
+    )
+    deletion = DeletionExecutorInvocationV2(
+        permit=deletion_permit,
+        execution_grant=deletion_grant,
+        manifest=_deletion_manifest(permit_id=ZERO),
+    )
+    assert deletion.object_type == "lucy.deletion-executor-invocation.v2"
+
+    with pytest.raises(ValidationError, match="non-retrieval"):
+        RetrievalExecutorInvocationV2(
+            permit=deletion_permit,
+            execution_grant=_grant(),
+            package=_package(),
+        )
+
+
+def test_v13_executor_result_binds_receipt_and_never_replays_plaintext() -> None:
+    receipt = _receipt()
+    result = ExecutorInvocationResultV2(
+        action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+        receipt=receipt,
+        receipt_digest=receipt.unsigned_digest_hex(),
+        replayed=False,
+        plaintext_b64="c3ludGhldGlj",
+    )
+    assert result.object_type == "lucy.executor-invocation-result.v2"
+
+    with pytest.raises(ValidationError, match="replay"):
+        ExecutorInvocationResultV2.model_validate(
+            result.model_dump() | {"replayed": True}
+        )
+    with pytest.raises(ValidationError, match="digest"):
+        ExecutorInvocationResultV2(
+            action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+            receipt=receipt,
+            receipt_digest="0" * 64,
+            replayed=False,
+        )
 
 
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
