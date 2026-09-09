@@ -368,6 +368,7 @@ class SensitiveActionPermitV3(SignedV13Contract):
     principal_id: UUID
     service_principal_id: UUID
     service_binding_id: UUID
+    service_binding_generation: int = Field(ge=1)
     operation_id: UUID
     target_scope: OriginScopeV1
     workspace_id: UUID
@@ -379,6 +380,7 @@ class SensitiveActionPermitV3(SignedV13Contract):
     approval_digest: DigestHex
     policy_version: int = Field(ge=1)
     membership_generation: int = Field(ge=1)
+    channel_binding_id: UUID
     channel_generation: int = Field(ge=1)
     grant_generation: int | None = Field(default=None, ge=1)
     permit_claim_deadline: datetime

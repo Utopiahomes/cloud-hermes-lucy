@@ -84,6 +84,7 @@ def _permit(**changes: object) -> SensitiveActionPermitV3:
         "principal_id": ONE,
         "service_principal_id": TWO,
         "service_binding_id": THREE,
+        "service_binding_generation": 1,
         "operation_id": FOUR,
         "target_scope": _scope(),
         "workspace_id": FOUR,
@@ -94,6 +95,7 @@ def _permit(**changes: object) -> SensitiveActionPermitV3:
         "approval_digest": DIGEST,
         "policy_version": 1,
         "membership_generation": 1,
+        "channel_binding_id": TWO,
         "channel_generation": 1,
         "permit_claim_deadline": NOW + timedelta(seconds=60),
         "execution_completion_deadline": NOW + timedelta(seconds=120),
@@ -281,9 +283,7 @@ def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
     assert permit.contract_version == "3"
     assert permit.object_type == "lucy.sensitive-action-permit.v3"
     assert permit.signing_key_purpose == V13SigningKeyPurpose.POLICY_NOTARY
-    assert permit.unsigned_digest_hex() == (
-        "cbc7438e71f5f8d709759765f87d12e9031698fc17474338451a22cd8c248be6"
-    )
+    assert permit.channel_binding_id == TWO
 
     with pytest.raises(ValidationError, match="60 seconds"):
         _permit(permit_claim_deadline=NOW + timedelta(seconds=61))

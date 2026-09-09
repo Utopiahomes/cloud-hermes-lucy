@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0024` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0025` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -84,6 +84,7 @@ durability claim.
 | Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
 | Utopia/Raymond authenticated workspace resolution, foreign channel/stale binding denial, monotonic membership/channel/service/node authority, directory SQL least privilege | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 6 passed | Directory function/grants, authority-generation schema, tenancy, or admission client change |
 | Authenticated Utopia memory write/read, Raymond isolation, and current-authority recheck before every effect | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 7 passed total | Admission gateway, realm session binding, scoped-memory client/function, or authority transition change |
+| Policy-only V3 permit issue, workflow-only exact-once claim, canonical permit digest, cross-realm and direct-table denial, revocation before issue/claim | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 2 passed | V3 permit contract, migration 0025, actor/service bindings, authority generations, or bootstrap roles |
 
 ## R1-2 checkpoint
 
@@ -172,7 +173,21 @@ required before every read or write; a revoked membership therefore cannot reach
 memory client. The resolved context remains server-only and is never accepted as a
 bearer credential.
 
-The next R1-2 increment is sensitive-chain scope parameterization. Durable revocation
+Migration `0025_r1_sensitive_permit_claim` begins sensitive-chain scope
+parameterization without changing the accepted v1.2 path. A policy-notary login may
+store only a signed V3 permit whose exact owner, channel, workspace, service binding,
+realm, storage epoch, deployment, and current authority generations match its fixed
+realm binding. The permit now binds both the channel ID and generation, and the
+target service-binding ID and generation. A separate workflow login can claim only
+that pre-issued permit in its own fixed realm. Claim is idempotent, rechecks current
+authority, and records an immutable scoped event; neither login can select or write
+the backing tables directly. PostgreSQL recomputes the same canonical unsigned
+contract digest used by the application. The policy process remains responsible for
+cryptographic signature verification before calling the issue gate; its scoped
+credential is therefore an explicit policy trust boundary.
+
+The next R1-2 increment stores the post-claim execution grant and executor receipt,
+then adds receipt-only reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain
 later R1-2 gates; this checkpoint does not claim R1-2 completion.
 
