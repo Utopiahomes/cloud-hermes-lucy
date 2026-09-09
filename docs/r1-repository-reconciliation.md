@@ -89,8 +89,9 @@ durability claim.
 
 `contracts/security_v1_3.py` adds new wire identities rather than extending or
 reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
-context, owner assertion V2, permit V3, sensitive execution grant V2, executor receipt
-V2, KMS encryption context V2, and v1.3 verification keys. New signatures retain the
+context, owner assertion V2, permit V3, encrypted evidence package V2, sensitive
+execution grant V2, executor receipt V2, KMS encryption context V2, and v1.3
+verification keys. New signatures retain the
 already reviewed `lucy-cjson-1`
 canonicalizer, include their object type/version as a domain separator, and pin a
 distinct v1.3 key purpose. Permit admission is at most 60 seconds while execution
@@ -111,6 +112,14 @@ grant digests, scope/active execution binding, qualified executor and caller, pa
 deadline, outcome, content-free journal reference, and operational deletion state.
 Cryptographic finality remains a later independently verified record; an executor
 receipt cannot claim it.
+
+`EncryptedEvidencePackageV2` separates an immutable payload binding from its
+replaceable key-wrapper binding. The payload commits to original realm scope,
+ciphertext bytes, nonce, authenticated header, record version, and ciphertext digest.
+The wrapper commits to the current wrapping scope, exact wrapped-key reference and KMS
+context. New ingestion requires matching scopes; moving only the wrapper requires an
+exact migration-receipt ID while leaving the ciphertext digest unchanged. This is a
+local typed boundary and does not migrate the accepted v1.2 archive.
 
 `realm_sessions.py` holds exactly one deployment-owned private-realm credential per
 process and selects it only after workload identity has been verified. A request may

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -17,6 +18,9 @@ from lucy.contracts.security_v1_2 import (
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
     Ed25519V13Signer,
+    EncryptedEvidencePackageV2,
+    EvidencePayloadBindingV2,
+    EvidenceWrapperBindingV2,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
     ExecutorReceiptV2,
@@ -170,6 +174,49 @@ def _receipt(**changes: object) -> ExecutorReceiptV2:
     return ExecutorReceiptV2.model_validate(values)
 
 
+def _package(
+    *,
+    payload_scope: OriginScopeV1 | None = None,
+    wrapping_scope: OriginScopeV1 | None = None,
+    migration_receipt_id: UUID | None = None,
+) -> EncryptedEvidencePackageV2:
+    ciphertext = b"synthetic-ciphertext-and-gcm-tag"
+    payload = EvidencePayloadBindingV2(
+        evidence_id=ZERO,
+        original_scope=payload_scope or _scope(),
+        record_version=1,
+        ciphertext_b64=base64.b64encode(ciphertext).decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"123456789012").decode("ascii"),
+        authenticated_header_b64=base64.b64encode(b"opaque-header").decode("ascii"),
+        payload_ciphertext_digest=hashlib.sha256(ciphertext).hexdigest(),
+    )
+    scope = wrapping_scope or _scope()
+    wrapper = EvidenceWrapperBindingV2(
+        representation_id=ONE,
+        wrapping_scope=scope,
+        wrapped_key_ref=TWO,
+        encryption_context=KmsEncryptionContextV2(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+            evidence_id=ZERO,
+        ),
+        payload_ciphertext_digest=payload.payload_ciphertext_digest,
+        migration_receipt_id=migration_receipt_id,
+    )
+    return EncryptedEvidencePackageV2(
+        operation_id=FOUR,
+        permit_id=ZERO,
+        payload_binding=payload,
+        wrapper_binding=wrapper,
+        content_classification="owner_conversation",
+        lineage_refs=(THREE,),
+    )
+
+
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
     permit = _permit()
     assert permit.contract_version == "3"
@@ -264,6 +311,35 @@ def test_executor_receipt_v2_pins_scope_action_fields_and_ecdsa_key() -> None:
     )
 
 
+def test_encrypted_package_v2_separates_payload_and_wrapper_scope() -> None:
+    package = _package()
+    assert package.payload_binding.original_scope == package.wrapper_binding.wrapping_scope
+    assert len(package.package_digest_hex()) == 64
+
+    moved_scope = _scope(realm=FOUR, storage_epoch=8)
+    with pytest.raises(ValidationError, match="migration receipt"):
+        _package(wrapping_scope=moved_scope)
+    moved = _package(wrapping_scope=moved_scope, migration_receipt_id=FOUR)
+    assert moved.payload_binding.original_scope != moved.wrapper_binding.wrapping_scope
+
+
+def test_encrypted_package_v2_rejects_ciphertext_or_context_mismatch() -> None:
+    package = _package()
+    payload = package.payload_binding
+    with pytest.raises(ValidationError, match="ciphertext digest"):
+        EvidencePayloadBindingV2.model_validate(
+            {**payload.model_dump(mode="python"), "payload_ciphertext_digest": "2" * 64}
+        )
+    wrapper = package.wrapper_binding
+    with pytest.raises(ValidationError, match="wrapping scope"):
+        EvidenceWrapperBindingV2.model_validate(
+            {
+                **wrapper.model_dump(mode="python"),
+                "wrapping_scope": _scope(realm=FOUR),
+            }
+        )
+
+
 def test_kms_context_has_only_fixed_nonsecret_keys() -> None:
     context = KmsEncryptionContextV2(
         tenant_account_id=ZERO,
@@ -293,6 +369,7 @@ def test_v13_schemas_and_models_reject_unknown_fields() -> None:
     assert schemas["SensitiveActionPermitV3"]["additionalProperties"] is False
     assert schemas["SensitiveExecutionGrantV2"]["additionalProperties"] is False
     assert schemas["ExecutorReceiptV2"]["additionalProperties"] is False
+    assert schemas["EncryptedEvidencePackageV2"]["additionalProperties"] is False
     with pytest.raises(ValidationError, match="extra_forbidden"):
         OriginScopeV1.model_validate({**_scope().model_dump(), "tenant_name": "secret"})
 

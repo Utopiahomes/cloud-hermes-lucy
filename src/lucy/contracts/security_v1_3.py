@@ -8,6 +8,7 @@ reviewed ``lucy-cjson-1`` canonicalizer.
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 import secrets
 from collections.abc import Mapping
@@ -22,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lucy.contracts.canonical import (
+    canonical_json_bytes,
     canonical_sha256,
     canonical_signed_bytes,
     signed_contract_sha256,
@@ -415,6 +417,103 @@ class SensitiveActionPermitV3(SignedV13Contract):
         return self
 
 
+class EvidencePayloadBindingV2(StrictV13Contract):
+    """Immutable ciphertext and original-scope binding for one evidence record."""
+
+    evidence_id: UUID
+    original_scope: OriginScopeV1
+    record_version: int = Field(ge=1)
+    cipher_suite: Literal["AES-256-GCM"] = "AES-256-GCM"
+    ciphertext_b64: str = Field(min_length=1, max_length=100_000)
+    content_nonce_b64: str = Field(min_length=1, max_length=64)
+    authenticated_header_b64: str = Field(min_length=1, max_length=32_768)
+    payload_ciphertext_digest: DigestHex
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> Self:
+        ciphertext = _decode_b64(self.ciphertext_b64, "ciphertext_b64")
+        nonce = _decode_b64(self.content_nonce_b64, "content_nonce_b64")
+        _decode_b64(self.authenticated_header_b64, "authenticated_header_b64")
+        if len(ciphertext) > 65_552:
+            raise ValueError("encrypted evidence exceeds the bounded plaintext plus GCM tag")
+        if len(nonce) != 12:
+            raise ValueError("AES-GCM content nonce must contain exactly 12 bytes")
+        if not secrets.compare_digest(
+            self.payload_ciphertext_digest,
+            hashlib.sha256(ciphertext).hexdigest(),
+        ):
+            raise ValueError("payload ciphertext digest does not match ciphertext")
+        return self
+
+
+class EvidenceWrapperBindingV2(StrictV13Contract):
+    """Replaceable key-wrapper binding around an unchanged payload."""
+
+    representation_id: UUID
+    wrapping_scope: OriginScopeV1
+    wrapped_key_ref: UUID
+    encryption_context: KmsEncryptionContextV2
+    encryption_context_version: Literal["KmsEncryptionContextV2"] = "KmsEncryptionContextV2"
+    payload_ciphertext_digest: DigestHex
+    migration_receipt_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_wrapper(self) -> Self:
+        context = self.encryption_context
+        scope = self.wrapping_scope
+        if (
+            context.tenant_account_id != scope.tenant_account_id
+            or context.node_id != scope.node_id
+            or context.node_tenure_id != scope.node_tenure_id
+            or context.tenure_epoch != scope.tenure_epoch
+            or context.security_realm_id != scope.security_realm_id
+            or context.storage_epoch != scope.storage_epoch
+        ):
+            raise ValueError("KMS context does not match wrapping scope")
+        return self
+
+
+class EncryptedEvidencePackageV2(StrictV13Contract):
+    """Bounded two-layer package for one exact retrieval operation."""
+
+    contract_version: Literal["2"] = "2"
+    canonicalization_version: Literal["lucy-cjson-1"] = "lucy-cjson-1"
+    object_type: Literal["lucy.encrypted-evidence-package.v2"] = (
+        "lucy.encrypted-evidence-package.v2"
+    )
+    operation_id: UUID
+    permit_id: UUID
+    action: Literal[SensitiveActionV2.EVIDENCE_RETRIEVE] = (
+        SensitiveActionV2.EVIDENCE_RETRIEVE
+    )
+    payload_binding: EvidencePayloadBindingV2
+    wrapper_binding: EvidenceWrapperBindingV2
+    content_classification: SafeIdentifier
+    lineage_refs: tuple[UUID, ...] = Field(default=(), max_length=32)
+
+    @model_validator(mode="after")
+    def validate_package(self) -> Self:
+        payload = self.payload_binding
+        wrapper = self.wrapper_binding
+        if wrapper.encryption_context.evidence_id != payload.evidence_id:
+            raise ValueError("KMS context evidence ID does not match payload")
+        if wrapper.payload_ciphertext_digest != payload.payload_ciphertext_digest:
+            raise ValueError("wrapper does not bind the exact payload ciphertext")
+        if (
+            payload.original_scope != wrapper.wrapping_scope
+            and wrapper.migration_receipt_id is None
+        ):
+            raise ValueError("rehosted wrapper requires an exact migration receipt")
+        if len(set(self.lineage_refs)) != len(self.lineage_refs):
+            raise ValueError("evidence lineage contains duplicate references")
+        if len(canonical_json_bytes(self)) > 131_072:
+            raise ValueError("encrypted evidence package exceeds the R1 boundary")
+        return self
+
+    def package_digest_hex(self) -> str:
+        return canonical_sha256(self, prefix=b"LUCY-ENCRYPTED-EVIDENCE-PACKAGE-V2\0")
+
+
 class SensitiveExecutionGrantV2(SignedV13Contract):
     """Policy-signed, post-claim delegation to one qualified realm executor."""
 
@@ -645,6 +744,13 @@ def _aware(value: datetime, field: str) -> None:
         raise ValueError(f"{field} must be timezone-aware")
 
 
+def _decode_b64(value: str, field: str) -> bytes:
+    try:
+        return base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{field} is not valid base64") from exc
+
+
 def _live_deadline(contract: SignedV13Contract) -> datetime | None:
     if isinstance(contract, OwnerInteractionAssertionV2):
         return contract.expires_at
@@ -667,6 +773,9 @@ def security_v1_3_json_schemas() -> dict[str, dict[str, object]]:
         V13VerificationKeyV1,
         OwnerInteractionAssertionV2,
         SensitiveActionPermitV3,
+        EvidencePayloadBindingV2,
+        EvidenceWrapperBindingV2,
+        EncryptedEvidencePackageV2,
         SensitiveExecutionGrantV2,
         ExecutorReceiptV2,
         KmsEncryptionContextV2,
