@@ -52,6 +52,7 @@ from lucy.db.models import (
     RealmSensitiveActorBindingRow,
     RealmServiceBindingRow,
 )
+from lucy.realm_archive import RealmArchiveEnvelopeV1
 from lucy.tenancy import TenancyService
 
 APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -75,6 +76,8 @@ def clean_sensitive_tables() -> None:
         connection.execute(
             text(
                 "TRUNCATE lucy.scoped_authorized_deletion_recovery_targets_v2, "
+                "lucy.scoped_archive_reconciliations_v1, "
+                "lucy.scoped_archive_aws_outcomes_v1, lucy.scoped_archive_intents_v1, "
                 "lucy.scoped_recovery_deletion_fences_v2, "
                 "lucy.scoped_authorized_deletion_recoveries_v2, "
                 "lucy.scoped_capture_receipts_v1, lucy.scoped_capture_transitions_v1, "
@@ -115,6 +118,11 @@ def clean_sensitive_tables() -> None:
                 "lucy.accept_scoped_capture_turn_v1(text,text), "
                 "lucy.register_capturable_scoped_evidence_v2("
                 "text,text,jsonb,jsonb,text,jsonb,text) TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb), "
+                "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text), "
+                "lucy.reconcile_capturable_scoped_archive_v1(uuid) "
+                "TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_sensitive_execution_grant_v2(uuid,jsonb) "
@@ -640,6 +648,202 @@ def test_scoped_off_record_receipts_fail_closed_across_transitions(
         ("before-off", True, 0),
         ("while-off", False, 1),
     ]
+
+
+def test_archive_commit_protocol_is_retry_safe_and_rechecks_capture(
+    realm: dict[str, UUID],
+) -> None:
+    assert ARCHIVE_URL and OWNER_URL and RAYMOND_WORKFLOW_URL
+    archive = create_engine(ARCHIVE_URL)
+    owner = create_engine(OWNER_URL)
+    foreign = create_engine(RAYMOND_WORKFLOW_URL)
+    conversation = "synthetic-archive-commit"
+    request_commitment = canonical_sha256({"plaintext": "synthetic owner message"})
+
+    with archive.begin() as connection:
+        receipt = connection.execute(
+            text("SELECT lucy.accept_scoped_capture_turn_v1(:conversation,'turn-1')"),
+            {"conversation": conversation},
+        ).scalar_one()
+        assert receipt["capture_enabled"] is True
+        claim = connection.execute(
+            text(
+                "SELECT lucy.claim_capturable_scoped_archive_v1("
+                ":conversation,'turn-1','archive-op-1',:commitment,"
+                "'owner_conversation','[]')"
+            ),
+            {"conversation": conversation, "commitment": request_commitment},
+        ).scalar_one()
+        replay = connection.execute(
+            text(
+                "SELECT lucy.claim_capturable_scoped_archive_v1("
+                ":conversation,'turn-1','archive-op-1',:commitment,"
+                "'owner_conversation','[]')"
+            ),
+            {"conversation": conversation, "commitment": request_commitment},
+        ).scalar_one()
+    assert claim["stage"] == "INTENT_RECORDED"
+    assert claim["replayed"] is False
+    assert replay == {**claim, "replayed": True}
+
+    with (
+        pytest.raises(DBAPIError, match="idempotency conflict"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.claim_capturable_scoped_archive_v1("
+                ":conversation,'turn-1','archive-op-1',:commitment,"
+                "'owner_conversation','[]')"
+            ),
+            {"conversation": conversation, "commitment": "f" * 64},
+        )
+
+    ciphertext = b"synthetic-realm-archive-ciphertext"
+    ciphertext_digest = hashlib.sha256(ciphertext).hexdigest()
+    scope = _scope(realm)
+    payload = EvidencePayloadBindingV2(
+        evidence_id=UUID(claim["evidence_id"]),
+        original_scope=scope,
+        record_version=1,
+        ciphertext_b64=base64.b64encode(ciphertext).decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"123456789012").decode("ascii"),
+        authenticated_header_b64=base64.b64encode(b"synthetic-aad").decode("ascii"),
+        payload_ciphertext_digest=ciphertext_digest,
+    )
+    wrapper = EvidenceWrapperBindingV2(
+        representation_id=UUID(claim["representation_id"]),
+        wrapping_scope=scope,
+        wrapped_key_ref=UUID(claim["wrapped_key_ref"]),
+        encryption_context=KmsEncryptionContextV2(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+            evidence_id=UUID(claim["evidence_id"]),
+        ),
+        payload_ciphertext_digest=ciphertext_digest,
+    )
+    envelope = RealmArchiveEnvelopeV1(
+        payload_binding=payload,
+        wrapper_binding=wrapper,
+        keyed_commitment="a" * 64,
+        request_commitment=request_commitment,
+        kms_request_id="synthetic-kms-request",
+    ).model_dump(mode="json")
+    envelope_digest = canonical_sha256(envelope)
+
+    with archive.begin() as connection:
+        outcome = connection.execute(
+            text(
+                "SELECT lucy.record_scoped_archive_aws_outcome_v1("
+                ":operation_id,:envelope,:digest)"
+            ),
+            {
+                "operation_id": claim["operation_id"],
+                "envelope": json.dumps(envelope),
+                "digest": envelope_digest,
+            },
+        ).scalar_one()
+        outcome_replay = connection.execute(
+            text(
+                "SELECT lucy.record_scoped_archive_aws_outcome_v1("
+                ":operation_id,:envelope,:digest)"
+            ),
+            {
+                "operation_id": claim["operation_id"],
+                "envelope": json.dumps(envelope),
+                "digest": envelope_digest,
+            },
+        ).scalar_one()
+        reconciled = connection.execute(
+            text("SELECT lucy.reconcile_capturable_scoped_archive_v1(:operation_id)"),
+            {"operation_id": claim["operation_id"]},
+        ).scalar_one()
+        reconciled_replay = connection.execute(
+            text("SELECT lucy.reconcile_capturable_scoped_archive_v1(:operation_id)"),
+            {"operation_id": claim["operation_id"]},
+        ).scalar_one()
+    assert outcome["replayed"] is False
+    assert outcome_replay == {**outcome, "replayed": True}
+    assert reconciled["replayed"] is False
+    assert reconciled_replay == {**reconciled, "replayed": True}
+    assert reconciled["evidence_id"] == claim["evidence_id"]
+
+    with pytest.raises(DBAPIError, match="permission denied"), archive.connect() as connection:
+        connection.execute(text("SELECT * FROM lucy.scoped_archive_intents_v1"))
+    with pytest.raises(DBAPIError, match="permission denied"), foreign.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.reconcile_capturable_scoped_archive_v1(:operation_id)"),
+            {"operation_id": claim["operation_id"]},
+        )
+    with owner.connect() as connection:
+        assert connection.scalar(
+            text(
+                "SELECT count(*) FROM lucy.scoped_evidence_records_v2 "
+                "WHERE id=:evidence_id"
+            ),
+            {"evidence_id": claim["evidence_id"]},
+        ) == 1
+
+    with archive.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.accept_scoped_capture_turn_v1(:conversation,'turn-2')"),
+            {"conversation": conversation},
+        )
+        pending = connection.execute(
+            text(
+                "SELECT lucy.claim_capturable_scoped_archive_v1("
+                ":conversation,'turn-2','archive-op-2',:commitment,"
+                "'owner_conversation','[]')"
+            ),
+            {"conversation": conversation, "commitment": "b" * 64},
+        ).scalar_one()
+        pending_envelope = {
+            **envelope,
+            "payload_binding": {
+                **envelope["payload_binding"],
+                "evidence_id": pending["evidence_id"],
+            },
+            "wrapper_binding": {
+                **envelope["wrapper_binding"],
+                "representation_id": pending["representation_id"],
+                "wrapped_key_ref": pending["wrapped_key_ref"],
+                "encryption_context": {
+                    **envelope["wrapper_binding"]["encryption_context"],
+                    "evidence_id": pending["evidence_id"],
+                },
+            },
+            "request_commitment": "b" * 64,
+        }
+        connection.execute(
+            text(
+                "SELECT lucy.record_scoped_archive_aws_outcome_v1("
+                ":operation_id,:envelope,:digest)"
+            ),
+            {
+                "operation_id": pending["operation_id"],
+                "envelope": json.dumps(pending_envelope),
+                "digest": canonical_sha256(pending_envelope),
+            },
+        )
+        connection.execute(
+            text("SELECT lucy.set_scoped_capture_mode_v1(:conversation,false,'withdraw-1')"),
+            {"conversation": conversation},
+        )
+    with (
+        pytest.raises(DBAPIError, match="not authorized for retention"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.reconcile_capturable_scoped_archive_v1(:operation_id)"),
+            {"operation_id": pending["operation_id"]},
+        )
+    archive.dispose()
+    owner.dispose()
+    foreign.dispose()
 
 
 def test_archive_registers_and_workflow_freezes_exact_claimed_package(

@@ -40,13 +40,25 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
     owner = create_engine(OWNER_URL)
     with owner.begin() as connection:
         connection.execute(text(sql))
-        assert connection.scalar(
+        assert not connection.scalar(
             text(
                 "SELECT has_function_privilege('lucy_utopia_routine',"
                 "'lucy.register_capturable_scoped_evidence_v2("
                 "text,text,jsonb,jsonb,text,jsonb,text)','EXECUTE')"
             )
         )
+        for signature in (
+            "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
+            "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
+            "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
+        ):
+            assert connection.scalar(
+                text(
+                    "SELECT has_function_privilege('lucy_utopia_routine',"
+                    ":signature,'EXECUTE')"
+                ),
+                {"signature": signature},
+            )
         assert not connection.scalar(
             text(
                 "SELECT has_function_privilege('lucy_utopia_routine',"

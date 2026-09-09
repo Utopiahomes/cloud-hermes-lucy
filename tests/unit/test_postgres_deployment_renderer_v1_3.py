@@ -35,7 +35,10 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
     assert "__LUCY_" not in rendered
     assert "Realm label: utopia" in rendered
     assert 'TO "lucy_utopia_routine"' in rendered
-    assert "register_capturable_scoped_evidence_v2" in rendered
+    assert "register_capturable_scoped_evidence_v2" not in rendered
+    assert "claim_capturable_scoped_archive_v1" in rendered
+    assert "record_scoped_archive_aws_outcome_v1" in rendered
+    assert "reconcile_capturable_scoped_archive_v1" in rendered
     assert "register_scoped_evidence_v2(jsonb" not in rendered
     assert 'TO "lucy_utopia_policy"' in rendered
     assert 'TO "lucy_utopia_sensitive_workflow"' in rendered

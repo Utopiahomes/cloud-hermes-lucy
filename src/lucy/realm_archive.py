@@ -108,6 +108,30 @@ class RealmArchiveEncryptor:
         self._identity = identity
         self._commitment_key = commitment_key
 
+    def recover(
+        self,
+        *,
+        evidence_id: UUID,
+        representation_id: UUID,
+        key_ref: UUID,
+        request_commitment: str,
+    ) -> RealmArchiveEnvelopeV1 | None:
+        """Load only the exact durable envelope allocated by PostgreSQL."""
+
+        envelope = self._backend.load_archive_envelope(key_ref)
+        if envelope is None:
+            return None
+        if (
+            envelope.payload_binding.evidence_id != evidence_id
+            or envelope.payload_binding.original_scope != self._identity.target_scope
+            or envelope.wrapper_binding.representation_id != representation_id
+            or envelope.wrapper_binding.wrapped_key_ref != key_ref
+            or envelope.wrapper_binding.wrapping_scope != self._identity.target_scope
+            or envelope.request_commitment != request_commitment
+        ):
+            raise RuntimeError("durable realm archive envelope differs from its intent")
+        return envelope
+
     def encrypt(
         self,
         *,

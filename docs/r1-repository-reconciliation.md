@@ -12,7 +12,7 @@ outstanding; production provisioning remains disabled.
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0037_r1_scoped_capture`.
+  head: `0038_r1_archive_commit_protocol`.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -77,7 +77,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0037` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0038` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -106,7 +106,7 @@ durability claim.
 | Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
 | Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
 | An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
-| Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives only the capture-enforcing archive entry point | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`, scoped integration and deployment-boundary tests; rendered SQL applied to disposable PostgreSQL; 19 checks passed across the focused passes | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
+| Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives the staged capture protocol but cannot call the legacy direct registration function | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`; rendered SQL applied to disposable PostgreSQL 16 | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
 | A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
 | Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
 | The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
@@ -116,8 +116,9 @@ durability claim.
 | The repeatable V1.3 CloudFormation stamp is derived only from the exact accepted V1.2 template digest, requires one explicit realm identity, creates separate physical keys/tables/roles/executors per stack, pins realm scope and caller identity in Lambda configuration, and enforces the complete V2 realm context in KMS and IAM | `tests/unit/test_aws_security_v1_3_template.py`; 5 passed plus Ruff and mypy | Frozen V1.2 template, V1.3 renderer/template, executor environment, KMS context, IAM policies, or realm output contract |
 | The content-free stamp builder accepts exactly one complete termination-protected stack, cross-checks every realm parameter/output against the PostgreSQL binding description, rejects unknown fields and cross-account AWS bindings, and emits a validated canonical `RealmSecurityStampV1` with its digest | `tests/unit/test_realm_security_stamp_builder_v1_3.py`; 5 passed plus Ruff and mypy | CloudFormation realm outputs, stamp builder/model, AWS binding formats, or PostgreSQL realm-binding input contract |
 | The V1.3 realm archive encryptor pins one deployment-owned scope and exact evidence key, obtains a 256-bit DEK, authenticates bounded plaintext with the exact header, emits validated payload/wrapper contracts, and registers the wrapped DEK only after KMS response validation; it exposes no decrypt or delete capability | `tests/unit/test_realm_archive.py`; 5 passed plus Ruff and mypy | Realm archive encryptor/identity, V1.3 payload/wrapper/context contracts, AES-GCM binding, or commitment behavior |
-| The realm archive AWS adapter permits only exact-key `GenerateDataKey` and conditional wrapped-key `PutItem`, stores content-free realm/context metadata, exposes no read/decrypt/delete surface, and rejects collisions or malformed KMS responses | `tests/unit/test_realm_archive_aws.py`; 3 focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key metadata |
+| The realm archive AWS adapter permits only exact-key `GenerateDataKey`, strongly consistent exact-key `GetItem`, and conditional wrapped-key/envelope `PutItem`; it exposes no scan, query, batch-read, decrypt, or delete surface | `tests/unit/test_realm_archive_aws.py`; focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key/envelope metadata |
 | Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
+| Archive capture durably separates PostgreSQL intent, AWS outcome, and PostgreSQL reconciliation; exact retries reuse stable IDs and a persisted DynamoDB envelope, a crash after DynamoDB does not generate a second DEK, withdrawal before reconciliation fails closed, and the production role cannot bypass the protocol | Clean migration 0001-0038; `tests/integration/test_r1_sensitive_permit_claim.py`, `tests/integration/test_r1_production_realm_roles.py`, and realm archive unit tests; 37 affected checks passed plus Ruff and mypy | Migration 0038, staged archive store/service, realm archive backend/envelope, scoped capture gate, or production realm grants |
 
 ## R1-2 checkpoint
 
@@ -199,16 +200,20 @@ the stack's read-only outputs with the reviewed PostgreSQL realm description and
 produces the canonical `RealmSecurityStampV1` plus digest. Deployed verification and
 synthetic cloud acceptance remain open gates.
 
-`realm_archive.py` and `realm_archive_aws.py` provide the encryption-only half of
-new-capture ingestion. The process receives one deployment-owned realm scope and
+`realm_archive.py`, `realm_archive_aws.py`, and `realm_archive_commit.py` provide
+the encryption-only new-capture ingestion path. The process receives one deployment-owned realm scope and
 exact KMS key, generates a data key, validates the KMS response, encrypts with
 AES-256-GCM and the supplied authenticated header, emits validated V2 payload and
 wrapper bindings, and conditionally stores the wrapped key with realm metadata. It
 has no decrypt or delete method. The environment factory requires the explicit V1.3
-backend and matches region/account/key before constructing AWS clients. This is not
-yet the complete archive workflow: durable idempotent coordination between the
-external wrapped-key write and PostgreSQL registration remains required before the
-path is connected to Telegram capture.
+backend and matches region/account/key before constructing AWS clients. Migration
+`0038_r1_archive_commit_protocol` durably separates the intent, AWS outcome, and
+reconciliation because PostgreSQL, KMS, and DynamoDB cannot share one transaction.
+It allocates stable object IDs before AWS, recovers an exact durable DynamoDB envelope
+after an ambiguous failure, and rechecks capture authorization during reconciliation.
+The request commitment is keyed, so PostgreSQL does not retain a guessable plaintext
+hash. The production realm login can execute only the staged functions and cannot
+call the legacy direct evidence-registration function.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
@@ -427,12 +432,13 @@ transaction, rejects conflicting or partial prior state, and treats an exact rep
 as read-only. The path has been proven on disposable PostgreSQL only; no production
 realm has been provisioned.
 
-The scoped retrieval and deletion chains are complete through reconciliation, finality
-observation, quarantined restore replay, scoped OTR enforcement, and the documented
-post-grant revocation race. The R1-2 local behavioral exit evidence is complete, and
-its realm-parameterized PostgreSQL role stamp and deterministic directory/binding
-provisioner are implemented. Realm-specific AWS and Render stamps remain before R1-2
-can be commissioned.
+The scoped retrieval, deletion, and new-capture chains are complete locally through
+reconciliation, finality observation, quarantined restore replay, scoped OTR
+enforcement, ambiguous archive-write recovery, and the documented post-grant
+revocation race. The next exact R1-2 action is to connect the staged archive service
+to its realm runtime composition while keeping live Telegram capture disabled, then
+perform synthetic deployed verification of one realm stamp. Realm-specific AWS and
+Render commissioning remains required before R1-2 can be activated.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 
