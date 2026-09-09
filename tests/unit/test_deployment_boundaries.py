@@ -167,3 +167,11 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
         "configure_security_v1.2.sql.example",
     ):
         assert f"COPY deploy/postgres/{artifact}" in dockerfile
+
+
+def test_security_configuration_uses_database_owned_capture_boundary() -> None:
+    script = (
+        ROOT / "deploy" / "postgres" / "configure_security_v1.2.sql.example"
+    ).read_text(encoding="utf-8")
+    assert "IF NOT lucy.capture_boundary_safe_v1() THEN" in script
+    assert "SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled" not in script

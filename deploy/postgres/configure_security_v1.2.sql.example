@@ -27,8 +27,7 @@ BEGIN
   IF current_setting('server_version_num')::integer < 160000 THEN
     RAISE EXCEPTION 'PostgreSQL 16 or newer is required';
   END IF;
-  IF EXISTS (SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled)
-     OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled) THEN
+  IF NOT lucy.capture_boundary_safe_v1() THEN
     RAISE EXCEPTION 'transcript capture must remain disabled during v1.2 configuration';
   END IF;
   IF EXISTS (SELECT 1 FROM lucy.sensitive_operations_v1) THEN

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,6 +15,24 @@ from deploy.postgres.replay_authorized_deletion_cloud_v1_2 import (
 )
 
 NOW = datetime(2026, 9, 8, 15, 0, tzinfo=UTC)
+ROOT = Path(__file__).parents[2]
+
+
+def test_capture_safety_migration_is_exact_and_fail_closed() -> None:
+    source = (
+        ROOT
+        / "migrations"
+        / "versions"
+        / "0021_recovery_capture_safety.py"
+    ).read_text(encoding="utf-8")
+    assert "NOT EXISTS (" in source
+    assert "FROM lucy.conversation_capture_states" in source
+    assert "FROM lucy.capture_receipts r" in source
+    assert "^cloud-acceptance-" in source
+    assert "r.source_turn_id = regexp_replace(" in source
+    assert "FROM lucy.evidence e" in source
+    assert "e.source = 'hermes'" in source
+    assert "OR NOT lucy.capture_boundary_safe_v1() THEN" in source
 
 
 def _key(*, purpose: str, algorithm: str, key_id: str, issuer: str) -> dict[str, Any]:

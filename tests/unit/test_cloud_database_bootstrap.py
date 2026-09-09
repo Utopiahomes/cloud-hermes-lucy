@@ -125,6 +125,16 @@ def test_reviewed_psql_header_filter_rejects_unexpected_commands() -> None:
         module._strip_reviewed_psql_header("\\i unreviewed.sql\nSELECT 1;\n")
 
 
+def test_bootstrap_uses_central_capture_boundary_and_new_migration_head() -> None:
+    module = _module()
+    source = (ROOT / "deploy" / "postgres" / "bootstrap_cloud_v1_2.py").read_text(
+        encoding="utf-8"
+    )
+    assert module.EXPECTED_REVISION == "0021_recovery_capture_safety"
+    assert "SELECT lucy.capture_boundary_safe_v1()" in source
+    assert "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)" not in source
+
+
 def test_main_never_echoes_database_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

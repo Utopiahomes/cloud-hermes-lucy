@@ -24,7 +24,7 @@ from psycopg import sql
 from sqlalchemy.engine import URL, make_url
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_REVISION = "0020_authorized_delete_recovery"
+EXPECTED_REVISION = "0021_recovery_capture_safety"
 AUTHORIZATION = "security-v1.2-private-quarantined"
 LOGIN_NAMES = {
     "routine": "lucy_routine_workflow",
@@ -360,10 +360,8 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             "SELECT count(*) FROM lucy.executor_bindings_v1 "
             "WHERE environment='production' AND active",
         )
-        capture_enabled = _scalar(
-            connection,
-            "SELECT EXISTS (SELECT 1 FROM lucy.conversation_capture_states WHERE capture_enabled) "
-            "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)",
+        capture_enabled = not bool(
+            _scalar(connection, "SELECT lucy.capture_boundary_safe_v1()")
         )
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed migration head")

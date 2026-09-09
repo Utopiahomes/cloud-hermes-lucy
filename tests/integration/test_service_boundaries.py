@@ -57,6 +57,7 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.db.models import (
     Base,
+    CaptureReceiptRow,
     DeletionJournalBindingRow,
     EvidencePayloadRow,
     EvidenceRow,
@@ -1697,3 +1698,62 @@ def test_authorized_deletion_recovery_reapplies_exact_restored_payload_once(
                 "'lucy_security_function_owner','lucy','CREATE')"
             )
         )
+
+
+def test_recovery_capture_boundary_allows_only_provenance_linked_synthetic_receipt(
+    role_db: dict[str, Any],
+) -> None:
+    acceptance_id = uuid4()
+    conversation_id = f"cloud-acceptance-{acceptance_id}"
+    operation_id = uuid4()
+    evidence_id = uuid4()
+    now = datetime.now(UTC)
+
+    with role_db["owner"].begin() as session:
+        session.add(
+            OperationRow(
+                id=operation_id,
+                idempotency_key=f"capture:{operation_id}",
+                outcome="succeeded",
+                result={},
+                created_at=now,
+                completed_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            EvidenceRow(
+                id=evidence_id,
+                source="hermes",
+                source_conversation_id=f"telegram:{conversation_id}",
+                captured_at=now,
+                content={"encrypted": True},
+                content_commitment="8" * 64,
+                operation_id=operation_id,
+            )
+        )
+        session.add(
+            CaptureReceiptRow(
+                platform="telegram",
+                source_conversation_id=conversation_id,
+                source_turn_id=f"turn-{acceptance_id}",
+                capture_enabled=True,
+                capture_version=1,
+                accepted_at=now,
+            )
+        )
+        session.flush()
+        assert session.scalar(text("SELECT lucy.capture_boundary_safe_v1()")) is True
+
+        session.add(
+            CaptureReceiptRow(
+                platform="telegram",
+                source_conversation_id=f"ordinary-{uuid4()}",
+                source_turn_id=f"turn-{uuid4()}",
+                capture_enabled=True,
+                capture_version=1,
+                accepted_at=now,
+            )
+        )
+        session.flush()
+        assert session.scalar(text("SELECT lucy.capture_boundary_safe_v1()")) is False
