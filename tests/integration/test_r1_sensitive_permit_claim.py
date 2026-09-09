@@ -109,6 +109,8 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.write_evidence_derived_memory_claim_v2("
                 "text,text,text,text,bigint,uuid[]) TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_scoped_deletion_manifest_v2(uuid,jsonb) "
+                "TO lucy_utopia_policy; "
+                "GRANT EXECUTE ON FUNCTION lucy.store_deletion_execution_grant_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy"
             )
         )
@@ -169,7 +171,7 @@ def realm() -> dict[str, UUID]:
         ).scalar_one()
     scope_id, service_binding_id = uuid4(), uuid4()
     policy_binding_id, workflow_binding_id, archive_binding_id = uuid4(), uuid4(), uuid4()
-    executor_binding_id = uuid4()
+    executor_binding_id, deletion_executor_binding_id = uuid4(), uuid4()
     deployment_id = uuid4()
     now = datetime.now(UTC)
     with owner_sessions.begin() as session:
@@ -264,8 +266,9 @@ def realm() -> dict[str, UUID]:
                 ),
             ]
         )
-        session.add(
-            RealmExecutorBindingV2Row(
+        session.add_all(
+            [
+                RealmExecutorBindingV2Row(
                 id=executor_binding_id,
                 content_scope_id=scope_id,
                 action="evidence.retrieve",
@@ -282,7 +285,28 @@ def realm() -> dict[str, UUID]:
                 policy_version=1,
                 active=True,
                 created_at=now,
-            )
+                ),
+                RealmExecutorBindingV2Row(
+                    id=deletion_executor_binding_id,
+                    content_scope_id=scope_id,
+                    action="evidence.delete",
+                    caller_identity=(
+                        "arn:aws:iam::123456789012:role/utopia-deletion-workflow"
+                    ),
+                    executor_identity="lucy-utopia-deletion-executor-v13",
+                    executor_alias_arn=(
+                        "arn:aws:lambda:us-east-1:123456789012:"
+                        "function:lucy-utopia-deletion-executor-v13:production"
+                    ),
+                    executor_version=1,
+                    receipt_key_id="utopia-deletion-receipt-v13-test",
+                    binding_generation=1,
+                    node_authz_epoch=1,
+                    policy_version=1,
+                    active=True,
+                    created_at=now,
+                ),
+            ]
         )
     return {
         "account": foundation.account_id,
@@ -883,6 +907,82 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     assert frozen_manifest["target_count"] == 2
     assert frozen_manifest["manifest_digest"] == manifest.unsigned_digest_hex()
     assert manifest_replay == {**frozen_manifest, "replayed": True}
+    with owner.connect() as connection:
+        deletion_claimed_at = connection.execute(
+            text("SELECT claimed_at FROM lucy.sensitive_operations_v2 WHERE id=:id"),
+            {"id": deletion_permit.operation_id},
+        ).scalar_one()
+    unsigned_deletion_grant = SensitiveExecutionGrantV2(
+        key_id="policy-v13-test",
+        issuer="lucy-policy-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=datetime.now(UTC),
+        grant_id=uuid4(),
+        action=deletion_permit.action,
+        permit_id=deletion_permit.permit_id,
+        permit_digest=deletion_permit.unsigned_digest_hex(),
+        operation_id=deletion_permit.operation_id,
+        caller_identity="arn:aws:iam::123456789012:role/utopia-deletion-workflow",
+        target_scope=deletion_permit.target_scope,
+        workspace_id=deletion_permit.workspace_id,
+        resource_selector=deletion_permit.resource_selector,
+        execution_binding=deletion_permit.execution_binding,
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        encrypted_package_digest=manifest.unsigned_digest_hex(),
+        package_size_bytes=len(canonical_json_bytes(manifest)),
+        idempotency_key="claim-delete-one",
+        executor_identity="lucy-utopia-deletion-executor-v13",
+        executor_alias_arn=(
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-deletion-executor-v13:production"
+        ),
+        executor_version=1,
+        permit_claimed_at=deletion_claimed_at,
+        permit_claim_deadline=deletion_permit.permit_claim_deadline,
+        execution_completion_deadline=deletion_permit.execution_completion_deadline,
+        max_records=deletion_permit.max_records,
+        max_bytes=deletion_permit.max_bytes,
+        nonce=uuid4().hex,
+    )
+    deletion_grant = signer.sign(unsigned_deletion_grant)
+    wrong_deletion_grant = signer.sign(
+        unsigned_deletion_grant.model_copy(
+            update={
+                "grant_id": uuid4(),
+                "deletion_manifest_digest": "f" * 64,
+                "nonce": uuid4().hex,
+            }
+        )
+    )
+    with (
+        pytest.raises(DBAPIError, match="deletion grant differs from frozen authority"),
+        policy.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.store_deletion_execution_grant_v2(:operation,:grant)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "grant": wrong_deletion_grant.model_dump_json(),
+            },
+        )
+    with policy.begin() as connection:
+        deletion_grant_digest = connection.execute(
+            text("SELECT lucy.store_deletion_execution_grant_v2(:operation,:grant)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "grant": deletion_grant.model_dump_json(),
+            },
+        ).scalar_one()
+        deletion_grant_replay = connection.execute(
+            text("SELECT lucy.store_deletion_execution_grant_v2(:operation,:grant)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "grant": deletion_grant.model_dump_json(),
+            },
+        ).scalar_one()
+    assert deletion_grant_digest == deletion_grant_replay
+    assert deletion_grant_digest == deletion_grant.unsigned_digest_hex()
     with (
         pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
         archive.begin() as connection,
@@ -909,7 +1009,7 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one() == 1
         assert connection.execute(
             text("SELECT count(*) FROM lucy.sensitive_execution_grants_v2")
-        ).scalar_one() == 1
+        ).scalar_one() == 2
         assert connection.execute(
             text("SELECT count(*) FROM lucy.executor_receipt_attestations_v2")
         ).scalar_one() == 1

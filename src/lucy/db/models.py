@@ -1056,6 +1056,10 @@ class SensitiveExecutionGrantV2Row(Base):
         ForeignKey("lucy.realm_executor_bindings_v2.id")
     )
     package_digest: Mapped[str] = mapped_column(String(64))
+    deletion_manifest_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.scoped_deletion_manifests_v2.id")
+    )
+    deletion_manifest_digest: Mapped[str | None] = mapped_column(String(64))
     grant_digest: Mapped[str] = mapped_column(String(64), unique=True)
     serialized_grant: Mapped[dict[str, Any]] = mapped_column(JSONB)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
