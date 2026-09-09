@@ -649,3 +649,186 @@ class ActionExecutionRow(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TenantAccountRow(Base):
+    __tablename__ = "tenant_accounts"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True)
+    display_name: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NodeRow(Base):
+    __tablename__ = "nodes"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True)
+    display_name: Mapped[str] = mapped_column(Text)
+    node_kind: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NodeTenureRow(Base):
+    __tablename__ = "node_tenures"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"))
+    account_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.tenant_accounts.id"))
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SecurityRealmRow(Base):
+    __tablename__ = "security_realms"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RealmBindingRow(Base):
+    __tablename__ = "realm_bindings"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    realm_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.security_realms.id"))
+    binding_version: Mapped[int] = mapped_column(BigInteger)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PrincipalRow(Base):
+    __tablename__ = "principals"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    issuer: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    principal_kind: Mapped[str] = mapped_column(String(40))
+    display_name: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkspaceRow(Base):
+    __tablename__ = "workspaces"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"))
+    tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    slug: Mapped[str] = mapped_column(String(80))
+    workspace_kind: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NodeMembershipRow(Base):
+    __tablename__ = "node_memberships"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    principal_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
+    role: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChannelBindingRow(Base):
+    __tablename__ = "channel_bindings"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(253), unique=True)
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"))
+    tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
+    channel_kind: Mapped[str] = mapped_column(String(40))
+    active: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LucyInstanceRow(Base):
+    __tablename__ = "lucy_instances"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"))
+    tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    principal_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
+    purpose: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WalletRegistrationRow(Base):
+    __tablename__ = "wallet_registrations"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"), unique=True)
+    tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    status: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PublicProjectionCandidateRow(Base):
+    __tablename__ = "public_projection_candidates"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    channel_binding_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.channel_bindings.id"))
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    snapshot_digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PublicProjectionApprovalRow(Base):
+    __tablename__ = "public_projection_approvals"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    candidate_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.public_projection_candidates.id"), unique=True
+    )
+    approved_digest: Mapped[str] = mapped_column(String(64))
+    approved_by: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PublicProjectionVersionRow(Base):
+    __tablename__ = "public_projection_versions"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    channel_binding_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.channel_bindings.id"))
+    candidate_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.public_projection_candidates.id"), unique=True
+    )
+    version: Mapped[int] = mapped_column(BigInteger)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    snapshot_digest: Mapped[str] = mapped_column(String(64))
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PublicProjectionRouteRow(Base):
+    __tablename__ = "public_projection_routes"
+    __table_args__ = {"schema": "lucy"}
+    channel_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.channel_bindings.id"), primary_key=True
+    )
+    active_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.public_projection_versions.id")
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PublicProjectionEventRow(Base):
+    __tablename__ = "public_projection_events"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    channel_binding_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.channel_bindings.id"))
+    event_type: Mapped[str] = mapped_column(String(40))
+    candidate_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.public_projection_candidates.id")
+    )
+    version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.public_projection_versions.id")
+    )
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
