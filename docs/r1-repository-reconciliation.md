@@ -1,7 +1,8 @@
 # R1 repository reconciliation
 
-Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contract and
-realm-session implementation has begun. Production provisioning remains disabled.
+Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
+realm-session selection, and the first scoped-memory PostgreSQL boundary are
+implemented locally. Production provisioning remains disabled.
 
 ## Frozen baseline
 
@@ -72,12 +73,13 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0022` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0023` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
 | V1.3 scope, KMS context, permit deadlines, purpose-pinned signature | `tests/unit/test_security_contracts_v1_3.py` | V1.3 contract/canonicalization change |
 | Verified workload selects one fixed private-realm credential | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
+| Raymond/Utopia/Alpha execute-only memory isolation, direct-table denial, idempotent replay/conflict, unbound-login denial | `tests/integration/test_r1_scoped_memory.py` on disposable PostgreSQL 16; 2 passed | Scoped-memory schema/functions, bootstrap roles, or client change |
 
 ## R1-2 checkpoint
 
@@ -94,9 +96,20 @@ requires an exact restore-mapping ID.
 after workload identity has been verified. A request may supply a realm/workspace hint
 only for conflict detection; it cannot select a credential. Unknown subjects/actions,
 conflicting hints, duplicate subjects, and shared private-realm credentials fail
-closed. The next R1-2 increment is the parallel scoped-memory schema and execute-only
-PostgreSQL operations for Raymond/Utopia/Alpha test logins; legacy v1.2 rows remain in
-their explicit enclave.
+closed.
+
+Migration `0023_r1_scoped_memory` adds immutable content-scope and service-binding
+rows plus append-only scoped claims/events. PostgreSQL resolves the caller from
+`session_user`; the application cannot supply a realm selector. Three synthetic
+logins receive execute-only access to named write/search functions and cannot select
+the backing tables. Cross-realm reads return no rows, unknown bindings fail closed,
+and idempotency conflicts do not write data. Legacy v1.2 rows remain in their
+explicit enclave.
+
+The next R1-2 increment is authenticated internal request admission and workspace-
+level authorization over this database-enforced realm boundary. Sensitive-chain
+parameterization, OTR/deletion closure, and revocation-race/receipt evidence remain
+later R1-2 gates; this checkpoint does not claim R1-2 completion.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

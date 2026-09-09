@@ -832,3 +832,64 @@ class PublicProjectionEventRow(Base):
     )
     actor_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RealmContentScopeRow(Base):
+    __tablename__ = "realm_content_scopes_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_account_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.tenant_accounts.id"))
+    node_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.nodes.id"))
+    node_tenure_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.node_tenures.id"))
+    tenure_epoch: Mapped[int] = mapped_column(BigInteger)
+    security_realm_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.security_realms.id"))
+    storage_epoch: Mapped[int] = mapped_column(BigInteger)
+    realm_binding_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_bindings.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.workspaces.id"))
+    deployment_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RealmServiceBindingRow(Base):
+    __tablename__ = "realm_service_bindings_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    session_login: Mapped[str] = mapped_column(String(63), unique=True)
+    service_principal_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.principals.id"))
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    service_role: Mapped[str] = mapped_column(String(40))
+    allowed_actions: Mapped[list[str]] = mapped_column(JSONB)
+    binding_generation: Mapped[int] = mapped_column(BigInteger)
+    node_authz_epoch: Mapped[int] = mapped_column(BigInteger)
+    active: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryClaimRow(Base):
+    __tablename__ = "scoped_memory_claims_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    service_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_service_bindings_v1.id")
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    predicate: Mapped[str] = mapped_column(Text)
+    object: Mapped[str] = mapped_column(Text)
+    confidence_millionths: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryEventRow(Base):
+    __tablename__ = "scoped_memory_events_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    service_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_service_bindings_v1.id")
+    )
+    event_type: Mapped[str] = mapped_column(String(40))
+    claim_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.scoped_memory_claims_v1.id"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
