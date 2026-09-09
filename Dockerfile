@@ -15,6 +15,7 @@ COPY deploy/postgres/rebind_executors_cloud_v1_2.py ./deploy/postgres/rebind_exe
 COPY deploy/postgres/inspect_unresolved_cloud_v1_2.py ./deploy/postgres/inspect_unresolved_cloud_v1_2.py
 COPY deploy/postgres/recover_expired_synthetic_retrieval_cloud_v1_2.py ./deploy/postgres/recover_expired_synthetic_retrieval_cloud_v1_2.py
 COPY deploy/postgres/replay_authorized_deletion_cloud_v1_2.py ./deploy/postgres/replay_authorized_deletion_cloud_v1_2.py
+COPY deploy/postgres/replay_authorized_deletion_cloud_v1_3.py ./deploy/postgres/replay_authorized_deletion_cloud_v1_3.py
 COPY deploy/postgres/render_security_v1_2_sql.py ./deploy/postgres/render_security_v1_2_sql.py
 COPY deploy/postgres/production_bootstrap.sql.example ./deploy/postgres/production_bootstrap.sql.example
 COPY deploy/postgres/production_roles_v1.2.sql.example ./deploy/postgres/production_roles_v1.2.sql.example

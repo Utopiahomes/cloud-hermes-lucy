@@ -100,6 +100,7 @@ durability claim.
 | Realm-bound metadata-only finality observation, database-derived `EXTENDED` result while PITR can recover the deleted key, exact replay, foreign-operation denial, and no direct deletion-effect access | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0035; 3 passed in the file; finality and deployment-boundary unit checks included in a separate 14-test pass | Migration 0035, finality collector, finality actor bindings, production grants, or recovery-inventory contract |
 | Historical V1.3 deletion recovery proof verifies retired-but-uncompromised policy/receipt keys and binds realm scope, permit, exact closure, grant, caller, executor, receipt, outcome, and digests; revoked keys and substituted callers fail closed | `tests/unit/test_security_contracts_v1_3.py` plus unchanged v1.2 recovery tests; 20 passed | V1.3 contracts/verifier, historical-key semantics, recovery-proof binding, canonicalization, or v1.2 recovery compatibility |
 | Quarantined V1.3 restore replay revalidates scope/target/recovery digests and exact restored artifacts, creates one immutable recovery fence, suppresses restored recall, blocks new derivation, and replays exactly once; wrong scope and ready storage fail closed | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0036; 3 passed in the file | Migration 0036, recovery contract/proof, capture-off admission, scoped archive/provenance, or recall/package fence logic |
+| Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
 
 ## R1-2 checkpoint
 
@@ -308,9 +309,19 @@ retry made no second write. Ciphertext remains immutable in PostgreSQL, while th
 externally destroyed wrapped key and enforced fence preserve crypto-shredding and
 ordinary-recall deletion semantics.
 
-The scoped retrieval chain is now complete through reconciliation. Durable revocation
-acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain
-later R1-2 gates; this checkpoint does not claim R1-2 completion.
+`deploy/postgres/replay_authorized_deletion_cloud_v1_3.py` is the production
+operator bridge for that gate. It accepts no command-line values, requires the exact
+reviewed authorization marker, production Render, capture-off state, the private
+migration login, an explicit realm/workspace scope, caller and qualified executor
+bindings, and historical V1.3 trust inventories. It verifies the signed chain before
+opening PostgreSQL, then requires TLS, quarantine, the database-owned capture boundary
+and both maintenance/admission locks. The container includes this utility, but no R1
+production deployment or replay has been performed.
+
+The scoped retrieval and deletion chains are complete through reconciliation, finality
+observation, and quarantined restore replay. Durable revocation acknowledgement,
+scoped OTR evidence, and revocation-race/receipt evidence remain later R1-2 gates;
+this checkpoint does not claim R1-2 completion.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

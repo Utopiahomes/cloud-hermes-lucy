@@ -163,6 +163,7 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
         "inspect_unresolved_cloud_v1_2.py",
         "recover_expired_synthetic_retrieval_cloud_v1_2.py",
         "replay_authorized_deletion_cloud_v1_2.py",
+        "replay_authorized_deletion_cloud_v1_3.py",
         "render_security_v1_2_sql.py",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",
