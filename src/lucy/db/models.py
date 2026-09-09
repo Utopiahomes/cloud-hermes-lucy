@@ -1131,6 +1131,49 @@ class ScopedEvidenceDeletionFenceV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ScopedDeletionManifestV2Row(Base):
+    __tablename__ = "scoped_deletion_manifests_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), unique=True
+    )
+    permit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_action_permits_v3.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    root_evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_records_v2.id")
+    )
+    root_representation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_wrappers_v2.representation_id")
+    )
+    manifest_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    targets_digest: Mapped[str] = mapped_column(String(64))
+    target_count: Mapped[int] = mapped_column(BigInteger)
+    serialized_manifest: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedDeletionManifestTargetV2Row(Base):
+    __tablename__ = "scoped_deletion_manifest_targets_v2"
+    __table_args__ = {"schema": "lucy"}
+    manifest_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_deletion_manifests_v2.id"), primary_key=True
+    )
+    artifact_class: Mapped[str] = mapped_column(String(40), primary_key=True)
+    artifact_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    artifact_version: Mapped[int] = mapped_column(BigInteger)
+    root_evidence_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    disposition: Mapped[str] = mapped_column(String(40))
+    representation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    wrapped_key_ref: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryEventRow(Base):
     __tablename__ = "scoped_memory_events_v1"
     __table_args__ = {"schema": "lucy"}

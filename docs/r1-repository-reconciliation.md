@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0030` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0030`; incremental migration through `0031` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -90,6 +90,7 @@ durability claim.
 | Policy-only V2 receipt attestation/replay, exact grant/package/key-purpose binding, wrong-package denial, historical receipt acceptance after executor revocation, and digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Executor-receipt V2 contract, migration 0028, receipt trust/bindings, or deadline rules |
 | Workflow-only receipt reconciliation/replay, foreign-workflow denial, terminal state/digest persistence, and no caller-supplied receipt body | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0029, workflow binding, receipt attestation, or operation-state rules |
 | Same-scope evidence-derived memory provenance, exact replay, foreign/missing evidence denial, and execute-only backing-table isolation | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0030, scoped archive or memory provenance rules |
+| Exact deletion closure, incomplete-closure denial, manifest replay, durable evidence fence, and post-fence derivation denial | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0031, deletion-manifest V2 contract, provenance, or fence locking |
 
 ## R1-2 checkpoint
 
@@ -230,6 +231,14 @@ archive service cannot enumerate either the evidence or provenance backing table
 Derivation and deletion use the same per-evidence transaction lock; a deletion fence
 therefore prevents a later derivation from committing, while any derivation that wins
 the lock is included in the closure computed by the following deletion increment.
+
+Migration `0031_r1_deletion_closure` freezes a policy-signed V2 manifest only when it
+exactly equals PostgreSQL's current same-scope closure: the active archive
+representation and every provenance-linked scoped memory claim. The fence, immutable
+manifest, normalized targets, and content-free event commit in the same transaction.
+An incomplete or stale representation fails closed, and exact replay cannot create a
+second fence or event. The policy application must cryptographically verify the
+manifest before invoking this execute-only database gate.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

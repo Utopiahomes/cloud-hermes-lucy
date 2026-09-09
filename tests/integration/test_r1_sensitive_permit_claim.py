@@ -20,6 +20,10 @@ from lucy.contracts.security_v1_2 import (
     SensitiveReasonCode,
 )
 from lucy.contracts.security_v1_3 import (
+    DeletionArtifactClass,
+    DeletionDisposition,
+    DeletionTargetManifestV2,
+    DeletionTargetReferenceV2,
     Ed25519V13Signer,
     EncryptedEvidencePackageV2,
     EvidencePayloadBindingV2,
@@ -32,6 +36,7 @@ from lucy.contracts.security_v1_3 import (
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
     V13SigningKeyPurpose,
+    deletion_targets_digest_v2,
 )
 from lucy.db import create_session_factory
 from lucy.db.models import (
@@ -63,6 +68,8 @@ def clean_sensitive_tables() -> None:
         connection.execute(
             text(
                 "TRUNCATE lucy.scoped_evidence_deletion_fences_v2, "
+                "lucy.scoped_deletion_manifest_targets_v2, "
+                "lucy.scoped_deletion_manifests_v2, "
                 "lucy.scoped_memory_claim_sources_v2, "
                 "lucy.executor_receipt_attestations_v2, "
                 "lucy.sensitive_execution_grants_v2, "
@@ -100,7 +107,9 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.reconcile_sensitive_operation_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.write_evidence_derived_memory_claim_v2("
-                "text,text,text,text,bigint,uuid[]) TO lucy_utopia_routine"
+                "text,text,text,text,bigint,uuid[]) TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION lucy.store_scoped_deletion_manifest_v2(uuid,jsonb) "
+                "TO lucy_utopia_policy"
             )
         )
     engine.dispose()
@@ -187,7 +196,12 @@ def realm() -> dict[str, UUID]:
                 service_principal_id=evidence_id,
                 content_scope_id=scope_id,
                 service_role="realm_evidence",
-                allowed_actions=["evidence.archive", "evidence.retrieve", "memory.write"],
+                allowed_actions=[
+                    "evidence.archive",
+                    "evidence.retrieve",
+                    "evidence.delete",
+                    "memory.write",
+                ],
                 binding_generation=1,
                 node_authz_epoch=1,
                 policy_version=1,
@@ -223,6 +237,7 @@ def realm() -> dict[str, UUID]:
                         "sensitive.permit.issue",
                         "sensitive.grant.issue",
                         "sensitive.receipt.attest",
+                        "sensitive.deletion_manifest.issue",
                     ],
                     binding_generation=1,
                     node_authz_epoch=1,
@@ -300,6 +315,7 @@ def _permit(
     *,
     permit_id: UUID | None = None,
     evidence_id: UUID | None = None,
+    action: SensitiveActionV2 = SensitiveActionV2.EVIDENCE_RETRIEVE,
 ) -> SensitiveActionPermitV3:
     now = datetime.now(UTC)
     unsigned = SensitiveActionPermitV3(
@@ -308,8 +324,12 @@ def _permit(
         environment=DeploymentEnvironment.TEST,
         issued_at=now,
         permit_id=permit_id or uuid4(),
-        action=SensitiveActionV2.EVIDENCE_RETRIEVE,
-        reason=SensitiveReasonCode.OWNER_REVIEW,
+        action=action,
+        reason=(
+            SensitiveReasonCode.OWNER_REQUEST
+            if action == SensitiveActionV2.EVIDENCE_DELETE
+            else SensitiveReasonCode.OWNER_REVIEW
+        ),
         principal_id=realm["owner"],
         service_principal_id=realm["evidence"],
         service_binding_id=realm["service_binding"],
@@ -336,8 +356,8 @@ def _permit(
         channel_generation=1,
         permit_claim_deadline=now + timedelta(seconds=60),
         execution_completion_deadline=now + timedelta(minutes=2),
-        max_records=1,
-        max_bytes=65_536,
+        max_records=90 if action == SensitiveActionV2.EVIDENCE_DELETE else 1,
+        max_bytes=131_072 if action == SensitiveActionV2.EVIDENCE_DELETE else 65_536,
         nonce=uuid4().hex,
     )
     return Ed25519V13Signer(
@@ -757,6 +777,130 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         "replayed": False,
     }
     assert reconcile_replay == {**reconciled, "replayed": True}
+    deletion_permit = _permit(
+        realm,
+        evidence_id=evidence_id,
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+    )
+    with policy.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.issue_sensitive_action_permit_v3(:permit,:key)"),
+            {"permit": deletion_permit.model_dump_json(), "key": "issue-delete-one"},
+        )
+    with workflow.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.claim_sensitive_operation_v2(:permit,:key)"),
+            {"permit": deletion_permit.permit_id, "key": "claim-delete-one"},
+        )
+    deletion_targets = (
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.ENCRYPTED_ARCHIVE,
+            artifact_id=evidence_id,
+            artifact_version=1,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=representation_id,
+            wrapped_key_ref=key_ref,
+        ),
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.MEMORY_CLAIM,
+            artifact_id=UUID(derived["claim_id"]),
+            artifact_version=1,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.INVALIDATE,
+        ),
+    )
+    unsigned_manifest = DeletionTargetManifestV2(
+        key_id="policy-v13-test",
+        issuer="lucy-policy-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=deletion_permit.issued_at,
+        manifest_id=uuid4(),
+        permit_id=deletion_permit.permit_id,
+        permit_digest=deletion_permit.unsigned_digest_hex(),
+        operation_id=deletion_permit.operation_id,
+        target_scope=deletion_permit.target_scope,
+        workspace_id=deletion_permit.workspace_id,
+        root_evidence_id=evidence_id,
+        root_representation_id=representation_id,
+        owner_assertion_id=deletion_permit.owner_assertion_id,
+        owner_assertion_digest=deletion_permit.owner_assertion_digest,
+        idempotency_key="delete-root-one",
+        closure_version=1,
+        targets=deletion_targets,
+        target_count=len(deletion_targets),
+        targets_digest=deletion_targets_digest_v2(deletion_targets),
+        tombstone_policy_version=1,
+        finality_policy_version=1,
+        permit_claim_deadline=deletion_permit.permit_claim_deadline,
+        execution_completion_deadline=deletion_permit.execution_completion_deadline,
+        nonce=uuid4().hex,
+    )
+    manifest = Ed25519V13Signer(
+        ed25519.Ed25519PrivateKey.generate(),
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    ).sign(unsigned_manifest)
+    wrong_manifest = Ed25519V13Signer(
+        ed25519.Ed25519PrivateKey.generate(),
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    ).sign(
+        unsigned_manifest.model_copy(
+            update={
+                "targets": (deletion_targets[0],),
+                "target_count": 1,
+                "targets_digest": deletion_targets_digest_v2((deletion_targets[0],)),
+            }
+        )
+    )
+    with (
+        pytest.raises(DBAPIError, match="scoped deletion closure is not exact"),
+        policy.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.store_scoped_deletion_manifest_v2(:operation,:manifest)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "manifest": wrong_manifest.model_dump_json(),
+            },
+        )
+    with policy.begin() as connection:
+        frozen_manifest = connection.execute(
+            text("SELECT lucy.store_scoped_deletion_manifest_v2(:operation,:manifest)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "manifest": manifest.model_dump_json(),
+            },
+        ).scalar_one()
+        manifest_replay = connection.execute(
+            text("SELECT lucy.store_scoped_deletion_manifest_v2(:operation,:manifest)"),
+            {
+                "operation": deletion_permit.operation_id,
+                "manifest": manifest.model_dump_json(),
+            },
+        ).scalar_one()
+    assert frozen_manifest["target_count"] == 2
+    assert frozen_manifest["manifest_digest"] == manifest.unsigned_digest_hex()
+    assert manifest_replay == {**frozen_manifest, "replayed": True}
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                ":key,:subject,:predicate,:object,:confidence,:sources)"
+            ),
+            {
+                "key": "derived-after-fence",
+                "subject": "Ray",
+                "predicate": "prefers",
+                "object": "late derivation",
+                "confidence": 900_000,
+                "sources": [evidence_id],
+            },
+        )
     with pytest.raises(DBAPIError, match="permission denied"), workflow.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
     with owner.connect() as connection:
@@ -772,6 +916,9 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         assert connection.execute(
             text("SELECT count(*) FROM lucy.scoped_memory_claim_sources_v2")
         ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_deletion_manifest_targets_v2")
+        ).scalar_one() == 2
         operation_state = connection.execute(
             text(
                 "SELECT state,executor_result,executor_receipt_digest "
