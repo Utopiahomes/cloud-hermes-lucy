@@ -110,6 +110,7 @@ durability claim.
 | Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
 | The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
 | The additive V1.3 AWS adapter loads one exact strongly consistent receipt, signs scoped receipts with the configured purpose key, conditionally persists retrieval receipts, and atomically records deletion authority/outcome/quota while removing only archive targets' exact wrapped keys | V1.3 contract and unchanged V1.2 executor unit suites; 41 passed plus Ruff and mypy | AWS adapter, V1.3 contracts, DynamoDB transaction shape/limits, KMS signing, or V1.2 compatibility |
+| The additive V1.3 executor core admits scope before any effect, performs one authenticated retrieval decrypt with no plaintext on replay, produces exact scoped KMS-signed receipts, and commits deletion without evidence-key/decrypt authority | V1.3 contract/core and unchanged V1.2 executor unit suites; 43 passed plus Ruff and mypy | V1.3 executor admission/core, AWS backend protocol, receipt construction/replay, AES-GCM binding, quota semantics, or V1.2 compatibility |
 
 ## R1-2 checkpoint
 
@@ -143,8 +144,8 @@ The executor wire boundary now has additive V2 invocation and result types. They
 accept only the V1.3 permit, post-claim grant, scoped package or deletion manifest,
 and scoped receipt contracts; action confusion, receipt-digest substitution,
 deletion plaintext, and replayed plaintext fail validation. The frozen V1 invocation
-and result types remain unchanged. The deployed Lambda handler/core and AWS adapter
-are still V1-only at this checkpoint and must not be stamped as V1.3 executors yet.
+and result types remain unchanged. The deployed Lambda handler/runtime selection is
+still V1-only at this checkpoint and must not be stamped as a V1.3 executor yet.
 
 `executors/admission_v1_3.py` adds the pure pre-effect admission layer. A claimed
 permit is verified as historical authorization evidence because its 60-second
@@ -162,6 +163,15 @@ the signed permit, post-claim grant, frozen closure and scoped receipt together 
 both quota reservations in one DynamoDB transaction, deleting only exact wrapped-key
 references carried by encrypted-archive targets. Derived-memory targets cannot name
 or delete AWS key material. The adapter exposes no scan, query, or batch-read method.
+
+`executors/core_v1_3.py` composes the pure admission boundary with those exact AWS
+operations. Retrieval admits the signed chain and realm identity before quota or KMS,
+authenticates the payload with its V2 header/context, bounds plaintext, persists a
+purpose-scoped receipt, and returns plaintext only for the winning first execution.
+An exact retry replays the durable receipt without decrypting or returning plaintext.
+Deletion constructs a content-free operational-deletion receipt and commits through
+the atomic adapter path; its core has no evidence key or decrypt capability. The
+production Lambda handler/runtime selection remains V1-only.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,

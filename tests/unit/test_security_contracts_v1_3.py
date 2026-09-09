@@ -9,6 +9,7 @@ import pytest
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import ValidationError
 
 from lucy.authorized_deletion_recovery import (
@@ -54,10 +55,12 @@ from lucy.executors.admission_v1_3 import (
 )
 from lucy.executors.aws import AwsExecutorBackend, AwsExecutorTables
 from lucy.executors.core import ExecutorRejected
+from lucy.executors.core_v1_3 import RealmDeletionExecutor, RealmRetrievalExecutor
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
     ExecutorInvocationResultV2,
     RetrievalExecutorInvocationV2,
+    WrappedKeyMaterial,
 )
 from lucy.scoped_deletion import (
     ScopedDeletionManifestResult,
@@ -248,6 +251,47 @@ def _package(
         content_classification="owner_conversation",
         lineage_refs=(THREE,),
     )
+
+
+def _executable_package() -> tuple[EncryptedEvidencePackageV2, bytes, bytes]:
+    plaintext = b"synthetic realm-scoped evidence"
+    dek = b"d" * 32
+    nonce = b"n" * 12
+    header = b'{"contract":"evidence-v2"}'
+    ciphertext = AESGCM(dek).encrypt(nonce, plaintext, header)
+    scope = _scope()
+    payload = EvidencePayloadBindingV2(
+        evidence_id=ZERO,
+        original_scope=scope,
+        record_version=1,
+        ciphertext_b64=base64.b64encode(ciphertext).decode("ascii"),
+        content_nonce_b64=base64.b64encode(nonce).decode("ascii"),
+        authenticated_header_b64=base64.b64encode(header).decode("ascii"),
+        payload_ciphertext_digest=hashlib.sha256(ciphertext).hexdigest(),
+    )
+    wrapper = EvidenceWrapperBindingV2(
+        representation_id=ONE,
+        wrapping_scope=scope,
+        wrapped_key_ref=TWO,
+        encryption_context=KmsEncryptionContextV2(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+            evidence_id=ZERO,
+        ),
+        payload_ciphertext_digest=payload.payload_ciphertext_digest,
+    )
+    package = EncryptedEvidencePackageV2(
+        operation_id=FOUR,
+        permit_id=ZERO,
+        payload_binding=payload,
+        wrapper_binding=wrapper,
+        content_classification="owner_conversation",
+    )
+    return package, plaintext, dek
 
 
 def _deletion_targets() -> tuple[DeletionTargetReferenceV2, ...]:
@@ -650,6 +694,162 @@ def test_v13_aws_deletion_commits_only_archive_key_targets_atomically() -> None:
     intent = actions[0]["Put"]["Item"]
     assert intent["security_realm_id"]["S"] == str(permit.target_scope.security_realm_id)
     assert DeletionTargetManifestV2.model_validate_json(intent["manifest_json"]["S"]) == manifest
+
+
+class _V13CoreBackend:
+    def __init__(self, dek: bytes) -> None:
+        self.dek = dek
+        self.receipts: dict[UUID, ExecutorReceiptV2] = {}
+        self.quota_reservations = 0
+        self.deletion_commits = 0
+        self.decrypt_calls = 0
+        self.receipt_private_key = ec.derive_private_key(17, ec.SECP256R1())
+
+    def load_receipt_v2(self, operation_id: UUID) -> ExecutorReceiptV2 | None:
+        return self.receipts.get(operation_id)
+
+    def load_wrapped_key(self, key_ref: UUID) -> WrappedKeyMaterial | None:
+        if key_ref != TWO:
+            return None
+        return WrappedKeyMaterial(
+            ciphertext_b64=base64.b64encode(b"wrapped-key").decode("ascii"),
+            nonce_b64=base64.b64encode(b"kms").decode("ascii"),
+            kek_version=EVIDENCE_KEY_ARN,
+        )
+
+    def decrypt_data_key(
+        self, wrapped_key: WrappedKeyMaterial, encryption_context: dict[str, str]
+    ) -> tuple[bytes, str]:
+        assert wrapped_key.kek_version == EVIDENCE_KEY_ARN
+        assert encryption_context["security_realm_id"] == str(THREE)
+        self.decrypt_calls += 1
+        return self.dek, "kms-request-v13"
+
+    def sign_receipt_v2(self, receipt: ExecutorReceiptV2) -> ExecutorReceiptV2:
+        signature = self.receipt_private_key.sign(
+            bytes.fromhex(receipt.unsigned_digest_hex()),
+            ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+        )
+        return receipt.model_copy(
+            update={"signature": base64.b64encode(signature).decode("ascii")}
+        )
+
+    def reserve_retrieval_quota(self, *, now: datetime, quota: ExecutorQuotaV1) -> None:
+        assert now == NOW + timedelta(seconds=70)
+        assert quota.action == SensitiveActionV2.EVIDENCE_RETRIEVE
+        self.quota_reservations += 1
+
+    def commit_retrieval_receipt_v2(self, receipt: ExecutorReceiptV2) -> bool:
+        if receipt.operation_id in self.receipts:
+            return False
+        self.receipts[receipt.operation_id] = receipt
+        return True
+
+    def commit_deletion_v2(
+        self,
+        *,
+        permit: SensitiveActionPermitV3,
+        grant: SensitiveExecutionGrantV2,
+        manifest: DeletionTargetManifestV2,
+        receipt: ExecutorReceiptV2,
+        transaction_token: str,
+        now: datetime,
+        quota: ExecutorQuotaV1,
+    ) -> bool:
+        assert permit.operation_id == grant.operation_id == receipt.operation_id
+        assert manifest.manifest_id == receipt.deletion_manifest_id
+        assert transaction_token == str(grant.operation_id)
+        assert now == NOW + timedelta(seconds=70)
+        assert quota.action == SensitiveActionV2.EVIDENCE_DELETE
+        self.deletion_commits += 1
+        self.receipts[receipt.operation_id] = receipt
+        return True
+
+
+def test_v13_retrieval_core_decrypts_once_and_replays_without_plaintext() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    package, plaintext, dek = _executable_package()
+    permit = signer.sign(_permit())
+    grant = signer.sign(
+        _grant(
+            permit_digest=permit.unsigned_digest_hex(),
+            encrypted_package_digest=package.package_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(package)),
+        )
+    )
+    invocation = RetrievalExecutorInvocationV2(
+        permit=permit,
+        execution_grant=grant,
+        package=package,
+    )
+    backend = _V13CoreBackend(dek)
+    executor = RealmRetrievalExecutor(
+        backend,
+        verifier,
+        _executor_identity(SensitiveActionV2.EVIDENCE_RETRIEVE),
+        receipt_key_id=RECEIPT_KEY_ARN,
+        evidence_key_arn=EVIDENCE_KEY_ARN,
+        clock=lambda: NOW + timedelta(seconds=70),
+    )
+    first = executor.execute(invocation, lambda_request_id="lambda-v13-first")
+    assert base64.b64decode(first.plaintext_b64 or "", validate=True) == plaintext
+    assert first.replayed is False
+    assert first.receipt.target_scope == _scope()
+
+    replay = executor.execute(invocation, lambda_request_id="lambda-v13-replay")
+    assert replay.replayed is True and replay.plaintext_b64 is None
+    assert backend.decrypt_calls == backend.quota_reservations == 1
+
+
+def test_v13_deletion_core_commits_once_and_never_decrypts() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    permit = signer.sign(
+        _permit(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            reason="owner_request",
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    manifest = signer.sign(
+        _deletion_manifest(
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=permit.operation_id,
+        )
+    )
+    grant = signer.sign(
+        _grant(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_digest=permit.unsigned_digest_hex(),
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(manifest)),
+            idempotency_key=manifest.idempotency_key,
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    invocation = DeletionExecutorInvocationV2(
+        permit=permit,
+        execution_grant=grant,
+        manifest=manifest,
+    )
+    backend = _V13CoreBackend(b"unused")
+    executor = RealmDeletionExecutor(
+        backend,
+        verifier,
+        _executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
+        receipt_key_id=RECEIPT_KEY_ARN,
+        clock=lambda: NOW + timedelta(seconds=70),
+    )
+    first = executor.execute(invocation, lambda_request_id="lambda-v13-delete")
+    assert first.replayed is False
+    assert first.receipt.finality_state == "operationally_deleted"
+    replay = executor.execute(invocation, lambda_request_id="lambda-v13-delete-replay")
+    assert replay.replayed is True
+    assert backend.deletion_commits == 1 and backend.decrypt_calls == 0
 
 
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
