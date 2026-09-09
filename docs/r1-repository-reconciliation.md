@@ -91,6 +91,7 @@ durability claim.
 | Workflow-only receipt reconciliation/replay, foreign-workflow denial, terminal state/digest persistence, and no caller-supplied receipt body | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0029, workflow binding, receipt attestation, or operation-state rules |
 | Same-scope evidence-derived memory provenance, exact replay, foreign/missing evidence denial, and execute-only backing-table isolation | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0030, scoped archive or memory provenance rules |
 | Exact deletion closure, incomplete-closure denial, manifest replay, durable evidence fence, and post-fence derivation denial | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0031, deletion-manifest V2 contract, provenance, or fence locking |
+| Policy-signature verification before scoped deletion storage; invalid signature produces no store call | `tests/unit/test_security_contracts_v1_3.py`; 15 passed in the file | V1.3 verifier, policy trust keys, or scoped deletion admission service |
 
 ## R1-2 checkpoint
 
@@ -239,6 +240,12 @@ manifest, normalized targets, and content-free event commit in the same transact
 An incomplete or stale representation fails closed, and exact replay cannot create a
 second fence or event. The policy application must cryptographically verify the
 manifest before invoking this execute-only database gate.
+
+`VerifiedScopedDeletionService` is that application-side admission gate. It verifies
+the policy-notary key purpose, issuer, environment, live key window, authorization
+deadline, and signature before any store call. It then compares the database result
+to the verified manifest identifiers and digests, rejecting a storage-binding
+mismatch.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

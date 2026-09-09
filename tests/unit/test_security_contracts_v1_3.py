@@ -39,6 +39,10 @@ from lucy.contracts.security_v1_3 import (
     deletion_targets_digest_v2,
     security_v1_3_json_schemas,
 )
+from lucy.scoped_deletion import (
+    ScopedDeletionManifestResult,
+    VerifiedScopedDeletionService,
+)
 
 ZERO = UUID("00000000-0000-4000-8000-000000000000")
 ONE = UUID("00000000-0000-4000-8000-000000000001")
@@ -548,3 +552,50 @@ def test_v13_signature_verification_pins_purpose_and_live_window() -> None:
             expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
             checked_at=NOW + timedelta(seconds=126),
         )
+
+
+def test_scoped_deletion_verifies_signature_before_database_effect() -> None:
+    private = ed25519.Ed25519PrivateKey.generate()
+    signer = Ed25519V13Signer(
+        private, key_id="policy-v13-test", purpose=V13SigningKeyPurpose.POLICY_NOTARY
+    )
+    manifest = signer.sign(_deletion_manifest())
+    verifier = V13ContractVerifier(
+        (
+            V13VerificationKeyV1(
+                key_id="policy-v13-test",
+                issuer="lucy-policy-v13-test",
+                environment=DeploymentEnvironment.TEST,
+                purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+                public_key_b64=signer.public_key_b64,
+                status=V13VerificationKeyStatus.ACTIVE,
+                valid_from=NOW - timedelta(days=1),
+                issuance_not_after=NOW + timedelta(days=1),
+                verify_not_after=NOW + timedelta(days=2),
+            ),
+        )
+    )
+    stored: list[DeletionTargetManifestV2] = []
+
+    class Store:
+        def store(
+            self, candidate: DeletionTargetManifestV2
+        ) -> ScopedDeletionManifestResult:
+            stored.append(candidate)
+            return ScopedDeletionManifestResult(
+                manifest_id=candidate.manifest_id,
+                manifest_digest=candidate.unsigned_digest_hex(),
+                targets_digest=candidate.targets_digest,
+                target_count=candidate.target_count,
+                replayed=False,
+            )
+
+    service = VerifiedScopedDeletionService(
+        Store(), policy_verifier=verifier, clock=lambda: NOW + timedelta(seconds=30)
+    )
+    assert service.freeze(manifest).manifest_id == manifest.manifest_id
+    assert stored == [manifest]
+    tampered = manifest.model_copy(update={"signature": base64.b64encode(b"bad").decode()})
+    with pytest.raises(PermissionError, match="signature"):
+        service.freeze(tampered)
+    assert stored == [manifest]
