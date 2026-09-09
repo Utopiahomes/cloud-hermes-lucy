@@ -514,6 +514,138 @@ class EncryptedEvidencePackageV2(StrictV13Contract):
         return canonical_sha256(self, prefix=b"LUCY-ENCRYPTED-EVIDENCE-PACKAGE-V2\0")
 
 
+class DeletionArtifactClass(StrEnum):
+    ENCRYPTED_ARCHIVE = "encrypted_archive"
+    MEMORY_CLAIM = "memory_claim"
+    EMBEDDING = "embedding"
+    RESULT_BODY = "result_body"
+    PUBLIC_PROJECTION = "public_projection"
+
+
+class DeletionDisposition(StrEnum):
+    DESTROY_WRAPPED_KEY = "destroy_wrapped_key"
+    DELETE = "delete"
+    INVALIDATE = "invalidate"
+    RECOMPUTE = "recompute"
+
+
+class DeletionTargetReferenceV2(StrictV13Contract):
+    artifact_class: DeletionArtifactClass
+    artifact_id: UUID
+    artifact_version: int = Field(ge=1)
+    root_evidence_id: UUID
+    disposition: DeletionDisposition
+    representation_id: UUID | None = None
+    wrapped_key_ref: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> Self:
+        archive = self.artifact_class == DeletionArtifactClass.ENCRYPTED_ARCHIVE
+        if archive and (
+            self.representation_id is None
+            or self.wrapped_key_ref is None
+            or self.disposition != DeletionDisposition.DESTROY_WRAPPED_KEY
+        ):
+            raise ValueError("archive deletion target requires exact representation and key")
+        if not archive and (
+            self.representation_id is not None
+            or self.wrapped_key_ref is not None
+            or self.disposition == DeletionDisposition.DESTROY_WRAPPED_KEY
+        ):
+            raise ValueError("derived deletion target must not carry archive key authority")
+        return self
+
+
+def deletion_targets_digest_v2(targets: tuple[DeletionTargetReferenceV2, ...]) -> str:
+    return canonical_sha256(
+        [target.model_dump(mode="python") for target in targets],
+        prefix=b"LUCY-DELETION-TARGETS-V2\0",
+    )
+
+
+class DeletionTargetManifestV2(SignedV13Contract):
+    """Frozen, scoped closure for archive and derived-data deletion."""
+
+    contract_version: Literal["2"] = "2"
+    object_type: Literal["lucy.deletion-target-manifest.v2"] = (
+        "lucy.deletion-target-manifest.v2"
+    )
+    signing_key_purpose: Literal[V13SigningKeyPurpose.POLICY_NOTARY] = (
+        V13SigningKeyPurpose.POLICY_NOTARY
+    )
+    manifest_id: UUID
+    permit_id: UUID
+    permit_digest: DigestHex
+    operation_id: UUID
+    action: Literal[SensitiveActionV2.EVIDENCE_DELETE] = SensitiveActionV2.EVIDENCE_DELETE
+    target_scope: OriginScopeV1
+    workspace_id: UUID
+    root_evidence_id: UUID
+    root_representation_id: UUID
+    owner_assertion_id: UUID
+    owner_assertion_digest: DigestHex
+    idempotency_key: SafeIdentifier
+    closure_version: int = Field(ge=1)
+    targets: tuple[DeletionTargetReferenceV2, ...] = Field(min_length=1, max_length=90)
+    target_count: int = Field(ge=1, le=90)
+    targets_digest: DigestHex
+    tombstone_policy_version: int = Field(ge=1)
+    finality_policy_version: int = Field(ge=1)
+    permit_claim_deadline: datetime
+    execution_completion_deadline: datetime
+    nonce: Nonce
+
+    @model_validator(mode="after")
+    def validate_manifest(self) -> Self:
+        _aware(self.issued_at, "issued_at")
+        _aware(self.permit_claim_deadline, "permit_claim_deadline")
+        _aware(self.execution_completion_deadline, "execution_completion_deadline")
+        if not self.issued_at < self.permit_claim_deadline <= self.execution_completion_deadline:
+            raise ValueError("deletion manifest deadlines are invalid")
+        if self.permit_claim_deadline > self.issued_at + timedelta(
+            seconds=V1_3_PERMIT_CLAIM_MAX_SECONDS
+        ):
+            raise ValueError("deletion manifest claim window exceeds 60 seconds")
+        if self.execution_completion_deadline > self.issued_at + timedelta(
+            seconds=V1_3_EXECUTION_MAX_SECONDS
+        ):
+            raise ValueError("deletion manifest execution window exceeds ten minutes")
+        order = tuple(
+            (
+                target.artifact_class.value,
+                str(target.artifact_id),
+                str(target.representation_id or UUID(int=0)),
+            )
+            for target in self.targets
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("deletion targets are not in canonical order")
+        identities = {(target.artifact_class, target.artifact_id) for target in self.targets}
+        if len(identities) != len(self.targets):
+            raise ValueError("deletion manifest contains duplicate artifact targets")
+        if any(target.root_evidence_id != self.root_evidence_id for target in self.targets):
+            raise ValueError("deletion target is outside the root evidence closure")
+        root_matches = [
+            target
+            for target in self.targets
+            if target.artifact_class == DeletionArtifactClass.ENCRYPTED_ARCHIVE
+            and target.artifact_id == self.root_evidence_id
+            and target.representation_id == self.root_representation_id
+        ]
+        if len(root_matches) != 1:
+            raise ValueError("deletion manifest lacks its exact root representation")
+        if self.target_count != len(self.targets):
+            raise ValueError("deletion target count does not match the manifest")
+        if not secrets.compare_digest(
+            self.targets_digest,
+            deletion_targets_digest_v2(self.targets),
+        ):
+            raise ValueError("deletion target digest does not match the manifest")
+        if len(self.canonical_unsigned_bytes()) > 65_536:
+            raise ValueError("canonical deletion manifest exceeds the R1 boundary")
+        return self
+
+
 class SensitiveExecutionGrantV2(SignedV13Contract):
     """Policy-signed, post-claim delegation to one qualified realm executor."""
 
@@ -760,6 +892,8 @@ def _live_deadline(contract: SignedV13Contract) -> datetime | None:
         return contract.execution_completion_deadline
     if isinstance(contract, ExecutorReceiptV2):
         return contract.execution_completion_deadline
+    if isinstance(contract, DeletionTargetManifestV2):
+        return contract.execution_completion_deadline
     return None
 
 
@@ -776,6 +910,8 @@ def security_v1_3_json_schemas() -> dict[str, dict[str, object]]:
         EvidencePayloadBindingV2,
         EvidenceWrapperBindingV2,
         EncryptedEvidencePackageV2,
+        DeletionTargetReferenceV2,
+        DeletionTargetManifestV2,
         SensitiveExecutionGrantV2,
         ExecutorReceiptV2,
         KmsEncryptionContextV2,

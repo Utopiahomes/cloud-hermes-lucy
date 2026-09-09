@@ -89,8 +89,8 @@ durability claim.
 
 `contracts/security_v1_3.py` adds new wire identities rather than extending or
 reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
-context, owner assertion V2, permit V3, encrypted evidence package V2, sensitive
-execution grant V2, executor receipt V2, KMS encryption context V2, and v1.3
+context, owner assertion V2, permit V3, encrypted evidence package V2, deletion target
+manifest V2, sensitive execution grant V2, executor receipt V2, KMS encryption context V2, and v1.3
 verification keys. New signatures retain the
 already reviewed `lucy-cjson-1`
 canonicalizer, include their object type/version as a domain separator, and pin a
@@ -120,6 +120,14 @@ The wrapper commits to the current wrapping scope, exact wrapped-key reference a
 context. New ingestion requires matching scopes; moving only the wrapper requires an
 exact migration-receipt ID while leaving the ciphertext digest unchanged. This is a
 local typed boundary and does not migrate the accepted v1.2 archive.
+
+`DeletionTargetManifestV2` freezes one canonical root-evidence closure across encrypted
+archive representations and derived artifacts. Archive targets require the exact
+representation and wrapped-key reference; memory, embedding, result and projection
+cleanup targets cannot carry wrapped-key destruction authority. The signed manifest
+binds the realm/workspace, permit and owner assertion, closure and policy versions,
+canonical target digest, and separate claim/execution deadlines. It reports
+operational deletion policy only; cryptographic finality remains independent.
 
 `realm_sessions.py` holds exactly one deployment-owned private-realm credential per
 process and selects it only after workload identity has been verified. A request may

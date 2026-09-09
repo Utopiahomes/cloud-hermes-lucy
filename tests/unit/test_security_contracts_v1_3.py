@@ -17,6 +17,10 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
+    DeletionArtifactClass,
+    DeletionDisposition,
+    DeletionTargetManifestV2,
+    DeletionTargetReferenceV2,
     Ed25519V13Signer,
     EncryptedEvidencePackageV2,
     EvidencePayloadBindingV2,
@@ -32,6 +36,7 @@ from lucy.contracts.security_v1_3 import (
     V13SigningKeyPurpose,
     V13VerificationKeyStatus,
     V13VerificationKeyV1,
+    deletion_targets_digest_v2,
     security_v1_3_json_schemas,
 )
 
@@ -217,6 +222,60 @@ def _package(
     )
 
 
+def _deletion_targets() -> tuple[DeletionTargetReferenceV2, ...]:
+    return (
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.ENCRYPTED_ARCHIVE,
+            artifact_id=ZERO,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=ONE,
+            wrapped_key_ref=TWO,
+        ),
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.MEMORY_CLAIM,
+            artifact_id=THREE,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.INVALIDATE,
+        ),
+    )
+
+
+def _deletion_manifest(**changes: object) -> DeletionTargetManifestV2:
+    targets = _deletion_targets()
+    values: dict[str, object] = {
+        "signing_key_purpose": V13SigningKeyPurpose.POLICY_NOTARY,
+        "key_id": "policy-v13-test",
+        "issuer": "lucy-policy-v13-test",
+        "environment": DeploymentEnvironment.TEST,
+        "issued_at": NOW,
+        "manifest_id": TWO,
+        "permit_id": ONE,
+        "permit_digest": DIGEST,
+        "operation_id": FOUR,
+        "target_scope": _scope(),
+        "workspace_id": FOUR,
+        "root_evidence_id": ZERO,
+        "root_representation_id": ONE,
+        "owner_assertion_id": ONE,
+        "owner_assertion_digest": DIGEST,
+        "idempotency_key": "delete-root-zero",
+        "closure_version": 1,
+        "targets": targets,
+        "target_count": len(targets),
+        "targets_digest": deletion_targets_digest_v2(targets),
+        "tombstone_policy_version": 1,
+        "finality_policy_version": 1,
+        "permit_claim_deadline": NOW + timedelta(seconds=60),
+        "execution_completion_deadline": NOW + timedelta(seconds=120),
+        "nonce": NONCE,
+    }
+    values.update(changes)
+    return DeletionTargetManifestV2.model_validate(values)
+
+
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
     permit = _permit()
     assert permit.contract_version == "3"
@@ -340,6 +399,41 @@ def test_encrypted_package_v2_rejects_ciphertext_or_context_mismatch() -> None:
         )
 
 
+def test_deletion_manifest_v2_freezes_exact_archive_and_derived_closure() -> None:
+    manifest = _deletion_manifest()
+    assert manifest.target_count == 2
+    assert manifest.targets[0].wrapped_key_ref == TWO
+    with pytest.raises(ValidationError, match="target digest"):
+        _deletion_manifest(targets_digest="2" * 64)
+    with pytest.raises(ValidationError, match="canonical order"):
+        reversed_targets = tuple(reversed(_deletion_targets()))
+        _deletion_manifest(
+            targets=reversed_targets,
+            targets_digest=deletion_targets_digest_v2(reversed_targets),
+        )
+
+
+def test_deletion_target_separates_archive_key_authority_from_derived_cleanup() -> None:
+    with pytest.raises(ValidationError, match="archive deletion target"):
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.ENCRYPTED_ARCHIVE,
+            artifact_id=ZERO,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.DELETE,
+        )
+    with pytest.raises(ValidationError, match="archive key authority"):
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.MEMORY_CLAIM,
+            artifact_id=THREE,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=ONE,
+            wrapped_key_ref=TWO,
+        )
+
+
 def test_kms_context_has_only_fixed_nonsecret_keys() -> None:
     context = KmsEncryptionContextV2(
         tenant_account_id=ZERO,
@@ -370,6 +464,7 @@ def test_v13_schemas_and_models_reject_unknown_fields() -> None:
     assert schemas["SensitiveExecutionGrantV2"]["additionalProperties"] is False
     assert schemas["ExecutorReceiptV2"]["additionalProperties"] is False
     assert schemas["EncryptedEvidencePackageV2"]["additionalProperties"] is False
+    assert schemas["DeletionTargetManifestV2"]["additionalProperties"] is False
     with pytest.raises(ValidationError, match="extra_forbidden"):
         OriginScopeV1.model_validate({**_scope().model_dump(), "tenant_name": "secret"})
 
