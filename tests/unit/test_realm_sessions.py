@@ -41,8 +41,7 @@ def _binding(name: str, realm: UUID, database_url: str) -> RealmRuntimeBindingV1
 
 def test_verified_workload_selects_one_fixed_realm_connection() -> None:
     utopia = _binding("utopia", ONE, "postgresql://utopia:not-a-real-password@utopia.private/db")
-    alpha = _binding("alpha", TWO, "postgresql://alpha:secret@alpha.private/db")
-    registry = RealmSessionRegistry((utopia, alpha))
+    registry = RealmSessionRegistry((utopia,))
     bound = registry.for_verified_workload(
         "render:utopia:routine",
         action="memory.read",
@@ -70,12 +69,11 @@ def test_unknown_action_or_request_selected_scope_fails_uniformly() -> None:
             registry.for_verified_workload(**values)  # type: ignore[arg-type]
 
 
-def test_private_realm_bindings_cannot_share_credentials() -> None:
-    shared = "postgresql://shared:secret@shared.private/db"
-    with pytest.raises(RealmBindingConfigurationError, match="must not share"):
+def test_private_realm_process_cannot_hold_multiple_bindings() -> None:
+    with pytest.raises(RealmBindingConfigurationError, match="exactly one"):
         RealmSessionRegistry(
             (
-                _binding("utopia", ONE, shared),
-                _binding("alpha", TWO, shared),
+                _binding("utopia", ONE, "postgresql://utopia:secret@utopia.private/db"),
+                _binding("alpha", TWO, "postgresql://alpha:secret@alpha.private/db"),
             )
         )

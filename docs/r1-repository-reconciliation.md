@@ -92,11 +92,13 @@ distinct v1.3 key purpose. Permit admission is at most 60 seconds while executio
 completion remains a separate bounded deadline. A historical realm/storage mismatch
 requires an exact restore-mapping ID.
 
-`realm_sessions.py` selects database credentials only from a deployment-owned mapping
-after workload identity has been verified. A request may supply a realm/workspace hint
-only for conflict detection; it cannot select a credential. Unknown subjects/actions,
-conflicting hints, duplicate subjects, and shared private-realm credentials fail
-closed.
+`realm_sessions.py` holds exactly one deployment-owned private-realm credential per
+process and selects it only after workload identity has been verified. A request may
+supply a realm/workspace hint only for conflict detection; it cannot select a
+credential. Unknown subjects/actions, conflicting hints, and any attempt to configure
+multiple realm bindings in one process fail closed. A content-free directory/admission
+interface may resolve metadata for several realms, but it cannot hold or return these
+content credentials.
 
 Migration `0023_r1_scoped_memory` adds immutable content-scope and service-binding
 rows plus append-only scoped claims/events. PostgreSQL resolves the caller from

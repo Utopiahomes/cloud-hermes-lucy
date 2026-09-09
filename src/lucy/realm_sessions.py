@@ -40,24 +40,15 @@ class BoundRealmSessions:
 
 
 class RealmSessionRegistry:
-    """Deployment-owned registry populated after workload-identity verification."""
+    """One deployment process's fixed realm credential and session factory."""
 
     def __init__(self, bindings: tuple[RealmRuntimeBindingV1, ...]) -> None:
-        by_subject = {binding.workload_subject: binding for binding in bindings}
-        if not bindings or len(by_subject) != len(bindings):
+        if len(bindings) != 1:
             raise RealmBindingConfigurationError(
-                "realm runtime bindings must contain unique workload subjects"
+                "a realm process must contain exactly one runtime binding"
             )
-        database_urls = [binding.database_url.get_secret_value() for binding in bindings]
-        if len(set(database_urls)) != len(database_urls):
-            raise RealmBindingConfigurationError(
-                "R1 private realm workloads must not share database credentials"
-            )
-        self._bindings = by_subject
-        self._sessions = {
-            subject: create_session_factory(binding.database_url.get_secret_value())
-            for subject, binding in by_subject.items()
-        }
+        self._binding = bindings[0]
+        self._sessions = create_session_factory(self._binding.database_url.get_secret_value())
 
     def for_verified_workload(
         self,
@@ -68,8 +59,8 @@ class RealmSessionRegistry:
         requested_workspace_id: UUID | None = None,
     ) -> BoundRealmSessions:
         """Resolve a verified subject and reject any conflicting request hint."""
-        binding = self._bindings.get(workload_subject)
-        if binding is None or action not in binding.allowed_actions:
+        binding = self._binding
+        if workload_subject != binding.workload_subject or action not in binding.allowed_actions:
             raise RealmAccessDenied("realm workload is not authorized")
         if requested_realm_id is not None and (
             requested_realm_id != binding.target_scope.security_realm_id
@@ -77,4 +68,4 @@ class RealmSessionRegistry:
             raise RealmAccessDenied("realm workload is not authorized")
         if requested_workspace_id is not None and requested_workspace_id != binding.workspace_id:
             raise RealmAccessDenied("realm workload is not authorized")
-        return BoundRealmSessions(binding=binding, sessions=self._sessions[workload_subject])
+        return BoundRealmSessions(binding=binding, sessions=self._sessions)
