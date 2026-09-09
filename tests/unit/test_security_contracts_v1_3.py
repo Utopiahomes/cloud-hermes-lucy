@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, utils
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ from lucy.authorized_deletion_recovery import (
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
+    ExecutorQuotaV1,
     ExecutorResult,
     SensitiveActionV2,
 )
@@ -50,6 +52,7 @@ from lucy.executors.admission_v1_3 import (
     verify_deletion_invocation_v2,
     verify_retrieval_invocation_v2,
 )
+from lucy.executors.aws import AwsExecutorBackend, AwsExecutorTables
 from lucy.executors.core import ExecutorRejected
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
@@ -69,6 +72,8 @@ FOUR = UUID("00000000-0000-4000-8000-000000000004")
 NOW = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
 DIGEST = "1" * 64
 NONCE = "n" * 32
+EVIDENCE_KEY_ARN = "arn:aws:kms:us-east-1:123456789012:key/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+RECEIPT_KEY_ARN = "arn:aws:kms:us-east-1:123456789012:key/bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
 
 
 def _scope(*, realm: UUID = THREE, storage_epoch: int = 7) -> OriginScopeV1:
@@ -493,6 +498,158 @@ def test_v13_deletion_admission_binds_signed_exact_closure() -> None:
             identity=_executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
             checked_at=NOW + timedelta(seconds=70),
         )
+
+
+class _V13Dynamo:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.get_response: dict[str, object] = {}
+        self.put_error: ClientError | None = None
+
+    def get_item(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("get_item", kwargs))
+        return self.get_response
+
+    def put_item(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("put_item", kwargs))
+        if self.put_error is not None:
+            raise self.put_error
+        return {}
+
+    def transact_write_items(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("transact_write_items", kwargs))
+        return {}
+
+
+class _V13Kms:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def decrypt(self, **kwargs: object) -> dict[str, object]:
+        raise AssertionError("deletion adapter must not call KMS decrypt")
+
+    def sign(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(kwargs)
+        return {
+            "Signature": b"synthetic-signature",
+            "KeyId": RECEIPT_KEY_ARN,
+            "SigningAlgorithm": "ECDSA_SHA_256",
+        }
+
+
+def _v13_aws_adapter(
+    dynamo: _V13Dynamo, kms: _V13Kms, *, deletion: bool = False
+) -> AwsExecutorBackend:
+    return AwsExecutorBackend(
+        dynamo,
+        kms,
+        tables=AwsExecutorTables(
+            wrapped_keys="lucy-utopia-wrapped-keys-v13",
+            receipts="lucy-utopia-receipts-v13",
+            quotas="lucy-utopia-quotas-v13",
+            intents="lucy-utopia-deletion-intents-v13" if deletion else None,
+        ),
+        evidence_key_arn=None if deletion else EVIDENCE_KEY_ARN,
+        receipt_key_arn=RECEIPT_KEY_ARN,
+        minute_limit=3,
+        day_limit=10,
+    )
+
+
+def test_v13_aws_adapter_uses_exact_receipt_operations() -> None:
+    dynamo, kms = _V13Dynamo(), _V13Kms()
+    adapter = _v13_aws_adapter(dynamo, kms)
+    receipt = _receipt(key_id=RECEIPT_KEY_ARN)
+    dynamo.get_response = {
+        "Item": {
+            "operation_id": {"S": str(receipt.operation_id)},
+            "receipt_json": {"S": canonical_json_bytes(receipt).decode("utf-8")},
+            "receipt_digest": {"S": receipt.unsigned_digest_hex()},
+        }
+    }
+    assert adapter.load_receipt_v2(receipt.operation_id) == receipt
+    assert dynamo.calls[-1][1]["ConsistentRead"] is True
+    assert "ProjectionExpression" in dynamo.calls[-1][1]
+
+    signed = adapter.sign_receipt_v2(receipt)
+    assert signed.signature == base64.b64encode(b"synthetic-signature").decode("ascii")
+    assert kms.calls[-1]["MessageType"] == "DIGEST"
+    assert adapter.commit_retrieval_receipt_v2(signed) is True
+    method, call = dynamo.calls[-1]
+    assert method == "put_item"
+    assert call["ConditionExpression"] == "attribute_not_exists(operation_id)"
+    item = call["Item"]
+    assert isinstance(item, dict)
+    assert item["security_realm_id"]["S"] == str(receipt.target_scope.security_realm_id)
+    assert not any(name in {"scan", "query", "batch_get_item"} for name, _ in dynamo.calls)
+
+    dynamo.put_error = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem"
+    )
+    assert adapter.commit_retrieval_receipt_v2(signed) is False
+
+
+def test_v13_aws_deletion_commits_only_archive_key_targets_atomically() -> None:
+    dynamo, kms = _V13Dynamo(), _V13Kms()
+    adapter = _v13_aws_adapter(dynamo, kms, deletion=True)
+    permit = _permit(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        reason="owner_request",
+        max_records=10,
+        max_bytes=131_072,
+    )
+    manifest = _deletion_manifest(
+        permit_id=permit.permit_id,
+        permit_digest=permit.unsigned_digest_hex(),
+        operation_id=permit.operation_id,
+    )
+    grant = _grant(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        permit_digest=permit.unsigned_digest_hex(),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        encrypted_package_digest=manifest.unsigned_digest_hex(),
+        package_size_bytes=len(canonical_json_bytes(manifest)),
+        idempotency_key=manifest.idempotency_key,
+        max_records=10,
+        max_bytes=131_072,
+    )
+    receipt = _receipt(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        signing_key_purpose=V13SigningKeyPurpose.DELETION_RECEIPT,
+        key_id=RECEIPT_KEY_ARN,
+        result=ExecutorResult.DELETION_SUCCEEDED,
+        kms_request_id=None,
+        transaction_client_token=str(FOUR),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        finality_state="operationally_deleted",
+    )
+    assert adapter.commit_deletion_v2(
+        permit=permit,
+        grant=grant,
+        manifest=manifest,
+        receipt=receipt,
+        transaction_token=str(FOUR),
+        now=NOW + timedelta(seconds=30),
+        quota=ExecutorQuotaV1.phase1(SensitiveActionV2.EVIDENCE_DELETE),
+    )
+    assert kms.calls == []
+    method, call = dynamo.calls[-1]
+    assert method == "transact_write_items"
+    actions = call["TransactItems"]
+    assert isinstance(actions, list) and len(actions) == 5
+    deletes = [item["Delete"] for item in actions if "Delete" in item]
+    assert deletes == [
+        {
+            "TableName": "lucy-utopia-wrapped-keys-v13",
+            "Key": {"key_ref": {"S": str(TWO)}},
+            "ConditionExpression": "attribute_exists(key_ref)",
+        }
+    ]
+    intent = actions[0]["Put"]["Item"]
+    assert intent["security_realm_id"]["S"] == str(permit.target_scope.security_realm_id)
+    assert DeletionTargetManifestV2.model_validate_json(intent["manifest_json"]["S"]) == manifest
 
 
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:

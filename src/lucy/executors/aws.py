@@ -25,6 +25,12 @@ from lucy.contracts.security_v1_2 import (
     SensitiveActionPermitV2,
     SensitiveExecutionGrantV1,
 )
+from lucy.contracts.security_v1_3 import (
+    DeletionTargetManifestV2,
+    ExecutorReceiptV2,
+    SensitiveActionPermitV3,
+    SensitiveExecutionGrantV2,
+)
 from lucy.executors.models import WrappedKeyMaterial
 
 
@@ -101,6 +107,28 @@ class AwsExecutorBackend:
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("durable executor receipt is malformed") from exc
 
+    def load_receipt_v2(self, operation_id: UUID) -> ExecutorReceiptV2 | None:
+        """Load one exact realm-scoped receipt without table enumeration."""
+
+        response = self._dynamodb.get_item(
+            TableName=self._tables.receipts,
+            Key={"operation_id": {"S": str(operation_id)}},
+            ProjectionExpression="operation_id, receipt_json, receipt_digest",
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not isinstance(item, dict):
+            return None
+        try:
+            if item["operation_id"]["S"] != str(operation_id):
+                raise ValueError("receipt operation ID changed")
+            receipt = ExecutorReceiptV2.model_validate_json(item["receipt_json"]["S"])
+            if item["receipt_digest"]["S"] != receipt.unsigned_digest_hex():
+                raise ValueError("durable receipt digest does not match its contract")
+            return receipt
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("durable realm executor receipt is malformed") from exc
+
     def load_wrapped_key(self, key_ref: UUID) -> WrappedKeyMaterial | None:
         response = self._dynamodb.get_item(
             TableName=self._tables.wrapped_keys,
@@ -162,6 +190,24 @@ class AwsExecutorBackend:
             raise RuntimeError("KMS signing response used an unexpected algorithm")
         return receipt.model_copy(update={"signature": base64.b64encode(signature).decode("ascii")})
 
+    def sign_receipt_v2(self, receipt: ExecutorReceiptV2) -> ExecutorReceiptV2:
+        if receipt.key_id != self._receipt_key_arn or receipt.signature:
+            raise ValueError("receipt is not an unsigned V1.3 contract for the configured key")
+        response = self._kms.sign(
+            KeyId=self._receipt_key_arn,
+            Message=bytes.fromhex(receipt.unsigned_digest_hex()),
+            MessageType="DIGEST",
+            SigningAlgorithm="ECDSA_SHA_256",
+        )
+        signature = response.get("Signature")
+        if not isinstance(signature, bytes):
+            raise RuntimeError("KMS signing response did not contain a signature")
+        if response.get("KeyId", self._receipt_key_arn) != self._receipt_key_arn:
+            raise RuntimeError("KMS signing response used an unexpected key")
+        if response.get("SigningAlgorithm", "ECDSA_SHA_256") != "ECDSA_SHA_256":
+            raise RuntimeError("KMS signing response used an unexpected algorithm")
+        return receipt.model_copy(update={"signature": base64.b64encode(signature).decode("ascii")})
+
     def reserve_retrieval_quota(self, *, now: datetime, quota: ExecutorQuotaV1) -> None:
         actions = self._quota_updates(now, quota)
         self._dynamodb.transact_write_items(TransactItems=actions)
@@ -171,6 +217,19 @@ class AwsExecutorBackend:
             self._dynamodb.put_item(
                 TableName=self._tables.receipts,
                 Item=self._receipt_item(receipt),
+                ConditionExpression="attribute_not_exists(operation_id)",
+            )
+            return True
+        except ClientError as exc:
+            if _aws_error_code(exc) == "ConditionalCheckFailedException":
+                return False
+            raise
+
+    def commit_retrieval_receipt_v2(self, receipt: ExecutorReceiptV2) -> bool:
+        try:
+            self._dynamodb.put_item(
+                TableName=self._tables.receipts,
+                Item=self._receipt_item_v2(receipt),
                 ConditionExpression="attribute_not_exists(operation_id)",
             )
             return True
@@ -251,12 +310,101 @@ class AwsExecutorBackend:
                 return False
             raise
 
+    def commit_deletion_v2(
+        self,
+        *,
+        permit: SensitiveActionPermitV3,
+        grant: SensitiveExecutionGrantV2,
+        manifest: DeletionTargetManifestV2,
+        receipt: ExecutorReceiptV2,
+        transaction_token: str,
+        now: datetime,
+        quota: ExecutorQuotaV1,
+    ) -> bool:
+        """Commit one realm's content-free proof and exact wrapped-key removals."""
+
+        if self._tables.intents is None:
+            raise RuntimeError("deletion executor has no immutable intent table")
+        if len(transaction_token) > 36:
+            raise ValueError("DynamoDB client request token exceeds its hard limit")
+        actions: list[dict[str, Any]] = [
+            {
+                "Put": {
+                    "TableName": self._tables.intents,
+                    "Item": {
+                        "operation_id": {"S": str(receipt.operation_id)},
+                        "permit_id": {"S": str(receipt.permit_id)},
+                        "security_realm_id": {"S": str(receipt.target_scope.security_realm_id)},
+                        "manifest_id": {"S": str(manifest.manifest_id)},
+                        "manifest_digest": {"S": manifest.unsigned_digest_hex()},
+                        "manifest_json": {
+                            "S": canonical_json_bytes(manifest).decode("utf-8")
+                        },
+                        "permit_digest": {"S": permit.unsigned_digest_hex()},
+                        "permit_json": {"S": canonical_json_bytes(permit).decode("utf-8")},
+                        "grant_digest": {"S": grant.unsigned_digest_hex()},
+                        "grant_json": {"S": canonical_json_bytes(grant).decode("utf-8")},
+                        "accepted_at": {"S": _utc_text(now)},
+                    },
+                    "ConditionExpression": "attribute_not_exists(operation_id)",
+                }
+            },
+            {
+                "Put": {
+                    "TableName": self._tables.receipts,
+                    "Item": self._receipt_item_v2(receipt),
+                    "ConditionExpression": "attribute_not_exists(operation_id)",
+                }
+            },
+            *self._quota_updates(now, quota),
+        ]
+        actions.extend(
+            {
+                "Delete": {
+                    "TableName": self._tables.wrapped_keys,
+                    "Key": {"key_ref": {"S": str(target.wrapped_key_ref)}},
+                    "ConditionExpression": "attribute_exists(key_ref)",
+                }
+            }
+            for target in manifest.targets
+            if target.wrapped_key_ref is not None
+        )
+        if len(actions) > AWS_DYNAMODB_TRANSACTION_ACTION_LIMIT:
+            raise ValueError("deletion transaction exceeds the AWS action limit")
+        serialized = json.dumps(actions, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        if len(serialized) > AWS_DYNAMODB_TRANSACTION_BYTES_LIMIT:
+            raise ValueError("deletion transaction exceeds the AWS byte limit")
+        try:
+            self._dynamodb.transact_write_items(
+                TransactItems=actions,
+                ClientRequestToken=transaction_token,
+            )
+            return True
+        except ClientError as exc:
+            if _aws_error_code(exc) == "TransactionCanceledException":
+                return False
+            raise
+
     def _receipt_item(self, receipt: ExecutorReceiptV1) -> dict[str, dict[str, str]]:
         return {
             "operation_id": {"S": str(receipt.operation_id)},
             "action": {"S": receipt.action.value},
             "permit_id": {"S": str(receipt.permit_id)},
             "grant_id": {"S": str(receipt.execution_grant_id)},
+            "package_digest": {"S": receipt.package_digest},
+            "receipt_digest": {"S": receipt.unsigned_digest_hex()},
+            "receipt_json": {"S": canonical_json_bytes(receipt).decode("utf-8")},
+            "completed_at": {"S": _utc_text(receipt.completed_at)},
+        }
+
+    def _receipt_item_v2(self, receipt: ExecutorReceiptV2) -> dict[str, dict[str, str]]:
+        return {
+            "operation_id": {"S": str(receipt.operation_id)},
+            "action": {"S": receipt.action.value},
+            "permit_id": {"S": str(receipt.permit_id)},
+            "grant_id": {"S": str(receipt.execution_grant_id)},
+            "security_realm_id": {"S": str(receipt.target_scope.security_realm_id)},
+            "storage_epoch": {"N": str(receipt.target_scope.storage_epoch)},
             "package_digest": {"S": receipt.package_digest},
             "receipt_digest": {"S": receipt.unsigned_digest_hex()},
             "receipt_json": {"S": canonical_json_bytes(receipt).decode("utf-8")},

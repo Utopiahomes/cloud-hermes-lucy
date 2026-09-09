@@ -109,6 +109,7 @@ durability claim.
 | A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
 | Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
 | The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
+| The additive V1.3 AWS adapter loads one exact strongly consistent receipt, signs scoped receipts with the configured purpose key, conditionally persists retrieval receipts, and atomically records deletion authority/outcome/quota while removing only archive targets' exact wrapped keys | V1.3 contract and unchanged V1.2 executor unit suites; 41 passed plus Ruff and mypy | AWS adapter, V1.3 contracts, DynamoDB transaction shape/limits, KMS signing, or V1.2 compatibility |
 
 ## R1-2 checkpoint
 
@@ -153,6 +154,14 @@ exact current wrapper/KMS scope, record, canonical package digest, and byte size
 Deletion additionally live-verifies the signed closure and binds its owner evidence,
 idempotency identity, target count, digest, and canonical size. No AWS operation is
 implemented by this layer, and the deployed handler remains V1-only.
+
+The shared AWS adapter now has additive V1.3 receipt and deletion operations while
+its accepted V1 methods remain unchanged. V1.3 receipts are exact-key, strongly
+consistent reads and conditional writes with realm/epoch metadata. Deletion stores
+the signed permit, post-claim grant, frozen closure and scoped receipt together with
+both quota reservations in one DynamoDB transaction, deleting only exact wrapped-key
+references carried by encrypted-archive targets. Derived-memory targets cannot name
+or delete AWS key material. The adapter exposes no scan, query, or batch-read method.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
