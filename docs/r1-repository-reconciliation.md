@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0028` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0029` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -88,6 +88,7 @@ durability claim.
 | Realm-scoped encrypted evidence registration and replay, archive/workflow direct-table denial, foreign-scope rejection, exact claimed-package freeze/replay, and Python/PostgreSQL package-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Encrypted evidence/package V2 contract, migration 0026, actor/service bindings, or authority generations |
 | Policy-only post-claim V2 grant storage/replay, exact executor/caller/package binding, wrong-alias rejection, current-authority recheck, and Python/PostgreSQL grant-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Execution-grant V2 contract, migration 0027, executor/actor bindings, or authority generations |
 | Policy-only V2 receipt attestation/replay, exact grant/package/key-purpose binding, wrong-package denial, historical receipt acceptance after executor revocation, and digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Executor-receipt V2 contract, migration 0028, receipt trust/bindings, or deadline rules |
+| Workflow-only receipt reconciliation/replay, foreign-workflow denial, terminal state/digest persistence, and no caller-supplied receipt body | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0029, workflow binding, receipt attestation, or operation-state rules |
 
 ## R1-2 checkpoint
 
@@ -215,7 +216,14 @@ deadline. Executor revocation blocks future grants but does not suppress an exac
 receipt for a grant already issued, preserving an auditable revocation race instead
 of losing its outcome.
 
-The next R1-2 increment adds receipt-only reconciliation. Durable revocation
+Migration `0029_r1_receipt_reconcile` adds the workflow-only terminal transition.
+The reconciliation function accepts only an operation ID, locks that exact scoped
+operation, and derives the outcome solely from the immutable policy-written receipt
+attestation. Foreign workflows fail closed; successful and rejected executor results
+become distinct terminal states; exact retries return the stored outcome without a
+second event.
+
+The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain
 later R1-2 gates; this checkpoint does not claim R1-2 completion.
 

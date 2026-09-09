@@ -94,7 +94,9 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.store_sensitive_execution_grant_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.attest_executor_receipt_v2(uuid,jsonb) "
-                "TO lucy_utopia_policy"
+                "TO lucy_utopia_policy; "
+                "GRANT EXECUTE ON FUNCTION lucy.reconcile_sensitive_operation_v2(uuid) "
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
             )
         )
     engine.dispose()
@@ -231,7 +233,10 @@ def realm() -> dict[str, UUID]:
                     target_service_binding_id=service_binding_id,
                     content_scope_id=scope_id,
                     actor_role="sensitive_workflow",
-                    allowed_actions=["sensitive.operation.claim"],
+                    allowed_actions=[
+                        "sensitive.operation.claim",
+                        "sensitive.operation.reconcile",
+                    ],
                     binding_generation=1,
                     node_authz_epoch=1,
                     policy_version=1,
@@ -427,7 +432,7 @@ def test_current_authority_is_required_at_issue_and_claim(realm: dict[str, UUID]
 def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     realm: dict[str, UUID],
 ) -> None:
-    assert ARCHIVE_URL and POLICY_URL and WORKFLOW_URL and OWNER_URL
+    assert ARCHIVE_URL and POLICY_URL and WORKFLOW_URL and RAYMOND_WORKFLOW_URL and OWNER_URL
     evidence_id, representation_id, key_ref = uuid4(), uuid4(), uuid4()
     ciphertext = b"synthetic-realm-ciphertext-and-gcm-tag"
     digest = hashlib.sha256(ciphertext).hexdigest()
@@ -673,6 +678,32 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
             {"operation": permit.operation_id, "receipt": receipt.model_dump_json()},
         ).scalar_one()
     assert receipt_digest == receipt_replay == receipt.unsigned_digest_hex()
+    raymond = create_engine(RAYMOND_WORKFLOW_URL)
+    with (
+        pytest.raises(DBAPIError, match="sensitive reconciliation unavailable"),
+        raymond.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.reconcile_sensitive_operation_v2(:operation)"),
+            {"operation": permit.operation_id},
+        )
+    with workflow.begin() as connection:
+        reconciled = connection.execute(
+            text("SELECT lucy.reconcile_sensitive_operation_v2(:operation)"),
+            {"operation": permit.operation_id},
+        ).scalar_one()
+        reconcile_replay = connection.execute(
+            text("SELECT lucy.reconcile_sensitive_operation_v2(:operation)"),
+            {"operation": permit.operation_id},
+        ).scalar_one()
+    assert reconciled == {
+        "operation_id": str(permit.operation_id),
+        "state": "RECONCILED",
+        "result": "retrieval_succeeded",
+        "receipt_digest": receipt.unsigned_digest_hex(),
+        "replayed": False,
+    }
+    assert reconcile_replay == {**reconciled, "replayed": True}
     with pytest.raises(DBAPIError, match="permission denied"), workflow.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
     with owner.connect() as connection:
@@ -685,3 +716,15 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         assert connection.execute(
             text("SELECT count(*) FROM lucy.executor_receipt_attestations_v2")
         ).scalar_one() == 1
+        operation_state = connection.execute(
+            text(
+                "SELECT state,executor_result,executor_receipt_digest "
+                "FROM lucy.sensitive_operations_v2 WHERE id=:id"
+            ),
+            {"id": permit.operation_id},
+        ).one()
+        assert operation_state == (
+            "RECONCILED",
+            "retrieval_succeeded",
+            receipt.unsigned_digest_hex(),
+        )

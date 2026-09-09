@@ -939,6 +939,12 @@ class SensitiveOperationV2Row(Base):
     claim_idempotency_key: Mapped[str] = mapped_column(String(512))
     state: Mapped[str] = mapped_column(String(20))
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    receipt_attestation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lucy.executor_receipt_attestations_v2.id")
+    )
+    executor_receipt_digest: Mapped[str | None] = mapped_column(String(64))
+    executor_result: Mapped[str | None] = mapped_column(String(40))
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SensitiveOperationEventV2Row(Base):
