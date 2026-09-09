@@ -1,4 +1,49 @@
-# Security Baseline v1.2 AWS deployment
+# Security Baseline AWS deployment
+
+## V1.3 per-realm template (local preparation only)
+
+`security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.
+The checked-in `security-baseline-v1.3.yaml` is a fail-closed derivation: its
+renderer first verifies the exact accepted v1.2 SHA-256, then applies counted
+changes for one explicit realm. Regenerate it after an intentional renderer
+change with:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\render_security_v1_3_template.py `
+  --output deploy\aws\security-baseline-v1.3.yaml `
+  --force
+```
+
+Deploy one stack per realm with a unique `ResourceNamespace`. The realm UUIDs,
+binding generations, storage epoch, Render service identities, and artifact
+version are required stack parameters. Each stack creates its own KMS keys,
+DynamoDB tables, caller roles, runtime roles, functions, and qualified
+`realm-v13` aliases. The functions derive scope and caller identity only from
+deployment-owned environment values; invocation JSON cannot choose a realm.
+
+After a stack is complete and termination-protected, save its read-only
+`describe-stacks` response. Combine that evidence with the reviewed,
+content-free PostgreSQL binding description:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\build_realm_security_stamp_v1_3.py `
+  --stack-description secrets\generated\utopia-stack.json `
+  --binding secrets\generated\utopia-binding.json `
+  --expected-account-id <12-digit-target-account> `
+  --output secrets\generated\utopia-realm-security-stamp.json
+```
+
+The builder rejects incomplete stacks, missing termination protection, any
+realm mismatch between parameters, outputs, and PostgreSQL identity, cross-
+account or unqualified executor bindings, and unknown binding fields. Its
+output contains the canonical `RealmSecurityStampV1` and digest consumed by
+the quarantined PostgreSQL provisioner. These preparation tools do not call
+AWS, modify PostgreSQL, enable paid traffic, or enable transcript capture.
+
+The v1.3 template is not production authorization. A dedicated deployed-state
+verifier and synthetic realm acceptance remain required before commissioning.
+
+## V1.2 accepted deployment
 
 Do not retry the v1.2 CloudFormation stack until the read-only preflight passes.
 It verifies the exact MFA-backed Identity Center administrator and target

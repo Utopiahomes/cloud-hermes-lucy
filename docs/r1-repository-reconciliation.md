@@ -3,8 +3,9 @@
 Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
 single-realm process sessions, authenticated admission, scoped memory, sensitive
 operations, deletion recovery, and scoped off-record enforcement are implemented
-locally. R1-2 production stamps and commissioning remain outstanding; production
-provisioning remains disabled.
+locally. A repeatable per-realm AWS template and validated AWS-to-PostgreSQL stamp
+handoff are prepared locally. R1-2 deployed verification and commissioning remain
+outstanding; production provisioning remains disabled.
 
 ## Frozen baseline
 
@@ -112,6 +113,8 @@ durability claim.
 | The additive V1.3 AWS adapter loads one exact strongly consistent receipt, signs scoped receipts with the configured purpose key, conditionally persists retrieval receipts, and atomically records deletion authority/outcome/quota while removing only archive targets' exact wrapped keys | V1.3 contract and unchanged V1.2 executor unit suites; 41 passed plus Ruff and mypy | AWS adapter, V1.3 contracts, DynamoDB transaction shape/limits, KMS signing, or V1.2 compatibility |
 | The additive V1.3 executor core admits scope before any effect, performs one authenticated retrieval decrypt with no plaintext on replay, produces exact scoped KMS-signed receipts, and commits deletion without evidence-key/decrypt authority | V1.3 contract/core and unchanged V1.2 executor unit suites; 43 passed plus Ruff and mypy | V1.3 executor admission/core, AWS backend protocol, receipt construction/replay, AES-GCM binding, quota semantics, or V1.2 compatibility |
 | Separate V1.3 Lambda entry points parse only V2 invocations, pin one realm/workspace/deployment/caller/qualified alias from environment, reject `$LATEST` or cross-scope configuration, emit content-free metrics, and scrub unexpected failure text | V1.3 handler and unchanged V1.2 executor unit suites; 45 passed plus Ruff and mypy | V1.3 handler/runtime configuration, environment contract, log/metric behavior, or V1.2 compatibility |
+| The repeatable V1.3 CloudFormation stamp is derived only from the exact accepted V1.2 template digest, requires one explicit realm identity, creates separate physical keys/tables/roles/executors per stack, pins realm scope and caller identity in Lambda configuration, and enforces the complete V2 realm context in KMS and IAM | `tests/unit/test_aws_security_v1_3_template.py`; 5 passed plus Ruff and mypy | Frozen V1.2 template, V1.3 renderer/template, executor environment, KMS context, IAM policies, or realm output contract |
+| The content-free stamp builder accepts exactly one complete termination-protected stack, cross-checks every realm parameter/output against the PostgreSQL binding description, rejects unknown fields and cross-account AWS bindings, and emits a validated canonical `RealmSecurityStampV1` with its digest | `tests/unit/test_realm_security_stamp_builder_v1_3.py`; 5 passed plus Ruff and mypy | CloudFormation realm outputs, stamp builder/model, AWS binding formats, or PostgreSQL realm-binding input contract |
 
 ## R1-2 checkpoint
 
@@ -130,8 +133,8 @@ requires an exact restore-mapping ID.
 claims in PostgreSQL before policy signs a post-claim grant. It binds the permit
 digest, claim/admission times, operation and idempotency identity, target and active
 scope, exact qualified executor alias/version/caller, package digest, and action-
-specific record/byte ceilings. This is a typed local contract only at this checkpoint;
-no v1.3 database gate, deployed executor, or cloud route claims implementation yet.
+specific record/byte ceilings. The additive database gates and local executor path
+now implement this contract; no v1.3 cloud route has been deployed.
 
 `ExecutorReceiptV2` preserves ECDSA P-256 for KMS-compatible executor signing while
 owner, permit, and grant contracts remain Ed25519. The v1.3 trust store pins the
@@ -145,8 +148,8 @@ The executor wire boundary now has additive V2 invocation and result types. They
 accept only the V1.3 permit, post-claim grant, scoped package or deletion manifest,
 and scoped receipt contracts; action confusion, receipt-digest substitution,
 deletion plaintext, and replayed plaintext fail validation. The frozen V1 invocation
-and result types remain unchanged. A separate V1.3 Lambda entry point now exists;
-neither it nor a V1.3 AWS template has been deployed at this checkpoint.
+and result types remain unchanged. Separate V1.3 Lambda entry points and a local
+per-realm CloudFormation stamp now exist; neither has been deployed.
 
 `executors/admission_v1_3.py` adds the pure pre-effect admission layer. A claimed
 permit is verified as historical authorization evidence because its 60-second
@@ -178,8 +181,20 @@ points. Each runtime derives one target scope, workspace, deployment binding, ca
 executor identity, published version, and qualified alias from deployment-owned
 environment. Request JSON cannot select those values. The handler accepts only V2
 invocations, rejects unqualified/moving execution, emits content-free V1.3 metrics,
-and never logs exception text. This path is locally tested but not yet referenced by
-a deployed Lambda version or realm CloudFormation stamp.
+and never logs exception text. The derived per-realm CloudFormation stamp references
+these handlers through distinct functions and `realm-v13` aliases, but no Lambda
+version or realm stack has been deployed.
+
+`deploy/aws/security-baseline-v1.3.yaml` preserves the accepted V1.2 resource
+boundary while making one stack equal one realm security stamp. Its fail-closed
+renderer pins the exact V1.2 input digest and requires every expected transformation
+count. Deployment-owned scope JSON, execution binding, workspace, caller role,
+executor identity, and alias are injected into each executor. KMS and IAM require
+the full `KmsEncryptionContextV2` realm context, including the realm and tenant IDs;
+the evidence ID remains dynamic but mandatory. A validated handoff builder combines
+the stack's read-only outputs with the reviewed PostgreSQL realm description and
+produces the canonical `RealmSecurityStampV1` plus digest. Deployed verification and
+synthetic cloud acceptance remain open gates.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
