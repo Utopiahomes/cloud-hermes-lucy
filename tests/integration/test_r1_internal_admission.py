@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.authenticated_memory import AuthenticatedScopedMemoryGateway
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
     ExactObjectSelectorV1,
@@ -33,6 +34,7 @@ from lucy.internal_admission import (
     VerifiedCustomerIdentityV1,
 )
 from lucy.realm_sessions import RealmRuntimeBindingV1, RealmSessionRegistry
+from lucy.scoped_memory import ScopedMemoryWrite
 from lucy.tenancy import NodeFoundation, TenancyService
 
 APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -255,6 +257,15 @@ def _admission(binding: RealmRuntimeBindingV1, token: str) -> RealmInternalAdmis
     )
 
 
+def _memory_gateway(
+    fixture: RealmFixture, token: str
+) -> AuthenticatedScopedMemoryGateway:
+    return AuthenticatedScopedMemoryGateway(
+        admission=_admission(fixture.runtime_binding, token),
+        workspace_id=fixture.foundation.workspace_id,
+    )
+
+
 def _admit(service: RealmInternalAdmissionService, workspace_id: UUID, token: str):
     return service.admit(
         credential=SecretStr(token),
@@ -299,6 +310,63 @@ def test_utopia_and_raymond_resolve_separate_contexts_and_foreign_binding_fails(
             _admission(stale_binding, "utopia-token"),
             utopia.foundation.workspace_id,
             "utopia-token",
+        )
+
+
+def test_authenticated_gateway_rechecks_authority_before_each_memory_effect(
+    realms: tuple[RealmFixture, RealmFixture, object, object],
+) -> None:
+    utopia, raymond, app_sessions, owner_sessions = realms
+    with owner_sessions.begin() as session:
+        session.execute(
+            text(
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint), "
+                "lucy.search_scoped_memory_v1(text,integer) TO "
+                "lucy_utopia_routine,lucy_raymond_routine"
+            )
+        )
+    utopia_gateway = _memory_gateway(utopia, "utopia-token")
+    raymond_gateway = _memory_gateway(raymond, "raymond-token")
+    candidate = ScopedMemoryWrite(
+        idempotency_key="authenticated-canary",
+        subject="Lucy",
+        predicate="realm",
+        object="UTOPIA-AUTHENTICATED-CANARY",
+        confidence_millionths=1_000_000,
+    )
+
+    assert utopia_gateway.write(
+        credential=SecretStr("utopia-token"),
+        request_id=uuid4(),
+        candidate=candidate,
+        checked_at=datetime.now(UTC),
+    ).replayed is False
+    assert utopia_gateway.search(
+        credential=SecretStr("utopia-token"),
+        request_id=uuid4(),
+        query="UTOPIA-AUTHENTICATED-CANARY",
+        checked_at=datetime.now(UTC),
+    )[0].object == "UTOPIA-AUTHENTICATED-CANARY"
+    assert raymond_gateway.search(
+        credential=SecretStr("raymond-token"),
+        request_id=uuid4(),
+        query="UTOPIA-AUTHENTICATED-CANARY",
+        checked_at=datetime.now(UTC),
+    ) == ()
+
+    with app_sessions.begin() as session:
+        session.execute(
+            update(NodeMembershipRow)
+            .where(NodeMembershipRow.id == utopia.membership_id)
+            .values(status="revoked", generation=2)
+        )
+    with pytest.raises(InternalAdmissionDenied, match="not authorized"):
+        utopia_gateway.search(
+            credential=SecretStr("utopia-token"),
+            request_id=uuid4(),
+            query="UTOPIA-AUTHENTICATED-CANARY",
+            checked_at=datetime.now(UTC),
         )
 
 

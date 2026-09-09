@@ -1,9 +1,9 @@
 # R1 repository reconciliation
 
 Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
-single-realm process sessions, authenticated-admission interfaces, and the first
-scoped-memory PostgreSQL boundary are implemented locally. Production provisioning
-remains disabled.
+single-realm process sessions, authenticated admission, and an admission-gated
+scoped-memory effect path are implemented locally. Production provisioning remains
+disabled.
 
 ## Frozen baseline
 
@@ -83,6 +83,7 @@ durability claim.
 | Raymond/Utopia/Alpha execute-only memory isolation, direct-table denial, idempotent replay/conflict, unbound-login denial | `tests/integration/test_r1_scoped_memory.py` on disposable PostgreSQL 16; 2 passed | Scoped-memory schema/functions, bootstrap roles, or client change |
 | Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
 | Utopia/Raymond authenticated workspace resolution, foreign channel/stale binding denial, monotonic membership/channel/service/node authority, directory SQL least privilege | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 6 passed | Directory function/grants, authority-generation schema, tenancy, or admission client change |
+| Authenticated Utopia memory write/read, Raymond isolation, and current-authority recheck before every effect | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 7 passed total | Admission gateway, realm session binding, scoped-memory client/function, or authority transition change |
 
 ## R1-2 checkpoint
 
@@ -129,12 +130,18 @@ process fixtures and realm-specific audiences. Membership, channel, service-bind
 principal, and node authority changes are monotonic: revocation/disable cannot be
 reversed, and generation or epoch changes invalidate stale admission.
 
-The next R1-2 increment is to place the admitted context in front of the scoped-memory
-client through an authenticated internal API fixture, proving that a valid context can
-read its own workspace while forged/stale contexts cannot reach the effect boundary.
-Sensitive-chain parameterization, durable revocation acknowledgement, OTR/deletion
-closure, and revocation-race/receipt evidence remain later R1-2 gates; this checkpoint
-does not claim R1-2 completion.
+`authenticated_memory.py` places that admission decision directly in front of the
+scoped-memory effect. The caller supplies identity proof and operation content but no
+realm, workspace, or database selector. The workspace is fixed deployment
+configuration, and the memory session is derived from the same admission object's
+single realm binding rather than injected separately. A fresh directory decision is
+required before every read or write; a revoked membership therefore cannot reach the
+memory client. The resolved context remains server-only and is never accepted as a
+bearer credential.
+
+The next R1-2 increment is sensitive-chain scope parameterization. Durable revocation
+acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain
+later R1-2 gates; this checkpoint does not claim R1-2 completion.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

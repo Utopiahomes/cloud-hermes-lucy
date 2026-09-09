@@ -22,6 +22,7 @@ from lucy.contracts.security_v1_3 import (
     build_resolved_execution_context_v1,
 )
 from lucy.realm_sessions import RealmSessionRegistry
+from lucy.scoped_memory import ScopedMemoryService
 
 
 class InternalAdmissionDenied(PermissionError):
@@ -271,6 +272,14 @@ class RealmInternalAdmissionService:
                 "context_issuer": binding.context_issuer,
             }
         )
+
+    def _scoped_memory_for_effect(self, *, action: str) -> ScopedMemoryService:
+        """Build the effect client from this admission service's fixed realm binding."""
+        bound = self._sessions.for_verified_workload(
+            self._workload_subject,
+            action=action,
+        )
+        return ScopedMemoryService(bound.sessions)
 
     @staticmethod
     def _validate_decision(
