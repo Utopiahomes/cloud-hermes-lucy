@@ -106,6 +106,7 @@ durability claim.
 | Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
 | An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
 | Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives only the capture-enforcing archive entry point | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`, scoped integration and deployment-boundary tests; rendered SQL applied to disposable PostgreSQL; 19 checks passed across the focused passes | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
+| A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
 
 ## R1-2 checkpoint
 
@@ -341,11 +342,23 @@ stamp was applied to the disposable PostgreSQL environment and its effective gra
 were queried. It does not create realm directory rows, AWS identities, Render
 services, or an activation decision.
 
+`realm_provisioning.py` and `provision_realm_bindings_v1_3.py` make the next
+commissioning boundary deterministic. One strict, content-free, canonical manifest
+pins the tenant/node/tenure/realm/workspace, four namespace-bound PostgreSQL and
+service identities, authority generations, and distinct same-account/same-region
+qualified retrieval/deletion executor aliases and receipt keys. The production
+utility requires the private migration identity, TLS, quarantined admission,
+capture-off state, and both maintenance locks. It applies the entire stamp in one
+transaction, rejects conflicting or partial prior state, and treats an exact replay
+as read-only. The path has been proven on disposable PostgreSQL only; no production
+realm has been provisioned.
+
 The scoped retrieval and deletion chains are complete through reconciliation, finality
 observation, quarantined restore replay, scoped OTR enforcement, and the documented
 post-grant revocation race. The R1-2 local behavioral exit evidence is complete, and
-its realm-parameterized PostgreSQL role stamp is implemented. Realm directory/binding
-provisioning plus AWS and Render stamps remain before R1-2 can be commissioned.
+its realm-parameterized PostgreSQL role stamp and deterministic directory/binding
+provisioner are implemented. Realm-specific AWS and Render stamps remain before R1-2
+can be commissioned.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 

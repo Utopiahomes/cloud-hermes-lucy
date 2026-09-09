@@ -151,3 +151,29 @@ After a successful run, put only each service's matching runtime URL on that
 service, remove the temporary migration resource and its environment snapshot,
 and verify the database inbound allowlist is still empty. Never retain the
 migration-owner URL on a continuously running service.
+
+## Provision one V1.3 realm binding stamp
+
+After the realm LOGIN role stamp is applied and the tenant/node/tenure/realm,
+workspace, four service principals, and AWS executor aliases exist, apply their
+reviewed relationships with:
+
+```text
+python deploy/postgres/provision_realm_bindings_v1_3.py
+```
+
+This temporary migration-only operation requires production Render, disabled
+transcript capture, quarantined runtime admission, TLS, the private
+`lucy_migration` URL, and the exact authorization marker
+`security-v1.3-quarantined-realm-binding-provision`. Supply the content-free
+`lucy.realm-security-stamp.v1` JSON as `LUCY_REALM_SECURITY_STAMP_JSON` and its
+separately reviewed canonical SHA-256 as
+`LUCY_REALM_SECURITY_STAMP_SHA256`.
+
+The stamp contains identifiers, role names, qualified Lambda alias ARNs, and KMS
+key ARNs, but no passwords, tokens, private content, or signing material. The
+utility verifies all four PostgreSQL LOGINs and the complete realm foundation,
+takes the maintenance and admission locks, and applies the content scope,
+service/actor bindings, and executor bindings in one transaction. An exact retry
+is read-only; a conflicting or partial prior stamp fails closed and rolls back.
+Remove the temporary service and its migration URL after the receipt is retained.
