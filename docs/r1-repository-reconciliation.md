@@ -111,6 +111,7 @@ durability claim.
 | The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
 | The additive V1.3 AWS adapter loads one exact strongly consistent receipt, signs scoped receipts with the configured purpose key, conditionally persists retrieval receipts, and atomically records deletion authority/outcome/quota while removing only archive targets' exact wrapped keys | V1.3 contract and unchanged V1.2 executor unit suites; 41 passed plus Ruff and mypy | AWS adapter, V1.3 contracts, DynamoDB transaction shape/limits, KMS signing, or V1.2 compatibility |
 | The additive V1.3 executor core admits scope before any effect, performs one authenticated retrieval decrypt with no plaintext on replay, produces exact scoped KMS-signed receipts, and commits deletion without evidence-key/decrypt authority | V1.3 contract/core and unchanged V1.2 executor unit suites; 43 passed plus Ruff and mypy | V1.3 executor admission/core, AWS backend protocol, receipt construction/replay, AES-GCM binding, quota semantics, or V1.2 compatibility |
+| Separate V1.3 Lambda entry points parse only V2 invocations, pin one realm/workspace/deployment/caller/qualified alias from environment, reject `$LATEST` or cross-scope configuration, emit content-free metrics, and scrub unexpected failure text | V1.3 handler and unchanged V1.2 executor unit suites; 45 passed plus Ruff and mypy | V1.3 handler/runtime configuration, environment contract, log/metric behavior, or V1.2 compatibility |
 
 ## R1-2 checkpoint
 
@@ -144,8 +145,8 @@ The executor wire boundary now has additive V2 invocation and result types. They
 accept only the V1.3 permit, post-claim grant, scoped package or deletion manifest,
 and scoped receipt contracts; action confusion, receipt-digest substitution,
 deletion plaintext, and replayed plaintext fail validation. The frozen V1 invocation
-and result types remain unchanged. The deployed Lambda handler/runtime selection is
-still V1-only at this checkpoint and must not be stamped as a V1.3 executor yet.
+and result types remain unchanged. A separate V1.3 Lambda entry point now exists;
+neither it nor a V1.3 AWS template has been deployed at this checkpoint.
 
 `executors/admission_v1_3.py` adds the pure pre-effect admission layer. A claimed
 permit is verified as historical authorization evidence because its 60-second
@@ -170,8 +171,15 @@ authenticates the payload with its V2 header/context, bounds plaintext, persists
 purpose-scoped receipt, and returns plaintext only for the winning first execution.
 An exact retry replays the durable receipt without decrypting or returning plaintext.
 Deletion constructs a content-free operational-deletion receipt and commits through
-the atomic adapter path; its core has no evidence key or decrypt capability. The
-production Lambda handler/runtime selection remains V1-only.
+the atomic adapter path; its core has no evidence key or decrypt capability.
+
+`executors/handlers_v1_3.py` exposes separate V1.3 retrieval and deletion entry
+points. Each runtime derives one target scope, workspace, deployment binding, caller,
+executor identity, published version, and qualified alias from deployment-owned
+environment. Request JSON cannot select those values. The handler accepts only V2
+invocations, rejects unqualified/moving execution, emits content-free V1.3 metrics,
+and never logs exception text. This path is locally tested but not yet referenced by
+a deployed Lambda version or realm CloudFormation stamp.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,

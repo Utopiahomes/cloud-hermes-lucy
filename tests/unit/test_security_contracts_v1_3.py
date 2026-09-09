@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -48,6 +50,7 @@ from lucy.contracts.security_v1_3 import (
     deletion_targets_digest_v2,
     security_v1_3_json_schemas,
 )
+from lucy.executors import handlers_v1_3
 from lucy.executors.admission_v1_3 import (
     RealmExecutorIdentityV1,
     verify_deletion_invocation_v2,
@@ -850,6 +853,100 @@ def test_v13_deletion_core_commits_once_and_never_decrypts() -> None:
     replay = executor.execute(invocation, lambda_request_id="lambda-v13-delete-replay")
     assert replay.replayed is True
     assert backend.deletion_commits == 1 and backend.decrypt_calls == 0
+
+
+def test_v13_lambda_identity_is_fixed_by_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alias = _grant().executor_alias_arn
+    values = {
+        "AWS_LAMBDA_FUNCTION_NAME": "lucy-utopia-evidence-executor-v13",
+        "LUCY_EXECUTOR_ALIAS_NAME": "production",
+        "LUCY_V13_TARGET_SCOPE_JSON": _scope().model_dump_json(),
+        "LUCY_V13_EXECUTION_BINDING_JSON": _binding().model_dump_json(),
+        "LUCY_V13_WORKSPACE_ID": str(FOUR),
+        "LUCY_V13_CALLER_IDENTITY": _grant().caller_identity,
+        "LUCY_EXECUTOR_IDENTITY": _grant().executor_identity,
+        "LUCY_EXECUTOR_ENVIRONMENT": DeploymentEnvironment.TEST.value,
+        "LUCY_ARCHIVE_RECORD_VERSION": "1",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    identity = handlers_v1_3._identity_from_environment(
+        SensitiveActionV2.EVIDENCE_RETRIEVE, alias, "1"
+    )
+    assert identity.target_scope == _scope()
+    assert identity.caller_identity == _grant().caller_identity
+
+    monkeypatch.setenv(
+        "LUCY_V13_TARGET_SCOPE_JSON", _scope(realm=FOUR).model_dump_json()
+    )
+    with pytest.raises(ValueError, match="scope and active binding differ"):
+        handlers_v1_3._identity_from_environment(
+            SensitiveActionV2.EVIDENCE_RETRIEVE, alias, "1"
+        )
+
+
+def test_v13_lambda_handler_routes_valid_contract_and_scrubs_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    permit = _permit()
+    package = _package()
+    invocation = RetrievalExecutorInvocationV2(
+        permit=permit,
+        execution_grant=_grant(),
+        package=package,
+    )
+    receipt = _receipt()
+    expected = ExecutorInvocationResultV2(
+        action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+        receipt=receipt,
+        receipt_digest=receipt.unsigned_digest_hex(),
+        replayed=False,
+        plaintext_b64="c3ludGhldGlj",
+    )
+
+    class _Executor:
+        def execute(self, *_args: object, **_kwargs: object) -> ExecutorInvocationResultV2:
+            return expected
+
+    class _Runtime:
+        executor = _Executor()
+
+        @staticmethod
+        def verify_context(context: SimpleNamespace) -> None:
+            assert context.aws_request_id == "lambda-v13-handler"
+
+    monkeypatch.setattr(handlers_v1_3, "_runtime", lambda *_args: _Runtime())
+    context = SimpleNamespace(
+        invoked_function_arn=_grant().executor_alias_arn,
+        function_version="1",
+        aws_request_id="lambda-v13-handler",
+    )
+    response = handlers_v1_3.realm_retrieval_lambda_handler(
+        invocation.model_dump(mode="json"), context
+    )
+    assert response["ok"] is True
+    assert response["result"]["object_type"] == "lucy.executor-invocation-result.v2"
+
+    forbidden = "synthetic private transcript"
+
+    class _FailingExecutor:
+        def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError(forbidden)
+
+    _Runtime.executor = _FailingExecutor()
+    with caplog.at_level(logging.ERROR, logger="lucy.executor.v1_3"):
+        failed = handlers_v1_3.realm_retrieval_lambda_handler(
+            invocation.model_dump(mode="json"), context
+        )
+    assert failed == {
+        "ok": False,
+        "error": "executor_unavailable",
+        "code": "internal_failure",
+    }
+    assert forbidden not in caplog.text
 
 
 def test_permit_v3_binds_scope_deadlines_and_key_purpose() -> None:
