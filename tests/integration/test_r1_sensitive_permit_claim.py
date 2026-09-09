@@ -62,7 +62,9 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.executor_receipt_attestations_v2, "
+                "TRUNCATE lucy.scoped_evidence_deletion_fences_v2, "
+                "lucy.scoped_memory_claim_sources_v2, "
+                "lucy.executor_receipt_attestations_v2, "
                 "lucy.sensitive_execution_grants_v2, "
                 "lucy.realm_executor_bindings_v2, lucy.sensitive_operation_packages_v2, "
                 "lucy.scoped_evidence_wrappers_v2, lucy.scoped_evidence_payloads_v2, "
@@ -96,7 +98,9 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.attest_executor_receipt_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.reconcile_sensitive_operation_v2(uuid) "
-                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
+                "GRANT EXECUTE ON FUNCTION lucy.write_evidence_derived_memory_claim_v2("
+                "text,text,text,text,bigint,uuid[]) TO lucy_utopia_routine"
             )
         )
     engine.dispose()
@@ -183,7 +187,7 @@ def realm() -> dict[str, UUID]:
                 service_principal_id=evidence_id,
                 content_scope_id=scope_id,
                 service_role="realm_evidence",
-                allowed_actions=["evidence.archive", "evidence.retrieve"],
+                allowed_actions=["evidence.archive", "evidence.retrieve", "memory.write"],
                 binding_generation=1,
                 node_authz_epoch=1,
                 policy_version=1,
@@ -520,6 +524,55 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         )
     with pytest.raises(DBAPIError, match="permission denied"), archive.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
+    with archive.begin() as connection:
+        derived = connection.execute(
+            text(
+                "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                ":key,:subject,:predicate,:object,:confidence,:sources)"
+            ),
+            {
+                "key": "derived-memory-one",
+                "subject": "Ray",
+                "predicate": "prefers",
+                "object": "durable provenance",
+                "confidence": 900_000,
+                "sources": [evidence_id],
+            },
+        ).scalar_one()
+        derived_replay = connection.execute(
+            text(
+                "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                ":key,:subject,:predicate,:object,:confidence,:sources)"
+            ),
+            {
+                "key": "derived-memory-one",
+                "subject": "Ray",
+                "predicate": "prefers",
+                "object": "durable provenance",
+                "confidence": 900_000,
+                "sources": [evidence_id],
+            },
+        ).scalar_one()
+    assert derived["replayed"] is False
+    assert derived_replay == {**derived, "replayed": True}
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
+        archive.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                ":key,:subject,:predicate,:object,:confidence,:sources)"
+            ),
+            {
+                "key": "foreign-derived-memory",
+                "subject": "Ray",
+                "predicate": "prefers",
+                "object": "foreign evidence",
+                "confidence": 900_000,
+                "sources": [uuid4()],
+            },
+        )
     permit = _permit(realm, evidence_id=evidence_id)
     with policy.begin() as connection:
         connection.execute(
@@ -715,6 +768,9 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         ).scalar_one() == 1
         assert connection.execute(
             text("SELECT count(*) FROM lucy.executor_receipt_attestations_v2")
+        ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_memory_claim_sources_v2")
         ).scalar_one() == 1
         operation_state = connection.execute(
             text(

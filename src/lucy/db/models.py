@@ -1101,6 +1101,33 @@ class ScopedMemoryClaimRow(Base):
     object: Mapped[str] = mapped_column(Text)
     confidence_millionths: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(20))
+    origin_class: Mapped[str] = mapped_column(String(30), default="direct_input")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryClaimSourceV2Row(Base):
+    __tablename__ = "scoped_memory_claim_sources_v2"
+    __table_args__ = {"schema": "lucy"}
+    claim_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_memory_claims_v1.id"), primary_key=True
+    )
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_records_v2.id"), primary_key=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedEvidenceDeletionFenceV2Row(Base):
+    __tablename__ = "scoped_evidence_deletion_fences_v2"
+    __table_args__ = {"schema": "lucy"}
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_records_v2.id"), primary_key=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), unique=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

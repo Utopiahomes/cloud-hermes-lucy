@@ -25,6 +25,10 @@ class ScopedMemoryWrite(BaseModel):
     confidence_millionths: int = Field(ge=0, le=1_000_000)
 
 
+class EvidenceDerivedScopedMemoryWrite(ScopedMemoryWrite):
+    source_evidence_ids: tuple[UUID, ...] = Field(min_length=1, max_length=16)
+
+
 class ScopedMemoryWriteResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     claim_id: UUID
@@ -62,6 +66,34 @@ class ScopedMemoryService:
                         "predicate": candidate.predicate,
                         "object": candidate.object,
                         "confidence": candidate.confidence_millionths,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise ScopedMemoryUnavailable("scoped memory operation is unavailable") from exc
+        return ScopedMemoryWriteResult.model_validate(result)
+
+    def write_derived(
+        self, candidate: EvidenceDerivedScopedMemoryWrite
+    ) -> ScopedMemoryWriteResult:
+        findings = detect_memory_secrets(candidate.subject, candidate.predicate, candidate.object)
+        if findings:
+            raise MemorySecretDetected(tuple(item.category for item in findings))
+        if len(set(candidate.source_evidence_ids)) != len(candidate.source_evidence_ids):
+            raise ValueError("source evidence IDs must be unique")
+        try:
+            with self._sessions.begin() as session:
+                result = session.execute(
+                    text(
+                        "SELECT lucy.write_evidence_derived_memory_claim_v2("
+                        ":key,:subject,:predicate,:object,:confidence,:sources)"
+                    ),
+                    {
+                        "key": candidate.idempotency_key,
+                        "subject": candidate.subject,
+                        "predicate": candidate.predicate,
+                        "object": candidate.object,
+                        "confidence": candidate.confidence_millionths,
+                        "sources": list(candidate.source_evidence_ids),
                     },
                 ).scalar_one()
         except DBAPIError as exc:
