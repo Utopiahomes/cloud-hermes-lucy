@@ -1014,6 +1014,49 @@ class SensitiveOperationPackageV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class RealmExecutorBindingV2Row(Base):
+    __tablename__ = "realm_executor_bindings_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    action: Mapped[str] = mapped_column(String(40))
+    caller_identity: Mapped[str] = mapped_column(String(512))
+    executor_identity: Mapped[str] = mapped_column(String(512))
+    executor_alias_arn: Mapped[str] = mapped_column(String(300))
+    executor_version: Mapped[int] = mapped_column(BigInteger)
+    receipt_key_id: Mapped[str] = mapped_column(String(512))
+    binding_generation: Mapped[int] = mapped_column(BigInteger)
+    node_authz_epoch: Mapped[int] = mapped_column(BigInteger)
+    policy_version: Mapped[int] = mapped_column(BigInteger)
+    active: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SensitiveExecutionGrantV2Row(Base):
+    __tablename__ = "sensitive_execution_grants_v2"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), unique=True
+    )
+    permit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_action_permits_v3.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    executor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_executor_bindings_v2.id")
+    )
+    package_digest: Mapped[str] = mapped_column(String(64))
+    grant_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_grant: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    execution_completion_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ScopedMemoryClaimRow(Base):
     __tablename__ = "scoped_memory_claims_v1"
     __table_args__ = {"schema": "lucy"}

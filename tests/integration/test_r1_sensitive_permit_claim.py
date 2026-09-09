@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
     SensitiveActionV2,
@@ -27,12 +28,14 @@ from lucy.contracts.security_v1_3 import (
     KmsEncryptionContextV2,
     OriginScopeV1,
     SensitiveActionPermitV3,
+    SensitiveExecutionGrantV2,
     V13SigningKeyPurpose,
 )
 from lucy.db import create_session_factory
 from lucy.db.models import (
     RealmBindingRow,
     RealmContentScopeRow,
+    RealmExecutorBindingV2Row,
     RealmSensitiveActorBindingRow,
     RealmServiceBindingRow,
 )
@@ -57,7 +60,8 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE lucy.sensitive_operation_packages_v2, "
+                "TRUNCATE lucy.sensitive_execution_grants_v2, "
+                "lucy.realm_executor_bindings_v2, lucy.sensitive_operation_packages_v2, "
                 "lucy.scoped_evidence_wrappers_v2, lucy.scoped_evidence_payloads_v2, "
                 "lucy.scoped_evidence_records_v2, lucy.sensitive_operation_events_v2, "
                 "lucy.sensitive_operations_v2, lucy.sensitive_action_permits_v3, "
@@ -83,7 +87,9 @@ def clean_sensitive_tables() -> None:
                 "lucy.register_scoped_evidence_v2(jsonb,jsonb,text,jsonb,text) "
                 "TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
-                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
+                "GRANT EXECUTE ON FUNCTION lucy.store_sensitive_execution_grant_v2(uuid,jsonb) "
+                "TO lucy_utopia_policy"
             )
         )
     engine.dispose()
@@ -143,6 +149,7 @@ def realm() -> dict[str, UUID]:
         ).scalar_one()
     scope_id, service_binding_id = uuid4(), uuid4()
     policy_binding_id, workflow_binding_id, archive_binding_id = uuid4(), uuid4(), uuid4()
+    executor_binding_id = uuid4()
     deployment_id = uuid4()
     now = datetime.now(UTC)
     with owner_sessions.begin() as session:
@@ -201,7 +208,7 @@ def realm() -> dict[str, UUID]:
                     target_service_binding_id=service_binding_id,
                     content_scope_id=scope_id,
                     actor_role="policy_notary",
-                    allowed_actions=["sensitive.permit.issue"],
+                    allowed_actions=["sensitive.permit.issue", "sensitive.grant.issue"],
                     binding_generation=1,
                     node_authz_epoch=1,
                     policy_version=1,
@@ -223,6 +230,26 @@ def realm() -> dict[str, UUID]:
                     created_at=now,
                 ),
             ]
+        )
+        session.add(
+            RealmExecutorBindingV2Row(
+                id=executor_binding_id,
+                content_scope_id=scope_id,
+                action="evidence.retrieve",
+                caller_identity="arn:aws:iam::123456789012:role/utopia-evidence-workflow",
+                executor_identity="lucy-utopia-evidence-executor-v13",
+                executor_alias_arn=(
+                    "arn:aws:lambda:us-east-1:123456789012:"
+                    "function:lucy-utopia-evidence-executor-v13:production"
+                ),
+                executor_version=1,
+                receipt_key_id="utopia-retrieval-receipt-v13-test",
+                binding_generation=1,
+                node_authz_epoch=1,
+                policy_version=1,
+                active=True,
+                created_at=now,
+            )
         )
     return {
         "account": foundation.account_id,
@@ -505,9 +532,82 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     assert frozen["package_digest"] == package.package_digest_hex()
     assert frozen_replay["package_digest"] == frozen["package_digest"]
     assert frozen_replay["replayed"] is True
+    with owner.connect() as connection:
+        claimed_at = connection.execute(
+            text("SELECT claimed_at FROM lucy.sensitive_operations_v2 WHERE id=:id"),
+            {"id": permit.operation_id},
+        ).scalar_one()
+    unsigned_grant = SensitiveExecutionGrantV2(
+        key_id="policy-v13-test",
+        issuer="lucy-policy-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=datetime.now(UTC),
+        grant_id=uuid4(),
+        action=permit.action,
+        permit_id=permit.permit_id,
+        permit_digest=permit.unsigned_digest_hex(),
+        operation_id=permit.operation_id,
+        caller_identity="arn:aws:iam::123456789012:role/utopia-evidence-workflow",
+        target_scope=permit.target_scope,
+        workspace_id=permit.workspace_id,
+        resource_selector=permit.resource_selector,
+        execution_binding=permit.execution_binding,
+        encrypted_package_digest=package.package_digest_hex(),
+        package_size_bytes=len(canonical_json_bytes(package)),
+        idempotency_key="claim-archived",
+        executor_identity="lucy-utopia-evidence-executor-v13",
+        executor_alias_arn=(
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-evidence-executor-v13:production"
+        ),
+        executor_version=1,
+        permit_claimed_at=claimed_at,
+        permit_claim_deadline=permit.permit_claim_deadline,
+        execution_completion_deadline=permit.execution_completion_deadline,
+        max_records=1,
+        max_bytes=permit.max_bytes,
+        nonce=uuid4().hex,
+    )
+    signer = Ed25519V13Signer(
+        ed25519.Ed25519PrivateKey.generate(),
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    wrong_grant = signer.sign(
+        unsigned_grant.model_copy(
+            update={
+                "executor_alias_arn": (
+                    "arn:aws:lambda:us-east-1:123456789012:"
+                    "function:lucy-utopia-evidence-executor-v13:wrong"
+                )
+            }
+        )
+    )
+    with (
+        pytest.raises(DBAPIError, match="execution grant differs from claimed authority"),
+        policy.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.store_sensitive_execution_grant_v2(:operation,:grant)"),
+            {"operation": permit.operation_id, "grant": wrong_grant.model_dump_json()},
+        )
+    grant = signer.sign(unsigned_grant)
+    with policy.begin() as connection:
+        grant_digest = connection.execute(
+            text("SELECT lucy.store_sensitive_execution_grant_v2(:operation,:grant)"),
+            {"operation": permit.operation_id, "grant": grant.model_dump_json()},
+        ).scalar_one()
+        grant_replay = connection.execute(
+            text("SELECT lucy.store_sensitive_execution_grant_v2(:operation,:grant)"),
+            {"operation": permit.operation_id, "grant": grant.model_dump_json()},
+        ).scalar_one()
+    assert grant_digest == grant_replay == grant.unsigned_digest_hex()
     with pytest.raises(DBAPIError, match="permission denied"), workflow.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_evidence_payloads_v2"))
     with owner.connect() as connection:
         assert connection.execute(
             text("SELECT count(*) FROM lucy.sensitive_operation_packages_v2")
+        ).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.sensitive_execution_grants_v2")
         ).scalar_one() == 1

@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0026` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0027` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
 | Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
@@ -86,6 +86,7 @@ durability claim.
 | Authenticated Utopia memory write/read, Raymond isolation, and current-authority recheck before every effect | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 7 passed total | Admission gateway, realm session binding, scoped-memory client/function, or authority transition change |
 | Policy-only V3 permit issue, workflow-only exact-once claim, canonical permit digest, cross-realm and direct-table denial, revocation before issue/claim | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16 | V3 permit contract, migration 0025, actor/service bindings, authority generations, or bootstrap roles |
 | Realm-scoped encrypted evidence registration and replay, archive/workflow direct-table denial, foreign-scope rejection, exact claimed-package freeze/replay, and Python/PostgreSQL package-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Encrypted evidence/package V2 contract, migration 0026, actor/service bindings, or authority generations |
+| Policy-only post-claim V2 grant storage/replay, exact executor/caller/package binding, wrong-alias rejection, current-authority recheck, and Python/PostgreSQL grant-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Execution-grant V2 contract, migration 0027, executor/actor bindings, or authority generations |
 
 ## R1-2 checkpoint
 
@@ -198,8 +199,16 @@ can freeze only that active evidence version and current wrapper into an immutab
 package digest. Migration/rehost wrappers remain deliberately outside this initial
 slice and require their later receipt-gated path.
 
-The next R1-2 increment stores the post-claim execution grant and executor receipt,
-then adds receipt-only reconciliation. Durable revocation
+Migration `0027_r1_execution_grant` adds an immutable realm executor registry and a
+policy-only post-claim V2 grant gate. The gate rechecks current owner, channel, node,
+tenure, realm, service, policy and executor authority immediately before admission;
+binds the exact claimed permit and frozen package; and pins the qualified Lambda
+alias, published version, caller identity, byte ceiling and completion deadline.
+Grant replay is exact and neither the policy nor workflow login can enumerate grant
+or package tables.
+
+The next R1-2 increments store the executor receipt and add receipt-only
+reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain
 later R1-2 gates; this checkpoint does not claim R1-2 completion.
 
