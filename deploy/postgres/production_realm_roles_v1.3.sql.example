@@ -1,0 +1,109 @@
+-- R1 V1.3 execute-only grants for one pre-created security realm.
+-- Render with render_security_v1_3_sql.py; never edit values into this source.
+-- The content-free directory and immutable realm bindings must be provisioned
+-- separately before runtime admission can open.
+-- Realm label: __LUCY_REALM_SLUG__
+
+DO $validation$
+DECLARE
+  v_login text;
+  v_logins text[] := ARRAY[
+    '__LUCY_REALM_ROUTINE_LOGIN__','__LUCY_REALM_POLICY_LOGIN__',
+    '__LUCY_REALM_WORKFLOW_LOGIN__','__LUCY_REALM_FINALITY_LOGIN__'
+  ];
+BEGIN
+  IF (SELECT count(DISTINCT value) FROM unnest(v_logins) AS value) <> 4 THEN
+    RAISE EXCEPTION 'v1.3 realm LOGIN identifiers must be distinct';
+  END IF;
+  FOREACH v_login IN ARRAY v_logins LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_roles WHERE rolname=v_login AND rolcanlogin
+        AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb
+        AND NOT rolinherit AND NOT rolreplication AND NOT rolbypassrls
+    ) THEN
+      RAISE EXCEPTION 'missing or elevated v1.3 realm LOGIN: %', v_login;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member
+      WHERE r.rolname=v_login
+    ) THEN
+      RAISE EXCEPTION 'v1.3 realm LOGIN has inherited role membership: %', v_login;
+    END IF;
+  END LOOP;
+END
+$validation$;
+
+DO $database_grants$
+BEGIN
+  EXECUTE format(
+    'REVOKE CONNECT, TEMP ON DATABASE %I FROM '
+    '"__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__", '
+    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__"',
+    current_database()
+  );
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO '
+    '"__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__", '
+    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__"',
+    current_database()
+  );
+END
+$database_grants$;
+
+REVOKE ALL ON SCHEMA lucy, public FROM
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA lucy FROM
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA lucy FROM
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA lucy FROM
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+
+GRANT USAGE ON SCHEMA lucy TO
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+GRANT SELECT ON public.alembic_version TO
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission
+  TO "__LUCY_REALM_ROUTINE_LOGIN__";
+
+-- Normal/private Lucy plus archive ingestion. Every operation derives its one
+-- content scope from session_user; there is no request-selected realm.
+GRANT EXECUTE ON FUNCTION
+  lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint),
+  lucy.search_scoped_memory_v1(text,integer),
+  lucy.write_evidence_derived_memory_claim_v2(text,text,text,text,bigint,uuid[]),
+  lucy.set_scoped_capture_mode_v1(text,boolean,text),
+  lucy.accept_scoped_capture_turn_v1(text,text),
+  lucy.register_capturable_scoped_evidence_v2(text,text,jsonb,jsonb,text,jsonb,text)
+TO "__LUCY_REALM_ROUTINE_LOGIN__";
+
+-- Content-free policy notary. It signs/adopts exact contracts, grants and
+-- receipts but receives no direct archive or memory table authority.
+GRANT EXECUTE ON FUNCTION
+  lucy.issue_sensitive_action_permit_v3(jsonb,text),
+  lucy.store_sensitive_execution_grant_v2(uuid,jsonb),
+  lucy.attest_executor_receipt_v2(uuid,jsonb),
+  lucy.store_scoped_deletion_manifest_v2(uuid,jsonb),
+  lucy.store_deletion_execution_grant_v2(uuid,jsonb),
+  lucy.attest_deletion_executor_receipt_v2(uuid,jsonb)
+TO "__LUCY_REALM_POLICY_LOGIN__";
+
+-- Workflow owns claim/freeze/reconcile state only. AWS execution remains in a
+-- realm-qualified Lambda identity and never receives this database LOGIN.
+GRANT EXECUTE ON FUNCTION
+  lucy.claim_sensitive_operation_v2(uuid,text),
+  lucy.freeze_claimed_evidence_package_v2(uuid),
+  lucy.reconcile_sensitive_operation_v2(uuid),
+  lucy.reconcile_scoped_deletion_v2(uuid)
+TO "__LUCY_REALM_WORKFLOW_LOGIN__";
+
+-- Metadata-only one-off finality observer.
+GRANT EXECUTE ON FUNCTION
+  lucy.record_scoped_finality_inventory_v2(uuid,jsonb)
+TO "__LUCY_REALM_FINALITY_LOGIN__";

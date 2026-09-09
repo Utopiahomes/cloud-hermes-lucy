@@ -1,5 +1,35 @@
 # Security Baseline v1.2 PostgreSQL deployment
 
+## R1 V1.3 realm role stamp (not yet deployed)
+
+The additive R1 schema uses four distinct PostgreSQL LOGINs per private security
+realm: routine/archive, policy notary, sensitive workflow, and one-off finality.
+Render the reviewed execute-only grants without passwords or other secrets:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\postgres\render_security_v1_3_sql.py `
+  --realm-slug utopia `
+  --routine-login lucy_utopia_routine `
+  --policy-login lucy_utopia_policy `
+  --workflow-login lucy_utopia_sensitive_workflow `
+  --finality-login lucy_utopia_finality `
+  --output secrets\generated\production_realm_roles_v1.3.sql
+```
+
+The renderer requires every LOGIN to use the selected realm namespace and refuses
+duplicates, unsafe identifiers, unresolved markers, missing output directories, and
+overwrites. The rendered SQL verifies that all four LOGINs already exist without
+elevated attributes or inherited memberships, removes all prior schema privileges,
+and grants only the exact R1 security-definer functions for that role. In particular,
+the routine identity receives the capture-receipt-enforcing archive function, never
+the lower-level raw scoped archive function. Realm directory and actor/executor
+bindings are a separate provisioning artifact; this role stamp alone cannot admit a
+realm. Live transcript capture remains disabled.
+
+The v1.2 instructions below remain the accepted single-tenant production baseline.
+Do not replace them until the complete V1.3 realm provisioning and commissioned cloud
+acceptance gates pass.
+
 The two production SQL templates are reviewed source artifacts. Do not insert
 deployment values into either template by hand. Generate deployment-specific
 SQL with `render_security_v1_2_sql.py`, review its SHA-256 and contents, apply

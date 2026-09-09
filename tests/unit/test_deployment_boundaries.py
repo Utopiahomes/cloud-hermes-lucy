@@ -165,8 +165,10 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
         "replay_authorized_deletion_cloud_v1_2.py",
         "replay_authorized_deletion_cloud_v1_3.py",
         "render_security_v1_2_sql.py",
+        "render_security_v1_3_sql.py",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",
+        "production_realm_roles_v1.3.sql.example",
         "configure_security_v1.2.sql.example",
     ):
         assert f"COPY deploy/postgres/{artifact}" in dockerfile

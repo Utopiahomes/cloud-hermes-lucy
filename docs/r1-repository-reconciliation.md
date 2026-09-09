@@ -105,6 +105,7 @@ durability claim.
 | Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
 | Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
 | An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
+| Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives only the capture-enforcing archive entry point | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`, scoped integration and deployment-boundary tests; rendered SQL applied to disposable PostgreSQL; 19 checks passed across the focused passes | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
 
 ## R1-2 checkpoint
 
@@ -332,12 +333,21 @@ revives them. The archive login has execute-only access and cannot enumerate or
 rewrite the supporting tables. This is the local R1 path; live Telegram capture is
 still disabled.
 
+`render_security_v1_3_sql.py` and `production_realm_roles_v1.3.sql.example`
+provide the first production parameterized stamp. They bind four distinct LOGINs to
+one explicit realm namespace and remove all table/function authority before granting
+the exact routine/archive, policy, workflow, and finality entry points. The rendered
+stamp was applied to the disposable PostgreSQL environment and its effective grants
+were queried. It does not create realm directory rows, AWS identities, Render
+services, or an activation decision.
+
 The scoped retrieval and deletion chains are complete through reconciliation, finality
 observation, quarantined restore replay, scoped OTR enforcement, and the documented
-post-grant revocation race. The R1-2 local behavioral exit evidence is complete.
-Realm-parameterized production stamps remain before R1-2 can be commissioned. Durable
-revocation acknowledgement and protected recovery handoff remain R1-4 gates and are
-not pulled forward into R1-2.
+post-grant revocation race. The R1-2 local behavioral exit evidence is complete, and
+its realm-parameterized PostgreSQL role stamp is implemented. Realm directory/binding
+provisioning plus AWS and Render stamps remain before R1-2 can be commissioned.
+Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
+and are not pulled forward into R1-2.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
