@@ -15,6 +15,7 @@ from lucy.authorized_deletion_recovery import (
     build_authorized_deletion_recovery_contract_v2,
     verify_authorized_deletion_recovery_v2,
 )
+from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import (
     DeploymentEnvironment,
     ExecutorResult,
@@ -44,6 +45,12 @@ from lucy.contracts.security_v1_3 import (
     deletion_targets_digest_v2,
     security_v1_3_json_schemas,
 )
+from lucy.executors.admission_v1_3 import (
+    RealmExecutorIdentityV1,
+    verify_deletion_invocation_v2,
+    verify_retrieval_invocation_v2,
+)
+from lucy.executors.core import ExecutorRejected
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
     ExecutorInvocationResultV2,
@@ -350,6 +357,141 @@ def test_v13_executor_result_binds_receipt_and_never_replays_plaintext() -> None
             receipt=receipt,
             receipt_digest="0" * 64,
             replayed=False,
+        )
+
+
+def _policy_signer_and_verifier() -> tuple[Ed25519V13Signer, V13ContractVerifier]:
+    private = ed25519.Ed25519PrivateKey.generate()
+    signer = Ed25519V13Signer(
+        private,
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    key = V13VerificationKeyV1(
+        key_id="policy-v13-test",
+        issuer="lucy-policy-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+        public_key_b64=signer.public_key_b64,
+        status=V13VerificationKeyStatus.ACTIVE,
+        valid_from=NOW - timedelta(minutes=1),
+        issuance_not_after=NOW + timedelta(minutes=5),
+        verify_not_after=NOW + timedelta(minutes=10),
+    )
+    return signer, V13ContractVerifier((key,))
+
+
+def _executor_identity(action: SensitiveActionV2) -> RealmExecutorIdentityV1:
+    grant = _grant()
+    return RealmExecutorIdentityV1(
+        action=action,
+        environment=DeploymentEnvironment.TEST,
+        target_scope=_scope(),
+        workspace_id=FOUR,
+        execution_binding=_binding(),
+        caller_identity=grant.caller_identity,
+        executor_identity=grant.executor_identity,
+        executor_alias_arn=grant.executor_alias_arn,
+        executor_version=grant.executor_version,
+        record_version=1,
+    )
+
+
+def test_v13_retrieval_admission_uses_live_post_claim_grant() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    permit = signer.sign(_permit())
+    package = _package()
+    grant = signer.sign(
+        _grant(
+            permit_digest=permit.unsigned_digest_hex(),
+            encrypted_package_digest=package.package_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(package)),
+        )
+    )
+    invocation = RetrievalExecutorInvocationV2(
+        permit=permit,
+        execution_grant=grant,
+        package=package,
+    )
+    # Permit admission has closed, but the post-claim grant is still live.
+    admitted = verify_retrieval_invocation_v2(
+        invocation,
+        verifier=verifier,
+        identity=_executor_identity(SensitiveActionV2.EVIDENCE_RETRIEVE),
+        checked_at=NOW + timedelta(seconds=70),
+    )
+    assert admitted.operation_id == FOUR
+    assert admitted.package_digest == package.package_digest_hex()
+
+    wrong_identity = _executor_identity(SensitiveActionV2.EVIDENCE_RETRIEVE)
+    wrong_identity = RealmExecutorIdentityV1(
+        **{
+            **wrong_identity.__dict__,
+            "caller_identity": "arn:aws:iam::123456789012:role/raymond-evidence-workflow",
+        }
+    )
+    with pytest.raises(ExecutorRejected, match="executor_binding_mismatch"):
+        verify_retrieval_invocation_v2(
+            invocation,
+            verifier=verifier,
+            identity=wrong_identity,
+            checked_at=NOW + timedelta(seconds=70),
+        )
+
+
+def test_v13_deletion_admission_binds_signed_exact_closure() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    permit = signer.sign(
+        _permit(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            reason="owner_request",
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    manifest = signer.sign(
+        _deletion_manifest(
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=permit.operation_id,
+        )
+    )
+    grant = signer.sign(
+        _grant(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_digest=permit.unsigned_digest_hex(),
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(manifest)),
+            idempotency_key=manifest.idempotency_key,
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    admitted = verify_deletion_invocation_v2(
+        DeletionExecutorInvocationV2(
+            permit=permit,
+            execution_grant=grant,
+            manifest=manifest,
+        ),
+        verifier=verifier,
+        identity=_executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
+        checked_at=NOW + timedelta(seconds=70),
+    )
+    assert admitted.deletion_manifest_id == manifest.manifest_id
+
+    substituted = manifest.model_copy(update={"signature": "invalid"})
+    with pytest.raises(ExecutorRejected, match="manifest_signature_invalid"):
+        verify_deletion_invocation_v2(
+            DeletionExecutorInvocationV2(
+                permit=permit,
+                execution_grant=grant,
+                manifest=substituted,
+            ),
+            verifier=verifier,
+            identity=_executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
+            checked_at=NOW + timedelta(seconds=70),
         )
 
 

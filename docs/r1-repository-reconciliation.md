@@ -108,6 +108,7 @@ durability claim.
 | Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives only the capture-enforcing archive entry point | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`, scoped integration and deployment-boundary tests; rendered SQL applied to disposable PostgreSQL; 19 checks passed across the focused passes | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
 | A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
 | Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
+| The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
 
 ## R1-2 checkpoint
 
@@ -143,6 +144,15 @@ and scoped receipt contracts; action confusion, receipt-digest substitution,
 deletion plaintext, and replayed plaintext fail validation. The frozen V1 invocation
 and result types remain unchanged. The deployed Lambda handler/core and AWS adapter
 are still V1-only at this checkpoint and must not be stamped as V1.3 executors yet.
+
+`executors/admission_v1_3.py` adds the pure pre-effect admission layer. A claimed
+permit is verified as historical authorization evidence because its 60-second
+admission deadline may legitimately precede Lambda execution; the post-claim grant
+is live-verified through the separate completion deadline. Retrieval then binds the
+exact current wrapper/KMS scope, record, canonical package digest, and byte size.
+Deletion additionally live-verifies the signed closure and binds its owner evidence,
+idempotency identity, target count, digest, and canonical size. No AWS operation is
+implemented by this layer, and the deployed handler remains V1-only.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
