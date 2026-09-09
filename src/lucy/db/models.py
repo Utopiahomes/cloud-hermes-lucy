@@ -1038,6 +1038,55 @@ class RealmExecutorBindingV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ScopedCaptureStateV1Row(Base):
+    __tablename__ = "scoped_capture_states_v1"
+    __table_args__ = {"schema": "lucy"}
+    content_scope_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_content_scopes_v1.id"), primary_key=True
+    )
+    platform: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source_conversation_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    archive_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    capture_enabled: Mapped[bool] = mapped_column(Boolean)
+    version: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedCaptureTransitionV1Row(Base):
+    __tablename__ = "scoped_capture_transitions_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    archive_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    platform: Mapped[str] = mapped_column(String(40))
+    source_conversation_id: Mapped[str] = mapped_column(String(512))
+    capture_enabled: Mapped[bool] = mapped_column(Boolean)
+    capture_version: Mapped[int] = mapped_column(BigInteger)
+    idempotency_key: Mapped[str] = mapped_column(String(512))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedCaptureReceiptV1Row(Base):
+    __tablename__ = "scoped_capture_receipts_v1"
+    __table_args__ = {"schema": "lucy"}
+    content_scope_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_content_scopes_v1.id"), primary_key=True
+    )
+    platform: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source_conversation_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    source_turn_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    archive_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    capture_enabled: Mapped[bool] = mapped_column(Boolean)
+    capture_version: Mapped[int] = mapped_column(BigInteger)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SensitiveExecutionGrantV2Row(Base):
     __tablename__ = "sensitive_execution_grants_v2"
     __table_args__ = {"schema": "lucy"}

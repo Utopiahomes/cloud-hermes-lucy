@@ -77,6 +77,8 @@ def clean_sensitive_tables() -> None:
                 "TRUNCATE lucy.scoped_authorized_deletion_recovery_targets_v2, "
                 "lucy.scoped_recovery_deletion_fences_v2, "
                 "lucy.scoped_authorized_deletion_recoveries_v2, "
+                "lucy.scoped_capture_receipts_v1, lucy.scoped_capture_transitions_v1, "
+                "lucy.scoped_capture_states_v1, "
                 "lucy.scoped_finality_observations_v2, "
                 "lucy.scoped_evidence_deletion_fences_v2, "
                 "lucy.scoped_deletion_manifest_targets_v2, "
@@ -109,6 +111,10 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.register_scoped_evidence_v2(jsonb,jsonb,text,jsonb,text) "
                 "TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION lucy.set_scoped_capture_mode_v1(text,boolean,text), "
+                "lucy.accept_scoped_capture_turn_v1(text,text), "
+                "lucy.register_capturable_scoped_evidence_v2("
+                "text,text,jsonb,jsonb,text,jsonb,text) TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_sensitive_execution_grant_v2(uuid,jsonb) "
@@ -517,6 +523,123 @@ def test_current_authority_is_required_at_issue_and_claim(realm: dict[str, UUID]
             text("SELECT lucy.issue_sensitive_action_permit_v3(:permit,:key)"),
             {"permit": later.model_dump_json(), "key": "issue-after-revocation"},
         )
+
+
+def test_scoped_off_record_receipts_fail_closed_across_transitions(
+    realm: dict[str, UUID],
+) -> None:
+    assert ARCHIVE_URL and OWNER_URL
+    archive = create_engine(ARCHIVE_URL)
+    owner = create_engine(OWNER_URL)
+    conversation = "synthetic-utopia-conversation"
+    scope = _scope(realm)
+    evidence_id, representation_id, key_ref = uuid4(), uuid4(), uuid4()
+    ciphertext = b"synthetic-capturable-realm-ciphertext"
+    digest = hashlib.sha256(ciphertext).hexdigest()
+    payload = EvidencePayloadBindingV2(
+        evidence_id=evidence_id,
+        original_scope=scope,
+        record_version=1,
+        ciphertext_b64=base64.b64encode(ciphertext).decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"123456789012").decode("ascii"),
+        authenticated_header_b64=base64.b64encode(b"synthetic-aad").decode("ascii"),
+        payload_ciphertext_digest=digest,
+    )
+    wrapper = EvidenceWrapperBindingV2(
+        representation_id=representation_id,
+        wrapping_scope=scope,
+        wrapped_key_ref=key_ref,
+        encryption_context=KmsEncryptionContextV2(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+            evidence_id=evidence_id,
+        ),
+        payload_ciphertext_digest=digest,
+    )
+
+    def accept(turn: str) -> dict[str, object]:
+        with archive.begin() as connection:
+            return connection.execute(
+                text("SELECT lucy.accept_scoped_capture_turn_v1(:conversation,:turn)"),
+                {"conversation": conversation, "turn": turn},
+            ).scalar_one()
+
+    def set_mode(enabled: bool, key: str) -> dict[str, object]:
+        with archive.begin() as connection:
+            return connection.execute(
+                text("SELECT lucy.set_scoped_capture_mode_v1(:conversation,:enabled,:key)"),
+                {"conversation": conversation, "enabled": enabled, "key": key},
+            ).scalar_one()
+
+    assert accept("before-off") == {"capture_enabled": True, "version": 0, "replayed": False}
+    assert set_mode(False, "off-transition") == {
+        "capture_enabled": False,
+        "version": 1,
+        "replayed": False,
+    }
+    assert set_mode(False, "off-transition")["replayed"] is True
+    with pytest.raises(DBAPIError, match="idempotency conflict"), archive.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.set_scoped_capture_mode_v1(:conversation,true,:key)"),
+            {"conversation": conversation, "key": "off-transition"},
+        )
+    assert accept("while-off")["capture_enabled"] is False
+    for turn in ("before-off", "while-off"):
+        with (
+            pytest.raises(DBAPIError, match="not authorized for retention"),
+            archive.begin() as connection,
+        ):
+            connection.execute(
+                text(
+                    "SELECT lucy.register_capturable_scoped_evidence_v2("
+                    ":conversation,:turn,:payload,:wrapper,'owner_conversation','[]',:key)"
+                ),
+                {
+                    "conversation": conversation,
+                    "turn": turn,
+                    "payload": payload.model_dump_json(),
+                    "wrapper": wrapper.model_dump_json(),
+                    "key": f"blocked-{turn}",
+                },
+            )
+    assert set_mode(True, "on-transition")["version"] == 2
+    assert accept("after-on")["capture_enabled"] is True
+    with archive.begin() as connection:
+        archived = connection.execute(
+            text(
+                "SELECT lucy.register_capturable_scoped_evidence_v2("
+                ":conversation,'after-on',:payload,:wrapper,'owner_conversation','[]',:key)"
+            ),
+            {
+                "conversation": conversation,
+                "payload": payload.model_dump_json(),
+                "wrapper": wrapper.model_dump_json(),
+                "key": "allowed-after-on",
+            },
+        ).scalar_one()
+    assert archived == {
+        "evidence_id": str(evidence_id),
+        "representation_id": str(representation_id),
+        "replayed": False,
+    }
+    with pytest.raises(DBAPIError, match="permission denied"), archive.begin() as connection:
+        connection.execute(text("SELECT * FROM lucy.scoped_capture_receipts_v1"))
+    with owner.connect() as connection:
+        receipts = connection.execute(
+            text(
+                "SELECT source_turn_id,capture_enabled,capture_version FROM "
+                "lucy.scoped_capture_receipts_v1 ORDER BY source_turn_id"
+            )
+        ).all()
+    assert receipts == [
+        ("after-on", True, 2),
+        ("before-off", True, 0),
+        ("while-off", False, 1),
+    ]
 
 
 def test_archive_registers_and_workflow_freezes_exact_claimed_package(

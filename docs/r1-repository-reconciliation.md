@@ -1,15 +1,17 @@
 # R1 repository reconciliation
 
 Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
-single-realm process sessions, authenticated admission, and an admission-gated
-scoped-memory effect path are implemented locally. Production provisioning remains
-disabled.
+single-realm process sessions, authenticated admission, scoped memory, sensitive
+operations, deletion recovery, and scoped off-record enforcement are implemented
+locally. R1-2 production stamps and commissioning remain outstanding; production
+provisioning remains disabled.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
-- Accepted PostgreSQL head: `0021_recovery_capture_safety`.
+- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
+  head: `0037_r1_scoped_capture`.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -74,7 +76,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0036` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0037` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -101,6 +103,8 @@ durability claim.
 | Historical V1.3 deletion recovery proof verifies retired-but-uncompromised policy/receipt keys and binds realm scope, permit, exact closure, grant, caller, executor, receipt, outcome, and digests; revoked keys and substituted callers fail closed | `tests/unit/test_security_contracts_v1_3.py` plus unchanged v1.2 recovery tests; 20 passed | V1.3 contracts/verifier, historical-key semantics, recovery-proof binding, canonicalization, or v1.2 recovery compatibility |
 | Quarantined V1.3 restore replay revalidates scope/target/recovery digests and exact restored artifacts, creates one immutable recovery fence, suppresses restored recall, blocks new derivation, and replays exactly once; wrong scope and ready storage fail closed | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0036; 3 passed in the file | Migration 0036, recovery contract/proof, capture-off admission, scoped archive/provenance, or recall/package fence logic |
 | Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
+| Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
+| An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
 
 ## R1-2 checkpoint
 
@@ -318,10 +322,22 @@ opening PostgreSQL, then requires TLS, quarantine, the database-owned capture bo
 and both maintenance/admission locks. The container includes this utility, but no R1
 production deployment or replay has been performed.
 
+Migration `0037_r1_scoped_capture` separates capture state and immutable turn
+receipts by database-derived content scope. An off-record transition increments the
+conversation generation under a scope-specific lock. Archive admission requires a
+previously accepted, enabled receipt whose generation still equals the current
+conversation generation. Consequently, disabling capture invalidates both future
+turns and any earlier accepted-but-not-yet-archived turn; returning on-record never
+revives them. The archive login has execute-only access and cannot enumerate or
+rewrite the supporting tables. This is the local R1 path; live Telegram capture is
+still disabled.
+
 The scoped retrieval and deletion chains are complete through reconciliation, finality
-observation, and quarantined restore replay. Durable revocation acknowledgement,
-scoped OTR evidence, and revocation-race/receipt evidence remain later R1-2 gates;
-this checkpoint does not claim R1-2 completion.
+observation, quarantined restore replay, scoped OTR enforcement, and the documented
+post-grant revocation race. The R1-2 local behavioral exit evidence is complete.
+Realm-parameterized production stamps remain before R1-2 can be commissioned. Durable
+revocation acknowledgement and protected recovery handoff remain R1-4 gates and are
+not pulled forward into R1-2.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
