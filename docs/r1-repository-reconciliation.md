@@ -89,12 +89,19 @@ durability claim.
 
 `contracts/security_v1_3.py` adds new wire identities rather than extending or
 reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
-context, owner assertion V2, permit V3, KMS encryption context V2, and v1.3
-verification keys. New signatures retain the already reviewed `lucy-cjson-1`
+context, owner assertion V2, permit V3, sensitive execution grant V2, KMS encryption
+context V2, and v1.3 verification keys. New signatures retain the already reviewed `lucy-cjson-1`
 canonicalizer, include their object type/version as a domain separator, and pin a
 distinct v1.3 key purpose. Permit admission is at most 60 seconds while execution
 completion remains a separate bounded deadline. A historical realm/storage mismatch
 requires an exact restore-mapping ID.
+
+`SensitiveExecutionGrantV2` preserves the corrected, deployed ordering: the workflow
+claims in PostgreSQL before policy signs a post-claim grant. It binds the permit
+digest, claim/admission times, operation and idempotency identity, target and active
+scope, exact qualified executor alias/version/caller, package digest, and action-
+specific record/byte ceilings. This is a typed local contract only at this checkpoint;
+no v1.3 database gate, executor, receipt, or cloud route claims implementation yet.
 
 `realm_sessions.py` holds exactly one deployment-owned private-realm credential per
 process and selects it only after workload identity has been verified. A request may

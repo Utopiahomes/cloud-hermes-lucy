@@ -8,6 +8,7 @@ reviewed ``lucy-cjson-1`` canonicalizer.
 from __future__ import annotations
 
 import base64
+import re
 import secrets
 from collections.abc import Mapping
 from datetime import datetime, timedelta
@@ -37,6 +38,10 @@ V1_3_PERMIT_CLAIM_MAX_SECONDS = 60
 V1_3_EXECUTION_MAX_SECONDS = 600
 V1_3_OWNER_ASSERTION_MAX_SECONDS = 300
 RESOLVED_CONTEXT_DIGEST_PREFIX = b"LUCY-RESOLVED-EXECUTION-CONTEXT-V1\0"
+_QUALIFIED_LAMBDA_ALIAS_ARN = re.compile(
+    r"^arn:aws(?:-us-gov|-cn)?:lambda:[a-z0-9-]+:\d{12}:"
+    r"function:[A-Za-z0-9-_]{1,64}:(?!\$LATEST$)[A-Za-z0-9-_]{1,128}$"
+)
 
 _SAFE_IDENTIFIER = r"^[A-Za-z0-9][A-Za-z0-9._:/@+=-]*$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -384,6 +389,86 @@ class SensitiveActionPermitV3(SignedV13Contract):
         return self
 
 
+class SensitiveExecutionGrantV2(SignedV13Contract):
+    """Policy-signed, post-claim delegation to one qualified realm executor."""
+
+    contract_version: Literal["2"] = "2"
+    object_type: Literal["lucy.sensitive-execution-grant.v2"] = (
+        "lucy.sensitive-execution-grant.v2"
+    )
+    signing_key_purpose: Literal[V13SigningKeyPurpose.POLICY_NOTARY] = (
+        V13SigningKeyPurpose.POLICY_NOTARY
+    )
+    grant_id: UUID
+    action: SensitiveActionV2
+    permit_id: UUID
+    permit_digest: DigestHex
+    operation_id: UUID
+    caller_identity: SafeIdentifier
+    target_scope: OriginScopeV1
+    workspace_id: UUID
+    resource_selector: ExactObjectSelectorV1
+    execution_binding: ExecutionBindingV1
+    restore_mapping_id: UUID | None = None
+    deletion_manifest_id: UUID | None = None
+    deletion_manifest_digest: DigestHex | None = None
+    encrypted_package_digest: DigestHex
+    package_size_bytes: int = Field(ge=1, le=131_072)
+    idempotency_key: SafeIdentifier
+    executor_identity: SafeIdentifier
+    executor_alias_arn: str = Field(min_length=1, max_length=300)
+    executor_version: int = Field(ge=1)
+    permit_claimed_at: datetime
+    permit_claim_deadline: datetime
+    execution_completion_deadline: datetime
+    max_records: int = Field(ge=1, le=90)
+    max_bytes: int = Field(ge=1, le=131_072)
+    nonce: Nonce
+
+    @model_validator(mode="after")
+    def validate_grant(self) -> Self:
+        _aware(self.issued_at, "issued_at")
+        _aware(self.permit_claimed_at, "permit_claimed_at")
+        _aware(self.permit_claim_deadline, "permit_claim_deadline")
+        _aware(self.execution_completion_deadline, "execution_completion_deadline")
+        if self.permit_claimed_at > self.issued_at + timedelta(
+            seconds=V1_3_CLOCK_SKEW_SECONDS
+        ):
+            raise ValueError("execution grant predates permit claim")
+        if self.permit_claimed_at > self.permit_claim_deadline + timedelta(
+            seconds=V1_3_CLOCK_SKEW_SECONDS
+        ):
+            raise ValueError("execution grant binds a late permit claim")
+        if self.issued_at > self.permit_claim_deadline + timedelta(
+            seconds=V1_3_CLOCK_SKEW_SECONDS
+        ):
+            raise ValueError("execution grant was issued after permit admission closed")
+        if not self.issued_at < self.execution_completion_deadline:
+            raise ValueError("execution completion deadline must follow grant issuance")
+        if self.execution_completion_deadline > self.issued_at + timedelta(
+            seconds=V1_3_EXECUTION_MAX_SECONDS
+        ):
+            raise ValueError("execution completion window exceeds ten minutes")
+        if _QUALIFIED_LAMBDA_ALIAS_ARN.fullmatch(self.executor_alias_arn) is None:
+            raise ValueError("executor alias must be an exact qualified Lambda alias ARN")
+        if self.package_size_bytes > self.max_bytes:
+            raise ValueError("execution package exceeds the grant byte ceiling")
+        realms_match = (
+            self.execution_binding.active_realm_id == self.target_scope.security_realm_id
+            and self.execution_binding.active_storage_epoch == self.target_scope.storage_epoch
+        )
+        if not realms_match and self.restore_mapping_id is None:
+            raise ValueError("historical scope mismatch requires an exact restore mapping")
+        if self.action == SensitiveActionV2.EVIDENCE_RETRIEVE:
+            if self.deletion_manifest_id is not None or self.deletion_manifest_digest is not None:
+                raise ValueError("retrieval grant must not bind a deletion manifest")
+            if self.max_records != 1 or self.max_bytes > 65_536:
+                raise ValueError("retrieval remains a bounded single-record operation")
+        elif self.deletion_manifest_id is None or self.deletion_manifest_digest is None:
+            raise ValueError("deletion grant must bind the exact deletion manifest")
+        return self
+
+
 class KmsEncryptionContextV2(StrictV13Contract):
     contract_version: Literal["KmsEncryptionContextV2"] = "KmsEncryptionContextV2"
     tenant_account_id: UUID
@@ -450,6 +535,8 @@ def _live_deadline(contract: SignedV13Contract) -> datetime | None:
         return contract.expires_at
     if isinstance(contract, SensitiveActionPermitV3):
         return contract.permit_claim_deadline
+    if isinstance(contract, SensitiveExecutionGrantV2):
+        return contract.execution_completion_deadline
     return None
 
 
@@ -463,6 +550,7 @@ def security_v1_3_json_schemas() -> dict[str, dict[str, object]]:
         V13VerificationKeyV1,
         OwnerInteractionAssertionV2,
         SensitiveActionPermitV3,
+        SensitiveExecutionGrantV2,
         KmsEncryptionContextV2,
     )
     return {model.__name__: model.model_json_schema() for model in models}
