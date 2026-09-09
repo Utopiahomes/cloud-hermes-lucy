@@ -74,7 +74,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0032`; incremental migration through `0033` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0034` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
 | Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
@@ -95,6 +95,7 @@ durability claim.
 | Policy-signature verification before scoped deletion storage; invalid signature produces no store call | `tests/unit/test_security_contracts_v1_3.py`; 15 passed in the file | V1.3 verifier, policy trust keys, or scoped deletion admission service |
 | Manifest-bound deletion grant, wrong-manifest denial, exact qualified executor/caller binding, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on a clean PostgreSQL 16 database; 3 passed in the file | Migration 0032, deletion manifest, permit ceilings, or executor binding |
 | Deletion receipt exact grant/manifest/package binding, action-specific fields and key purpose, substitution denial, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on PostgreSQL 16; 3 passed in the file | Migration 0033, deletion receipt V2 contract, grant, manifest, or executor binding |
+| Receipt-only deletion reconciliation to 30-day `FINALITY_PENDING`, foreign/wrong-reconciler denial, recall suppression, and post-fence retrieval-package denial | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0034; 3 passed in the file | Migration 0034, reconciliation state, deletion effects, memory search, or package/grant fence guards |
 
 ## R1-2 checkpoint
 
@@ -263,6 +264,15 @@ caller, permit, grant, manifest, package digest, transaction token, record versi
 deadline, result, and operational-finality fields exactly match stored authority.
 The receipt is content-free and immutable; the historical executor binding may have
 been revoked after grant admission without erasing the exact completed outcome.
+
+Migration `0034_r1_deletion_reconcile` separates deletion reconciliation from the
+retrieval terminal path. A successful or idempotent deletion receipt creates one
+immutable operational effect and advances the operation to `FINALITY_PENDING` with a
+fixed 30-day not-before time; a rejected receipt creates no deletion effect. Exact
+replay is read-only. Once the deletion fence exists, provenance-linked claims are
+excluded from ordinary scoped recall and no new retrieval package or retrieval grant
+can be admitted for that evidence. Cryptographic finality remains a later,
+independently verified record rather than a claim made by the executor receipt.
 
 The scoped retrieval chain is now complete through reconciliation. Durable revocation
 acknowledgement, OTR/deletion closure, and revocation-race/receipt evidence remain

@@ -108,13 +108,17 @@ def clean_sensitive_tables() -> None:
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.write_evidence_derived_memory_claim_v2("
                 "text,text,text,text,bigint,uuid[]) TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION lucy.search_scoped_memory_v1(text,integer) "
+                "TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_scoped_deletion_manifest_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.store_deletion_execution_grant_v2(uuid,jsonb) "
                 "TO lucy_utopia_policy; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.attest_deletion_executor_receipt_v2(uuid,jsonb) "
-                "TO lucy_utopia_policy"
+                "TO lucy_utopia_policy; "
+                "GRANT EXECUTE ON FUNCTION lucy.reconcile_scoped_deletion_v2(uuid) "
+                "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow"
             )
         )
     engine.dispose()
@@ -205,6 +209,7 @@ def realm() -> dict[str, UUID]:
                     "evidence.archive",
                     "evidence.retrieve",
                     "evidence.delete",
+                    "memory.read",
                     "memory.write",
                 ],
                 binding_generation=1,
@@ -1053,6 +1058,65 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
     assert deletion_receipt_digest == deletion_receipt_replay
     assert deletion_receipt_digest == deletion_receipt.unsigned_digest_hex()
     with (
+        pytest.raises(DBAPIError, match="sensitive reconciliation unavailable"),
+        workflow.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.reconcile_sensitive_operation_v2(:operation)"),
+            {"operation": deletion_permit.operation_id},
+        )
+    with (
+        pytest.raises(DBAPIError, match="scoped deletion reconciliation unavailable"),
+        raymond.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.reconcile_scoped_deletion_v2(:operation)"),
+            {"operation": deletion_permit.operation_id},
+        )
+    with workflow.begin() as connection:
+        deletion_reconciled = connection.execute(
+            text("SELECT lucy.reconcile_scoped_deletion_v2(:operation)"),
+            {"operation": deletion_permit.operation_id},
+        ).scalar_one()
+        deletion_reconcile_replay = connection.execute(
+            text("SELECT lucy.reconcile_scoped_deletion_v2(:operation)"),
+            {"operation": deletion_permit.operation_id},
+        ).scalar_one()
+    assert deletion_reconciled["state"] == "FINALITY_PENDING"
+    assert deletion_reconciled["result"] == "deletion_succeeded"
+    assert deletion_reconciled["finality_not_before"] is not None
+    assert deletion_reconcile_replay == {**deletion_reconciled, "replayed": True}
+    with archive.connect() as connection:
+        assert connection.execute(
+            text("SELECT lucy.search_scoped_memory_v1(:query,:limit)"),
+            {"query": "durable", "limit": 10},
+        ).scalar_one() == []
+    late_retrieval_permit = _permit(realm, evidence_id=evidence_id)
+    with policy.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.issue_sensitive_action_permit_v3(:permit,:key)"),
+            {
+                "permit": late_retrieval_permit.model_dump_json(),
+                "key": "issue-retrieval-after-delete-fence",
+            },
+        )
+    with workflow.begin() as connection:
+        connection.execute(
+            text("SELECT lucy.claim_sensitive_operation_v2(:permit,:key)"),
+            {
+                "permit": late_retrieval_permit.permit_id,
+                "key": "claim-retrieval-after-delete-fence",
+            },
+        )
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence is deletion fenced"),
+        workflow.begin() as connection,
+    ):
+        connection.execute(
+            text("SELECT lucy.freeze_claimed_evidence_package_v2(:operation)"),
+            {"operation": late_retrieval_permit.operation_id},
+        )
+    with (
         pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
         archive.begin() as connection,
     ):
@@ -1088,6 +1152,9 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
         assert connection.execute(
             text("SELECT count(*) FROM lucy.scoped_deletion_manifest_targets_v2")
         ).scalar_one() == 2
+        assert connection.execute(
+            text("SELECT count(*) FROM lucy.scoped_deletion_effects_v2")
+        ).scalar_one() == 1
         operation_state = connection.execute(
             text(
                 "SELECT state,executor_result,executor_receipt_digest "
@@ -1099,4 +1166,16 @@ def test_archive_registers_and_workflow_freezes_exact_claimed_package(
             "RECONCILED",
             "retrieval_succeeded",
             receipt.unsigned_digest_hex(),
+        )
+        deletion_operation_state = connection.execute(
+            text(
+                "SELECT state,executor_result,executor_receipt_digest "
+                "FROM lucy.sensitive_operations_v2 WHERE id=:id"
+            ),
+            {"id": deletion_permit.operation_id},
+        ).one()
+        assert deletion_operation_state == (
+            "FINALITY_PENDING",
+            "deletion_succeeded",
+            deletion_receipt.unsigned_digest_hex(),
         )

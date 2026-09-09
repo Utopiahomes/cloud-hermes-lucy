@@ -1178,6 +1178,24 @@ class ScopedDeletionManifestTargetV2Row(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ScopedDeletionEffectV2Row(Base):
+    __tablename__ = "scoped_deletion_effects_v2"
+    __table_args__ = {"schema": "lucy"}
+    operation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.sensitive_operations_v2.id"), primary_key=True
+    )
+    manifest_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_deletion_manifests_v2.id"), unique=True
+    )
+    receipt_attestation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.executor_receipt_attestations_v2.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finality_status: Mapped[str] = mapped_column(String(30))
+
+
 class ScopedMemoryEventRow(Base):
     __tablename__ = "scoped_memory_events_v1"
     __table_args__ = {"schema": "lucy"}
