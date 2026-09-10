@@ -44,7 +44,9 @@ def clean_cost_tables() -> None:
             raise RuntimeError("refusing to clear a non-synthetic database")
         connection.execute(
             text(
-                "TRUNCATE lucy.cost_events_v1,lucy.cost_recovery_outbox_v1,"
+                "TRUNCATE lucy.restored_cost_exposures_v1,"
+                "lucy.restored_cost_admission_v1,lucy.cost_events_v1,"
+                "lucy.cost_recovery_outbox_v1,"
                 "lucy.exposure_reservations_v1,lucy.provider_attempts_v1,"
                 "lucy.provider_cost_policies_v1,lucy.public_projection_events,"
                 "lucy.public_projection_routes,lucy.public_projection_versions,"

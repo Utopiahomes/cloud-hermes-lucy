@@ -13,15 +13,15 @@ Production commissioning has not been attempted. R1-4 durable authority recovery
 now has its content-free journal/head/handoff contracts, DynamoDB conditional provider,
 and independently acknowledged cost-outcome lifecycle. Authority restriction staging and
 crash-safe authority and cost journal preparation now pass clean local PostgreSQL execution.
-Restrictive authority events now replay exactly once into a quarantined restore at
-migration `0047`; reopening admission remains a separate protected handoff.
+Restrictive authority and cost events now replay exactly once into a quarantined
+restore at migration `0048`; reopening admission remains a separate protected handoff.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0047_r1_authority_replay`. The quarantined Utopia production realm
+  head: `0048_r1_cost_replay`. The quarantined Utopia production realm
   remains at reviewed head `0042_r1_permit_authority` until R1-3 commissioning.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
@@ -92,7 +92,7 @@ durability claim.
 | Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
 | Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
-| Clean migration 0001 through `0047` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 47 forward migrations completed | Migration or bootstrap change |
+| Clean migration 0001 through `0048` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 48 forward migrations completed | Migration or bootstrap change |
 | R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
 | The R1-4 DynamoDB adapter performs one conditional append transaction over the event, permanent event-ID acknowledgement, exact expected head, and writer-pause fence; exact acknowledgement is recovered after an ambiguous response, all reads are strongly consistent and exact-key, and event/head/pause metadata substitution fails closed. Its production constructor pins `us-east-1`, account, table ARN/name, stream binding, and distinct same-account writer/recovery roles before client creation. | `src/lucy/recovery_journal_aws.py`, `tests/unit/test_recovery_journal_aws.py`; 6 adapter checks plus the 9 unchanged recovery-contract checks passed with Ruff and strict mypy | DynamoDB adapter/transaction shape, environment binding, event serialization, pause fencing, or recovery contracts change |
 | Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
@@ -102,6 +102,7 @@ durability claim.
 | Migration `0046` freezes every reservation and provider-outcome journal sequence, prior digest, and event digest before independent append. PostgreSQL accepts only that prepared digest from the recovery identity; wrong, missing, and conflicting acknowledgements fail closed. The writer contains commitments and accounting metadata only, validates caller/attempt bindings before external writes, and exactly replays after ambiguous response loss. | Clean migration 0001→0046; 4 cost-writer contract checks, 4 PostgreSQL cost boundary checks, 60 affected unit/deployment checks, Ruff, strict mypy, and offline Alembic rendering passed on 2026-09-10 | Migration `0046`, cost event/preparation service, journal contracts/provider, public inference orchestration, readiness, or bootstrap change |
 | The protected recovery coordinator requires both authority and cost streams, rejects rollback below either witness, replays each exact suffix, catches up a stream that races the pause request, fences both writers, re-reads both live heads, and invokes activation only while restored/live/paused heads are identical and unexpired. Pause acquisition is exactly replayable by pause ID. | `src/lucy/recovery_coordinator.py`, `tests/unit/test_recovery_coordinator.py`, and `tests/unit/test_recovery_journal.py`; 13 focused checks passed with Ruff and strict mypy on 2026-09-10 | Replay coordinator/stream applier, pause semantics, activation handoff contract, witness source, or journal provider change |
 | Migration `0047` gives the recovery identity an execute-only, restrictive authority applier for quarantined capture-off restores. It pins the configured authority stream before SQL, accepts only exact content-free membership-revocation or publication-withdrawal events, advances a contiguous immutable replay head transactionally with the restriction, and exactly replays ambiguous outcomes. Normal, transition, and cost identities cannot invoke or enumerate it. | Fresh migration 0001→0047; `tests/integration/test_r1_authority_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0047`, authority replay adapter, authority/capture tables or guards, recovery role grants, stream contracts, readiness, or bootstrap change |
+| Migration `0048` projects exact reservation and terminal cost events into a private per-attempt recovery ledger without fabricating executable provider-attempt rows. A matching base attempt is validated rather than double represented as new work; missing policy authority sets operator review. The first replay installs a durable paid-inference block, so replay alone cannot resubmit historical work or silently reopen spending. | Fresh migration 0001→0048; `tests/integration/test_r1_cost_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0048`, cost replay adapter/projection, recovery admission guard, cost contracts, readiness, or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -692,7 +693,7 @@ scan, query, automatic genesis, or caller-selected scope. Its production constru
 requires an exact same-account table binding and separate writer/recovery roles and
 relies on the runtime's workload credentials rather than accepting static keys.
 
-The remaining R1-4 work is restored-state replay for cost,
+The remaining R1-4 work is cost-projection finalization and old-runtime fencing,
 infrastructure/IAM provisioning for the two journal streams, the independently deployed
 acknowledgement receiver, and protected activation integration.
 
@@ -713,7 +714,7 @@ and journal checks, the complete 525-test unit suite, clean PostgreSQL migration
 `0045`, 6 focused authority/public checks, 7 internal-admission checks, and 2 runtime-role
 checks pass. Migration `0046` adds the corresponding freeze-before-append path and exact
 acknowledgement enforcement for cost reservations and outcomes. Readiness and the
-quarantine-first bootstrap now accept `0047` and provision
+quarantine-first bootstrap now accept `0048` and provision
 its three inert prerequisite roles without assigning them to normal realm runtimes.
 
 Migration `0047_r1_authority_replay` adds the execute-only PostgreSQL half of restore
@@ -724,6 +725,15 @@ the restriction, immutable event, and restored head advance in one transaction. 
 restored subjects remain safely absent. This identity can cause denial of service for a
 known identifier if compromised, but it cannot grant membership or republish content.
 
+Migration `0048_r1_cost_replay` adds the paired cost stream applier. It follows the
+reviewed recovery-overlay design: the journal cannot reconstruct session/IP commitments,
+token bounds, or an executable request, so replay creates only a content-free accounting
+projection and never invents a provider-attempt row. The projection replaces—not adds to—a
+matching base attempt during the later accounting finalization. Until that finalization
+fences every pre-restore executable attempt and resolves the missing one-minute rate
+dimensions, a database trigger durably blocks new paid provider admission. This preserves
+normal recovery progress without pretending paid inference is safe to reopen.
+
 Docker Desktop 4.90.0 initially recreated and then could not rename its own
 `sailor-ingest.sock`; a bounded WSL reset after stopping every Docker helper recovered
 engine `29.7.2`. The recoverable runtime backups are
@@ -733,8 +743,8 @@ engine `29.7.2`. The recoverable runtime backups are
 only failed runtime sockets, not images, volumes, or project data.
 
 Remaining R1-4 work is wiring the independently deployed acknowledgement receiver,
-restored-state replay for cost, the two-stream AWS/IAM bindings, and the
-protected recovery activation handoff.
+cost-projection finalization and old-runtime fencing, the two-stream AWS/IAM bindings,
+and the protected recovery activation handoff.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
