@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import pytest
+
+import deploy.postgres.bootstrap_realm_cloud_v1_3 as bootstrap
+from deploy.postgres.provision_realm_foundation_v1_3 import RealmFoundationSeedV1
+from lucy.realm_provisioning import RealmExecutorStampV1, RealmSecurityStampV1
+
+ACCOUNT = "123456789012"
+HOST = "dpg-example-a"
+DATABASE = "lucy_example"
+
+
+def _executor(label: str, suffix: str) -> RealmExecutorStampV1:
+    return RealmExecutorStampV1(
+        binding_id=uuid4(),
+        caller_identity=f"arn:aws:iam::{ACCOUNT}:role/lucy-utopia-{label}",
+        executor_identity=f"lucy-utopia-{label}",
+        executor_alias_arn=(
+            f"arn:aws:lambda:us-east-1:{ACCOUNT}:function:lucy-utopia-{label}:realm-v13"
+        ),
+        executor_version=1,
+        receipt_key_id=(
+            f"arn:aws:kms:us-east-1:{ACCOUNT}:key/00000000-0000-4000-8000-00000000000{suffix}"
+        ),
+    )
+
+
+def _stamp() -> RealmSecurityStampV1:
+    return RealmSecurityStampV1(
+        realm_slug="utopia",
+        aws_account_id=ACCOUNT,
+        content_scope_id=uuid4(),
+        tenant_account_id=uuid4(),
+        node_id=uuid4(),
+        node_tenure_id=uuid4(),
+        tenure_epoch=1,
+        security_realm_id=uuid4(),
+        storage_epoch=1,
+        realm_binding_id=uuid4(),
+        workspace_id=uuid4(),
+        deployment_id=uuid4(),
+        service_binding_id=uuid4(),
+        routine_login="lucy_utopia_routine",
+        routine_principal_id=uuid4(),
+        archive_actor_binding_id=uuid4(),
+        policy_login="lucy_utopia_policy",
+        policy_principal_id=uuid4(),
+        policy_actor_binding_id=uuid4(),
+        workflow_login="lucy_utopia_sensitive_workflow",
+        workflow_principal_id=uuid4(),
+        workflow_actor_binding_id=uuid4(),
+        finality_login="lucy_utopia_finality",
+        finality_principal_id=uuid4(),
+        finality_actor_binding_id=uuid4(),
+        binding_generation=1,
+        node_authz_epoch=1,
+        policy_version=1,
+        retrieval_executor=_executor("retrieval", "1"),
+        deletion_executor=_executor("deletion", "2"),
+    )
+
+
+def _seed() -> RealmFoundationSeedV1:
+    return RealmFoundationSeedV1(
+        realm_slug="utopia",
+        account_slug="utopia",
+        account_display_name="Utopia Homes",
+        node_slug="utopia",
+        node_display_name="Utopia Homes",
+        node_kind="organization",
+        workspace_slug="private",
+        service_issuer="lucy://utopia/services",
+        wallet_id=uuid4(),
+        provisioned_at=datetime(2026, 9, 10, tzinfo=UTC),
+    )
+
+
+def _environment() -> dict[str, str]:
+    stamp, seed = _stamp(), _seed()
+    result = {
+        "RENDER": "true",
+        "LUCY_ENVIRONMENT": "production",
+        "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
+        "LUCY_REALM_BOOTSTRAP_AUTHORIZATION": bootstrap.AUTHORIZATION,
+        "LUCY_MIGRATION_DATABASE_URL": (
+            f"postgresql://lucy_migration:migration-secret@{HOST}:5432/{DATABASE}"
+        ),
+        "LUCY_REALM_SECURITY_STAMP_JSON": stamp.model_dump_json(),
+        "LUCY_REALM_SECURITY_STAMP_SHA256": stamp.digest_hex(),
+        "LUCY_REALM_FOUNDATION_SEED_JSON": seed.model_dump_json(),
+        "LUCY_REALM_FOUNDATION_SEED_SHA256": seed.digest_hex(),
+    }
+    for mode, login in {
+        "routine": stamp.routine_login,
+        "policy": stamp.policy_login,
+        "workflow": stamp.workflow_login,
+        "finality": stamp.finality_login,
+    }.items():
+        result[f"LUCY_{mode.upper()}_DATABASE_URL"] = (
+            f"postgresql://{login}:{mode}-secret@{HOST}:5432/{DATABASE}"
+        )
+    return result
+
+
+def test_config_requires_private_capture_off_exact_realm_urls() -> None:
+    config = bootstrap.BootstrapConfig.from_environment(_environment())
+    assert config.stamp.realm_slug == "utopia"
+    assert set(config.runtime_urls) == {"routine", "policy", "workflow", "finality"}
+    assert all(url.query["sslmode"] == "require" for url in config.runtime_urls.values())
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("RENDER", "false", "production Render"),
+        ("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true", "capture must remain disabled"),
+        ("LUCY_REALM_BOOTSTRAP_AUTHORIZATION", "wrong", "exact reviewed"),
+        (
+            "LUCY_MIGRATION_DATABASE_URL",
+            "postgresql://lucy_migration:x@public.example.com/lucy_example",
+            "private Render",
+        ),
+        (
+            "LUCY_POLICY_DATABASE_URL",
+            f"postgresql://wrong:x@{HOST}/{DATABASE}",
+            "exact password-bearing login",
+        ),
+    ],
+)
+def test_config_fails_closed(key: str, value: str, message: str) -> None:
+    environment = _environment()
+    environment[key] = value
+    with pytest.raises(bootstrap.BootstrapError, match=message):
+        bootstrap.BootstrapConfig.from_environment(environment)
+
+
+def test_run_orders_quarantine_before_all_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = bootstrap.BootstrapConfig.from_environment(_environment())
+    calls: list[str] = []
+    monkeypatch.setattr(
+        bootstrap,
+        "_quarantine",
+        lambda _config: calls.append("quarantine") or "0021_recovery_capture_safety",
+    )
+    monkeypatch.setattr(bootstrap, "_bootstrap_roles", lambda _config: calls.append("roles"))
+    monkeypatch.setattr(bootstrap, "_run_migrations", lambda _config: calls.append("migrations"))
+    monkeypatch.setattr(
+        bootstrap,
+        "_apply_grants_and_provision",
+        lambda _config: calls.append("provision") or ("a" * 64, True, True),
+    )
+    monkeypatch.setattr(
+        bootstrap,
+        "_verify",
+        lambda _config: calls.append("verify")
+        or {"migration_revision": bootstrap.EXPECTED_REVISION},
+    )
+    report = bootstrap.run(config)
+    assert calls == ["quarantine", "roles", "migrations", "provision", "verify"]
+    assert report["status"] == "passed"
+    assert report["source_revision"] == "0021_recovery_capture_safety"
+
+
+def test_main_never_echoes_secrets(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    environment = _environment()
+    secret = "never-print-this-password"
+    environment["LUCY_ROUTINE_DATABASE_URL"] = environment[
+        "LUCY_ROUTINE_DATABASE_URL"
+    ].replace("routine-secret", secret)
+    monkeypatch.setattr(bootstrap.os, "environ", environment)
+    monkeypatch.setattr(
+        bootstrap,
+        "run",
+        lambda _config: (_ for _ in ()).throw(RuntimeError(secret)),
+    )
+    assert bootstrap.main() == 1
+    output = capsys.readouterr().out
+    assert secret not in output
+    assert '"error_type": "RuntimeError"' in output

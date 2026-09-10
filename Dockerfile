@@ -11,6 +11,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
 COPY deploy/postgres/bootstrap_cloud_v1_2.py ./deploy/postgres/bootstrap_cloud_v1_2.py
+COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_realm_cloud_v1_3.py
 COPY deploy/postgres/rebind_executors_cloud_v1_2.py ./deploy/postgres/rebind_executors_cloud_v1_2.py
 COPY deploy/postgres/inspect_unresolved_cloud_v1_2.py ./deploy/postgres/inspect_unresolved_cloud_v1_2.py
 COPY deploy/postgres/recover_expired_synthetic_retrieval_cloud_v1_2.py ./deploy/postgres/recover_expired_synthetic_retrieval_cloud_v1_2.py

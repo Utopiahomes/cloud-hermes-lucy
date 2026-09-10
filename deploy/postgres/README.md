@@ -154,6 +154,37 @@ migration-owner URL on a continuously running service.
 
 ## Provision one V1.3 realm foundation and binding stamp
 
+For an existing accepted V1.2 Render database, prefer the single quarantine-first
+commissioning command:
+
+```text
+python deploy/postgres/bootstrap_realm_cloud_v1_3.py
+```
+
+The temporary migration-only job requires the private `lucy_migration` URL, four
+password-bearing realm runtime URLs (`ROUTINE`, `POLICY`, `WORKFLOW`, and `FINALITY`),
+the reviewed security stamp and foundation seed with their canonical digests, and:
+
+```text
+RENDER=true
+LUCY_ENVIRONMENT=production
+LUCY_TRANSCRIPT_CAPTURE_ENABLED=false
+LUCY_REALM_BOOTSTRAP_AUTHORIZATION=security-v1.3-private-quarantined
+```
+
+It accepts only migration source revisions `0021_recovery_capture_safety` and
+`0039_r1_scoped_capture_runtime`. Before any schema or role mutation it takes the
+maintenance and admission locks, verifies TLS and the database-owned capture
+boundary, and closes runtime admission. It then creates or rotates the four inert
+realm LOGINs, migrates to `0039`, applies the reviewed execute-only grants, and
+transactionally provisions the foundation and immutable bindings. Its final
+content-free verification reconnects through every runtime LOGIN and proves that
+the database remains quarantined. Exact replay is supported. The operation never
+opens admission and never enables transcript capture.
+
+The lower-level foundation and binding commands below remain available for a
+reviewed recovery or diagnostic run.
+
 Before binding authority, create the content-free tenant/node/tenure/realm,
 private workspace, four service principals, and nonspendable wallet with:
 

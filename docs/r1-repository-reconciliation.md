@@ -461,6 +461,18 @@ disposable PostgreSQL integration extension is present but not rerun because Doc
 Desktop was unavailable; production execution remains blocked until the branch is
 published and the container is built.
 
+`bootstrap_realm_cloud_v1_3.py` now composes the production database commissioning
+steps into one quarantine-first, replay-safe operation. It accepts only the accepted
+V1.2 revision or the exact V1.3 head; acquires the maintenance and admission locks;
+proves TLS and the database-owned capture boundary; closes admission before role or
+schema mutation; creates or rotates four realm-qualified non-inheriting LOGINs;
+migrates through `0039`; applies the reviewed execute-only role stamp; provisions
+the content-free foundation and immutable realm bindings in one transaction; and
+reconnects through all four logins for content-free verification. It cannot open
+admission or enable capture, and its result omits database URLs and passwords. The
+focused commissioning tests and static checks pass locally; deployed execution is
+not yet claimed.
+
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
