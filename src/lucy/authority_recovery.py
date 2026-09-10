@@ -7,6 +7,7 @@ recovery identity may acknowledge that event as durably journaled.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Literal, Protocol
@@ -23,7 +24,9 @@ from lucy.recovery_journal import (
     RecoveryJournalError,
     RecoveryJournalEventV1,
     RecoveryJournalHeadV1,
+    RecoveryStreamBindingV1,
     RecoveryStreamKind,
+    advance_recovery_head,
     recovery_event_digest,
 )
 
@@ -377,3 +380,73 @@ class AuthorityJournalWriter:
             **unsigned.model_dump(exclude={"event_digest"}),
             event_digest=recovery_event_digest(unsigned),
         )
+
+
+class PostgresAuthorityReplayStore:
+    """Apply one exact restrictive journal suffix through an execute-only login."""
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        binding: RecoveryStreamBindingV1,
+    ) -> None:
+        if binding.stream_kind is not RecoveryStreamKind.AUTHORITY:
+            raise ValueError("authority replay store requires an authority binding")
+        self._sessions = sessions
+        self._binding = binding
+
+    def head(self) -> RecoveryJournalHeadV1:
+        with self._sessions() as session:
+            result = session.execute(
+                text("SELECT lucy.restored_recovery_head_v1('authority')")
+            ).scalar_one()
+        if result is None:
+            return self._genesis()
+        head = RecoveryJournalHeadV1.model_validate(result)
+        self._require_binding(head)
+        return head
+
+    def apply(
+        self,
+        event: RecoveryJournalEventV1,
+        expected: RecoveryJournalHeadV1,
+    ) -> RecoveryJournalHeadV1:
+        self._require_binding(expected)
+        self._require_binding(event)
+        predicted = advance_recovery_head(expected, event)
+        with self._sessions.begin() as session:
+            result = session.execute(
+                text(
+                    "SELECT lucy.apply_authority_recovery_event_v1("
+                    "CAST(:expected AS jsonb),CAST(:event AS jsonb))"
+                ),
+                {
+                    "expected": json.dumps(expected.model_dump(mode="json")),
+                    "event": json.dumps(event.model_dump(mode="json")),
+                },
+            ).scalar_one()
+        applied = RecoveryJournalHeadV1.model_validate(result)
+        if applied != predicted:
+            raise RecoveryJournalError("authority recovery applied an inexact event")
+        return applied
+
+    def _genesis(self) -> RecoveryJournalHeadV1:
+        return RecoveryJournalHeadV1(
+            stream_kind=self._binding.stream_kind,
+            stream_id=self._binding.stream_id,
+            authority_epoch=self._binding.authority_epoch,
+            independent_store_id=self._binding.independent_store_id,
+            binding_manifest_digest=self._binding.binding_manifest_digest,
+            sequence=0,
+            event_digest="0" * 64,
+        )
+
+    def _require_binding(self, value: RecoveryJournalHeadV1 | RecoveryJournalEventV1) -> None:
+        if (
+            value.stream_kind is not RecoveryStreamKind.AUTHORITY
+            or value.stream_id != self._binding.stream_id
+            or value.authority_epoch != self._binding.authority_epoch
+            or value.independent_store_id != self._binding.independent_store_id
+            or value.binding_manifest_digest != self._binding.binding_manifest_digest
+        ):
+            raise RecoveryJournalError("authority recovery stream binding differs")
