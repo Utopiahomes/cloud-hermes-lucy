@@ -13,7 +13,7 @@ from lucy.db.session import _psycopg_url
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
-R1_SCHEMA_REVISION = "0043_r1_provider_cost_admission"
+R1_SCHEMA_REVISION = "0044_r1_cost_outcome_recovery"
 SERVICE_ROLES = {
     "routine": "lucy_routine",
     "policy": "lucy_policy",

@@ -10,14 +10,16 @@ quarantined, all four continuous services are suspended, and live transcript cap
 remains disabled. R1-3 spending controls now pass local contract, coordinator,
 clean-migration, PostgreSQL concurrency/retry/rollover, and service-boundary checks.
 Production commissioning has not been attempted. R1-4 durable authority recovery
-remains a separate gate.
+now has its content-free journal/head/handoff contracts, atomic acceptance provider,
+and independently acknowledged cost-outcome lifecycle; domain replay and the AWS
+conditional store remain open.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0043_r1_provider_cost_admission`. The quarantined Utopia production realm
+  head: `0044_r1_cost_outcome_recovery`. The quarantined Utopia production realm
   remains at reviewed head `0042_r1_permit_authority` until R1-3 commissioning.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
@@ -88,7 +90,9 @@ durability claim.
 | Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
 | Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
-| Clean migration 0001 through `0043` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 43 forward migrations completed | Migration or bootstrap change |
+| Clean migration 0001 through `0044` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 44 forward migrations completed | Migration or bootstrap change |
+| R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
+| Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -130,9 +134,9 @@ durability claim.
 | The realm archive AWS adapter permits only exact-key `GenerateDataKey`, strongly consistent exact-key `GetItem`, and conditional wrapped-key/envelope `PutItem`; it exposes no scan, query, batch-read, decrypt, or delete surface | `tests/unit/test_realm_archive_aws.py`; focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key/envelope metadata |
 | Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
 | Archive capture durably separates PostgreSQL intent, AWS outcome, and PostgreSQL reconciliation; exact retries reuse stable IDs and a persisted DynamoDB envelope, a crash after DynamoDB does not generate a second DEK, withdrawal before reconciliation fails closed, and the production role cannot bypass the protocol | Clean migration 0001-0038; `tests/integration/test_r1_sensitive_permit_claim.py`, `tests/integration/test_r1_production_realm_roles.py`, and realm archive unit tests; 37 affected checks passed plus Ruff and mypy | Migration 0038, staged archive store/service, realm archive backend/envelope, scoped capture gate, or production realm grants |
-| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy. The clean schema now reaches 0043; the complete 56-check database slice has not been repeated after 0040-0043, while its application evidence remains valid. | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
+| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy. The clean schema now reaches 0044; the complete 56-check database slice has not been repeated after 0040-0044, while its application evidence remains valid. | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
 | The read-only V1.3 deployed-state verifier pins one realm's CloudFormation identity, termination protection, qualified executor versions and configuration, public-only trust stores, KMS keys, DynamoDB protections, and absence of static AWS credentials | `tests/unit/test_realm_security_v1_3_deployment_verifier.py` plus unchanged v1.2 verifier tests; 9 passed plus Ruff and mypy | V1.3 verifier, realm template parameters/outputs, executor environment, or inherited v1.2 deployed-resource rules |
-| V1.3 container admission selects the explicit R1 schema head, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | `tests/unit/test_runtime_readiness.py` and `tests/integration/test_r1_production_realm_roles.py`; 20 checks passed against clean head `0043`, including all four Utopia HTTP boundary logins and execute-only realm grants | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
+| V1.3 container admission selects the explicit R1 schema head, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | `tests/unit/test_runtime_readiness.py` and `tests/integration/test_r1_production_realm_roles.py`; affected checks passed against clean head `0044`, including all four Utopia HTTP boundary logins and execute-only realm grants | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
 | Per-realm V1.3 policy identity generation writes a private Ed25519 seed and public purpose-bound trust inventory to separate ignored files, refuses overwrite, and removes the private output if public-output creation fails | `tests/unit/test_generate_policy_identity_v1_3.py`; 1 focused check passed plus Ruff and mypy | Generator, V1.3 verification-key contract, purpose, or validity windows |
 | The Utopia V1.3 AWS realm stack is `CREATE_COMPLETE` with termination protection and capture-disabled tags; immutable executor aliases, reviewed artifact/trust digests, exact realm bindings, non-static credentials, three purpose-specific KMS keys, protected/PITR DynamoDB ledgers, and quota TTLs passed the read-only deployed verifier | `secrets/generated/utopia-aws-deployment-v1.3-2026-09-09-pass.json`; stack `lucy-utopia-security-v1-3`; 49 checks passed in `us-east-1` | Stack update, alias/version/configuration change, policy trust rotation, KMS state/policy change, DynamoDB protection/PITR/TTL change, or verifier change |
 | The deployed Utopia CloudFormation identity and the reviewed PostgreSQL binding produce one validated canonical realm security stamp | `secrets/generated/utopia-realm-security-stamp-v1.3.json`; digest `dd2fc2afb6134a2580af00b6b187b3912d57cb2f52244169862ec8b62e6e2959` | Stack realm outputs, PostgreSQL binding description, AWS account/region, or stamp contract/builder change |
@@ -651,11 +655,31 @@ Contract, static boundary, coordinator, bootstrap, Ruff, strict-mypy, and all 50
 unit checks pass. Docker Desktop was recovered by moving only its inaccessible,
 runtime-generated socket directories to timestamped backup paths and allowing Docker
 to recreate them. A fresh disposable PostgreSQL 16 cluster migrated from 0001 through
-0043. The focused PostgreSQL tests prove serialized concurrent admission, retained
+0044. The focused PostgreSQL tests prove serialized concurrent admission, retained
 unknown exposure across period rollover, exact retry without resubmission, and denial
 of direct attempt-table access; the unchanged public slice and all four V1.3 HTTP
 login/readiness boundaries also pass. Production R1-3 deployment has not been
 attempted.
+
+## R1-4 checkpoint
+
+`recovery_journal.py` defines the content-free stream binding, head, typed authority
+and cost effects, append acknowledgement, writer pause, and activation handoff. A
+restored valid lower prefix is replay work rather than activation evidence; rollback
+below an independently retained witness, a wrong store/stream/epoch/manifest, a
+missing required stream, an expired pause, or a head that advances during handoff
+fails closed. The in-memory provider is acceptance-only and proves atomic append,
+exact idempotent replay, conflicting-ID and concurrent-head rejection, and pause
+fencing; it is never a production backend.
+
+Migration `0044_r1_cost_outcome_recovery` corrects the cost lifecycle before an
+independent journal is connected. Provider results first become
+`SETTLEMENT_PENDING` or `OVER_CAP_PENDING`; the full maximum remains unresolved.
+Only the separate recovery writer can acknowledge the exact outcome event and move
+the attempt to its final state, release unused exposure, and record the acknowledged
+head. The coordinator does not return the model output before this acknowledgement.
+The remaining R1-4 work is the DynamoDB conditional adapter, domain-specific
+authority staging/replay, restored-cost replay, and protected activation integration.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

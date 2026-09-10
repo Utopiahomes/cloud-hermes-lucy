@@ -90,3 +90,15 @@ def test_cost_migration_has_separate_execute_only_boundaries() -> None:
     assert "v_concurrency>=v_policy.concurrency_limit" in source
     assert "provider_attempt idempotency conflict" not in source
     assert "provider attempt idempotency conflict" in source
+
+
+def test_cost_outcome_migration_requires_independent_ack_before_release() -> None:
+    source = (ROOT / "migrations/versions/0044_r1_cost_outcome_recovery.py").read_text(
+        encoding="utf-8"
+    )
+    pending = source.index("SET state=v_pending")
+    acknowledgement = source.index("CREATE FUNCTION lucy.acknowledge_provider_outcome_v1")
+    release = source.index("unresolved_microusd=0", acknowledgement)
+    assert pending < acknowledgement < release
+    assert "TO lucy_cost_recovery_writer" in source
+    assert "FROM PUBLIC,lucy_app,lucy_public_runtime,lucy_cost_admission" in source

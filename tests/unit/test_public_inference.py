@@ -29,7 +29,7 @@ class FakeAdmission:
             policy_version=1,
             state=state,
             reserved_microusd=5_000,
-            unresolved_microusd=0 if state == "SETTLED" else 5_000,
+            unresolved_microusd=0 if state in {"SETTLED", "OVER_CAP"} else 5_000,
             event_id=self.event_id,
             replayed=replayed,
         )
@@ -56,12 +56,18 @@ class FakeAdmission:
 
     def settle(self, **_: object) -> ProviderAttemptAdmissionV1:
         self.calls.append("settle")
+        self.event_id = uuid4()
+        return self.result("SETTLEMENT_PENDING")
+
+    def acknowledge_outcome(self, **_: object) -> ProviderAttemptAdmissionV1:
+        self.calls.append("acknowledge_outcome")
         return self.result("SETTLED")
 
 
 class FakeJournal:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, fail_outcome: bool = False) -> None:
         self.fail = fail
+        self.fail_outcome = fail_outcome
         self.calls = 0
 
     def append_reservation(self, _: ProviderAttemptAdmissionV1) -> str:
@@ -69,6 +75,12 @@ class FakeJournal:
         if self.fail:
             raise RuntimeError("synthetic journal unavailable")
         return "d" * 64
+
+    def append_outcome(self, **_: object) -> str:
+        self.calls += 1
+        if self.fail_outcome:
+            raise RuntimeError("synthetic outcome journal unavailable")
+        return "e" * 64
 
 
 class FakeProvider:
@@ -133,8 +145,14 @@ def test_provider_runs_only_after_durable_admission_and_exact_claim() -> None:
         attempt=attempt, inference=inference
     )
     assert result.output == "synthetic answer"
-    assert admission.calls == ["reserve", "acknowledge", "claim", "settle"]
-    assert journal.calls == 1 and provider.calls == 1
+    assert admission.calls == [
+        "reserve",
+        "acknowledge",
+        "claim",
+        "settle",
+        "acknowledge_outcome",
+    ]
+    assert journal.calls == 2 and provider.calls == 1
 
 
 def test_journal_failure_never_reaches_provider() -> None:
@@ -153,6 +171,17 @@ def test_ambiguous_provider_failure_preserves_unknown_exposure() -> None:
     with pytest.raises(PublicInferenceUnavailable, match="outcome is unknown"):
         coordinator(admission, journal, provider).execute(attempt=attempt, inference=inference)
     assert admission.calls == ["reserve", "acknowledge", "claim", "unknown"]
+
+
+def test_outcome_journal_failure_retains_exposure_and_does_not_return_output() -> None:
+    admission = FakeAdmission()
+    journal = FakeJournal(fail_outcome=True)
+    provider = FakeProvider()
+    attempt, inference = request_pair(admission.attempt_id)
+    with pytest.raises(RuntimeError, match="outcome journal unavailable"):
+        coordinator(admission, journal, provider).execute(attempt=attempt, inference=inference)
+    assert admission.calls == ["reserve", "acknowledge", "claim", "settle"]
+    assert provider.calls == 1 and journal.calls == 2
 
 
 def test_retry_never_calls_provider_again() -> None:

@@ -114,7 +114,16 @@ class ProviderAttemptAdmissionV1(BaseModel):
     attempt_id: UUID
     policy_id: UUID
     policy_version: int = Field(ge=1)
-    state: Literal["PERSISTENCE_PENDING", "ADMITTED", "SUBMITTED", "UNKNOWN", "SETTLED", "OVER_CAP"]
+    state: Literal[
+        "PERSISTENCE_PENDING",
+        "ADMITTED",
+        "SUBMITTED",
+        "UNKNOWN",
+        "SETTLEMENT_PENDING",
+        "OVER_CAP_PENDING",
+        "SETTLED",
+        "OVER_CAP",
+    ]
     reserved_microusd: int = Field(ge=0)
     unresolved_microusd: int = Field(ge=0)
     event_id: UUID
@@ -173,6 +182,17 @@ class ProviderCostAdmissionService:
                 "incurred_microusd": incurred_microusd,
                 "provider_reference_commitment": provider_reference_commitment,
             },
+        )
+        return result
+
+    def acknowledge_outcome(
+        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
+    ) -> ProviderAttemptAdmissionV1:
+        if _COMMITMENT.fullmatch(head_digest) is None:
+            raise ValueError("cost journal head digest is invalid")
+        result = self._transition(
+            "acknowledge_provider_outcome_v1",
+            {"attempt_id": attempt_id, "event_id": event_id, "head_digest": head_digest},
         )
         if result.state == "OVER_CAP":
             raise ProviderCostOverrun(result)

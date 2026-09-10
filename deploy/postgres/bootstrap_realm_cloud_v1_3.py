@@ -41,8 +41,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0041_r1_deletion_auth_snapshot",
     "0042_r1_permit_authority",
     "0043_r1_provider_cost_admission",
+    "0044_r1_cost_outcome_recovery",
 }
-EXPECTED_REVISION = "0043_r1_provider_cost_admission"
+EXPECTED_REVISION = "0044_r1_cost_outcome_recovery"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

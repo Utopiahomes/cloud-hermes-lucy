@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError
 from lucy.cost_admission import (
     ProviderAttemptRequestV1,
     ProviderCostAdmissionService,
+    ProviderCostOverrun,
     ProviderCostPolicyV1,
 )
 from lucy.db import create_session_factory
@@ -176,3 +177,96 @@ def test_concurrent_attempts_cannot_oversubscribe_outstanding_cap() -> None:
     with pytest.raises(DBAPIError, match="permission denied"), engine.begin() as connection:
         connection.execute(text("SELECT * FROM lucy.provider_attempts_v1"))
     engine.dispose()
+
+
+def test_outcome_does_not_release_exposure_before_exact_journal_acknowledgement() -> None:
+    assert COST_URL is not None and RECOVERY_URL is not None
+    foundation, _ = _foundation_and_policy(outstanding=5_000)
+    admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
+    recovery = ProviderCostAdmissionService(create_session_factory(RECOVERY_URL))
+    request = _request(foundation, key="public:settlement:1")
+
+    reserved = admission.reserve(request)
+    recovery.acknowledge(
+        attempt_id=request.attempt_id,
+        event_id=reserved.event_id,
+        head_digest="d" * 64,
+    )
+    admission.claim_submission(request.attempt_id)
+    pending = admission.settle(
+        attempt_id=request.attempt_id,
+        incurred_microusd=2_000,
+        provider_reference_commitment="e" * 64,
+    )
+    assert pending.state == "SETTLEMENT_PENDING"
+    assert pending.unresolved_microusd == 5_000
+    settlement_replay = admission.settle(
+        attempt_id=request.attempt_id,
+        incurred_microusd=2_000,
+        provider_reference_commitment="e" * 64,
+    )
+    assert settlement_replay.replayed and settlement_replay.event_id == pending.event_id
+    with pytest.raises(DBAPIError, match="limit exceeded"):
+        admission.reserve(_request(foundation, key="public:settlement:blocked", maximum=1))
+    with pytest.raises(DBAPIError, match="permission denied"):
+        admission.acknowledge_outcome(
+            attempt_id=request.attempt_id,
+            event_id=pending.event_id,
+            head_digest="f" * 64,
+        )
+    with pytest.raises(DBAPIError, match="permission denied"):
+        recovery.settle(
+            attempt_id=request.attempt_id,
+            incurred_microusd=2_000,
+            provider_reference_commitment="e" * 64,
+        )
+    with pytest.raises(DBAPIError, match="acknowledgement unavailable"):
+        recovery.acknowledge_outcome(
+            attempt_id=request.attempt_id,
+            event_id=uuid4(),
+            head_digest="f" * 64,
+        )
+
+    final = recovery.acknowledge_outcome(
+        attempt_id=request.attempt_id,
+        event_id=pending.event_id,
+        head_digest="f" * 64,
+    )
+    assert final.state == "SETTLED" and final.unresolved_microusd == 0
+    replay = recovery.acknowledge_outcome(
+        attempt_id=request.attempt_id,
+        event_id=pending.event_id,
+        head_digest="f" * 64,
+    )
+    assert replay.replayed
+
+
+def test_pending_and_acknowledged_over_cap_both_block_new_admission() -> None:
+    assert COST_URL is not None and RECOVERY_URL is not None
+    foundation, _ = _foundation_and_policy(outstanding=20_000)
+    admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
+    recovery = ProviderCostAdmissionService(create_session_factory(RECOVERY_URL))
+    request = _request(foundation, key="public:over-cap:1")
+    reserved = admission.reserve(request)
+    recovery.acknowledge(
+        attempt_id=request.attempt_id,
+        event_id=reserved.event_id,
+        head_digest="d" * 64,
+    )
+    admission.claim_submission(request.attempt_id)
+    pending = admission.settle(
+        attempt_id=request.attempt_id,
+        incurred_microusd=6_000,
+        provider_reference_commitment="e" * 64,
+    )
+    assert pending.state == "OVER_CAP_PENDING" and pending.unresolved_microusd == 5_000
+    with pytest.raises(DBAPIError, match="admission unavailable"):
+        admission.reserve(_request(foundation, key="public:over-cap:blocked"))
+    with pytest.raises(ProviderCostOverrun):
+        recovery.acknowledge_outcome(
+            attempt_id=request.attempt_id,
+            event_id=pending.event_id,
+            head_digest="f" * 64,
+        )
+    with pytest.raises(DBAPIError, match="admission unavailable"):
+        admission.reserve(_request(foundation, key="public:over-cap:still-blocked"))

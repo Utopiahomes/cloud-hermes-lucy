@@ -58,9 +58,22 @@ class CostAdmissionGateway(Protocol):
         provider_reference_commitment: str,
     ) -> ProviderAttemptAdmissionV1: ...
 
+    def acknowledge_outcome(
+        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
+    ) -> ProviderAttemptAdmissionV1: ...
+
 
 class CostJournalGateway(Protocol):
     def append_reservation(self, admission: ProviderAttemptAdmissionV1) -> str: ...
+
+    def append_outcome(
+        self,
+        *,
+        attempt: ProviderAttemptRequestV1,
+        admission: ProviderAttemptAdmissionV1,
+        incurred_microusd: int,
+        provider_reference_commitment: str,
+    ) -> str: ...
 
 
 class PublicProvider(Protocol):
@@ -133,9 +146,22 @@ class PublicInferenceCoordinator:
             incurred_microusd=outcome.incurred_microusd,
             provider_reference_commitment=reference_commitment,
         )
-        if settled.state != "SETTLED":
+        if settled.state not in {"SETTLEMENT_PENDING", "OVER_CAP_PENDING"}:
+            raise PublicInferenceUnavailable("provider settlement persistence is unavailable")
+        outcome_head = self._journal.append_outcome(
+            attempt=attempt,
+            admission=settled,
+            incurred_microusd=outcome.incurred_microusd,
+            provider_reference_commitment=reference_commitment,
+        )
+        finalized = self._admission.acknowledge_outcome(
+            attempt_id=attempt.attempt_id,
+            event_id=settled.event_id,
+            head_digest=outcome_head,
+        )
+        if finalized.state != "SETTLED":
             raise PublicInferenceUnavailable("provider settlement did not close")
-        return PublicInferenceResult(attempt.attempt_id, settled.state, outcome.output, False)
+        return PublicInferenceResult(attempt.attempt_id, finalized.state, outcome.output, False)
 
     @staticmethod
     def _require_same_bounds(
