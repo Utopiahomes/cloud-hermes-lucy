@@ -14,6 +14,7 @@ from lucy.cost_admission import (
     ProviderCostAdmissionService,
     ProviderCostOverrun,
     ProviderCostPolicyV1,
+    ProviderCostRecoveryService,
 )
 from lucy.db import create_session_factory
 from lucy.tenancy import TenancyService
@@ -128,7 +129,7 @@ def test_unknown_exposure_survives_rollover_and_retry_never_resubmits() -> None:
     assert COST_URL is not None and RECOVERY_URL is not None and OWNER_URL is not None
     foundation, _ = _foundation_and_policy(outstanding=5_000)
     admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
-    recovery = ProviderCostAdmissionService(create_session_factory(RECOVERY_URL))
+    recovery = ProviderCostRecoveryService(create_session_factory(RECOVERY_URL))
     request = _request(foundation, key="public:unknown:1")
 
     pending = admission.reserve(request)
@@ -183,7 +184,7 @@ def test_outcome_does_not_release_exposure_before_exact_journal_acknowledgement(
     assert COST_URL is not None and RECOVERY_URL is not None
     foundation, _ = _foundation_and_policy(outstanding=5_000)
     admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
-    recovery = ProviderCostAdmissionService(create_session_factory(RECOVERY_URL))
+    recovery = ProviderCostRecoveryService(create_session_factory(RECOVERY_URL))
     request = _request(foundation, key="public:settlement:1")
 
     reserved = admission.reserve(request)
@@ -209,13 +210,13 @@ def test_outcome_does_not_release_exposure_before_exact_journal_acknowledgement(
     with pytest.raises(DBAPIError, match="limit exceeded"):
         admission.reserve(_request(foundation, key="public:settlement:blocked", maximum=1))
     with pytest.raises(DBAPIError, match="permission denied"):
-        admission.acknowledge_outcome(
+        ProviderCostRecoveryService(create_session_factory(COST_URL)).acknowledge_outcome(
             attempt_id=request.attempt_id,
             event_id=pending.event_id,
             head_digest="f" * 64,
         )
     with pytest.raises(DBAPIError, match="permission denied"):
-        recovery.settle(
+        ProviderCostAdmissionService(create_session_factory(RECOVERY_URL)).settle(
             attempt_id=request.attempt_id,
             incurred_microusd=2_000,
             provider_reference_commitment="e" * 64,
@@ -245,7 +246,7 @@ def test_pending_and_acknowledged_over_cap_both_block_new_admission() -> None:
     assert COST_URL is not None and RECOVERY_URL is not None
     foundation, _ = _foundation_and_policy(outstanding=20_000)
     admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
-    recovery = ProviderCostAdmissionService(create_session_factory(RECOVERY_URL))
+    recovery = ProviderCostRecoveryService(create_session_factory(RECOVERY_URL))
     request = _request(foundation, key="public:over-cap:1")
     reserved = admission.reserve(request)
     recovery.acknowledge(

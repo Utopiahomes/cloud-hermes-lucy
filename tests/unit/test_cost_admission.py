@@ -5,7 +5,12 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from lucy.cost_admission import ProviderAttemptRequestV1, ProviderCostPolicyV1
+from lucy.cost_admission import (
+    ProviderAttemptRequestV1,
+    ProviderCostAdmissionService,
+    ProviderCostPolicyV1,
+    ProviderCostRecoveryService,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -102,3 +107,10 @@ def test_cost_outcome_migration_requires_independent_ack_before_release() -> Non
     assert pending < acknowledgement < release
     assert "TO lucy_cost_recovery_writer" in source
     assert "FROM PUBLIC,lucy_app,lucy_public_runtime,lucy_cost_admission" in source
+
+
+def test_cost_clients_do_not_expose_each_others_privileged_operations() -> None:
+    assert not hasattr(ProviderCostAdmissionService, "acknowledge")
+    assert not hasattr(ProviderCostAdmissionService, "acknowledge_outcome")
+    assert not hasattr(ProviderCostRecoveryService, "reserve")
+    assert not hasattr(ProviderCostRecoveryService, "settle")

@@ -42,10 +42,6 @@ class ProviderInferenceOutcome(BaseModel):
 class CostAdmissionGateway(Protocol):
     def reserve(self, request: ProviderAttemptRequestV1) -> ProviderAttemptAdmissionV1: ...
 
-    def acknowledge(
-        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
-    ) -> ProviderAttemptAdmissionV1: ...
-
     def claim_submission(self, attempt_id: UUID) -> ProviderAttemptAdmissionV1: ...
 
     def mark_unknown(self, attempt_id: UUID) -> ProviderAttemptAdmissionV1: ...
@@ -56,6 +52,13 @@ class CostAdmissionGateway(Protocol):
         attempt_id: UUID,
         incurred_microusd: int,
         provider_reference_commitment: str,
+    ) -> ProviderAttemptAdmissionV1: ...
+
+
+
+class CostRecoveryGateway(Protocol):
+    def acknowledge(
+        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
     ) -> ProviderAttemptAdmissionV1: ...
 
     def acknowledge_outcome(
@@ -95,6 +98,7 @@ class PublicInferenceCoordinator:
         self,
         admission: CostAdmissionGateway,
         journal: CostJournalGateway,
+        recovery: CostRecoveryGateway,
         provider: PublicProvider,
         *,
         provider_reference_commitment_key: bytes,
@@ -103,6 +107,7 @@ class PublicInferenceCoordinator:
             raise ValueError("provider reference commitment key is too short")
         self._admission = admission
         self._journal = journal
+        self._recovery = recovery
         self._provider = provider
         self._commitment_key = provider_reference_commitment_key
 
@@ -120,7 +125,7 @@ class PublicInferenceCoordinator:
             raise PublicInferenceUnavailable("provider reservation returned an invalid state")
 
         head_digest = self._journal.append_reservation(reserved)
-        admitted = self._admission.acknowledge(
+        admitted = self._recovery.acknowledge(
             attempt_id=attempt.attempt_id,
             event_id=reserved.event_id,
             head_digest=head_digest,
@@ -154,7 +159,7 @@ class PublicInferenceCoordinator:
             incurred_microusd=outcome.incurred_microusd,
             provider_reference_commitment=reference_commitment,
         )
-        finalized = self._admission.acknowledge_outcome(
+        finalized = self._recovery.acknowledge_outcome(
             attempt_id=attempt.attempt_id,
             event_id=settled.event_id,
             head_digest=outcome_head,

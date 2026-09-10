@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +14,17 @@ from lucy.public_inference import (
     PublicInferenceUnavailable,
 )
 
+_State = Literal[
+    "PERSISTENCE_PENDING",
+    "ADMITTED",
+    "SUBMITTED",
+    "UNKNOWN",
+    "SETTLEMENT_PENDING",
+    "OVER_CAP_PENDING",
+    "SETTLED",
+    "OVER_CAP",
+]
+
 
 class FakeAdmission:
     def __init__(self) -> None:
@@ -20,9 +32,13 @@ class FakeAdmission:
         self.policy_id = uuid4()
         self.event_id = uuid4()
         self.calls: list[str] = []
-        self.replay_state: str | None = None
+        self.replay_state: _State | None = None
 
-    def result(self, state: str, replayed: bool = False) -> ProviderAttemptAdmissionV1:
+    def result(
+        self,
+        state: _State,
+        replayed: bool = False,
+    ) -> ProviderAttemptAdmissionV1:
         return ProviderAttemptAdmissionV1(
             attempt_id=self.attempt_id,
             policy_id=self.policy_id,
@@ -42,10 +58,6 @@ class FakeAdmission:
             replayed=self.replay_state is not None,
         )
 
-    def acknowledge(self, **_: object) -> ProviderAttemptAdmissionV1:
-        self.calls.append("acknowledge")
-        return self.result("ADMITTED")
-
     def claim_submission(self, _: UUID) -> ProviderAttemptAdmissionV1:
         self.calls.append("claim")
         return self.result("SUBMITTED")
@@ -59,9 +71,17 @@ class FakeAdmission:
         self.event_id = uuid4()
         return self.result("SETTLEMENT_PENDING")
 
+
+
+class FakeRecovery:
+    def __init__(self, admission: FakeAdmission) -> None:
+        self._admission = admission
+
+    def acknowledge(self, **_: object) -> ProviderAttemptAdmissionV1:
+        return self._admission.result("ADMITTED")
+
     def acknowledge_outcome(self, **_: object) -> ProviderAttemptAdmissionV1:
-        self.calls.append("acknowledge_outcome")
-        return self.result("SETTLED")
+        return self._admission.result("SETTLED")
 
 
 class FakeJournal:
@@ -129,10 +149,13 @@ def request_pair(attempt_id: UUID) -> tuple[ProviderAttemptRequestV1, PublicInfe
     return attempt, inference
 
 
-def coordinator(admission: FakeAdmission, journal: FakeJournal, provider: FakeProvider):
+def coordinator(
+    admission: FakeAdmission, journal: FakeJournal, provider: FakeProvider
+) -> PublicInferenceCoordinator:
     return PublicInferenceCoordinator(
         admission,
         journal,
+        FakeRecovery(admission),
         provider,
         provider_reference_commitment_key=b"k" * 32,
     )
@@ -147,10 +170,8 @@ def test_provider_runs_only_after_durable_admission_and_exact_claim() -> None:
     assert result.output == "synthetic answer"
     assert admission.calls == [
         "reserve",
-        "acknowledge",
         "claim",
         "settle",
-        "acknowledge_outcome",
     ]
     assert journal.calls == 2 and provider.calls == 1
 
@@ -170,7 +191,7 @@ def test_ambiguous_provider_failure_preserves_unknown_exposure() -> None:
     attempt, inference = request_pair(admission.attempt_id)
     with pytest.raises(PublicInferenceUnavailable, match="outcome is unknown"):
         coordinator(admission, journal, provider).execute(attempt=attempt, inference=inference)
-    assert admission.calls == ["reserve", "acknowledge", "claim", "unknown"]
+    assert admission.calls == ["reserve", "claim", "unknown"]
 
 
 def test_outcome_journal_failure_retains_exposure_and_does_not_return_output() -> None:
@@ -180,7 +201,7 @@ def test_outcome_journal_failure_retains_exposure_and_does_not_return_output() -
     attempt, inference = request_pair(admission.attempt_id)
     with pytest.raises(RuntimeError, match="outcome journal unavailable"):
         coordinator(admission, journal, provider).execute(attempt=attempt, inference=inference)
-    assert admission.calls == ["reserve", "acknowledge", "claim", "settle"]
+    assert admission.calls == ["reserve", "claim", "settle"]
     assert provider.calls == 1 and journal.calls == 2
 
 

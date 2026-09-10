@@ -130,11 +130,23 @@ class ProviderAttemptAdmissionV1(BaseModel):
     replayed: bool
 
 
-class ProviderCostAdmissionService:
-    """Execute-only client for database-enforced provider-cost transitions."""
+class _ProviderCostDatabaseService:
+    """Shared execute-only PostgreSQL client without cross-role methods."""
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
+
+    def _transition(self, function: str, values: dict[str, object]) -> ProviderAttemptAdmissionV1:
+        arguments = ",".join(f":{name}" for name in values)
+        with self._sessions.begin() as session:
+            result = session.execute(
+                text(f"SELECT lucy.{function}({arguments})"), values
+            ).scalar_one()
+        return ProviderAttemptAdmissionV1.model_validate(result)
+
+
+class ProviderCostAdmissionService(_ProviderCostDatabaseService):
+    """Normal cost identity; it cannot acknowledge independent persistence."""
 
     def reserve(self, request: ProviderAttemptRequestV1) -> ProviderAttemptAdmissionV1:
         with self._sessions.begin() as session:
@@ -149,16 +161,6 @@ class ProviderCostAdmissionService:
                 request.model_dump(mode="python"),
             ).scalar_one()
         return ProviderAttemptAdmissionV1.model_validate(result)
-
-    def acknowledge(
-        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
-    ) -> ProviderAttemptAdmissionV1:
-        if _COMMITMENT.fullmatch(head_digest) is None:
-            raise ValueError("cost journal head digest is invalid")
-        return self._transition(
-            "acknowledge_provider_reservation_v1",
-            {"attempt_id": attempt_id, "event_id": event_id, "head_digest": head_digest},
-        )
 
     def claim_submission(self, attempt_id: UUID) -> ProviderAttemptAdmissionV1:
         return self._transition("claim_provider_submission_v1", {"attempt_id": attempt_id})
@@ -185,6 +187,21 @@ class ProviderCostAdmissionService:
         )
         return result
 
+
+
+class ProviderCostRecoveryService(_ProviderCostDatabaseService):
+    """Recovery identity; it can only acknowledge exact persisted events."""
+
+    def acknowledge(
+        self, *, attempt_id: UUID, event_id: UUID, head_digest: str
+    ) -> ProviderAttemptAdmissionV1:
+        if _COMMITMENT.fullmatch(head_digest) is None:
+            raise ValueError("cost journal head digest is invalid")
+        return self._transition(
+            "acknowledge_provider_reservation_v1",
+            {"attempt_id": attempt_id, "event_id": event_id, "head_digest": head_digest},
+        )
+
     def acknowledge_outcome(
         self, *, attempt_id: UUID, event_id: UUID, head_digest: str
     ) -> ProviderAttemptAdmissionV1:
@@ -197,14 +214,6 @@ class ProviderCostAdmissionService:
         if result.state == "OVER_CAP":
             raise ProviderCostOverrun(result)
         return result
-
-    def _transition(self, function: str, values: dict[str, object]) -> ProviderAttemptAdmissionV1:
-        arguments = ",".join(f":{name}" for name in values)
-        with self._sessions.begin() as session:
-            result = session.execute(
-                text(f"SELECT lucy.{function}({arguments})"), values
-            ).scalar_one()
-        return ProviderAttemptAdmissionV1.model_validate(result)
 
 
 class ProviderCostOverrun(RuntimeError):
