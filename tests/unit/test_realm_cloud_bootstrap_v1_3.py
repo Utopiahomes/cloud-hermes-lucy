@@ -203,6 +203,15 @@ def test_prerequisite_roles_must_be_inert() -> None:
         )
 
 
+def test_bootstrap_removes_creator_membership_from_caller_roles() -> None:
+    source = (
+        ROOT / "deploy/postgres/bootstrap_realm_cloud_v1_3.py"
+    ).read_text(encoding="utf-8")
+    assert "REVOKE lucy_public_runtime FROM lucy_migration" in source
+    assert "REVOKE lucy_directory_admission FROM lucy_migration" in source
+    assert "GRANT lucy_directory_function_owner TO lucy_migration" in source
+
+
 def test_stage_sanitizes_sqlalchemy_statement_and_parameters() -> None:
     secret = "never-print-this-database-secret"
 

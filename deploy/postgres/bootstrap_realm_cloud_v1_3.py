@@ -242,6 +242,8 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
                 ).format(sql.Identifier(name))
             )
         connection.execute("GRANT lucy_directory_function_owner TO lucy_migration")
+        connection.execute("REVOKE lucy_public_runtime FROM lucy_migration")
+        connection.execute("REVOKE lucy_directory_admission FROM lucy_migration")
         prerequisite_rows = _role_rows(connection, _PREREQUISITE_ROLES)
         if set(prerequisite_rows) != _PREREQUISITE_ROLES:
             raise BootstrapError("one or more prerequisite roles are missing")
