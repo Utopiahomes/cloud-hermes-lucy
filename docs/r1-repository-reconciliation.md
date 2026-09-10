@@ -829,5 +829,17 @@ invalidated by a change to the recovery grant template, any recovery LOGIN membe
 or function ACL, the schema revision, admission/capture state, or the database network
 allow-list.
 
+The operator-only protected recovery runner is now implemented locally. Its production
+configuration binds two distinct journals, two independently retained witness heads,
+the exact authority/cost recovery LOGINs, the private migration login, and a fresh
+runtime epoch. It rejects static AWS keys, verifies the actual Render OIDC assumed role
+through STS, requires TLS plus quarantined/capture-safe PostgreSQL, replays both streams,
+obtains the coordinated writer pauses, finalizes recovered cost state, rechecks the
+handoff, and activates only through the offline migration identity. Twenty-five focused
+runner, coordinator, and DynamoDB adapter tests passed with Ruff and strict mypy on
+2026-09-10. The utility has not yet been run against Utopia production; its migration
+URL and operator authorization must never remain on the continuous acknowledgement
+service after the one-off recovery job.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

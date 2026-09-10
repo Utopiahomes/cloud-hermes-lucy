@@ -194,11 +194,38 @@ R1-4 recovery workloads use a second, additive execute-only role stamp rendered 
 `lucy_<realm>_authority_writer`, `lucy_<realm>_cost_writer`,
 `lucy_<realm>_authority_recovery`, and `lucy_<realm>_cost_recovery`. The stamp
 revokes all inherited schema/table/sequence/function access, grants only schema use
-and schema-version read, then grants the exact pending/prepare or
-pending/acknowledge functions for that identity. It grants no membership in the
+and schema-version read, then grants the exact pending/prepare functions to each
+writer and exact pending/acknowledge/replay functions to its matching recovery
+identity. It grants no membership in the
 generic prerequisite roles. Production LOGIN creation/password rotation is performed
 by the same quarantine-first bootstrap when the four recovery database URLs are
 supplied. Do not place the migration URL on any continuous service.
+
+## Run a protected V1.3 recovery handoff
+
+`run_protected_recovery_v1_3.py` is an operator-only, one-off recovery utility. It
+must run under the exact recovery-coordinator Render OIDC role while ordinary Lucy is
+quarantined and capture is off. It rejects static AWS credentials and verifies the
+active assumed role through STS before reading either journal. Supply the two exact
+recovery database URLs, both immutable stream bindings, independently retained
+pre-restore witness heads, the two journal table names, a new target runtime epoch,
+the private migration URL, and:
+
+```text
+RENDER=true
+LUCY_ENVIRONMENT=production
+LUCY_SECURITY_BASELINE=v1.3
+LUCY_TRANSCRIPT_CAPTURE_ENABLED=false
+LUCY_PROTECTED_RECOVERY_AUTHORIZATION=security-v1.3-protected-recovery-handoff
+```
+
+The runner verifies each non-elevated recovery LOGIN and the TLS/capture/quarantine
+boundary, replays both journal suffixes, obtains the protected short writer pauses,
+finalizes cost recovery, rechecks the heads and pauses, and only then activates the
+new runtime epoch. The migration URL is required only for that final transaction and
+must be removed after the one-off job. A successful report does not enable transcript
+capture; paid admission remains subject to the recovered cost cooldown and other
+database-enforced limits.
 
 The lower-level foundation and binding commands below remain available for a
 reviewed recovery or diagnostic run.
