@@ -31,6 +31,20 @@ Build the committed executor bundle under an unambiguous V1.3 release name:
 The V1.2 filename remains the wrapper's compatibility default; a V1.3 stack
 must use the explicitly named V1.3 artifact and its adjacent digest manifest.
 
+Generate a purpose-distinct policy-notary identity for each realm. Both outputs
+belong under ignored local `secrets/generated`; only the public trust-store JSON
+and its digest enter CloudFormation. The private seed goes only to that realm's
+policy service and must never be printed, committed, or supplied to AWS:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\generate_policy_identity_v1_3.py `
+  --key-id utopia-policy-v13-1 `
+  --issuer lucy-utopia-policy `
+  --environment production `
+  --private-output secrets\generated\utopia-policy-private-v1.3.json `
+  --trust-output secrets\generated\utopia-policy-trust-store-v1.3.json
+```
+
 After a stack is complete and termination-protected, save its read-only
 `describe-stacks` response. Combine that evidence with the reviewed,
 content-free PostgreSQL binding description:
