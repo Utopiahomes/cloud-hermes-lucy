@@ -56,6 +56,7 @@ projects:
               - {key: LUCY_ARCHIVE_BACKEND, value: aws-kms-dynamodb-v13}
               - {key: LUCY_ARCHIVE_RECORD_VERSION, value: "1"}
               - {key: LUCY_ARCHIVE_COMMITMENT_KEY_B64, sync: false}
+              - {key: LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64, sync: false}
               - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
               - {key: AWS_REGION, value: us-east-1}
               - {key: AWS_ROLE_ARN, sync: false}

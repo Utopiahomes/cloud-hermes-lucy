@@ -571,6 +571,8 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
         assert environment["LUCY_SECURITY_BASELINE"]["value"] == "v1.3"
     routine = {item["key"]: item for item in services["lucy-routine"]["envVars"]}
     assert routine["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert "LUCY_ARCHIVE_COMMITMENT_KEY_B64" in routine
+    assert "LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64" in routine
     assert services["lucy-finality-utility"]["schedule"] == "0 0 1 1 *"
     assert services["lucy-finality-utility"]["dockerCommand"].endswith(
         "--scheduled-sentinel"
