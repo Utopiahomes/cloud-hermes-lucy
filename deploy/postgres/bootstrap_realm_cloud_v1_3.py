@@ -225,6 +225,10 @@ def _assert_inert_role(name: str, flags: tuple[Any, ...]) -> None:
         raise BootstrapError(f"prerequisite role is not inert: {name}")
 
 
+def _membership_pairs(rows: Sequence[Sequence[Any]]) -> set[tuple[str, str]]:
+    return {(str(row[0]), str(row[1])) for row in rows}
+
+
 def _bootstrap_roles(config: BootstrapConfig) -> None:
     expected = {url.username for url in config.runtime_urls.values()}
     if None in expected or len(expected) != 4:
@@ -249,15 +253,20 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
             raise BootstrapError("one or more prerequisite roles are missing")
         for name, flags in prerequisite_rows.items():
             _assert_inert_role(name, flags)
-        memberships = connection.execute(
+        membership_rows = connection.execute(
             "SELECT parent.rolname,member.rolname FROM pg_auth_members m "
             "JOIN pg_roles parent ON parent.oid=m.roleid "
             "JOIN pg_roles member ON member.oid=m.member "
             "WHERE parent.rolname=ANY(%s)",
             (sorted(_PREREQUISITE_ROLES),),
         ).fetchall()
-        if set(memberships) != {("lucy_directory_function_owner", "lucy_migration")}:
-            raise BootstrapError("prerequisite role membership is not isolated")
+        memberships = _membership_pairs(membership_rows)
+        expected_memberships = {("lucy_directory_function_owner", "lucy_migration")}
+        if memberships != expected_memberships:
+            raise BootstrapError(
+                "prerequisite role membership is not isolated: "
+                f"{sorted(memberships)}"
+            )
 
         rows = _role_rows(connection, names)
         for name, flags in rows.items():

@@ -212,6 +212,16 @@ def test_bootstrap_removes_creator_membership_from_caller_roles() -> None:
     assert "GRANT lucy_directory_function_owner TO lucy_migration" in source
 
 
+def test_membership_rows_are_normalized_before_comparison() -> None:
+    class DriverRow:
+        def __getitem__(self, index: int) -> object:
+            return ("lucy_directory_function_owner", "lucy_migration")[index]
+
+    assert bootstrap._membership_pairs([DriverRow()]) == {
+        ("lucy_directory_function_owner", "lucy_migration")
+    }
+
+
 def test_stage_sanitizes_sqlalchemy_statement_and_parameters() -> None:
     secret = "never-print-this-database-secret"
 
