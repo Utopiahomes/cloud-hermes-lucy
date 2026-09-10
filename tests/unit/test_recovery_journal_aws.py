@@ -217,7 +217,7 @@ def test_event_metadata_substitution_is_rejected() -> None:
 
 
 def test_stale_head_and_active_pause_fail_closed() -> None:
-    bound, _, journal = _journal()
+    bound, client, journal = _journal()
     before = journal.head()
     journal.append(_event(bound, before), before)
     with pytest.raises(RecoveryJournalError, match="unconfirmed"):
@@ -233,6 +233,12 @@ def test_stale_head_and_active_pause_fail_closed() -> None:
         duration=timedelta(seconds=30),
         now=datetime.now(UTC),
     )
+    pause_put = client.transactions[1][0]["Put"]
+    assert isinstance(pause_put, dict)
+    pause_item = pause_put["Item"]
+    assert isinstance(pause_item, dict)
+    assert _s(pause_item, "pk") == f"PAUSE#{bound.stream_kind.value}#{bound.stream_id}"
+    assert "ExpressionAttributeValues" not in pause_put
     assert journal.acquire_pause(
         pause_id=pause_id,
         recovery_id=recovery_id,

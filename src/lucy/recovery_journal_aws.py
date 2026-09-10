@@ -55,6 +55,7 @@ class AwsDynamoRecoveryJournal:
         self._table = table_name
         self._binding = binding
         self._stream_key = f"STREAM#{binding.stream_kind.value}#{binding.stream_id}"
+        self._pause_key = f"PAUSE#{binding.stream_kind.value}#{binding.stream_id}"
 
     @classmethod
     def from_environment(cls) -> AwsDynamoRecoveryJournal:
@@ -194,9 +195,9 @@ class AwsDynamoRecoveryJournal:
                 }
             },
             {
-                "ConditionCheck": {
-                    "TableName": self._table,
-                    "Key": {"pk": {"S": self._stream_key}, "sk": {"S": "PAUSE"}},
+                    "ConditionCheck": {
+                        "TableName": self._table,
+                        "Key": {"pk": {"S": self._pause_key}, "sk": {"S": "PAUSE"}},
                     "ConditionExpression": (
                         "attribute_not_exists(pk) OR expires_epoch_ms<=:now_ms"
                     ),
@@ -249,31 +250,30 @@ class AwsDynamoRecoveryJournal:
             expires_at=now + duration,
         )
         condition = "attribute_not_exists(pk)"
-        condition_values: dict[str, dict[str, str]] = {
-            ":now_ms": {"N": str(_epoch_ms(now))}
-        }
+        condition_values: dict[str, dict[str, str]] = {}
         if existing is not None:
             condition = "fencing_generation=:previous AND expires_epoch_ms<=:now_ms"
             condition_values[":previous"] = {"N": str(existing.fencing_generation)}
+            condition_values[":now_ms"] = {"N": str(_epoch_ms(now))}
+        pause_put: dict[str, object] = {
+            "TableName": self._table,
+            "Item": {
+                "pk": {"S": self._pause_key},
+                "sk": {"S": "PAUSE"},
+                "pause_id": {"S": str(pause.pause_id)},
+                "recovery_id": {"S": str(pause.recovery_id)},
+                "fencing_generation": {"N": str(generation)},
+                "expires_epoch_ms": {"N": str(_epoch_ms(pause.expires_at))},
+                "body": {"S": pause.model_dump_json()},
+            },
+            "ConditionExpression": condition,
+        }
+        if condition_values:
+            pause_put["ExpressionAttributeValues"] = condition_values
         try:
             self._client.transact_write_items(
                 TransactItems=[
-                    {
-                        "Put": {
-                            "TableName": self._table,
-                            "Item": {
-                                "pk": {"S": self._stream_key},
-                                "sk": {"S": "PAUSE"},
-                                "pause_id": {"S": str(pause.pause_id)},
-                                "recovery_id": {"S": str(pause.recovery_id)},
-                                "fencing_generation": {"N": str(generation)},
-                                "expires_epoch_ms": {"N": str(_epoch_ms(pause.expires_at))},
-                                "body": {"S": pause.model_dump_json()},
-                            },
-                            "ConditionExpression": condition,
-                            "ExpressionAttributeValues": condition_values,
-                        }
-                    },
+                    {"Put": pause_put},
                     {
                         "ConditionCheck": {
                             "TableName": self._table,
@@ -346,7 +346,7 @@ class AwsDynamoRecoveryJournal:
             raise RecoveryJournalError("recovery journal acknowledgement is invalid") from None
 
     def _read_pause(self) -> RecoveryWriterPauseV1 | None:
-        item = self._get({"pk": {"S": self._stream_key}, "sk": {"S": "PAUSE"}})
+        item = self._get({"pk": {"S": self._pause_key}, "sk": {"S": "PAUSE"}})
         if item is None:
             return None
         try:
