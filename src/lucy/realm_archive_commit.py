@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
 from collections.abc import Mapping
 from typing import Literal, Protocol
@@ -15,6 +16,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from lucy.archive import (
+    CaptureModeInput,
+    CaptureModeResult,
+    ConversationMessageArchiveInput,
+    ConversationMessageArchiveResult,
+    TurnCaptureInput,
+    TurnCaptureResult,
+)
 from lucy.contracts.canonical import canonical_json_bytes, canonical_sha256
 from lucy.db import create_session_factory
 from lucy.realm_archive import RealmArchiveEncryptor, RealmArchiveEnvelopeV1
@@ -80,6 +89,16 @@ class RealmArchiveCommitStore(Protocol):
     def reconcile(self, operation_id: UUID) -> RealmArchiveCommitResultV1: ...
 
 
+class RealmConversationArchiveStore(RealmArchiveCommitStore, Protocol):
+    def accept_turn(self, request: TurnCaptureInput) -> TurnCaptureResult: ...
+
+    def capture_mode(self, source_conversation_id: str) -> CaptureModeResult: ...
+
+    def set_capture_mode(
+        self, idempotency_key: str, request: CaptureModeInput
+    ) -> CaptureModeResult: ...
+
+
 class PostgresRealmArchiveCommitStore:
     """Execute-only adapter; the database derives realm scope from session_user."""
 
@@ -102,7 +121,7 @@ class PostgresRealmArchiveCommitStore:
                         "key": request.idempotency_key,
                         "commitment": request_commitment,
                         "classification": request.content_classification,
-                        "lineage": list(request.lineage_refs),
+                        "lineage": json.dumps(request.lineage_refs),
                     },
                 ).scalar_one()
         except DBAPIError as exc:
@@ -142,6 +161,66 @@ class PostgresRealmArchiveCommitStore:
                 "realm archive reconciliation is unavailable"
             ) from exc
         return RealmArchiveCommitResultV1.model_validate(value)
+
+    def accept_turn(self, request: TurnCaptureInput) -> TurnCaptureResult:
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.accept_scoped_capture_turn_v1("
+                        ":conversation,:turn)"
+                    ),
+                    {
+                        "conversation": request.source_conversation_id,
+                        "turn": request.source_turn_id,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise RealmArchiveCommitUnavailable("realm capture receipt is unavailable") from exc
+        return TurnCaptureResult.model_validate(value)
+
+    def capture_mode(self, source_conversation_id: str) -> CaptureModeResult:
+        try:
+            with self._sessions() as session:
+                value = session.execute(
+                    text("SELECT lucy.get_scoped_capture_mode_v1(:conversation)"),
+                    {"conversation": source_conversation_id},
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise RealmArchiveCommitUnavailable("realm capture state is unavailable") from exc
+        return CaptureModeResult.model_validate(
+            {
+                **value,
+                "platform": "telegram",
+                "source_conversation_id": source_conversation_id,
+            }
+        )
+
+    def set_capture_mode(
+        self, idempotency_key: str, request: CaptureModeInput
+    ) -> CaptureModeResult:
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.set_scoped_capture_mode_v1("
+                        ":conversation,:enabled,:key)"
+                    ),
+                    {
+                        "conversation": request.source_conversation_id,
+                        "enabled": request.capture_enabled,
+                        "key": idempotency_key,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise RealmArchiveCommitUnavailable("realm capture transition is unavailable") from exc
+        return CaptureModeResult.model_validate(
+            {
+                **value,
+                "platform": "telegram",
+                "source_conversation_id": request.source_conversation_id,
+            }
+        )
 
 
 class RealmArchiveCommitService:
@@ -200,6 +279,81 @@ class RealmArchiveCommitService:
         return hmac.new(self._request_commitment_key, material, hashlib.sha256).hexdigest()
 
 
+class RealmConversationArchiveService:
+    """Preserve the existing Hermes HTTP contract over the V1.3 realm protocol."""
+
+    def __init__(
+        self,
+        store: RealmConversationArchiveStore,
+        commit_service: RealmArchiveCommitService,
+        *,
+        capture_authorized: bool,
+    ) -> None:
+        self._store = store
+        self._commit_service = commit_service
+        self._capture_authorized = capture_authorized
+
+    def accept_turn(self, request: TurnCaptureInput) -> TurnCaptureResult:
+        if not self._capture_authorized:
+            return TurnCaptureResult(capture_enabled=False, version=0)
+        return self._store.accept_turn(request)
+
+    def capture_mode(self, platform: str, source_conversation_id: str) -> CaptureModeResult:
+        if platform != "telegram":
+            raise ValueError("realm capture platform is invalid")
+        result = self._store.capture_mode(source_conversation_id)
+        if self._capture_authorized:
+            return result
+        return result.model_copy(update={"capture_enabled": False})
+
+    def set_capture_mode(
+        self, idempotency_key: str, request: CaptureModeInput
+    ) -> CaptureModeResult:
+        if request.capture_enabled and not self._capture_authorized:
+            raise PermissionError("live capture has not been authorized")
+        return self._store.set_capture_mode(idempotency_key, request)
+
+    def preserve_message(
+        self,
+        idempotency_key: str,
+        request: ConversationMessageArchiveInput,
+    ) -> ConversationMessageArchiveResult:
+        if not self._capture_authorized:
+            raise PermissionError("live capture has not been authorized")
+        if request.role == "user" and request.source_evidence_ids:
+            raise ValueError("inbound user evidence is an independent source")
+        lineage = tuple(str(value) for value in sorted(request.source_evidence_ids))
+        authenticated_header = canonical_json_bytes(
+            {
+                "contract_version": "realm-archive-message-v1",
+                "platform": request.platform,
+                "source_conversation_id": request.source_conversation_id,
+                "source_turn_id": request.source_turn_id,
+                "source_message_id": request.source_message_id,
+                "role": request.role,
+                "lineage_refs": lineage,
+            }
+        )
+        result = self._commit_service.preserve(
+            RealmArchiveCommitInputV1(
+                source_conversation_id=request.source_conversation_id,
+                source_turn_id=request.source_turn_id,
+                idempotency_key=idempotency_key,
+                plaintext=request.content.encode("utf-8"),
+                authenticated_header=authenticated_header,
+                content_classification="owner_conversation",
+                lineage_refs=lineage,
+            )
+        )
+        return ConversationMessageArchiveResult(
+            operation_id=result.operation_id,
+            evidence_id=result.evidence_id,
+            archived=True,
+            capture_enabled=True,
+            replayed=result.replayed,
+        )
+
+
 def realm_archive_commit_from_environment(
     environment: Mapping[str, str] | None = None,
     *,
@@ -208,6 +362,36 @@ def realm_archive_commit_from_environment(
     """Construct one realm-bound archive workflow from deployment-owned settings."""
 
     values = os.environ if environment is None else environment
+    database_url, request_key = _commit_configuration(values)
+    archive_encryptor = encryptor or realm_archive_from_environment(values)
+    return RealmArchiveCommitService(
+        PostgresRealmArchiveCommitStore(create_session_factory(database_url)),
+        archive_encryptor,
+        request_commitment_key=request_key,
+    )
+
+
+def realm_conversation_archive_from_environment(
+    environment: Mapping[str, str] | None = None,
+) -> RealmConversationArchiveService:
+    """Compose the V1.3 realm archive behind the existing Hermes API contract."""
+
+    values = os.environ if environment is None else environment
+    database_url, request_key = _commit_configuration(values)
+    store = PostgresRealmArchiveCommitStore(create_session_factory(database_url))
+    commit = RealmArchiveCommitService(
+        store,
+        realm_archive_from_environment(values),
+        request_commitment_key=request_key,
+    )
+    return RealmConversationArchiveService(
+        store,
+        commit,
+        capture_authorized=values.get("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true",
+    )
+
+
+def _commit_configuration(values: Mapping[str, str]) -> tuple[str, bytes]:
     database_url = values.get("LUCY_DATABASE_URL", "").strip()
     encoded_key = values.get("LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64", "").strip()
     if not database_url or not encoded_key:
@@ -218,9 +402,4 @@ def realm_archive_commit_from_environment(
         raise ValueError("realm archive request commitment key is invalid") from exc
     if len(request_key) != 32:
         raise ValueError("realm archive request commitment key must contain 32 bytes")
-    archive_encryptor = encryptor or realm_archive_from_environment(values)
-    return RealmArchiveCommitService(
-        PostgresRealmArchiveCommitStore(create_session_factory(database_url)),
-        archive_encryptor,
-        request_commitment_key=request_key,
-    )
+    return database_url, request_key

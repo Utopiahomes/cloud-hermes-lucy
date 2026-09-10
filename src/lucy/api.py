@@ -82,6 +82,10 @@ from lucy.readiness import (
     expected_storage_epoch,
     service_mode_from_environment,
 )
+from lucy.realm_archive_commit import (
+    RealmConversationArchiveService,
+    realm_conversation_archive_from_environment,
+)
 from lucy.secret_filter import MemorySecretDetected
 from lucy.security_workflows import (
     BotoLambdaExecutorInvoker,
@@ -314,7 +318,14 @@ def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
         raise HTTPException(status_code=503, detail="archive encryption unavailable") from exc
 
 
-def _archive_service() -> ConversationArchiveService:
+def _archive_service() -> ConversationArchiveService | RealmConversationArchiveService:
+    if os.getenv("LUCY_ARCHIVE_BACKEND") == "aws-kms-dynamodb-v13":
+        try:
+            return realm_conversation_archive_from_environment()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503, detail="realm archive boundary unavailable"
+            ) from exc
     cipher, key_store = _archive_crypto()
     try:
         if key_store.registry_identity != deletion_journal_from_environment().head().registry_id:

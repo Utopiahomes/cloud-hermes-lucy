@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.archive import ConversationMessageArchiveInput, TurnCaptureInput
 from lucy.authorized_deletion_recovery import (
     AuthorizedDeletionRecoveryProofV2,
     build_authorized_deletion_recovery_contract_v2,
@@ -52,7 +53,17 @@ from lucy.db.models import (
     RealmSensitiveActorBindingRow,
     RealmServiceBindingRow,
 )
-from lucy.realm_archive import RealmArchiveEnvelopeV1
+from lucy.realm_archive import (
+    GeneratedDataKeyV1,
+    RealmArchiveEncryptor,
+    RealmArchiveEnvelopeV1,
+    RealmArchiveIdentityV1,
+)
+from lucy.realm_archive_commit import (
+    PostgresRealmArchiveCommitStore,
+    RealmArchiveCommitService,
+    RealmConversationArchiveService,
+)
 from lucy.tenancy import TenancyService
 
 APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -115,6 +126,7 @@ def clean_sensitive_tables() -> None:
                 "lucy.register_scoped_evidence_v2(jsonb,jsonb,text,jsonb,text) "
                 "TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.set_scoped_capture_mode_v1(text,boolean,text), "
+                "lucy.get_scoped_capture_mode_v1(text), "
                 "lucy.accept_scoped_capture_turn_v1(text,text), "
                 "lucy.register_capturable_scoped_evidence_v2("
                 "text,text,jsonb,jsonb,text,jsonb,text) TO lucy_utopia_routine; "
@@ -666,6 +678,10 @@ def test_archive_commit_protocol_is_retry_safe_and_rechecks_capture(
             {"conversation": conversation},
         ).scalar_one()
         assert receipt["capture_enabled"] is True
+        assert connection.execute(
+            text("SELECT lucy.get_scoped_capture_mode_v1(:conversation)"),
+            {"conversation": conversation},
+        ).scalar_one() == {"capture_enabled": True, "version": 0, "replayed": False}
         claim = connection.execute(
             text(
                 "SELECT lucy.claim_capturable_scoped_archive_v1("
@@ -833,6 +849,10 @@ def test_archive_commit_protocol_is_retry_safe_and_rechecks_capture(
             text("SELECT lucy.set_scoped_capture_mode_v1(:conversation,false,'withdraw-1')"),
             {"conversation": conversation},
         )
+        assert connection.execute(
+            text("SELECT lucy.get_scoped_capture_mode_v1(:conversation)"),
+            {"conversation": conversation},
+        ).scalar_one() == {"capture_enabled": False, "version": 1, "replayed": False}
     with (
         pytest.raises(DBAPIError, match="not authorized for retention"),
         archive.begin() as connection,
@@ -844,6 +864,88 @@ def test_archive_commit_protocol_is_retry_safe_and_rechecks_capture(
     archive.dispose()
     owner.dispose()
     foreign.dispose()
+
+
+def test_realm_runtime_preserves_existing_hermes_archive_contract(
+    realm: dict[str, UUID],
+) -> None:
+    assert ARCHIVE_URL and OWNER_URL
+
+    class Backend:
+        def __init__(self) -> None:
+            self.envelopes: dict[UUID, RealmArchiveEnvelopeV1] = {}
+            self.generate_calls = 0
+
+        def generate_data_key(
+            self, *, key_arn: str, encryption_context: dict[str, str]
+        ) -> GeneratedDataKeyV1:
+            self.generate_calls += 1
+            return GeneratedDataKeyV1(
+                b"d" * 32, b"synthetic-wrapped-dek", key_arn, "synthetic-kms-request"
+            )
+
+        def load_archive_envelope(self, key_ref: UUID) -> RealmArchiveEnvelopeV1 | None:
+            return self.envelopes.get(key_ref)
+
+        def put_archive_envelope(
+            self,
+            *,
+            envelope: RealmArchiveEnvelopeV1,
+            wrapped_key: bytes,
+            key_arn: str,
+        ) -> None:
+            assert wrapped_key and key_arn
+            self.envelopes[envelope.wrapper_binding.wrapped_key_ref] = envelope
+
+    sessions = create_session_factory(ARCHIVE_URL)
+    store = PostgresRealmArchiveCommitStore(sessions)
+    backend = Backend()
+    encryptor = RealmArchiveEncryptor(
+        backend,
+        RealmArchiveIdentityV1(
+            target_scope=_scope(realm),
+            evidence_key_arn=(
+                "arn:aws:kms:us-east-1:123456789012:"
+                "key/11111111-1111-4111-8111-111111111111"
+            ),
+            record_version=1,
+        ),
+        commitment_key=b"c" * 32,
+    )
+    runtime = RealmConversationArchiveService(
+        store,
+        RealmArchiveCommitService(store, encryptor, request_commitment_key=b"r" * 32),
+        capture_authorized=True,
+    )
+    assert runtime.accept_turn(
+        TurnCaptureInput(
+            platform="telegram",
+            source_conversation_id="runtime-conversation",
+            source_turn_id="runtime-turn",
+        )
+    ).capture_enabled
+    request = ConversationMessageArchiveInput(
+        platform="telegram",
+        source_conversation_id="runtime-conversation",
+        source_turn_id="runtime-turn",
+        source_message_id="runtime-message",
+        role="user",
+        content="synthetic owner message",
+    )
+    first = runtime.preserve_message("runtime-archive-1", request)
+    replay = runtime.preserve_message("runtime-archive-1", request)
+    assert first.archived and first.capture_enabled and not first.replayed
+    assert replay.evidence_id == first.evidence_id and replay.replayed
+    assert backend.generate_calls == 1
+    assert len(backend.envelopes) == 1
+
+    owner = create_engine(OWNER_URL)
+    with owner.connect() as connection:
+        assert connection.scalar(
+            text("SELECT count(*) FROM lucy.scoped_evidence_records_v2 WHERE id=:id"),
+            {"id": first.evidence_id},
+        ) == 1
+    owner.dispose()
 
 
 def test_archive_registers_and_workflow_freezes_exact_claimed_package(

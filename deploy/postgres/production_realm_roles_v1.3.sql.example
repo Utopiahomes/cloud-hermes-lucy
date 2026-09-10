@@ -79,6 +79,7 @@ GRANT EXECUTE ON FUNCTION
   lucy.search_scoped_memory_v1(text,integer),
   lucy.write_evidence_derived_memory_claim_v2(text,text,text,text,bigint,uuid[]),
   lucy.set_scoped_capture_mode_v1(text,boolean,text),
+  lucy.get_scoped_capture_mode_v1(text),
   lucy.accept_scoped_capture_turn_v1(text,text),
   lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb),
   lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text),

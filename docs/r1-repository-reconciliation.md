@@ -12,7 +12,7 @@ outstanding; production provisioning remains disabled.
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0038_r1_archive_commit_protocol`.
+  head: `0039_r1_scoped_capture_runtime`.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -77,7 +77,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0038` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
+| Clean migration 0001 through `0039` | Disposable pgvector/PostgreSQL 16 tmpfs cluster | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -119,6 +119,7 @@ durability claim.
 | The realm archive AWS adapter permits only exact-key `GenerateDataKey`, strongly consistent exact-key `GetItem`, and conditional wrapped-key/envelope `PutItem`; it exposes no scan, query, batch-read, decrypt, or delete surface | `tests/unit/test_realm_archive_aws.py`; focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key/envelope metadata |
 | Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
 | Archive capture durably separates PostgreSQL intent, AWS outcome, and PostgreSQL reconciliation; exact retries reuse stable IDs and a persisted DynamoDB envelope, a crash after DynamoDB does not generate a second DEK, withdrawal before reconciliation fails closed, and the production role cannot bypass the protocol | Clean migration 0001-0038; `tests/integration/test_r1_sensitive_permit_claim.py`, `tests/integration/test_r1_production_realm_roles.py`, and realm archive unit tests; 37 affected checks passed plus Ruff and mypy | Migration 0038, staged archive store/service, realm archive backend/envelope, scoped capture gate, or production realm grants |
+| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
 
 ## R1-2 checkpoint
 
@@ -214,6 +215,15 @@ after an ambiguous failure, and rechecks capture authorization during reconcilia
 The request commitment is keyed, so PostgreSQL does not retain a guessable plaintext
 hash. The production realm login can execute only the staged functions and cannot
 call the legacy direct evidence-registration function.
+
+Migration `0039_r1_scoped_capture_runtime` adds a realm-derived, execute-only
+capture-state read and connects the staged archive service behind Hermes' existing
+internal conversation API contract when the backend is exactly
+`aws-kms-dynamodb-v13`. The global transcript-capture flag remains an independent
+fail-closed gate: while false, turn acceptance and message preservation perform no
+database or AWS write. This compatibility path has been exercised against disposable
+PostgreSQL with a synthetic KMS/DynamoDB effect boundary; it has not been activated
+or deployed.
 
 `EncryptedEvidencePackageV2` separates an immutable payload binding from its
 replaceable key-wrapper binding. The payload commits to original realm scope,
@@ -435,9 +445,8 @@ realm has been provisioned.
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
-revocation race. The next exact R1-2 action is to connect the staged archive service
-to its realm runtime composition while keeping live Telegram capture disabled, then
-perform synthetic deployed verification of one realm stamp. Realm-specific AWS and
+revocation race. The next exact R1-2 action is to prepare and perform synthetic
+deployed verification of one realm stamp with capture still disabled. Realm-specific AWS and
 Render commissioning remains required before R1-2 can be activated.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.

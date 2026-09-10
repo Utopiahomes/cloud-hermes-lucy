@@ -52,6 +52,15 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
     }
 
 
+def test_archive_service_selects_v13_realm_runtime_only_for_exact_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = object()
+    monkeypatch.setenv("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb-v13")
+    monkeypatch.setattr(api, "realm_conversation_archive_from_environment", lambda: marker)
+    assert api._archive_service() is marker
+
+
 def test_memory_proposal_maps_missing_evidence_to_controlled_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

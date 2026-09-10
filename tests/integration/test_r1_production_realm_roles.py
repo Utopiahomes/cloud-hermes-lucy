@@ -48,6 +48,7 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
             )
         )
         for signature in (
+            "lucy.get_scoped_capture_mode_v1(text)",
             "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
             "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
             "lucy.reconcile_capturable_scoped_archive_v1(uuid)",

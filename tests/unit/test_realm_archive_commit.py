@@ -6,6 +6,13 @@ from uuid import UUID
 
 import pytest
 
+from lucy.archive import (
+    CaptureModeInput,
+    CaptureModeResult,
+    ConversationMessageArchiveInput,
+    TurnCaptureInput,
+    TurnCaptureResult,
+)
 from lucy.contracts.security_v1_3 import OriginScopeV1
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
@@ -19,6 +26,7 @@ from lucy.realm_archive_commit import (
     RealmArchiveCommitResultV1,
     RealmArchiveCommitService,
     RealmArchiveOutcomeV1,
+    RealmConversationArchiveService,
     realm_archive_commit_from_environment,
 )
 
@@ -77,6 +85,8 @@ class FakeStore:
         self.outcome: RealmArchiveEnvelopeV1 | None = None
         self.reconciliations = 0
         self.fail_first_outcome = fail_first_outcome
+        self.capture_enabled = True
+        self.capture_calls = 0
 
     def claim(
         self, request: RealmArchiveCommitInputV1, *, request_commitment: str
@@ -127,6 +137,31 @@ class FakeStore:
             evidence_id=self.evidence_id,
             representation_id=self.representation_id,
             replayed=replayed,
+        )
+
+    def accept_turn(self, request: TurnCaptureInput) -> TurnCaptureResult:
+        del request
+        self.capture_calls += 1
+        return TurnCaptureResult(capture_enabled=self.capture_enabled, version=1)
+
+    def capture_mode(self, source_conversation_id: str) -> CaptureModeResult:
+        self.capture_calls += 1
+        return CaptureModeResult(
+            source_conversation_id=source_conversation_id,
+            capture_enabled=self.capture_enabled,
+            version=1,
+        )
+
+    def set_capture_mode(
+        self, idempotency_key: str, request: CaptureModeInput
+    ) -> CaptureModeResult:
+        del idempotency_key
+        self.capture_calls += 1
+        self.capture_enabled = request.capture_enabled
+        return CaptureModeResult(
+            source_conversation_id=request.source_conversation_id,
+            capture_enabled=self.capture_enabled,
+            version=2,
         )
 
 
@@ -240,3 +275,66 @@ def test_factory_requires_a_separate_request_commitment_key() -> None:
             },
             encryptor=encryptor,
         )
+
+
+def test_compatibility_service_keeps_capture_disabled_without_database_writes() -> None:
+    store, backend = FakeStore(), FakeBackend()
+    service = RealmConversationArchiveService(
+        store,
+        _service(store, backend),
+        capture_authorized=False,
+    )
+    turn = TurnCaptureInput(
+        platform="telegram", source_conversation_id="conversation-1", source_turn_id="turn-1"
+    )
+    assert service.accept_turn(turn) == TurnCaptureResult(capture_enabled=False, version=0)
+    assert store.capture_calls == 0
+    with pytest.raises(PermissionError, match="not been authorized"):
+        service.preserve_message(
+            "archive-1",
+            ConversationMessageArchiveInput(
+                platform="telegram",
+                source_conversation_id="conversation-1",
+                source_turn_id="turn-1",
+                source_message_id="message-1",
+                role="user",
+                content="synthetic owner message",
+            ),
+        )
+    with pytest.raises(PermissionError, match="not been authorized"):
+        service.set_capture_mode(
+            "capture-on",
+            CaptureModeInput(
+                platform="telegram",
+                source_conversation_id="conversation-1",
+                capture_enabled=True,
+            ),
+        )
+    assert store.capture_calls == 0
+
+
+def test_compatibility_service_preserves_existing_hermes_contract() -> None:
+    store, backend = FakeStore(), FakeBackend()
+    service = RealmConversationArchiveService(
+        store,
+        _service(store, backend),
+        capture_authorized=True,
+    )
+    turn = TurnCaptureInput(
+        platform="telegram", source_conversation_id="conversation-1", source_turn_id="turn-1"
+    )
+    assert service.accept_turn(turn).capture_enabled
+    result = service.preserve_message(
+        "archive-1",
+        ConversationMessageArchiveInput(
+            platform="telegram",
+            source_conversation_id="conversation-1",
+            source_turn_id="turn-1",
+            source_message_id="message-1",
+            role="user",
+            content="synthetic owner message",
+        ),
+    )
+    assert result.archived and result.capture_enabled
+    assert result.evidence_id == store.evidence_id
+    assert backend.generate_calls == 1
