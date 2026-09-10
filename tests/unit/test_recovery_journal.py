@@ -280,7 +280,11 @@ def test_writer_pause_fences_append_until_expiry() -> None:
     before = journal.head()
     now = datetime.now(UTC)
     journal.acquire_pause(
-        recovery_id=uuid4(), expected=before, duration=timedelta(seconds=30), now=now
+        pause_id=uuid4(),
+        recovery_id=uuid4(),
+        expected=before,
+        duration=timedelta(seconds=30),
+        now=now,
     )
     with pytest.raises(RecoveryJournalError, match="paused"):
         journal.append(event(bound, before), before)

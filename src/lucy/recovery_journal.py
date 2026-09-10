@@ -381,6 +381,7 @@ class InMemoryRecoveryJournal:
     def acquire_pause(
         self,
         *,
+        pause_id: UUID,
         recovery_id: UUID,
         expected: RecoveryJournalHeadV1,
         duration: timedelta,
@@ -396,7 +397,7 @@ class InMemoryRecoveryJournal:
                 raise RecoveryJournalError("recovery journal writer is already paused")
             self._fencing_generation += 1
             self._pause = RecoveryWriterPauseV1(
-                pause_id=UUID(int=secrets.randbits(128)),
+                pause_id=pause_id,
                 recovery_id=recovery_id,
                 stream_kind=self._binding.stream_kind,
                 stream_id=self._binding.stream_id,

@@ -92,6 +92,7 @@ durability claim.
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
 | Clean migration 0001 through `0044` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 44 forward migrations completed | Migration or bootstrap change |
 | R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
+| The R1-4 DynamoDB adapter performs one conditional append transaction over the event, permanent event-ID acknowledgement, exact expected head, and writer-pause fence; exact acknowledgement is recovered after an ambiguous response, all reads are strongly consistent and exact-key, and event/head/pause metadata substitution fails closed. Its production constructor pins `us-east-1`, account, table ARN/name, stream binding, and distinct same-account writer/recovery roles before client creation. | `src/lucy/recovery_journal_aws.py`, `tests/unit/test_recovery_journal_aws.py`; 6 adapter checks plus the 9 unchanged recovery-contract checks passed with Ruff and strict mypy | DynamoDB adapter/transaction shape, environment binding, event serialization, pause fencing, or recovery contracts change |
 | Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
@@ -678,8 +679,14 @@ independent journal is connected. Provider results first become
 Only the separate recovery writer can acknowledge the exact outcome event and move
 the attempt to its final state, release unused exposure, and record the acknowledged
 head. The coordinator does not return the model output before this acknowledgement.
-The remaining R1-4 work is the DynamoDB conditional adapter, domain-specific
-authority staging/replay, restored-cost replay, and protected activation integration.
+`recovery_journal_aws.py` now supplies the DynamoDB conditional adapter without a
+scan, query, automatic genesis, or caller-selected scope. Its production constructor
+requires an exact same-account table binding and separate writer/recovery roles and
+relies on the runtime's workload credentials rather than accepting static keys.
+
+The remaining R1-4 work is domain-specific authority staging/replay, restored-cost
+replay, infrastructure/IAM provisioning for the two journal streams, and protected
+activation integration.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
