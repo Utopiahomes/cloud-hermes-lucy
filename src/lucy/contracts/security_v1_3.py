@@ -248,6 +248,14 @@ class Ed25519V13Signer:
         raw = self._private_key.public_key().public_bytes_raw()
         return base64.b64encode(raw).decode("ascii")
 
+    @property
+    def key_id(self) -> str:
+        return self._key_id
+
+    @property
+    def purpose(self) -> V13SigningKeyPurpose:
+        return self._purpose
+
     def sign(self, contract: SignedV13T) -> SignedV13T:
         if contract.signature_algorithm != SignatureAlgorithm.ED25519:
             raise ValueError("Ed25519 signer cannot sign this contract algorithm")

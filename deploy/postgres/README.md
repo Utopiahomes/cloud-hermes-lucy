@@ -174,7 +174,7 @@ LUCY_REALM_BOOTSTRAP_AUTHORIZATION=security-v1.3-private-quarantined
 
 It accepts only migration source revisions `0021_recovery_capture_safety`,
 `0039_r1_scoped_capture_runtime`, `0040_r1_grant_authority_snapshot`, and
-`0041_r1_deletion_auth_snapshot`. Before any
+`0042_r1_permit_authority`. Before any
 schema or role mutation it takes the
 maintenance and admission locks, verifies TLS and the database-owned capture
 boundary, and closes runtime admission. It then creates or rotates the four inert

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import re
 import secrets
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
@@ -17,13 +18,21 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.contracts.canonical import canonical_json_bytes
-from lucy.contracts.security_v1_2 import SensitiveActionV2
+from lucy.contracts.security_v1_2 import (
+    DeploymentEnvironment,
+    SensitiveActionV2,
+    SensitiveReasonCode,
+)
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
     DeletionTargetReferenceV2,
     Ed25519V13Signer,
     EncryptedEvidencePackageV2,
+    ExactObjectSelectorV1,
+    ExecutionBindingV1,
     ExecutorReceiptV2,
+    OriginScopeV1,
+    OwnerInteractionAssertionV2,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
     V13ContractVerifier,
@@ -41,6 +50,7 @@ _QUALIFIED_LAMBDA_ALIAS_ARN = re.compile(
     r"arn:(?:aws|aws-us-gov|aws-cn):lambda:[a-z0-9-]+:\d{12}:"
     r"function:[A-Za-z0-9-_]{1,64}:(?!\$LATEST\Z|[0-9]+\Z)[A-Za-z0-9-_]{1,128}\Z"
 )
+_V13_ID_NAMESPACE = UUID("3e1d7b31-117c-5e30-b98a-759b469df91a")
 
 
 class RealmWorkflowUnavailable(PermissionError):
@@ -68,6 +78,35 @@ class RealmFrozenPackageResultV1(BaseModel):
     package: EncryptedEvidencePackageV2
     package_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     replayed: bool
+
+
+class RealmPermitAuthorityV1(BaseModel):
+    """Current database-derived authority for one exact sensitive permit."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    principal_id: UUID
+    identity_issuer: str = Field(min_length=1, max_length=512)
+    identity_subject: str = Field(min_length=1, max_length=512)
+    target_scope: OriginScopeV1
+    workspace_id: UUID
+    service_principal_id: UUID
+    service_binding_id: UUID
+    service_binding_generation: int = Field(ge=1)
+    execution_binding: ExecutionBindingV1
+    membership_generation: int = Field(ge=1)
+    channel_binding_id: UUID
+    channel_generation: int = Field(ge=1)
+    policy_version: int = Field(ge=1)
+    resource_selector: ExactObjectSelectorV1
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> RealmPermitAuthorityV1:
+        if (
+            self.execution_binding.active_realm_id != self.target_scope.security_realm_id
+            or self.execution_binding.active_storage_epoch != self.target_scope.storage_epoch
+        ):
+            raise ValueError("permit authority execution binding differs")
+        return self
 
 
 class RealmReconciliationResultV1(BaseModel):
@@ -178,6 +217,15 @@ class RealmDeletionAuthorityV1(BaseModel):
 
 
 class RealmPolicyStore(Protocol):
+    def permit_authority(
+        self,
+        principal_id: UUID,
+        channel_binding_id: UUID,
+        action: SensitiveActionV2,
+        resource_object_id: UUID,
+        resource_object_version: int,
+    ) -> RealmPermitAuthorityV1: ...
+
     def store_permit(self, permit: SensitiveActionPermitV3, idempotency_key: str) -> UUID: ...
 
     def store_grant(self, grant: SensitiveExecutionGrantV2) -> str: ...
@@ -198,6 +246,27 @@ class PostgresRealmPolicyStore:
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
+
+    def permit_authority(
+        self,
+        principal_id: UUID,
+        channel_binding_id: UUID,
+        action: SensitiveActionV2,
+        resource_object_id: UUID,
+        resource_object_version: int,
+    ) -> RealmPermitAuthorityV1:
+        result = self._execute(
+            "SELECT lucy.read_sensitive_permit_authority_v1("
+            ":principal,:channel,:action,:resource,:version)",
+            {
+                "principal": principal_id,
+                "channel": channel_binding_id,
+                "action": action.value,
+                "resource": resource_object_id,
+                "version": resource_object_version,
+            },
+        )
+        return RealmPermitAuthorityV1.model_validate(result)
 
     def store_permit(self, permit: SensitiveActionPermitV3, idempotency_key: str) -> UUID:
         result = self._execute(
@@ -321,6 +390,122 @@ class VerifiedRealmPolicyAdapter:
         purpose: V13SigningKeyPurpose,
     ) -> None:
         self._verifier.verify(contract, expected_purpose=purpose, checked_at=self._clock())
+
+
+class RealmPolicyPermitService:
+    """Verify owner interaction and mint one database-bound V1.3 permit."""
+
+    def __init__(
+        self,
+        store: RealmPolicyStore,
+        *,
+        owner_verifier: V13ContractVerifier,
+        policy_verifier: V13ContractVerifier,
+        signer: Ed25519V13Signer,
+        issuer: str,
+        environment: DeploymentEnvironment,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if not issuer.strip():
+            raise ValueError("policy issuer is missing")
+        if signer.purpose != V13SigningKeyPurpose.POLICY_NOTARY:
+            raise ValueError("permit signer must be a policy notary")
+        self._store = store
+        self._owner_verifier = owner_verifier
+        self._policy_adapter = VerifiedRealmPolicyAdapter(
+            store, verifier=policy_verifier, clock=clock
+        )
+        self._signer = signer
+        self._issuer = issuer
+        self._environment = environment
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    def issue_permit(
+        self,
+        assertion: OwnerInteractionAssertionV2,
+        *,
+        reason: SensitiveReasonCode,
+        idempotency_key: str,
+    ) -> SensitiveActionPermitV3:
+        if not idempotency_key.strip() or len(idempotency_key) > 512:
+            raise RealmWorkflowUnavailable("permit idempotency key is invalid")
+        now = self._clock()
+        self._owner_verifier.verify(
+            assertion,
+            expected_purpose=V13SigningKeyPurpose.OWNER_BROKER,
+            checked_at=now,
+        )
+        if assertion.environment != self._environment:
+            raise RealmWorkflowUnavailable("owner assertion environment differs")
+        authority = self._store.permit_authority(
+            assertion.principal_id,
+            assertion.channel_binding_id,
+            assertion.requested_action,
+            assertion.resource_selector.object_id,
+            assertion.resource_selector.object_version,
+        )
+        if (
+            assertion.principal_id != authority.principal_id
+            or assertion.identity_issuer != authority.identity_issuer
+            or assertion.identity_subject != authority.identity_subject
+            or assertion.target_scope != authority.target_scope
+            or assertion.workspace_id != authority.workspace_id
+            or assertion.resource_selector != authority.resource_selector
+            or assertion.channel_binding_id != authority.channel_binding_id
+            or assertion.node_authz_epoch != authority.execution_binding.node_authz_epoch
+        ):
+            raise RealmWorkflowUnavailable("owner assertion authority differs")
+        permit_id = uuid5(
+            _V13_ID_NAMESPACE,
+            f"permit:{assertion.assertion_id}:{idempotency_key}",
+        )
+        operation_id = uuid5(_V13_ID_NAMESPACE, f"operation:{permit_id}")
+        nonce = hashlib.sha256(
+            b"lucy-sensitive-permit-v3\0"
+            + assertion.canonical_unsigned_bytes()
+            + b"\0"
+            + idempotency_key.encode("utf-8")
+        ).hexdigest()
+        max_records = (
+            1 if assertion.requested_action == SensitiveActionV2.EVIDENCE_RETRIEVE else 90
+        )
+        max_bytes = 65_536 if max_records == 1 else 131_072
+        claim_deadline = min(assertion.expires_at, now + timedelta(seconds=60))
+        if claim_deadline <= now:
+            raise RealmWorkflowUnavailable("owner assertion has expired")
+        unsigned = SensitiveActionPermitV3(
+            key_id=self._signer.key_id,
+            issuer=self._issuer,
+            environment=self._environment,
+            issued_at=now,
+            permit_id=permit_id,
+            action=assertion.requested_action,
+            reason=reason,
+            principal_id=authority.principal_id,
+            service_principal_id=authority.service_principal_id,
+            service_binding_id=authority.service_binding_id,
+            service_binding_generation=authority.service_binding_generation,
+            operation_id=operation_id,
+            target_scope=authority.target_scope,
+            workspace_id=authority.workspace_id,
+            resource_selector=authority.resource_selector,
+            execution_binding=authority.execution_binding,
+            owner_assertion_id=assertion.assertion_id,
+            owner_assertion_digest=assertion.unsigned_digest_hex(),
+            approval_digest=assertion.displayed_action_digest,
+            policy_version=authority.policy_version,
+            membership_generation=authority.membership_generation,
+            channel_binding_id=authority.channel_binding_id,
+            channel_generation=authority.channel_generation,
+            permit_claim_deadline=claim_deadline,
+            execution_completion_deadline=now + timedelta(minutes=10),
+            max_records=max_records,
+            max_bytes=max_bytes,
+            nonce=nonce,
+        )
+        permit = self._signer.sign(unsigned)
+        self._policy_adapter.admit_permit(permit, idempotency_key)
+        return permit
 
 
 class RealmPolicyGrantService:
@@ -478,6 +663,18 @@ class PostgresRealmWorkflowStore:
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
+
+    def load_permit(
+        self, permit_id: UUID, expected_action: SensitiveActionV2
+    ) -> SensitiveActionPermitV3:
+        result = self._execute(
+            "SELECT lucy.read_sensitive_action_permit_v3(:permit,:action)",
+            {"permit": permit_id, "action": expected_action.value},
+        )
+        permit = SensitiveActionPermitV3.model_validate(result)
+        if permit.permit_id != permit_id or permit.action != expected_action:
+            raise RealmWorkflowUnavailable("sensitive permit handoff differs")
+        return permit
 
     def claim(self, permit_id: UUID, idempotency_key: str) -> RealmOperationClaimResultV1:
         result = self._execute(

@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from lucy.contracts.security_v1_2 import DeploymentEnvironment, SensitiveActionV2
 from lucy.contracts.security_v1_3 import (
+    AuthenticationStrength,
     DeletionArtifactClass,
     DeletionDisposition,
     DeletionTargetReferenceV2,
@@ -18,6 +19,7 @@ from lucy.contracts.security_v1_3 import (
     ExactObjectSelectorV1,
     ExecutionBindingV1,
     OriginScopeV1,
+    OwnerInteractionAssertionV2,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
     SensitiveReasonCode,
@@ -37,8 +39,10 @@ from lucy.realm_security_workflows import (
     RealmLambdaExecutorInvoker,
     RealmOperationClaimResultV1,
     RealmOperationStatusV1,
+    RealmPermitAuthorityV1,
     RealmPolicyDeletionService,
     RealmPolicyGrantService,
+    RealmPolicyPermitService,
     RealmRetrievalCoordinator,
     RealmWorkflowUnavailable,
     VerifiedRealmPolicyAdapter,
@@ -123,9 +127,19 @@ def _permit(
 
 
 class _PolicyStore:
-    def __init__(self, stored_id: UUID | None = None) -> None:
+    def __init__(
+        self,
+        stored_id: UUID | None = None,
+        authority: RealmPermitAuthorityV1 | None = None,
+    ) -> None:
         self.stored_id = stored_id
+        self.authority = authority
         self.calls: list[tuple[SensitiveActionPermitV3, str]] = []
+
+    def permit_authority(self, *_args: Any) -> RealmPermitAuthorityV1:
+        if self.authority is None:
+            raise AssertionError("not used")
+        return self.authority
 
     def store_permit(self, permit: SensitiveActionPermitV3, idempotency_key: str) -> UUID:
         self.calls.append((permit, idempotency_key))
@@ -155,6 +169,137 @@ def test_verified_policy_adapter_checks_signature_and_storage_binding() -> None:
         VerifiedRealmPolicyAdapter(wrong_store, verifier=verifier).admit_permit(
             permit, "permit-once"
         )
+
+
+def _owner_assertion_and_authority(
+    *, now: datetime
+) -> tuple[
+    OwnerInteractionAssertionV2,
+    V13ContractVerifier,
+    RealmPermitAuthorityV1,
+]:
+    private = ed25519.Ed25519PrivateKey.generate()
+    signer = Ed25519V13Signer(
+        private, key_id="owner-v13", purpose=V13SigningKeyPurpose.OWNER_BROKER
+    )
+    scope = OriginScopeV1(
+        tenant_account_id=uuid4(),
+        node_id=uuid4(),
+        node_tenure_id=uuid4(),
+        tenure_epoch=1,
+        security_realm_id=uuid4(),
+        storage_epoch=1,
+    )
+    principal_id = uuid4()
+    workspace_id = uuid4()
+    channel_id = uuid4()
+    selector = ExactObjectSelectorV1(object_id=uuid4(), object_version=1)
+    execution = ExecutionBindingV1(
+        deployment_id=uuid4(),
+        active_realm_id=scope.security_realm_id,
+        active_storage_epoch=scope.storage_epoch,
+        realm_binding_generation=1,
+        node_authz_epoch=1,
+    )
+    assertion = signer.sign(
+        OwnerInteractionAssertionV2(
+            key_id="owner-v13",
+            issuer="lucy-owner-broker",
+            environment=DeploymentEnvironment.PRODUCTION,
+            issued_at=now,
+            assertion_id=uuid4(),
+            principal_id=principal_id,
+            identity_issuer="synthetic-commissioning",
+            identity_subject="synthetic-owner",
+            authn_strength=AuthenticationStrength.PHISHING_RESISTANT,
+            auth_time=now,
+            target_scope=scope,
+            workspace_id=workspace_id,
+            requested_action=SensitiveActionV2.EVIDENCE_RETRIEVE,
+            resource_selector=selector,
+            displayed_action_digest="d" * 64,
+            channel_binding_id=channel_id,
+            challenge_id=uuid4(),
+            node_authz_epoch=1,
+            expires_at=now + timedelta(seconds=60),
+            nonce=uuid4().hex,
+        )
+    )
+    key = V13VerificationKeyV1(
+        key_id="owner-v13",
+        issuer="lucy-owner-broker",
+        environment=DeploymentEnvironment.PRODUCTION,
+        purpose=V13SigningKeyPurpose.OWNER_BROKER,
+        public_key_b64=signer.public_key_b64,
+        status=V13VerificationKeyStatus.ACTIVE,
+        valid_from=now - timedelta(minutes=1),
+        issuance_not_after=now + timedelta(hours=1),
+        verify_not_after=now + timedelta(hours=2),
+    )
+    authority = RealmPermitAuthorityV1(
+        principal_id=principal_id,
+        identity_issuer="synthetic-commissioning",
+        identity_subject="synthetic-owner",
+        target_scope=scope,
+        workspace_id=workspace_id,
+        service_principal_id=uuid4(),
+        service_binding_id=uuid4(),
+        service_binding_generation=1,
+        execution_binding=execution,
+        membership_generation=1,
+        channel_binding_id=channel_id,
+        channel_generation=1,
+        policy_version=1,
+        resource_selector=selector,
+    )
+    return assertion, V13ContractVerifier((key,)), authority
+
+
+def test_policy_permit_service_verifies_owner_and_its_own_signed_permit() -> None:
+    now = datetime.now(UTC)
+    assertion, owner_verifier, authority = _owner_assertion_and_authority(now=now)
+    _unused, policy_verifier, policy_signer = _permit()
+    store = _PolicyStore(authority=authority)
+    permit = RealmPolicyPermitService(
+        store,  # type: ignore[arg-type]
+        owner_verifier=owner_verifier,
+        policy_verifier=policy_verifier,
+        signer=policy_signer,
+        issuer="lucy-policy",
+        environment=DeploymentEnvironment.PRODUCTION,
+        clock=lambda: now + timedelta(seconds=1),
+    ).issue_permit(
+        assertion,
+        reason=SensitiveReasonCode.OWNER_REVIEW,
+        idempotency_key="synthetic-permit-once",
+    )
+    assert permit.owner_assertion_id == assertion.assertion_id
+    assert permit.resource_selector == authority.resource_selector
+    assert store.calls == [(permit, "synthetic-permit-once")]
+
+
+def test_policy_permit_service_rejects_assertion_authority_drift() -> None:
+    now = datetime.now(UTC)
+    assertion, owner_verifier, authority = _owner_assertion_and_authority(now=now)
+    _unused, policy_verifier, policy_signer = _permit()
+    store = _PolicyStore(
+        authority=authority.model_copy(update={"identity_subject": "different-owner"})
+    )
+    with pytest.raises(RealmWorkflowUnavailable, match="authority differs"):
+        RealmPolicyPermitService(
+            store,  # type: ignore[arg-type]
+            owner_verifier=owner_verifier,
+            policy_verifier=policy_verifier,
+            signer=policy_signer,
+            issuer="lucy-policy",
+            environment=DeploymentEnvironment.PRODUCTION,
+            clock=lambda: now + timedelta(seconds=1),
+        ).issue_permit(
+            assertion,
+            reason=SensitiveReasonCode.OWNER_REVIEW,
+            idempotency_key="authority-drift",
+        )
+    assert store.calls == []
 
 
 class _Result:
@@ -187,6 +332,31 @@ class _Sessions:
 
     def begin(self) -> _Session:
         return self.session
+
+
+def test_policy_store_reads_exact_permit_authority() -> None:
+    now = datetime.now(UTC)
+    assertion, _verifier, authority = _owner_assertion_and_authority(now=now)
+    sessions = _Sessions([authority.model_dump(mode="json")])
+    result = PostgresRealmPolicyStore(sessions).permit_authority(
+        assertion.principal_id,
+        assertion.channel_binding_id,
+        assertion.requested_action,
+        assertion.resource_selector.object_id,
+        assertion.resource_selector.object_version,
+    )
+    assert result == authority
+    assert "read_sensitive_permit_authority_v1" in sessions.session.statements[0]
+
+
+def test_workflow_store_loads_only_exact_permit_and_action() -> None:
+    permit, _verifier, _signer = _permit()
+    sessions = _Sessions([permit.model_dump(mode="json")])
+    result = PostgresRealmWorkflowStore(sessions).load_permit(
+        permit.permit_id, permit.action
+    )
+    assert result == permit
+    assert "read_sensitive_action_permit_v3" in sessions.session.statements[0]
 
 
 def test_policy_store_reads_only_exact_post_claim_authority() -> None:
@@ -396,6 +566,24 @@ def test_deletion_authority_snapshot_is_exact_content_free_and_rechecks_after_lo
     )
     assert lock < current_time < delegated_store
     assert "REVOKE ALL ON FUNCTION lucy.read_claimed_deletion_authority_v1" in source
+
+
+def test_permit_authority_migration_is_exact_fenced_and_role_scoped() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "versions"
+        / "0042_r1_permit_authority.py"
+    ).read_text(encoding="utf-8")
+    assert "session_login=session_user AND actor_role='policy_notary'" in source
+    assert "p_action NOT IN ('evidence.retrieve','evidence.delete')" in source
+    assert "e.id=p_resource_object_id" in source
+    assert "ep.record_version=p_resource_object_version" in source
+    assert "scoped_evidence_deletion_fences_v2" in source
+    assert "scoped_recovery_deletion_fences_v2" in source
+    assert "read_sensitive_action_permit_v3(uuid,text)" in source
+    assert "p.id=p_permit_id AND p.action=p_expected_action" in source
+    assert "REVOKE ALL ON FUNCTION" in source
 
 
 class _TerminalWorkflow:
