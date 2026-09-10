@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -21,13 +22,18 @@ from lucy.contracts.security_v1_3 import (
     V13VerificationKeyV1,
 )
 from lucy.realm_security_workflows import (
+    PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
+    RealmGrantAuthorityV1,
+    RealmPolicyGrantService,
     RealmWorkflowUnavailable,
     VerifiedRealmPolicyAdapter,
 )
 
 
-def _permit() -> tuple[SensitiveActionPermitV3, V13ContractVerifier]:
+def _permit() -> tuple[
+    SensitiveActionPermitV3, V13ContractVerifier, Ed25519V13Signer
+]:
     now = datetime.now(UTC)
     private = ed25519.Ed25519PrivateKey.generate()
     signer = Ed25519V13Signer(
@@ -90,7 +96,7 @@ def _permit() -> tuple[SensitiveActionPermitV3, V13ContractVerifier]:
         issuance_not_after=now + timedelta(hours=1),
         verify_not_after=now + timedelta(hours=2),
     )
-    return permit, V13ContractVerifier((key,))
+    return permit, V13ContractVerifier((key,)), signer
 
 
 class _PolicyStore:
@@ -110,7 +116,7 @@ class _PolicyStore:
 
 
 def test_verified_policy_adapter_checks_signature_and_storage_binding() -> None:
-    permit, verifier = _permit()
+    permit, verifier, _signer = _permit()
     store = _PolicyStore()
     adapter = VerifiedRealmPolicyAdapter(store, verifier=verifier)
     assert adapter.admit_permit(permit, "permit-once") == permit.permit_id
@@ -158,6 +164,109 @@ class _Sessions:
 
     def begin(self) -> _Session:
         return self.session
+
+
+def test_policy_store_reads_only_exact_post_claim_authority() -> None:
+    permit, _verifier, _signer = _permit()
+    authority = {
+        "operation_id": str(permit.operation_id),
+        "action": permit.action,
+        "claimed_at": datetime.now(UTC).isoformat(),
+        "claim_idempotency_key": "claim-once",
+        "permit": permit.model_dump(mode="json"),
+        "package_digest": "c" * 64,
+        "package_size_bytes": 100,
+        "executor_binding_id": str(uuid4()),
+        "caller_identity": "arn:aws:iam::123456789012:role/lucy-utopia-retrieval",
+        "executor_identity": "lucy-utopia-retrieval",
+        "executor_alias_arn": (
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-retrieval:realm-v13"
+        ),
+        "executor_version": 1,
+        "receipt_key_id": (
+            "arn:aws:kms:us-east-1:123456789012:"
+            "key/00000000-0000-4000-8000-000000000001"
+        ),
+        "deletion_manifest_id": None,
+        "deletion_manifest_digest": None,
+    }
+    sessions = _Sessions([authority])
+    result = PostgresRealmPolicyStore(sessions).grant_authority(permit.operation_id)  # type: ignore[arg-type]
+    assert result.permit == permit
+    assert result.package_digest == "c" * 64
+    assert "read_claimed_sensitive_authority_v1" in sessions.session.statements[0]
+
+
+class _GrantStore:
+    def __init__(self, authority: RealmGrantAuthorityV1) -> None:
+        self.authority = authority
+        self.grants: list[Any] = []
+
+    def grant_authority(self, _operation_id: UUID) -> RealmGrantAuthorityV1:
+        return self.authority
+
+    def store_grant(self, grant: Any) -> str:
+        self.grants.append(grant)
+        return grant.unsigned_digest_hex()
+
+    def store_permit(self, _permit: Any, _idempotency_key: str) -> UUID:
+        raise AssertionError("not used")
+
+    def attest_receipt(self, _receipt: Any) -> str:
+        raise AssertionError("not used")
+
+
+def test_policy_grant_service_builds_and_replays_exact_signed_grant() -> None:
+    permit, verifier, signer = _permit()
+    now = permit.issued_at + timedelta(seconds=1)
+    authority = RealmGrantAuthorityV1(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-once",
+        permit=permit,
+        package_digest="c" * 64,
+        package_size_bytes=100,
+        executor_binding_id=uuid4(),
+        caller_identity="arn:aws:iam::123456789012:role/lucy-utopia-retrieval",
+        executor_identity="lucy-utopia-retrieval",
+        executor_alias_arn=(
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-retrieval:realm-v13"
+        ),
+        executor_version=1,
+        receipt_key_id=(
+            "arn:aws:kms:us-east-1:123456789012:"
+            "key/00000000-0000-4000-8000-000000000001"
+        ),
+    )
+    store = _GrantStore(authority)
+    service = RealmPolicyGrantService(
+        store, signer=signer, verifier=verifier, clock=lambda: now
+    )
+    grant = service.issue(permit.operation_id)
+    assert grant.permit_claimed_at == authority.claimed_at
+    assert grant.executor_alias_arn == authority.executor_alias_arn
+    assert grant.encrypted_package_digest == authority.package_digest
+    assert grant.signature
+
+    store.authority = authority.model_copy(update={"existing_grant": grant})
+    assert service.issue(permit.operation_id) == grant
+    assert store.grants == [grant, grant]
+
+
+def test_grant_authority_migration_is_policy_only_and_content_free() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "versions"
+        / "0040_r1_grant_authority_snapshot.py"
+    ).read_text(encoding="utf-8")
+    assert "session_login=session_user AND actor_role='policy_notary'" in source
+    assert "serialized_package" in source and "'package_digest'" in source
+    assert "'package',v_package.serialized_package" not in source
+    assert "REVOKE ALL ON FUNCTION lucy.read_claimed_sensitive_authority_v1" in source
 
 
 def test_workflow_store_selects_action_specific_reconciliation() -> None:

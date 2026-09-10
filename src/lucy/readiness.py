@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
-R1_SCHEMA_REVISION = "0039_r1_scoped_capture_runtime"
+R1_SCHEMA_REVISION = "0040_r1_grant_authority_snapshot"
 SERVICE_ROLES = {
     "routine": "lucy_routine",
     "policy": "lucy_policy",
@@ -345,6 +345,7 @@ class ServiceReadiness:
             ),
             "policy": (
                 "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
+                "lucy.read_claimed_sensitive_authority_v1(uuid)",
                 "lucy.store_sensitive_execution_grant_v2(uuid,jsonb)",
                 "lucy.attest_executor_receipt_v2(uuid,jsonb)",
             ),

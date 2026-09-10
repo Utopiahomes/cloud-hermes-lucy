@@ -42,6 +42,7 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
     assert "reconcile_capturable_scoped_archive_v1" in rendered
     assert "register_scoped_evidence_v2(jsonb" not in rendered
     assert 'TO "lucy_utopia_policy"' in rendered
+    assert "read_claimed_sensitive_authority_v1" in rendered
     assert 'TO "lucy_utopia_sensitive_workflow"' in rendered
     assert 'TO "lucy_utopia_finality"' in rendered
     assert "GRANT SELECT ON lucy.scoped_" not in rendered

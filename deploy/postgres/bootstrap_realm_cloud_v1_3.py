@@ -31,8 +31,12 @@ from deploy.postgres.render_security_v1_3_sql import render_realm_roles
 from lucy.realm_provisioning import RealmSecurityStampV1
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_SOURCE_REVISIONS = {"0021_recovery_capture_safety", "0039_r1_scoped_capture_runtime"}
-EXPECTED_REVISION = "0039_r1_scoped_capture_runtime"
+EXPECTED_SOURCE_REVISIONS = {
+    "0021_recovery_capture_safety",
+    "0039_r1_scoped_capture_runtime",
+    "0040_r1_grant_authority_snapshot",
+}
+EXPECTED_REVISION = "0040_r1_grant_authority_snapshot"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

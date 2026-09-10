@@ -93,6 +93,7 @@ TO "__LUCY_REALM_ROUTINE_LOGIN__";
 -- receipts but receives no direct archive or memory table authority.
 GRANT EXECUTE ON FUNCTION
   lucy.issue_sensitive_action_permit_v3(jsonb,text),
+  lucy.read_claimed_sensitive_authority_v1(uuid),
   lucy.store_sensitive_execution_grant_v2(uuid,jsonb),
   lucy.attest_executor_receipt_v2(uuid,jsonb),
   lucy.store_scoped_deletion_manifest_v2(uuid,jsonb),
