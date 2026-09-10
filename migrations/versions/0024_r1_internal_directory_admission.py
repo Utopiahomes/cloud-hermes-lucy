@@ -290,8 +290,7 @@ def upgrade() -> None:
         REVOKE ALL ON FUNCTION lucy.resolve_internal_admission_v1(
           text,text,text,uuid,uuid,uuid,bigint,uuid,bigint,uuid,uuid,uuid,uuid,
           bigint,uuid,text,uuid,bigint,timestamptz
-        ) FROM PUBLIC, lucy_app, lucy_public_runtime,
-          lucy_raymond_routine, lucy_utopia_routine, lucy_alpha_routine;
+        ) FROM PUBLIC, lucy_app, lucy_public_runtime;
         GRANT EXECUTE ON FUNCTION lucy.resolve_internal_admission_v1(
           text,text,text,uuid,uuid,uuid,bigint,uuid,bigint,uuid,uuid,uuid,uuid,
           bigint,uuid,text,uuid,bigint,timestamptz

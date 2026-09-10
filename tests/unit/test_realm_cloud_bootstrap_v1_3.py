@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 import deploy.postgres.bootstrap_realm_cloud_v1_3 as bootstrap
 from deploy.postgres.provision_realm_foundation_v1_3 import RealmFoundationSeedV1
@@ -12,6 +17,7 @@ from lucy.realm_provisioning import RealmExecutorStampV1, RealmSecurityStampV1
 ACCOUNT = "123456789012"
 HOST = "dpg-example-a"
 DATABASE = "lucy_example"
+ROOT = Path(__file__).parents[2]
 
 
 def _executor(label: str, suffix: str) -> RealmExecutorStampV1:
@@ -183,3 +189,52 @@ def test_main_never_echoes_secrets(
     output = capsys.readouterr().out
     assert secret not in output
     assert '"error_type": "RuntimeError"' in output
+
+
+def test_prerequisite_roles_must_be_inert() -> None:
+    bootstrap._assert_inert_role(
+        "lucy_public_runtime",
+        (False, False, False, False, False, False, False),
+    )
+    with pytest.raises(bootstrap.BootstrapError, match="not inert"):
+        bootstrap._assert_inert_role(
+            "lucy_public_runtime",
+            (True, False, False, False, False, False, False),
+        )
+
+
+def test_stage_sanitizes_sqlalchemy_statement_and_parameters() -> None:
+    secret = "never-print-this-database-secret"
+
+    def fail() -> None:
+        raise ProgrammingError("SELECT :secret", {"secret": secret}, RuntimeError("failure"))
+
+    with pytest.raises(bootstrap.BootstrapError) as captured:
+        bootstrap._stage("migration", fail)
+    assert secret not in str(captured.value)
+    assert "SELECT" not in str(captured.value)
+
+
+def test_directory_migration_does_not_hardcode_tenant_logins() -> None:
+    migration = (
+        ROOT / "migrations/versions/0024_r1_internal_directory_admission.py"
+    ).read_text(encoding="utf-8")
+    assert "lucy_raymond_routine" not in migration
+    assert "lucy_utopia_routine" not in migration
+    assert "lucy_alpha_routine" not in migration
+
+
+def test_documented_module_entrypoint_loads_repository_packages() -> None:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, "-m", "deploy.postgres.bootstrap_realm_cloud_v1_3"],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert '"status": "failed"' in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr

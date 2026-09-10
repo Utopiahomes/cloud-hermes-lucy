@@ -158,7 +158,7 @@ For an existing accepted V1.2 Render database, prefer the single quarantine-firs
 commissioning command:
 
 ```text
-python deploy/postgres/bootstrap_realm_cloud_v1_3.py
+python -m deploy.postgres.bootstrap_realm_cloud_v1_3
 ```
 
 The temporary migration-only job requires the private `lucy_migration` URL, four

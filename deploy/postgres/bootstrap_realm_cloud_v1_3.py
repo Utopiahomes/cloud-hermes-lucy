@@ -21,6 +21,7 @@ from alembic.config import Config
 from psycopg import sql
 from pydantic import ValidationError
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import DBAPIError
 
 from deploy.postgres.provision_realm_bindings_v1_3 import apply_manifest
 from deploy.postgres.provision_realm_foundation_v1_3 import (
@@ -44,6 +45,11 @@ _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _MAINTENANCE_LOCK = 0x4C5543594D53
 _ADMISSION_LOCK = 0x4C5543594144
+_PREREQUISITE_ROLES = {
+    "lucy_public_runtime",
+    "lucy_directory_function_owner",
+    "lucy_directory_admission",
+}
 
 
 class BootstrapError(RuntimeError):
@@ -162,6 +168,14 @@ def _stage[T](name: str, operation: Callable[[], T]) -> T:
             raise BootstrapError(
                 f"{name} failed ({exc.sqlstate or 'unknown'}): {primary}"
             ) from exc
+        if isinstance(exc, DBAPIError):
+            original = exc.orig
+            if isinstance(original, psycopg.Error):
+                primary = original.diag.message_primary or type(original).__name__
+                raise BootstrapError(
+                    f"{name} failed ({original.sqlstate or 'unknown'}): {primary}"
+                ) from exc
+            raise BootstrapError(f"{name} failed ({type(original).__name__})") from exc
         raise
 
 
@@ -206,12 +220,43 @@ def _assert_runtime_role(name: str, flags: tuple[Any, ...]) -> None:
         raise BootstrapError(f"runtime login is missing or elevated: {name}")
 
 
+def _assert_inert_role(name: str, flags: tuple[Any, ...]) -> None:
+    if flags != (False, False, False, False, False, False, False):
+        raise BootstrapError(f"prerequisite role is not inert: {name}")
+
+
 def _bootstrap_roles(config: BootstrapConfig) -> None:
     expected = {url.username for url in config.runtime_urls.values()}
     if None in expected or len(expected) != 4:
         raise BootstrapError("realm runtime LOGIN set is invalid")
     names = {str(name) for name in expected}
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
+        prerequisite_rows = _role_rows(connection, _PREREQUISITE_ROLES)
+        for name, flags in prerequisite_rows.items():
+            _assert_inert_role(name, flags)
+        for name in sorted(_PREREQUISITE_ROLES - set(prerequisite_rows)):
+            connection.execute(
+                sql.SQL(
+                    "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                    "NOINHERIT NOREPLICATION NOBYPASSRLS"
+                ).format(sql.Identifier(name))
+            )
+        connection.execute("GRANT lucy_directory_function_owner TO lucy_migration")
+        prerequisite_rows = _role_rows(connection, _PREREQUISITE_ROLES)
+        if set(prerequisite_rows) != _PREREQUISITE_ROLES:
+            raise BootstrapError("one or more prerequisite roles are missing")
+        for name, flags in prerequisite_rows.items():
+            _assert_inert_role(name, flags)
+        memberships = connection.execute(
+            "SELECT parent.rolname,member.rolname FROM pg_auth_members m "
+            "JOIN pg_roles parent ON parent.oid=m.roleid "
+            "JOIN pg_roles member ON member.oid=m.member "
+            "WHERE parent.rolname=ANY(%s)",
+            (sorted(_PREREQUISITE_ROLES),),
+        ).fetchall()
+        if set(memberships) != {("lucy_directory_function_owner", "lucy_migration")}:
+            raise BootstrapError("prerequisite role membership is not isolated")
+
         rows = _role_rows(connection, names)
         for name, flags in rows.items():
             _assert_runtime_role(name, flags)
@@ -309,12 +354,35 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             "WHERE content_scope_id=%s AND active",
             (config.stamp.content_scope_id,),
         )
+        directory_signature = (
+            "lucy.resolve_internal_admission_v1(text,text,text,uuid,uuid,uuid,bigint,uuid,"
+            "bigint,uuid,uuid,uuid,uuid,bigint,uuid,text,uuid,bigint,timestamptz)"
+        )
+        directory_acl = {
+            name: _scalar(
+                connection,
+                "SELECT has_function_privilege(%s,%s,'EXECUTE')",
+                (name, directory_signature),
+            )
+            for name in {
+                "lucy_app",
+                "lucy_public_runtime",
+                "lucy_directory_admission",
+                *(str(url.username) for url in config.runtime_urls.values()),
+            }
+        }
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed V1.3 migration head")
     if admission != "quarantined" or safe is not True:
         raise BootstrapError("database did not remain quarantined with capture disabled")
     if (scope_count, actor_count, executor_count) != (1, 4, 2):
         raise BootstrapError("realm foundation or immutable bindings are incomplete")
+    if directory_acl.get("lucy_directory_admission") is not True or any(
+        allowed
+        for name, allowed in directory_acl.items()
+        if name != "lucy_directory_admission"
+    ):
+        raise BootstrapError("directory admission function ACL is not isolated")
 
     verified_logins: list[str] = []
     for mode, url in config.runtime_urls.items():
@@ -344,6 +412,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         "content_scope_count": scope_count,
         "active_actor_bindings": actor_count,
         "active_executor_bindings": executor_count,
+        "directory_admission_acl_isolated": True,
         "verified_runtime_logins": verified_logins,
     }
 
