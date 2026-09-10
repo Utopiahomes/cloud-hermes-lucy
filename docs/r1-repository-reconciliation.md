@@ -82,7 +82,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| R1-3 cost-policy and provider-attempt contracts require complete numeric/model/rate limits and canonical content-free commitments; the additive schema exposes reservation/submission/unknown/settlement only through distinct cost-admission and recovery-writer functions | `tests/unit/test_cost_admission.py` plus bootstrap/deployment-boundary checks; 30 focused tests passed; full unit suite 503 passed; Ruff and strict mypy passed. PostgreSQL execution is not yet claimed. | Cost contract/service, migration `0043`, cost roles/bootstrap, canonicalization, or provider-call integration change |
+| R1-3 cost-policy and provider-attempt contracts require complete numeric/model/rate limits and canonical content-free commitments; the additive schema exposes reservation/submission/unknown/settlement only through distinct cost-admission and recovery-writer functions; the coordinator cannot call a provider before durable acknowledgement and an exact one-time submission claim | `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, plus bootstrap/deployment-boundary checks; 35 focused tests passed across the two increments; full unit suite 508 passed; Ruff and strict mypy passed. PostgreSQL execution is not yet claimed. | Cost contract/service, migration `0043`, cost roles/bootstrap, public coordinator, canonicalization, or provider-call integration change |
 | Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
 | Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
@@ -633,8 +633,20 @@ The cost-admission identity can execute reservation, submission, unknown-outcome
 and settlement transitions but cannot read backing tables. A separate recovery
 writer can acknowledge only an exact reservation event. The independent journal
 head and protected activation handoff are intentionally R1-4 work, so no production
-provider call is authorized by this checkpoint. Contract, static boundary,
-bootstrap, Ruff, strict-mypy, and all 503 unit checks pass. The prepared PostgreSQL
+provider call is authorized by this checkpoint.
+
+`public_inference.py` adds the body-bearing coordinator without putting request or
+response content in the shared cost store. It requires an exact reservation, sends
+its event to the independent-journal interface, requires the corresponding durable
+acknowledgement, and claims submission exactly once before invoking a provider. A
+journal failure makes no provider call. A provider exception marks the attempt
+`UNKNOWN`; a retry of an admitted, submitted, unknown, settled, or over-cap attempt
+never invokes the provider again. Provider references are retained only as keyed
+commitments, and the body-bearing request must exactly match the admitted cost,
+token, byte, and timeout bounds.
+
+Contract, static boundary, coordinator, bootstrap, Ruff, strict-mypy, and all 508
+unit checks pass. The prepared PostgreSQL
 concurrency/retry/period-rollover test is not yet executed: Docker Desktop's engine
 remains unavailable because Windows cannot access its stale Unix-socket reparse
 points. No database migration or production deployment has been attempted.
