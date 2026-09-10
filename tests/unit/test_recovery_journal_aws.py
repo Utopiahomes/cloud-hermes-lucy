@@ -18,7 +18,7 @@ from lucy.recovery_journal import (
     RecoveryStreamKind,
     recovery_event_digest,
 )
-from lucy.recovery_journal_aws import AwsDynamoRecoveryJournal
+from lucy.recovery_journal_aws import AwsDynamoRecoveryJournal, initialize_recovery_head
 
 
 class FakeDynamo:
@@ -39,6 +39,23 @@ class FakeDynamo:
         }
         self.transactions: list[list[dict[str, object]]] = []
         self.raise_after_commit = False
+
+    def put_item(self, **kwargs: object) -> dict[str, object]:
+        item = kwargs["Item"]
+        assert isinstance(item, dict)
+        key = _key(item)
+        if key in self.items:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ConditionalCheckFailedException",
+                        "Message": "conditional",
+                    }
+                },
+                "PutItem",
+            )
+        self.items[key] = item
+        return {}
 
     def get_item(self, **kwargs: object) -> dict[str, object]:
         assert kwargs["ConsistentRead"] is True
@@ -275,6 +292,7 @@ def test_environment_factory_rejects_missing_or_cross_account_store(
 ) -> None:
     with pytest.raises(RecoveryJournalError, match="configuration is incomplete"):
         AwsDynamoRecoveryJournal.from_environment()
+
     bound = _binding().model_dump(mode="json")
     bound["independent_store_id"] = (
         "arn:aws:dynamodb:us-east-1:000000000000:table/synthetic"
@@ -285,6 +303,24 @@ def test_environment_factory_rejects_missing_or_cross_account_store(
     monkeypatch.setenv("LUCY_RECOVERY_STREAM_BINDING_JSON", json.dumps(bound))
     with pytest.raises(RecoveryJournalError, match="binding is invalid"):
         AwsDynamoRecoveryJournal.from_environment()
+
+
+def test_genesis_initializer_is_create_only_and_exactly_replayable() -> None:
+    bound = _binding()
+    client = FakeDynamo(bound)
+    client.items.clear()
+    assert initialize_recovery_head(
+        client, table_name="lucy-synthetic-recovery", binding=bound
+    )
+    assert not initialize_recovery_head(
+        client, table_name="lucy-synthetic-recovery", binding=bound
+    )
+    stream_key = f"STREAM#{bound.stream_kind.value}#{bound.stream_id}"
+    client.items[(stream_key, "HEAD")]["binding_manifest_digest"] = {"S": "f" * 64}
+    with pytest.raises(RecoveryJournalError, match="stream binding mismatch"):
+        initialize_recovery_head(
+            client, table_name="lucy-synthetic-recovery", binding=bound
+        )
 
 
 def _key(value: object) -> tuple[str, str]:

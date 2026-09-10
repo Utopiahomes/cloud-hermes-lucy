@@ -32,6 +32,8 @@ _GENESIS = "0" * 64
 class DynamoRecoveryClient(Protocol):
     def get_item(self, **kwargs: object) -> dict[str, object]: ...
 
+    def put_item(self, **kwargs: object) -> dict[str, object]: ...
+
     def transact_write_items(self, **kwargs: object) -> dict[str, object]: ...
 
 
@@ -445,6 +447,50 @@ class AwsDynamoRecoveryJournal:
 
 def _epoch_ms(value: datetime) -> int:
     return int(value.timestamp() * 1000)
+
+
+def initialize_recovery_head(
+    client: DynamoRecoveryClient,
+    *,
+    table_name: str,
+    binding: RecoveryStreamBindingV1,
+) -> bool:
+    """Create one immutable genesis head; return False for an exact replay."""
+
+    journal = AwsDynamoRecoveryJournal(client, table_name=table_name, binding=binding)
+    stream_key = f"STREAM#{binding.stream_kind.value}#{binding.stream_id}"
+    item: dict[str, object] = {
+        "pk": {"S": stream_key},
+        "sk": {"S": "HEAD"},
+        "stream_kind": {"S": binding.stream_kind.value},
+        "stream_id": {"S": str(binding.stream_id)},
+        "authority_epoch": {"N": str(binding.authority_epoch)},
+        "independent_store_id": {"S": binding.independent_store_id},
+        "binding_manifest_digest": {"S": binding.binding_manifest_digest},
+        "sequence": {"N": "0"},
+        "event_digest": {"S": _GENESIS},
+    }
+    try:
+        client.put_item(
+            TableName=table_name,
+            Item=item,
+            ConditionExpression="attribute_not_exists(pk)",
+            ReturnValues="NONE",
+        )
+        return True
+    except (BotoCoreError, ClientError):
+        expected = RecoveryJournalHeadV1(
+            stream_kind=binding.stream_kind,
+            stream_id=binding.stream_id,
+            authority_epoch=binding.authority_epoch,
+            independent_store_id=binding.independent_store_id,
+            binding_manifest_digest=binding.binding_manifest_digest,
+            sequence=0,
+            event_digest=_GENESIS,
+        )
+        if journal.head() != expected:
+            raise RecoveryJournalError("recovery journal genesis conflicts") from None
+        return False
 
 
 def _string(item: dict[str, object], name: str) -> str:

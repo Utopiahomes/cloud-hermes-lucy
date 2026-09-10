@@ -225,6 +225,11 @@ def test_r1_recovery_journals_have_separate_tables_and_pause_only_recovery() -> 
     for serialized in (authority, cost, recovery):
         assert "TransactWriteItems" in serialized
         assert not any(action in serialized for action in ("Scan", "Query", "DeleteItem"))
+    for statements in policies.values():
+        for statement in statements:
+            assert statement["Condition"]["Null"] == {
+                "dynamodb:LeadingKeys": "false"
+            }
 
     trusts = [
         str(resources[name]["Properties"]["AssumeRolePolicyDocument"])

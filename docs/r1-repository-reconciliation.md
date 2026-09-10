@@ -16,7 +16,9 @@ crash-safe authority and cost journal preparation now pass clean local PostgreSQ
 Restrictive authority and cost events now replay exactly once into a quarantined
 restore at migration `0049`. Cost recovery now fences old executable attempts and
 retains a 90-second paid-admission cooldown; reopening general admission remains a
-separate protected handoff.
+separate protected handoff. The additive, not-yet-deployed AWS journal boundary now
+defines separate protected authority and cost tables, three exact Render OIDC roles,
+and a create-only operator genesis initializer.
 
 ## Frozen baseline
 
@@ -106,6 +108,7 @@ durability claim.
 | Migration `0047` gives the recovery identity an execute-only, restrictive authority applier for quarantined capture-off restores. It pins the configured authority stream before SQL, accepts only exact content-free membership-revocation or publication-withdrawal events, advances a contiguous immutable replay head transactionally with the restriction, and exactly replays ambiguous outcomes. Normal, transition, and cost identities cannot invoke or enumerate it. | Fresh migration 0001→0047; `tests/integration/test_r1_authority_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0047`, authority replay adapter, authority/capture tables or guards, recovery role grants, stream contracts, readiness, or bootstrap change |
 | Migration `0048` projects exact reservation and terminal cost events into a private per-attempt recovery ledger without fabricating executable provider-attempt rows. A matching base attempt is validated rather than double represented as new work; missing policy authority sets operator review. The first replay installs a durable paid-inference block, so replay alone cannot resubmit historical work or silently reopen spending. | Fresh migration 0001→0048; `tests/integration/test_r1_cost_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0048`, cost replay adapter/projection, recovery admission guard, cost contracts, readiness, or bootstrap change |
 | Migration `0049` finalizes cost recovery only at the exact replayed head, converts surviving pre-restore executable attempts to non-executable `UNKNOWN`, applies terminal projections to surviving accounting rows, detects unexplained or contradictory attempts for operator review, and keeps paid admission closed for a database-clock 90-second cooldown. Canonical cap checks count either the surviving base attempt or its recovery projection, never both; recovered unresolved work still consumes concurrency. | Fresh migration 0001→0049; `tests/integration/test_r1_cost_replay.py` and `tests/integration/test_r1_provider_cost_admission.py`; 7 PostgreSQL boundary checks passed on 2026-09-10 | Migration `0049`, cost finalization/projection semantics, provider-attempt state machine, admission guard, cost roles, readiness, or bootstrap change |
+| The additive R1 recovery stack isolates authority and cost journals in separate retained, deletion-protected, 30-day-PITR tables. Exact Render OIDC subjects receive only their stream operations; the coordinator can pause and exact-check heads but cannot update a head or access events. Every key-scoped allow fails when `dynamodb:LeadingKeys` is absent. The operator initializer validates both bindings and uses create-only genesis writes; exact reruns are idempotent and conflicts fail closed. | `deploy/aws/r1-recovery-journals-v1.3.yaml`, `src/lucy/recovery_journal_aws.py`, and `deploy/aws/initialize_recovery_journals_v1_3.py`; 25 focused recovery/AWS-template checks passed with Ruff, strict mypy, and `git diff --check` on 2026-09-10 | Recovery stack/IAM/key layout, stream-binding contract, DynamoDB adapter, initializer, or manifest changes |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -758,8 +761,11 @@ engine `29.7.2`. The recoverable runtime backups are
 `C:\Users\Forti\AppData\Local\Docker\run.stale-codex-20260910-125545`. These contain
 only failed runtime sockets, not images, volumes, or project data.
 
-Remaining R1-4 work is wiring the independently deployed acknowledgement receiver,
-and the two-stream AWS/IAM bindings.
+The two-stream AWS/IAM boundary and create-only genesis path are now implemented
+locally but not deployed. Remaining R1-4 work is wiring the independently deployed
+acknowledgement receiver, adding CloudTrail data-event coverage and deployed negative
+permission checks, then commissioning the two journal bindings and exercising the
+protected recovery handoff with synthetic state.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

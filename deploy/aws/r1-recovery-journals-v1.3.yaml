@@ -84,8 +84,8 @@ Resources:
         Statement:
           - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
           - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
-          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}}}
+          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
 
   CostWriterPolicy:
     Type: AWS::IAM::Policy
@@ -97,8 +97,8 @@ Resources:
         Statement:
           - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
           - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
-          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}}}
+          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
 
   RecoveryCoordinatorPolicy:
     Type: AWS::IAM::Policy
@@ -108,12 +108,12 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", !Sub "PAUSE#authority#${AuthorityStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", !Sub "PAUSE#cost#${CostStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}}}
-          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}}}
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", !Sub "PAUSE#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", !Sub "PAUSE#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
 
 Outputs:
   AuthorityJournalTableName: {Value: !Ref AuthorityJournal}

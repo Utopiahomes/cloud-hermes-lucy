@@ -9,6 +9,26 @@ authority. Keep this separate from the accepted realm stack until the three Rend
 service IDs, genesis heads, CloudTrail integration, and deployed negative-permission
 exercise are ready for one reviewed update.
 
+After deployment, create the two genesis heads with the human security-administrator
+identity. The initializer validates the account, region, table ARNs, stream kinds,
+distinct stream IDs, and shared manifest before either write. It uses conditional
+`PutItem`; an exact rerun reports both heads as already present, while any conflicting
+head fails closed:
+
+```powershell
+$env:AWS_PROFILE = 'lucy-dev'
+.\.venv\Scripts\python.exe deploy\aws\initialize_recovery_journals_v1_3.py `
+  --account-id 429870640638 `
+  --authority-table <authority-table-output> `
+  --authority-binding secrets\generated\authority-recovery-binding-v1.3.json `
+  --cost-table <cost-table-output> `
+  --cost-binding secrets\generated\cost-recovery-binding-v1.3.json
+```
+
+The binding files contain identifiers and digests, not credentials. Keep them in the
+ignored generated-evidence directory. The command relies on the existing short-lived
+AWS SSO session and never accepts or creates static access keys.
+
 ## V1.3 per-realm template (local preparation only)
 
 `security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.
