@@ -1,0 +1,81 @@
+{
+  "aws": {
+    "account_id": "429870640638",
+    "authority_stream_id": "9796c159-d8c2-4494-bccf-b02bb9ee1073",
+    "authority_table": "lucy-utopia-v13-authority-journal",
+    "cloudtrail_recovery_data_events": true,
+    "cost_stream_id": "7a959591-3c34-44ea-b713-25b13c22cbe3",
+    "cost_table": "lucy-utopia-v13-cost-journal",
+    "genesis_heads_created": true,
+    "main_stack": "lucy-utopia-security-v1-3",
+    "main_stack_status": "UPDATE_COMPLETE",
+    "main_stack_termination_protected": true,
+    "negative_permission_checks": {
+      "authority_writer_cross_stream_read": "implicitDeny",
+      "coordinator_delete": "implicitDeny",
+      "coordinator_foreign_head_read": "implicitDeny",
+      "coordinator_kms_decrypt": "implicitDeny",
+      "coordinator_query": "implicitDeny",
+      "coordinator_scan": "implicitDeny",
+      "coordinator_update_head": "implicitDeny",
+      "cost_writer_delete": "implicitDeny",
+      "cost_writer_query": "implicitDeny",
+      "cost_writer_scan": "implicitDeny"
+    },
+    "recovery_stack": "lucy-utopia-recovery-v1-3",
+    "recovery_stack_status": "CREATE_COMPLETE",
+    "recovery_stack_termination_protected": true,
+    "region": "us-east-1",
+    "tables": {
+      "billing_mode": "PAY_PER_REQUEST",
+      "deletion_protection": true,
+      "pitr_days": 30,
+      "sse": "ENABLED",
+      "status": "ACTIVE"
+    },
+    "v1_3_deployed_verifier_passed": true
+  },
+  "capture_enabled": false,
+  "database": {
+    "bootstrap_job_id": "job-dahidjnlk1mc73a2h3eg",
+    "directory_admission_acl_isolated": true,
+    "function_owner_schema_create_removed": true,
+    "migration_revision": "0050_r1_recovery_ack_receiver",
+    "roles_sql_sha256": "2a3de5087864e678cbac590ff3dfd2a209c61724151d5109894e4480d40fd0ea",
+    "runtime_admission": "quarantined",
+    "source_revision": "0042_r1_permit_authority",
+    "verified_recovery_logins": [
+      "lucy_utopia_authority_writer",
+      "lucy_utopia_cost_writer",
+      "lucy_utopia_authority_recovery",
+      "lucy_utopia_cost_recovery"
+    ],
+    "verified_runtime_logins": [
+      "lucy_utopia_routine",
+      "lucy_utopia_policy",
+      "lucy_utopia_sensitive_workflow",
+      "lucy_utopia_finality"
+    ]
+  },
+  "object_type": "lucy.r1-recovery-commissioning-evidence.v1",
+  "recorded_at": "2026-09-10T21:56:14Z",
+  "render": {
+    "auto_deploy": false,
+    "environment_id": "evm-daca8g2fngtc73clv91g",
+    "network_isolation": true,
+    "services": {
+      "authority_writer": "srv-dahi58lg1s2s73bae65g",
+      "cost_writer": "srv-dahi5hcs728c73b7bqsg",
+      "recovery_coordinator": "srv-dahi5hss728c73b7bt70"
+    },
+    "services_suspended": true,
+    "workspace_id": "tea-da8et5bbc2fs73a2dtng"
+  },
+  "status": "partially_commissioned",
+  "transcript_capture_activation_authorized": false,
+  "unexecuted": [
+    "transmit the four recovery database URLs and four private service tokens to the exact suspended Render services",
+    "deploy and run the three recovery services",
+    "exercise the synthetic protected handoff"
+  ]
+}
