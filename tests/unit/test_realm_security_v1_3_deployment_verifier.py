@@ -33,9 +33,9 @@ def _trust_store() -> str:
                 "issuance_not_after": "2027-09-01T00:00:00Z",
                 "issuer": "lucy-policy",
                 "key_id": "policy-notary.production.1",
-                "object_type": "lucy.verification-key.v1",
+                "object_type": "lucy.v13-verification-key.v1",
                 "public_key_b64": base64.b64encode(b"p" * 32).decode(),
-                "purpose": "policy_notary",
+                "purpose": "policy_notary_v13",
                 "status": "active",
                 "valid_from": "2026-09-01T00:00:00Z",
                 "verify_not_after": "2027-09-02T00:00:00Z",
@@ -219,3 +219,11 @@ def test_realm_executors_bind_exact_scope_and_reject_static_credentials() -> Non
     )
     failed = {check.name for check in checks if not check.passed}
     assert {"lambda.retrieval.environment", "lambda.retrieval.no_static_credentials"} <= failed
+
+
+def test_v13_trust_store_rejects_the_v12_contract() -> None:
+    module = _module("verify_realm_security_v1_3_deployment.py")
+    payload = json.loads(_trust_store())
+    payload[0]["object_type"] = "lucy.verification-key.v1"
+    payload[0]["purpose"] = "policy_notary"
+    assert not module.verify_v13_policy_trust_store(json.dumps(payload))

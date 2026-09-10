@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 import boto3  # type: ignore[import-untyped]
+from pydantic import ValidationError
 
 from deploy.aws.verify_security_v1_2_deployment import (
     _ACCOUNT_ID,
@@ -22,9 +23,14 @@ from deploy.aws.verify_security_v1_2_deployment import (
     _lambda_arn_parts,
     verify_caller,
     verify_kms_key,
-    verify_policy_trust_store,
     verify_stack,
     verify_table,
+)
+from lucy.contracts.security_v1_2 import DeploymentEnvironment
+from lucy.contracts.security_v1_3 import (
+    V13SigningKeyPurpose,
+    V13VerificationKeyStatus,
+    V13VerificationKeyV1,
 )
 
 _REALM_OUTPUT_PARAMETERS = {
@@ -124,6 +130,27 @@ def _json_equals(raw: object, expected: object) -> bool:
         return value == expected
     except json.JSONDecodeError:
         return False
+
+
+def verify_v13_policy_trust_store(raw: object) -> bool:
+    if not isinstance(raw, str):
+        return False
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, list) or not payload:
+            return False
+        keys = tuple(V13VerificationKeyV1.model_validate(item) for item in payload)
+    except (json.JSONDecodeError, ValidationError):
+        return False
+    return (
+        len({key.key_id for key in keys}) == len(keys)
+        and all(
+            key.environment == DeploymentEnvironment.PRODUCTION
+            and key.purpose == V13SigningKeyPurpose.POLICY_NOTARY
+            for key in keys
+        )
+        and sum(key.status == V13VerificationKeyStatus.ACTIVE for key in keys) == 1
+    )
 
 
 def verify_realm_executor(
@@ -235,7 +262,7 @@ def verify_realm_executor(
         ),
         Check(
             f"lambda.{kind}.policy_trust",
-            verify_policy_trust_store(trust_store)
+            verify_v13_policy_trust_store(trust_store)
             and isinstance(trust_store, str)
             and hashlib.sha256(trust_store.encode()).hexdigest()
             == outputs.get("PolicyTrustStoreSha256"),

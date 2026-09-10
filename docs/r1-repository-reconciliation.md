@@ -3,9 +3,10 @@
 Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
 single-realm process sessions, authenticated admission, scoped memory, sensitive
 operations, deletion recovery, and scoped off-record enforcement are implemented
-locally. A repeatable per-realm AWS template and validated AWS-to-PostgreSQL stamp
-handoff are prepared locally. R1-2 deployed verification and commissioning remain
-outstanding; production provisioning remains disabled.
+locally. The termination-protected Utopia realm AWS stamp is deployed and its
+read-only deployment verification passes. Its canonical AWS-to-PostgreSQL stamp is
+prepared locally. PostgreSQL/Render commissioning and synthetic deployed execution
+remain outstanding. Live transcript capture remains disabled.
 
 ## Frozen baseline
 
@@ -123,6 +124,8 @@ durability claim.
 | The read-only V1.3 deployed-state verifier pins one realm's CloudFormation identity, termination protection, qualified executor versions and configuration, public-only trust stores, KMS keys, DynamoDB protections, and absence of static AWS credentials | `tests/unit/test_realm_security_v1_3_deployment_verifier.py` plus unchanged v1.2 verifier tests; 9 passed plus Ruff and mypy | V1.3 verifier, realm template parameters/outputs, executor environment, or inherited v1.2 deployed-resource rules |
 | V1.3 container admission selects schema head 0039 explicitly, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | `tests/unit/test_runtime_readiness.py`, `tests/unit/test_postgres_deployment_renderer_v1_3.py`, and `tests/integration/test_r1_production_realm_roles.py`; 25 focused checks passed, including four real PostgreSQL boundary admissions; Ruff and mypy passed | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
 | Per-realm V1.3 policy identity generation writes a private Ed25519 seed and public purpose-bound trust inventory to separate ignored files, refuses overwrite, and removes the private output if public-output creation fails | `tests/unit/test_generate_policy_identity_v1_3.py`; 1 focused check passed plus Ruff and mypy | Generator, V1.3 verification-key contract, purpose, or validity windows |
+| The Utopia V1.3 AWS realm stack is `CREATE_COMPLETE` with termination protection and capture-disabled tags; immutable executor aliases, reviewed artifact/trust digests, exact realm bindings, non-static credentials, three purpose-specific KMS keys, protected/PITR DynamoDB ledgers, and quota TTLs passed the read-only deployed verifier | `secrets/generated/utopia-aws-deployment-v1.3-2026-09-09-pass.json`; stack `lucy-utopia-security-v1-3`; 49 checks passed in `us-east-1` | Stack update, alias/version/configuration change, policy trust rotation, KMS state/policy change, DynamoDB protection/PITR/TTL change, or verifier change |
+| The deployed Utopia CloudFormation identity and the reviewed PostgreSQL binding produce one validated canonical realm security stamp | `secrets/generated/utopia-realm-security-stamp-v1.3.json`; digest `dd2fc2afb6134a2580af00b6b187b3912d57cb2f52244169862ec8b62e6e2959` | Stack realm outputs, PostgreSQL binding description, AWS account/region, or stamp contract/builder change |
 
 ## R1-2 checkpoint
 
@@ -448,9 +451,11 @@ realm has been provisioned.
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
-revocation race. The next exact R1-2 action is to prepare and perform synthetic
-deployed verification of one realm stamp with capture still disabled. Realm-specific AWS and
-Render commissioning remains required before R1-2 can be activated.
+revocation race. The Utopia AWS realm stamp is now deployed and passes its read-only
+verification. The next exact R1-2 action is to commission the validated stamp into
+quarantined PostgreSQL and the four existing Render identities, then perform the
+synthetic deployed execution path with capture still disabled. Render/PostgreSQL
+commissioning remains required before R1-2 can be accepted.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 
