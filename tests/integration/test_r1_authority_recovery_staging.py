@@ -116,6 +116,13 @@ def test_restrictions_apply_locally_before_separate_durable_acknowledgement() ->
         )
     replay = transition.revoke_membership(membership_request)
     assert replay.replayed and replay.event_id == pending_membership.event_id
+    with pytest.raises(DBAPIError, match="acknowledgement unavailable"):
+        recovery.acknowledge(
+            event_id=pending_membership.event_id,
+            journal_sequence=1,
+            journal_event_digest="d" * 64,
+            journal_head_digest="d" * 64,
+        )
 
     withdrawal = transition.withdraw_publication(
         _request(
@@ -130,6 +137,26 @@ def test_restrictions_apply_locally_before_separate_durable_acknowledgement() ->
             hostname="utopia.test", question="hello"
         )
 
+    prepared = transition.prepare(
+        event_id=withdrawal.event_id,
+        journal_sequence=2,
+        journal_previous_digest="c" * 64,
+        journal_event_digest="b" * 64,
+    )
+    assert prepared.journal_sequence == 2
+    assert transition.prepare(
+        event_id=withdrawal.event_id,
+        journal_sequence=2,
+        journal_previous_digest="c" * 64,
+        journal_event_digest="b" * 64,
+    ).journal_event_digest == "b" * 64
+    with pytest.raises(DBAPIError, match="preparation conflicts"):
+        transition.prepare(
+            event_id=withdrawal.event_id,
+            journal_sequence=2,
+            journal_previous_digest="c" * 64,
+            journal_event_digest="e" * 64,
+        )
     exact = recovery.acknowledge(
         event_id=withdrawal.event_id,
         journal_sequence=2,

@@ -69,6 +69,9 @@ def upgrade() -> None:
         CREATE TABLE lucy.authority_recovery_outbox_v1 (
           event_id uuid PRIMARY KEY REFERENCES lucy.authority_transition_events_v1(id),
           journal_sequence bigint CHECK (journal_sequence>0),
+          journal_previous_digest text CHECK (
+            journal_previous_digest IS NULL OR journal_previous_digest ~ '^[0-9a-f]{64}$'
+          ),
           journal_event_digest text CHECK (
             journal_event_digest IS NULL OR journal_event_digest ~ '^[0-9a-f]{64}$'
           ),
@@ -76,9 +79,10 @@ def upgrade() -> None:
             journal_head_digest IS NULL OR journal_head_digest ~ '^[0-9a-f]{64}$'
           ),
           acknowledged_at timestamptz,
+          CHECK ((journal_sequence IS NULL)=(journal_previous_digest IS NULL)),
           CHECK ((journal_sequence IS NULL)=(journal_event_digest IS NULL)),
-          CHECK ((journal_sequence IS NULL)=(journal_head_digest IS NULL)),
-          CHECK ((journal_sequence IS NULL)=(acknowledged_at IS NULL))
+          CHECK ((journal_head_digest IS NULL)=(acknowledged_at IS NULL)),
+          CHECK (journal_head_digest IS NULL OR journal_head_digest=journal_event_digest)
         );
         CREATE TRIGGER authority_transition_events_immutable_v1
           BEFORE UPDATE OR DELETE ON lucy.authority_transition_events_v1
@@ -117,6 +121,7 @@ def upgrade() -> None:
             'new_generation',e.new_generation,
             'transition_digest',e.transition_digest,
             'journal_sequence',o.journal_sequence,
+            'journal_previous_digest',o.journal_previous_digest,
             'journal_event_digest',o.journal_event_digest,
             'journal_head_digest',o.journal_head_digest,'replayed',p_replayed
           ) FROM lucy.authority_transition_events_v1 e
@@ -258,10 +263,44 @@ def upgrade() -> None:
             'previous_generation',e.previous_generation,'new_generation',e.new_generation,
             'source_authority_ref',e.source_authority_ref,
             'source_authority_digest',e.source_authority_digest,
-            'transition_digest',e.transition_digest,'occurred_at',e.occurred_at
+            'transition_digest',e.transition_digest,'occurred_at',e.occurred_at,
+            'journal_sequence',o.journal_sequence,
+            'journal_previous_digest',o.journal_previous_digest,
+            'journal_event_digest',o.journal_event_digest
           ) FROM lucy.authority_transition_events_v1 e
           JOIN lucy.authority_recovery_outbox_v1 o ON o.event_id=e.id
           WHERE e.id=p_event_id AND o.acknowledged_at IS NULL
+        $function$;
+
+        CREATE FUNCTION lucy.prepare_authority_event_v1(
+          p_event_id uuid,p_journal_sequence bigint,p_journal_previous_digest text,
+          p_journal_event_digest text
+        ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+        SET search_path = pg_catalog, pg_temp AS $function$
+        DECLARE v_sequence bigint; v_previous text; v_event_digest text; v_ack timestamptz;
+        BEGIN
+          IF p_journal_sequence<1
+             OR p_journal_previous_digest !~ '^[0-9a-f]{64}$'
+             OR p_journal_event_digest !~ '^[0-9a-f]{64}$'
+          THEN RAISE EXCEPTION 'authority event preparation unavailable'; END IF;
+          SELECT journal_sequence,journal_previous_digest,journal_event_digest,acknowledged_at
+          INTO v_sequence,v_previous,v_event_digest,v_ack
+          FROM lucy.authority_recovery_outbox_v1 WHERE event_id=p_event_id FOR UPDATE;
+          IF NOT FOUND OR v_ack IS NOT NULL THEN
+            RAISE EXCEPTION 'authority event preparation unavailable'; END IF;
+          IF v_sequence IS NOT NULL THEN
+            IF (v_sequence,v_previous,v_event_digest) IS DISTINCT FROM
+              (p_journal_sequence,p_journal_previous_digest,p_journal_event_digest)
+            THEN RAISE EXCEPTION 'authority event preparation conflicts'; END IF;
+          ELSE
+            UPDATE lucy.authority_recovery_outbox_v1 SET
+              journal_sequence=p_journal_sequence,
+              journal_previous_digest=p_journal_previous_digest,
+              journal_event_digest=p_journal_event_digest
+              WHERE event_id=p_event_id;
+          END IF;
+          RETURN lucy.get_pending_authority_event_v1(p_event_id);
+        END
         $function$;
 
         CREATE FUNCTION lucy.acknowledge_authority_event_v1(
@@ -285,9 +324,10 @@ def upgrade() -> None:
               (p_journal_sequence,p_journal_event_digest,p_journal_head_digest)
             THEN RAISE EXCEPTION 'authority acknowledgement conflicts'; END IF;
             RETURN lucy.authority_transition_result_v1(p_event_id,true); END IF;
+          IF v_sequence IS NULL OR v_event_digest IS NULL
+             OR v_sequence<>p_journal_sequence OR v_event_digest<>p_journal_event_digest
+          THEN RAISE EXCEPTION 'authority acknowledgement unavailable'; END IF;
           UPDATE lucy.authority_recovery_outbox_v1 SET
-            journal_sequence=p_journal_sequence,
-            journal_event_digest=p_journal_event_digest,
             journal_head_digest=p_journal_head_digest,acknowledged_at=v_now
             WHERE event_id=p_event_id;
           RETURN lucy.authority_transition_result_v1(p_event_id,false);
@@ -304,6 +344,9 @@ def upgrade() -> None:
             "lucy_authority_transition",
         ),
         "lucy.get_pending_authority_event_v1(uuid)": ("lucy_authority_transition",),
+        "lucy.prepare_authority_event_v1(uuid,bigint,text,text)": (
+            "lucy_authority_transition",
+        ),
         "lucy.acknowledge_authority_event_v1(uuid,bigint,text,text)": (
             "lucy_authority_recovery_writer",
         ),
