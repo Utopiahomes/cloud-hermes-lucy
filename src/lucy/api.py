@@ -53,6 +53,15 @@ from lucy.contracts.security_v1_2 import (
     SensitiveReasonCode,
     VerificationKeyV1,
 )
+from lucy.contracts.security_v1_3 import (
+    Ed25519V13Signer,
+    ExecutorReceiptV2,
+    SensitiveActionPermitV3,
+    SensitiveExecutionGrantV2,
+    V13ContractVerifier,
+    V13SigningKeyPurpose,
+    V13VerificationKeyV1,
+)
 from lucy.db import create_session_factory
 from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_environment
 from lucy.evidence import (
@@ -87,6 +96,17 @@ from lucy.readiness import (
 from lucy.realm_archive_commit import (
     RealmConversationArchiveService,
     realm_conversation_archive_from_environment,
+)
+from lucy.realm_security_workflows import (
+    HttpRealmPolicyClient,
+    PostgresRealmPolicyStore,
+    PostgresRealmWorkflowStore,
+    RealmLambdaExecutorInvoker,
+    RealmPolicyGrantService,
+    RealmRetrievalCoordinator,
+    RealmRetrievalWorkflowResultV1,
+    RealmWorkflowUnavailable,
+    VerifiedRealmPolicyAdapter,
 )
 from lucy.secret_filter import MemorySecretDetected
 from lucy.security_workflows import (
@@ -246,6 +266,19 @@ def _verification_keys(name: str) -> tuple[VerificationKeyV1, ...]:
     return keys
 
 
+def _v13_verification_keys(name: str) -> tuple[V13VerificationKeyV1, ...]:
+    try:
+        payload = json.loads(_required_environment(name))
+        if not isinstance(payload, list):
+            raise ValueError("verification-key inventory must be a list")
+        keys = tuple(V13VerificationKeyV1.model_validate(item) for item in payload)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("v1.3 verification-key inventory is invalid") from exc
+    if not keys:
+        raise ValueError("v1.3 verification-key inventory is empty")
+    return keys
+
+
 @lru_cache(maxsize=1)
 def _policy_notary() -> PolicyNotaryService:
     environment = DeploymentEnvironment(_required_environment("LUCY_SECURITY_ENVIRONMENT"))
@@ -332,6 +365,57 @@ def _executor_invoker(mode: str) -> BotoLambdaExecutorInvoker:
         client,
         deletion_alias_arn=_required_environment(
             "LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN"
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_policy_services() -> tuple[RealmPolicyGrantService, VerifiedRealmPolicyAdapter]:
+    try:
+        private_seed = base64.b64decode(
+            _required_environment("LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64"),
+            validate=True,
+        )
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_seed)
+    except ValueError as exc:
+        raise ValueError("v1.3 policy signing key is invalid") from exc
+    store = PostgresRealmPolicyStore(_ready_sessions())
+    signer = Ed25519V13Signer(
+        private_key,
+        key_id=_required_environment("LUCY_V13_POLICY_KEY_ID"),
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    return (
+        RealmPolicyGrantService(
+            store,
+            signer=signer,
+            verifier=V13ContractVerifier(
+                _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
+            ),
+        ),
+        VerifiedRealmPolicyAdapter(
+            store,
+            verifier=V13ContractVerifier(
+                _v13_verification_keys("LUCY_V13_RECEIPT_TRUST_STORE_JSON")
+            ),
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_policy_workflow_client() -> HttpRealmPolicyClient:
+    return HttpRealmPolicyClient(
+        _required_environment("LUCY_POLICY_HOSTPORT"),
+        _required_environment("LUCY_POLICY_GATEWAY_TOKEN"),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_retrieval_executor() -> RealmLambdaExecutorInvoker:
+    return RealmLambdaExecutorInvoker(
+        boto3.client("lambda", region_name=_required_environment("AWS_REGION")),
+        retrieval_alias_arn=_required_environment(
+            "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN"
         ),
     )
 
@@ -773,6 +857,11 @@ class DeliveryOutcomeV2Input(BaseModel):
     accepted: bool
 
 
+class RetrievalExecuteV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    permit: SensitiveActionPermitV3
+
+
 _POLICY_PERMIT_STORAGE_FAILURE_CODES = {
     "invalid permit issuance idempotency key": "invalid_idempotency_key",
     "signed authorization contracts must be JSON objects": "invalid_contract_container",
@@ -1030,3 +1119,71 @@ def owner_delete_evidence_v2(
         raise HTTPException(status_code=status, detail=exc.code) from exc
     except (ValueError, SQLAlchemyError) as exc:
         raise HTTPException(status_code=409, detail="deletion failed closed") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/grant",
+    tags=["internal"],
+    response_model=SensitiveExecutionGrantV2,
+)
+def grant_sensitive_operation_v3(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> SensitiveExecutionGrantV2:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        grants, _receipts = _realm_policy_services()
+        return grants.issue_grant(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/receipt-attestation",
+    tags=["internal"],
+)
+def attest_executor_receipt_v3(
+    operation_id: UUID,
+    receipt: ExecutorReceiptV2,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    if receipt.operation_id != operation_id:
+        raise HTTPException(status_code=400, detail="operation identity mismatch")
+    try:
+        _grants, receipts = _realm_policy_services()
+        return {"receipt_digest": receipts.attest_receipt(receipt)}
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="executor receipt not trusted") from exc
+
+
+@app.post(
+    "/owner/v3/evidence/retrieve",
+    tags=["owner"],
+    response_model=RealmRetrievalWorkflowResultV1,
+)
+def owner_retrieve_evidence_v3(
+    request: RetrievalExecuteV3Input,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RealmRetrievalWorkflowResultV1:
+    _require_mode("evidence")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_owner(authorization)
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    try:
+        return RealmRetrievalCoordinator(
+            PostgresRealmWorkflowStore(_ready_sessions()),
+            _realm_policy_workflow_client(),
+            _realm_retrieval_executor(),
+        ).execute(request.permit, idempotency_key=idempotency_key.strip())
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=409, detail="retrieval failed closed") from exc

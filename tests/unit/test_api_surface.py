@@ -49,6 +49,11 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
             "POST",
             "/internal/v2/security/operations/{operation_id}/receipt-attestation",
         ),
+        ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
+        (
+            "POST",
+            "/internal/v3/security/operations/{operation_id}/receipt-attestation",
+        ),
     }
 
 
@@ -169,6 +174,48 @@ def test_v13_hides_all_v12_sensitive_endpoints(
 
     assert legacy.value.status_code == 404
     assert v12.value.status_code == 404
+
+
+def test_v13_grant_route_is_hidden_from_v12_and_uses_policy_identity_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation_id = uuid4()
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.2")
+    with pytest.raises(HTTPException) as hidden:
+        api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token")
+    assert hidden.value.status_code == 404
+
+    marker = object()
+
+    class Grants:
+        def issue_grant(self, candidate: object) -> object:
+            assert candidate == operation_id
+            return marker
+
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
+    monkeypatch.setattr(api, "_realm_policy_services", lambda: (Grants(), object()))
+    assert api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token") is marker
+
+
+def test_v13_receipt_route_rejects_path_body_identity_mismatch_before_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
+    monkeypatch.setattr(
+        api,
+        "_realm_policy_services",
+        lambda: pytest.fail("mismatched receipt must not reach policy"),
+    )
+    receipt = type("Receipt", (), {"operation_id": uuid4()})()
+    with pytest.raises(HTTPException) as caught:
+        api.attest_executor_receipt_v3(
+            uuid4(), receipt, "Bearer policy-token"  # type: ignore[arg-type]
+        )
+    assert caught.value.status_code == 400
 
 
 def test_policy_storage_failure_logging_uses_only_an_allowlisted_code() -> None:

@@ -505,9 +505,19 @@ obtains its signed grant through the separate policy-client boundary, invokes on
 qualified non-version Lambda alias, attests the receipt, and reconciles PostgreSQL.
 It never accepts a caller-supplied realm or database role and never returns historical
 plaintext on terminal replay. Fifty-eight focused workflow, deployment-rendering,
-readiness, bootstrap, and API tests pass with Ruff and full-package strict mypy. HTTP
-transport/factory wiring, deletion choreography, and deployed PostgreSQL execution
-remain pending; therefore the V1.3 sensitive endpoint is still unavailable.
+readiness, bootstrap, and API tests pass with Ruff and full-package strict mypy.
+Deletion choreography and deployed PostgreSQL execution remain pending.
+
+The V1.3 private HTTP transport is now locally wired without reusing V1.2 contract
+configuration. The policy process alone exposes exact-operation grant and receipt-
+attestation routes; the evidence process exposes the owner-authenticated retrieval
+route and calls policy only through a fixed Render-private host/port plus its existing
+gateway token. The evidence process invokes only its configured qualified retrieval
+alias. Path/body operation mismatches, wrong service mode, wrong baseline, malformed
+private endpoints, untrusted receipts, and all workflow failures fail closed. This
+does not create an owner-assertion broker or enable capture. The focused API,
+transport, workflow, and readiness checks pass locally; Render variables and deployed
+execution are still pending.
 
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR

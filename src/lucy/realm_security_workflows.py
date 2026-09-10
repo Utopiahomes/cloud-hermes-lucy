@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import secrets
@@ -417,6 +418,71 @@ class RealmPolicyClient(Protocol):
     def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
 
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
+
+
+class HttpRealmPolicyClient:
+    """Bounded private-network V1.3 policy client with no caller-selected URL."""
+
+    def __init__(self, hostport: str, token: str, *, timeout_seconds: int = 15) -> None:
+        match = re.fullmatch(
+            r"([a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?):([0-9]{2,5})", hostport
+        )
+        if match is None or not token or timeout_seconds not in range(1, 31):
+            raise ValueError("private realm policy client configuration is invalid")
+        port = int(match.group(2))
+        if port > 65_535:
+            raise ValueError("private realm policy client port is invalid")
+        self._host = match.group(1)
+        self._port = port
+        self._token = token
+        self._timeout = timeout_seconds
+
+    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2:
+        payload = self._post(
+            f"/internal/v3/security/operations/{operation_id}/grant", {}
+        )
+        return SensitiveExecutionGrantV2.model_validate(payload)
+
+    def attest_receipt(self, receipt: ExecutorReceiptV2) -> str:
+        payload = self._post(
+            f"/internal/v3/security/operations/{receipt.operation_id}/receipt-attestation",
+            receipt.model_dump(mode="json"),
+        )
+        digest = payload.get("receipt_digest") if isinstance(payload, dict) else None
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise RealmWorkflowUnavailable("realm policy response is invalid")
+        return digest
+
+    def _post(self, path: str, payload: dict[str, Any]) -> Any:
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        if len(body) > 262_144:
+            raise RealmWorkflowUnavailable("realm policy request is too large")
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        try:
+            connection.request(
+                "POST",
+                path,
+                body=body,
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            raw = response.read(262_145)
+        except (OSError, http.client.HTTPException) as exc:
+            raise RealmWorkflowUnavailable("realm policy is unavailable") from exc
+        finally:
+            connection.close()
+        if response.status != 200:
+            raise RealmWorkflowUnavailable("realm policy rejected the operation")
+        if len(raw) > 262_144:
+            raise RealmWorkflowUnavailable("realm policy response is too large")
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            raise RealmWorkflowUnavailable("realm policy response is invalid") from exc
 
 
 class RealmRetrievalCoordinator:

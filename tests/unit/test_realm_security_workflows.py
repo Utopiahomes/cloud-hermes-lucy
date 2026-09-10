@@ -22,6 +22,7 @@ from lucy.contracts.security_v1_3 import (
     V13VerificationKeyV1,
 )
 from lucy.realm_security_workflows import (
+    HttpRealmPolicyClient,
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
     RealmGrantAuthorityV1,
@@ -332,6 +333,22 @@ def test_retrieval_coordinator_returns_terminal_replay_without_lambda() -> None:
 def test_realm_lambda_invoker_requires_exact_alias(alias: str) -> None:
     with pytest.raises(ValueError, match="exact non-version"):
         RealmLambdaExecutorInvoker(object(), retrieval_alias_arn=alias)
+
+
+@pytest.mark.parametrize(
+    "hostport,token",
+    [
+        ("https://lucy-policy:8080", "token"),
+        ("lucy-policy", "token"),
+        ("lucy-policy:70000", "token"),
+        ("lucy-policy:8080", ""),
+    ],
+)
+def test_realm_policy_client_rejects_unbounded_configuration(
+    hostport: str, token: str
+) -> None:
+    with pytest.raises(ValueError, match="private realm policy client"):
+        HttpRealmPolicyClient(hostport, token)
 
 
 def test_workflow_store_selects_action_specific_reconciliation() -> None:
