@@ -182,15 +182,9 @@ class PublicProjectionPublisher:
         return version_id
 
     def withdraw(self, *, channel_binding_id: UUID, actor_id: UUID) -> None:
-        """Block locally now; durable authority-journal acknowledgement arrives in R1-4."""
-        with self._sessions.begin() as session:
-            route = session.get(PublicProjectionRouteRow, channel_binding_id)
-            if route is None:
-                raise PublicationRejected("public route does not exist")
-            self._require_actor(session, channel_binding_id, actor_id, {"owner", "approver"})
-            route.active_version_id = None
-            route.updated_at = datetime.now(UTC)
-            self._event(session, channel_binding_id, "withdrawal_blocked", actor_id)
+        """Reject the obsolete direct path; withdrawals require durable staging."""
+        del channel_binding_id, actor_id
+        raise PublicationRejected("publication withdrawal requires authority transition service")
 
     @staticmethod
     def _require_actor(

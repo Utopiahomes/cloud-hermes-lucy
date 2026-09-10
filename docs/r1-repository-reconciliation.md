@@ -10,9 +10,10 @@ quarantined, all four continuous services are suspended, and live transcript cap
 remains disabled. R1-3 spending controls now pass local contract, coordinator,
 clean-migration, PostgreSQL concurrency/retry/rollover, and service-boundary checks.
 Production commissioning has not been attempted. R1-4 durable authority recovery
-now has its content-free journal/head/handoff contracts, atomic acceptance provider,
-and independently acknowledged cost-outcome lifecycle; domain replay and the AWS
-conditional store remain open.
+now has its content-free journal/head/handoff contracts, DynamoDB conditional provider,
+and independently acknowledged cost-outcome lifecycle. Authority restriction staging is
+implemented as uncommissioned migration `0045`, with its PostgreSQL execution proof still
+blocked on the local Docker Desktop host failure described below.
 
 ## Frozen baseline
 
@@ -94,6 +95,7 @@ durability claim.
 | R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
 | The R1-4 DynamoDB adapter performs one conditional append transaction over the event, permanent event-ID acknowledgement, exact expected head, and writer-pause fence; exact acknowledgement is recovered after an ambiguous response, all reads are strongly consistent and exact-key, and event/head/pause metadata substitution fails closed. Its production constructor pins `us-east-1`, account, table ARN/name, stream binding, and distinct same-account writer/recovery roles before client creation. | `src/lucy/recovery_journal_aws.py`, `tests/unit/test_recovery_journal_aws.py`; 6 adapter checks plus the 9 unchanged recovery-contract checks passed with Ruff and strict mypy | DynamoDB adapter/transaction shape, environment binding, event serialization, pause fencing, or recovery contracts change |
 | Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
+| Candidate migration `0045` atomically blocks membership/publication authority before staging a content-free recovery event, closes ordinary Lucy's legacy direct-withdrawal path, and separates transition from exact acknowledgement identities. Contract validation, offline Alembic rendering, Ruff, strict mypy, 19 focused authority/journal tests, and the complete 525-test unit suite pass. PostgreSQL execution is **not yet claimed**. | `src/lucy/authority_recovery.py`, `migrations/versions/0045_r1_authority_recovery_staging.py`, `tests/unit/test_authority_recovery.py`, and `tests/integration/test_r1_authority_recovery_staging.py`; local run 2026-09-10 | Migration/service/role change, or the pending clean PostgreSQL execution |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -684,9 +686,33 @@ scan, query, automatic genesis, or caller-selected scope. Its production constru
 requires an exact same-account table binding and separate writer/recovery roles and
 relies on the runtime's workload credentials rather than accepting static keys.
 
-The remaining R1-4 work is domain-specific authority staging/replay, restored-cost
-replay, infrastructure/IAM provisioning for the two journal streams, and protected
-activation integration.
+The remaining R1-4 work is database acceptance plus journal coordination/replay for
+domain authority, restored-cost replay, infrastructure/IAM provisioning for the two
+journal streams, and protected activation integration.
+
+Candidate migration `0045_r1_authority_recovery_staging` now implements the first half
+of domain authority durability. A membership revocation or public withdrawal takes
+effect locally in the same transaction that creates its immutable recovery outbox row;
+the caller receives `PERSISTENCE_PENDING`. Only the separate recovery-writer identity
+may attach the exact journal sequence/event/head acknowledgement and advance the result
+to `DURABLY_RECORDED`. Ordinary Lucy's former direct publication-withdrawal API is closed,
+and database triggers reject equivalent direct runtime updates. Exact replay, conflicting
+replay, role separation, cross-workspace denial, last-owner protection, and immediate
+local blocking have focused PostgreSQL tests ready.
+
+The Python contracts, offline Alembic rendering, Ruff, strict mypy, 19 focused authority
+and journal checks, and the complete 525-test unit suite pass. A clean PostgreSQL execution
+through `0045` is still required before this migration becomes the accepted R1 head or is
+added to production readiness/bootstrap. Docker Desktop 4.90.0 repeatedly recreates and
+then cannot rename its own `sailor-ingest.sock`; one bounded repair also found and moved
+the stale secrets-engine directory. The recoverable backups are
+`C:\Users\Forti\AppData\Local\Docker\run.stale-codex-20260910-123506` and
+`C:\Users\Forti\AppData\Local\docker-secrets-engine.stale-codex-20260910-123750`.
+No further startup loop was attempted.
+
+After the PostgreSQL proof, remaining R1-4 work is the exact journal prepare/append/ack
+coordinator and replay path for authority and cost, the two-stream AWS/IAM bindings, and
+the protected recovery activation handoff.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

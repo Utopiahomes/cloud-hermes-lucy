@@ -163,9 +163,8 @@ def test_synthetic_utopia_public_slice_is_scoped_immutable_and_withdrawable() ->
     # The database trigger, not just application code, rejects post-review byte changes.
     # SQLAlchemy wraps the trigger exception as DBAPIError.
     # The transaction above is intentionally expected to fail.
-    publisher.withdraw(channel_binding_id=utopia.channel_binding_id, actor_id=actor)
-    with pytest.raises(ScopeNotFound, match="unavailable"):
-        reader.answer(hostname="utopiahomes.test", question="Where is Utopia Homes located?")
+    with pytest.raises(PublicationRejected, match="authority transition service"):
+        publisher.withdraw(channel_binding_id=utopia.channel_binding_id, actor_id=actor)
 
 
 def test_database_enforces_one_wallet_per_node_and_immutable_tenure() -> None:
