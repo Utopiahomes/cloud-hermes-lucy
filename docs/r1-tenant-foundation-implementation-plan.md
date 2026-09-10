@@ -194,22 +194,27 @@ logical-database consolidation requires proven hosting/grant/restore support.
 
 | Component | Planning quantity | Cost status |
 | --- | --- | --- |
-| Private workflow compute | 8 continuous processes for two realms | Existing template shape 0.5 CPU/512 MB; account quote needed |
+| Private workflow compute | 8 continuous processes for two realms | USD 7/service/month at `0.5c-512mb`; USD 56/month for two realms |
 | Content ingress/public compute | Budget for 2 public + 2 private ingress processes; merge only where credentials/audiences remain safe | Account quote needed |
 | Shared metadata services | Directory and cost controller, separate identities/processes | Account quote needed |
-| Databases | 2 realm + directory + cost logical databases; conservative estimate uses 4 managed instances | Instance/storage/backup quote needed; existing realm template 0.5 CPU/1 GB, 5 GB storage |
+| Databases | 2 realm + directory + cost logical databases; conservative estimate uses 4 managed instances | USD 19/instance/month at `0.5c-1g`, including 1 GB; 5 GB allocation adds USD 1.20/instance/month at USD 0.30/GB |
 | KMS | 6 new realm keys | USD 6/month base key storage, before rotation/request charges |
 | Other AWS/Render | 4 Lambdas, realm tables plus authority/cost journals, PITR, audit/logs, finality/publication jobs, bandwidth, workspace | Usage-based quote needed |
 | Transitional resources | Existing v1.2 plus temporary Alpha/test realm while retained | Track separately; do not silently delete accepted resources |
 | Inference | Explicit owner-approved request and period ceilings | Disabled until configured |
 
 KMS base storage follows [AWS pricing](https://aws.amazon.com/kms/pricing/).
-[Render pricing](https://render.com/pricing) did not expose an authoritative
-numeric compute table in the retrieved page; this plan intentionally does not
-substitute older Starter prices for the current plan IDs. Total monthly cost is
-not yet quoted or measured. R1-0 must attach the account-specific fixed-cost,
-variable-cost and temporary-resource estimate before production provisioning.
-This open quote does not block local identity/public-slice work.
+[Render pricing](https://render.com/pricing), observed 2026-09-09, lists the
+current `0.5c-512mb` service at USD 7/month, `0.5c-1g` PostgreSQL at USD
+19/month with 1 GB included, additional database storage at USD 0.30/GB, and
+the Pro workspace at USD 25/month plus compute. On that basis, one continuously
+running realm foundation (four private services, one 5 GB realm database, and
+three KMS keys) is approximately USD 51.20/month before usage-based AWS charges;
+two are approximately USD 102.40/month. The existing Pro workspace charge is
+shared and is not repeated per realm. Public/private ingress, shared directory
+and cost-controller processes, their databases, logs, traffic, PITR operations,
+and temporary overlap remain additive. Actual billing remains an R1-5 evidence
+item, but the first-realm provisioning decision now has a concrete minimum.
 
 ## Verification and handoff
 
