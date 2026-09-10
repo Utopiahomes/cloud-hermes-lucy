@@ -345,6 +345,7 @@ class ServiceReadiness:
             ),
             "policy": (
                 "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
+                "lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint)",
                 "lucy.read_claimed_sensitive_authority_v1(uuid)",
                 "lucy.read_claimed_deletion_authority_v1(uuid)",
                 "lucy.store_scoped_deletion_manifest_v3(uuid,jsonb)",
@@ -352,12 +353,14 @@ class ServiceReadiness:
                 "lucy.attest_executor_receipt_v2(uuid,jsonb)",
             ),
             "evidence": (
+                "lucy.read_sensitive_action_permit_v3(uuid,text)",
                 "lucy.claim_sensitive_operation_v2(uuid,text)",
                 "lucy.read_sensitive_operation_status_v1(uuid)",
                 "lucy.freeze_claimed_evidence_package_v2(uuid)",
                 "lucy.reconcile_sensitive_operation_v2(uuid)",
             ),
             "deletion": (
+                "lucy.read_sensitive_action_permit_v3(uuid,text)",
                 "lucy.claim_sensitive_operation_v2(uuid,text)",
                 "lucy.read_sensitive_operation_status_v1(uuid)",
                 "lucy.reconcile_scoped_deletion_v2(uuid)",
