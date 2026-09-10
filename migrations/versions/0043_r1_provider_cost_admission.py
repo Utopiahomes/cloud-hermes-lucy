@@ -126,6 +126,7 @@ def upgrade() -> None:
         REVOKE ALL ON lucy.provider_cost_policies_v1, lucy.provider_attempts_v1,
           lucy.exposure_reservations_v1, lucy.cost_events_v1,
           lucy.cost_recovery_outbox_v1 FROM PUBLIC, lucy_app, lucy_public_runtime;
+        GRANT USAGE ON SCHEMA lucy TO lucy_cost_function_owner;
         GRANT SELECT ON lucy.channel_bindings TO lucy_cost_function_owner;
         GRANT SELECT ON lucy.provider_cost_policies_v1, lucy.provider_attempts_v1,
           lucy.exposure_reservations_v1, lucy.cost_events_v1,

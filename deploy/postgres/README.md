@@ -174,12 +174,13 @@ LUCY_REALM_BOOTSTRAP_AUTHORIZATION=security-v1.3-private-quarantined
 
 It accepts only migration source revisions `0021_recovery_capture_safety`,
 `0039_r1_scoped_capture_runtime`, `0040_r1_grant_authority_snapshot`, and
-`0042_r1_permit_authority`. Before any
+`0041_r1_deletion_auth_snapshot`, `0042_r1_permit_authority`, or
+`0043_r1_provider_cost_admission`. Before any
 schema or role mutation it takes the
 maintenance and admission locks, verifies TLS and the database-owned capture
 boundary, and closes runtime admission. It then creates or rotates the four inert
-realm LOGINs, migrates to `0042`, applies the reviewed execute-only grants, and
-transactionally provisions the foundation and immutable bindings at `0042`. Its final
+realm LOGINs, migrates to `0043`, applies the reviewed execute-only grants, and
+transactionally provisions the foundation and immutable bindings at `0043`. Its final
 content-free verification reconnects through every runtime LOGIN and proves that
 the database remains quarantined. Exact replay is supported. The operation never
 opens admission and never enables transcript capture.

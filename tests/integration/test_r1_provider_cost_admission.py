@@ -81,7 +81,7 @@ def _foundation_and_policy(*, concurrency: int = 2, outstanding: int = 10_000):
         requests_per_minute=20,
         session_requests_per_minute=20,
         ip_requests_per_minute=20,
-        per_request_cap_microusd=10_000,
+        per_request_cap_microusd=min(10_000, outstanding),
         max_input_tokens=1_000,
         max_output_tokens=500,
         max_request_bytes=8_000,
