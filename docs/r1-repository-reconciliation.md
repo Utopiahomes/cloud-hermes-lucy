@@ -1,14 +1,14 @@
 # R1 repository reconciliation
 
-Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
-single-realm process sessions, authenticated admission, scoped memory, sensitive
-operations, deletion recovery, and scoped off-record enforcement are implemented
-locally. The termination-protected Utopia realm AWS stamp is deployed and its
-read-only deployment verification passes. On 2026-09-10 the canonical realm stamp
-was commissioned into Render PostgreSQL 18 at migration `0041` with all four runtime
-logins verified, admission quarantined, and capture disabled. The remaining R1-2 gate
-is V1.3 configuration of the existing Render identities followed by the synthetic
-deployed retrieval/deletion execution path. Live transcript capture remains disabled.
+Status: R1-0, the R1-1 synthetic local slice, and R1-2 cloud acceptance are complete.
+The Utopia realm is commissioned at migration `0042`; its four private services are
+pinned to commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
+archive, retrieval, and deletion path passed exact-replay and negative-permission
+checks. The metadata-only finality observer found no exceptional copies and correctly
+recorded `EXTENDED` while the fixed 30-day recovery window remains open. Admission is
+quarantined, all four continuous services are suspended, and live transcript capture
+remains disabled. R1-3 spending controls and R1-4 durable authority recovery remain
+separate gates.
 
 ## Frozen baseline
 
@@ -81,6 +81,8 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
+| Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
+| Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
 | Clean migration 0001 through `0039` | Disposable pgvector/PostgreSQL 16 tmpfs cluster; invalidated by unexecuted migrations `0040`-`0041` while Docker is unavailable | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
@@ -556,13 +558,14 @@ The scoped retrieval, deletion, and new-capture chains are complete locally thro
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
 revocation race. The Utopia AWS realm stamp is deployed and passes its read-only
-verification; its PostgreSQL foundation is commissioned and verified in quarantine.
-The next exact R1-2 action is to apply the complete V1.3 configuration to the four
-existing Render identities and perform the synthetic deployed execution path with
-capture still disabled. That execution evidence remains required before R1-2 can be
-accepted.
-Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
-and are not pulled forward into R1-2.
+verification; its PostgreSQL foundation is commissioned at `0042` and verified in
+quarantine. The four existing Render identities now carry the complete V1.3
+configuration and the deployed synthetic archive, retrieval, deletion, replay, and
+negative-permission path passed with capture disabled. A metadata-only finality job
+recorded `EXTENDED`, with no exceptional recovery copies, because the 30-day recovery
+window is intentionally still open. This accepts R1-2; durable revocation
+acknowledgement and protected recovery handoff remain R1-4 gates and are not pulled
+forward into R1-2.
 
 The Render V1.3 topology is now explicit in
 `deploy/render/security-baseline-v1.3.yaml.example`. It pins the five existing

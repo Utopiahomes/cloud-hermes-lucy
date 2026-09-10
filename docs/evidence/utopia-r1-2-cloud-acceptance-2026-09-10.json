@@ -1,0 +1,68 @@
+{
+  "contract": "lucy.r1-2-cloud-acceptance.v1",
+  "status": "passed",
+  "accepted_at": "2026-09-10T14:22:09Z",
+  "realm": "Utopia",
+  "region": "us-east-1",
+  "migration_head": "0042_r1_permit_authority",
+  "application_commit": "9fb64891fa1703ba5ac526940d8a415e9e468a34",
+  "capture_enabled": false,
+  "runtime_admission": "QUARANTINED",
+  "continuous_services": "SUSPENDED",
+  "render": {
+    "branch": "codex/r1-tenant-foundation",
+    "auto_deploy": "off",
+    "blank_environment_keys": 0,
+    "database_public_ip_allowlist_entries": 0,
+    "deploys": {
+      "routine": "dep-dahbh21594qs73810esg",
+      "policy": "dep-dahbh36k1f9s73edfltg",
+      "evidence": "dep-dahbh215efls738qpc1g",
+      "deletion": "dep-dahbh2uk1f9s73edfl90"
+    },
+    "finality": {
+      "service_id": "crn-daca8gafngtc73clvaag",
+      "deploy_id": "dep-daha5iajnfac738v9dd0",
+      "application_commit": "dd6f0f5c083ef60e7b941c69a1251ce8e4a5e4b7",
+      "relevant_source_unchanged_through": "9fb64891fa1703ba5ac526940d8a415e9e468a34"
+    }
+  },
+  "synthetic_slice": {
+    "run_id": "d7f2ea0a-e920-4edd-b928-b555ae1cd941",
+    "archive_job_id": "job-dahbhj142hec73fkh5sg",
+    "root_evidence_id": "76b4b063-1c18-41d8-bfa7-bae92d6b7645",
+    "derived_evidence_id": "d6c24cec-b379-4547-92a0-a4374b4b69ba",
+    "archive_replay_exactly_once": true,
+    "retrieval_job_id": "job-dahbj2h5efls738r0cvg",
+    "retrieval_operation_id": "52acc0ff-f961-58f0-a853-43db2501e3b5",
+    "retrieval_receipt_verified": true,
+    "retrieval_replay_released_no_plaintext": true,
+    "deletion_job_id": "job-dahbmbmq1p3s73beqgeg",
+    "deletion_operation_id": "005536b2-9e7b-5167-8ce1-b3199bd4b086",
+    "deletion_receipt_verified": true,
+    "deletion_replay_exactly_once": true,
+    "negative_permission_checks": {
+      "opposite_executor_denied": true,
+      "wrapped_key_scan_denied": true
+    }
+  },
+  "finality_observation": {
+    "job_id": "job-dahbq167bikc73d0ij2g",
+    "operation_id": "005536b2-9e7b-5167-8ce1-b3199bd4b086",
+    "status": "EXTENDED",
+    "metadata_inventory_digest": "57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee",
+    "exceptional_recoverable_copy_count": 0,
+    "reason": "The fixed 30-day operational-versus-cryptographic deletion window has not elapsed."
+  },
+  "cleanup": {
+    "synthetic_owner_revoked": true,
+    "temporary_service_count": 0,
+    "acceptance_environment_markers_remaining": 0,
+    "capture_remained_disabled": true
+  },
+  "deferred_gates": [
+    "R1-3 paid public inference and durable spending controls",
+    "R1-4 durable authority acknowledgement and protected recovery handoff",
+    "R1-5 commissioned product activation review"
+  ]
+}
