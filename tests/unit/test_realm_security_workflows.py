@@ -25,7 +25,11 @@ from lucy.realm_security_workflows import (
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
     RealmGrantAuthorityV1,
+    RealmLambdaExecutorInvoker,
+    RealmOperationClaimResultV1,
+    RealmOperationStatusV1,
     RealmPolicyGrantService,
+    RealmRetrievalCoordinator,
     RealmWorkflowUnavailable,
     VerifiedRealmPolicyAdapter,
 )
@@ -245,14 +249,14 @@ def test_policy_grant_service_builds_and_replays_exact_signed_grant() -> None:
     service = RealmPolicyGrantService(
         store, signer=signer, verifier=verifier, clock=lambda: now
     )
-    grant = service.issue(permit.operation_id)
+    grant = service.issue_grant(permit.operation_id)
     assert grant.permit_claimed_at == authority.claimed_at
     assert grant.executor_alias_arn == authority.executor_alias_arn
     assert grant.encrypted_package_digest == authority.package_digest
     assert grant.signature
 
     store.authority = authority.model_copy(update={"existing_grant": grant})
-    assert service.issue(permit.operation_id) == grant
+    assert service.issue_grant(permit.operation_id) == grant
     assert store.grants == [grant, grant]
 
 
@@ -267,6 +271,67 @@ def test_grant_authority_migration_is_policy_only_and_content_free() -> None:
     assert "serialized_package" in source and "'package_digest'" in source
     assert "'package',v_package.serialized_package" not in source
     assert "REVOKE ALL ON FUNCTION lucy.read_claimed_sensitive_authority_v1" in source
+    assert "session_login=session_user AND actor_role='sensitive_workflow'" in source
+    assert "REVOKE ALL ON FUNCTION lucy.read_sensitive_operation_status_v1" in source
+
+
+class _TerminalWorkflow:
+    def __init__(self, permit: SensitiveActionPermitV3) -> None:
+        self.permit = permit
+
+    def claim(self, _permit_id: UUID, _key: str) -> RealmOperationClaimResultV1:
+        return RealmOperationClaimResultV1(
+            operation_id=self.permit.operation_id, replayed=True
+        )
+
+    def status(self, _operation_id: UUID) -> RealmOperationStatusV1:
+        return RealmOperationStatusV1(
+            operation_id=self.permit.operation_id,
+            action=self.permit.action,
+            state="RECONCILED",
+            result="retrieval_succeeded",
+            receipt_digest="d" * 64,
+        )
+
+
+class _NeverPolicy:
+    def issue_grant(self, _operation_id: UUID) -> Any:
+        raise AssertionError("terminal replay must not issue a grant")
+
+    def attest_receipt(self, _receipt: Any) -> str:
+        raise AssertionError("terminal replay must not attest a receipt")
+
+
+class _NeverExecutor:
+    def invoke_retrieval(self, _invocation: Any) -> Any:
+        raise AssertionError("terminal replay must not reinvoke Lambda")
+
+
+def test_retrieval_coordinator_returns_terminal_replay_without_lambda() -> None:
+    permit, _verifier, _signer = _permit()
+    coordinator = RealmRetrievalCoordinator(
+        _TerminalWorkflow(permit),  # type: ignore[arg-type]
+        _NeverPolicy(),  # type: ignore[arg-type]
+        _NeverExecutor(),  # type: ignore[arg-type]
+    )
+    result = coordinator.execute(permit, idempotency_key="claim-once")
+    assert result.state == "RECONCILED"
+    assert result.plaintext_b64 is None
+    assert result.executor_replayed is True
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "",
+        "arn:aws:lambda:us-east-1:123456789012:function:executor:$LATEST",
+        "arn:aws:lambda:us-east-1:123456789012:function:executor:1",
+        "https://example.com/executor",
+    ],
+)
+def test_realm_lambda_invoker_requires_exact_alias(alias: str) -> None:
+    with pytest.raises(ValueError, match="exact non-version"):
+        RealmLambdaExecutorInvoker(object(), retrieval_alias_arn=alias)
 
 
 def test_workflow_store_selects_action_specific_reconciliation() -> None:
@@ -274,6 +339,14 @@ def test_workflow_store_selects_action_specific_reconciliation() -> None:
     sessions = _Sessions(
         [
             {"operation_id": str(operation_id), "replayed": False},
+            {
+                "operation_id": str(operation_id),
+                "action": SensitiveActionV2.EVIDENCE_RETRIEVE,
+                "state": "CLAIMED",
+                "result": None,
+                "receipt_digest": None,
+                "finality_not_before": None,
+            },
             {
                 "operation_id": str(operation_id),
                 "state": "RECONCILED",
@@ -293,6 +366,7 @@ def test_workflow_store_selects_action_specific_reconciliation() -> None:
     )
     store = PostgresRealmWorkflowStore(sessions)  # type: ignore[arg-type]
     assert store.claim(uuid4(), "claim-once").operation_id == operation_id
+    assert store.status(operation_id).state == "CLAIMED"
     assert store.reconcile(operation_id, SensitiveActionV2.EVIDENCE_RETRIEVE).state == (
         "RECONCILED"
     )
@@ -301,5 +375,6 @@ def test_workflow_store_selects_action_specific_reconciliation() -> None:
     )
     statements = sessions.session.statements
     assert "claim_sensitive_operation_v2" in statements[0]
-    assert "reconcile_sensitive_operation_v2" in statements[1]
-    assert "reconcile_scoped_deletion_v2" in statements[2]
+    assert "read_sensitive_operation_status_v1" in statements[1]
+    assert "reconcile_sensitive_operation_v2" in statements[2]
+    assert "reconcile_scoped_deletion_v2" in statements[3]

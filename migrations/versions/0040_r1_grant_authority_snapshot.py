@@ -87,6 +87,43 @@ def upgrade() -> None:
           OWNER TO lucy_security_function_owner;
         REVOKE ALL ON FUNCTION lucy.read_claimed_sensitive_authority_v1(uuid)
           FROM PUBLIC,lucy_app;
+
+        CREATE FUNCTION lucy.read_sensitive_operation_status_v1(p_operation_id uuid)
+        RETURNS jsonb
+        LANGUAGE plpgsql STABLE SECURITY DEFINER
+        SET search_path=pg_catalog,pg_temp
+        AS $function$
+        DECLARE
+          v_actor lucy.realm_sensitive_actor_bindings_v1%ROWTYPE;
+          v_operation lucy.sensitive_operations_v2%ROWTYPE;
+          v_finality timestamptz;
+        BEGIN
+          SELECT * INTO v_actor FROM lucy.realm_sensitive_actor_bindings_v1
+          WHERE session_login=session_user AND actor_role='sensitive_workflow' AND active
+            AND allowed_actions @> '["sensitive.operation.reconcile"]'::jsonb;
+          IF NOT FOUND THEN RAISE EXCEPTION 'sensitive operation status unavailable'; END IF;
+          SELECT * INTO v_operation FROM lucy.sensitive_operations_v2
+          WHERE id=p_operation_id AND content_scope_id=v_actor.content_scope_id
+            AND workflow_actor_binding_id=v_actor.id;
+          IF NOT FOUND THEN RAISE EXCEPTION 'sensitive operation status unavailable'; END IF;
+          IF v_operation.action='evidence.delete' THEN
+            SELECT finality_not_before INTO v_finality FROM lucy.scoped_deletion_effects_v2
+            WHERE operation_id=v_operation.id AND content_scope_id=v_actor.content_scope_id;
+          END IF;
+          RETURN jsonb_build_object(
+            'operation_id',v_operation.id,
+            'action',v_operation.action,
+            'state',v_operation.state,
+            'result',v_operation.executor_result,
+            'receipt_digest',v_operation.executor_receipt_digest,
+            'finality_not_before',v_finality);
+        END
+        $function$;
+
+        ALTER FUNCTION lucy.read_sensitive_operation_status_v1(uuid)
+          OWNER TO lucy_security_function_owner;
+        REVOKE ALL ON FUNCTION lucy.read_sensitive_operation_status_v1(uuid)
+          FROM PUBLIC,lucy_app;
         """
     )
 

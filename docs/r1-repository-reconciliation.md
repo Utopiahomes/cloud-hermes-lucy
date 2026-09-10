@@ -497,6 +497,18 @@ rechecks current authority when storing it. The Alembic graph has one head at `0
 yet run against PostgreSQL because Docker remains unavailable, so its database proof
 and the prior head-dependent database evidence remain pending.
 
+The same migration now exposes an exact, content-free operation-status snapshot only
+to the realm-bound sensitive-workflow login. `RealmRetrievalCoordinator` uses that
+snapshot after every claim: a terminal retry returns the stored outcome without
+calling Lambda again, while a claimed operation freezes its single evidence package,
+obtains its signed grant through the separate policy-client boundary, invokes only a
+qualified non-version Lambda alias, attests the receipt, and reconciles PostgreSQL.
+It never accepts a caller-supplied realm or database role and never returns historical
+plaintext on terminal replay. Fifty-eight focused workflow, deployment-rendering,
+readiness, bootstrap, and API tests pass with Ruff and full-package strict mypy. HTTP
+transport/factory wiring, deletion choreography, and deployed PostgreSQL execution
+remain pending; therefore the V1.3 sensitive endpoint is still unavailable.
+
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant

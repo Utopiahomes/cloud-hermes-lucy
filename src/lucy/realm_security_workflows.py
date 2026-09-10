@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import SensitiveActionV2
 from lucy.contracts.security_v1_3 import (
     Ed25519V13Signer,
@@ -22,6 +25,12 @@ from lucy.contracts.security_v1_3 import (
     SensitiveExecutionGrantV2,
     V13ContractVerifier,
     V13SigningKeyPurpose,
+)
+from lucy.executors.models import ExecutorInvocationResultV2, RetrievalExecutorInvocationV2
+
+_QUALIFIED_LAMBDA_ALIAS_ARN = re.compile(
+    r"arn:(?:aws|aws-us-gov|aws-cn):lambda:[a-z0-9-]+:\d{12}:"
+    r"function:[A-Za-z0-9-_]{1,64}:(?!\$LATEST\Z|[0-9]+\Z)[A-Za-z0-9-_]{1,128}\Z"
 )
 
 
@@ -33,6 +42,16 @@ class RealmOperationClaimResultV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     operation_id: UUID
     replayed: bool
+
+
+class RealmOperationStatusV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    operation_id: UUID
+    action: SensitiveActionV2
+    state: str = Field(min_length=1, max_length=40)
+    result: str | None = Field(default=None, max_length=80)
+    receipt_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    finality_not_before: datetime | None = None
 
 
 class RealmFrozenPackageResultV1(BaseModel):
@@ -230,7 +249,7 @@ class RealmPolicyGrantService:
         self._verifier = verifier
         self._clock = clock or (lambda: datetime.now(UTC))
 
-    def issue(self, operation_id: UUID) -> SensitiveExecutionGrantV2:
+    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2:
         authority = self._store.grant_authority(operation_id)
         now = self._clock()
         self._verifier.verify(
@@ -310,6 +329,16 @@ class PostgresRealmWorkflowStore:
             raise RealmWorkflowUnavailable("frozen package digest differs")
         return frozen
 
+    def status(self, operation_id: UUID) -> RealmOperationStatusV1:
+        result = self._execute(
+            "SELECT lucy.read_sensitive_operation_status_v1(:operation)",
+            {"operation": operation_id},
+        )
+        status = RealmOperationStatusV1.model_validate(result)
+        if status.operation_id != operation_id:
+            raise RealmWorkflowUnavailable("operation status differs")
+        return status
+
     def reconcile(
         self, operation_id: UUID, action: SensitiveActionV2
     ) -> RealmReconciliationResultV1:
@@ -332,3 +361,115 @@ class PostgresRealmWorkflowStore:
                 return session.execute(text(statement), parameters).scalar_one()
         except DBAPIError as exc:
             raise RealmWorkflowUnavailable("realm workflow operation is unavailable") from exc
+
+
+class RealmLambdaExecutorInvoker:
+    """Invoke one exact realm retrieval alias and validate its bounded response."""
+
+    def __init__(self, client: Any, *, retrieval_alias_arn: str) -> None:
+        if _QUALIFIED_LAMBDA_ALIAS_ARN.fullmatch(retrieval_alias_arn) is None:
+            raise ValueError("realm executor requires an exact non-version Lambda alias ARN")
+        self._client = client
+        self._alias = retrieval_alias_arn
+
+    def invoke_retrieval(
+        self, invocation: RetrievalExecutorInvocationV2
+    ) -> ExecutorInvocationResultV2:
+        if invocation.execution_grant.executor_alias_arn != self._alias:
+            raise RealmWorkflowUnavailable("realm executor alias differs from grant")
+        response = self._client.invoke(
+            FunctionName=self._alias,
+            InvocationType="RequestResponse",
+            Payload=canonical_json_bytes(invocation),
+        )
+        if response.get("StatusCode") != 200 or response.get("FunctionError"):
+            raise RealmWorkflowUnavailable("realm executor invocation failed")
+        if response.get("ExecutedVersion") != str(invocation.execution_grant.executor_version):
+            raise RealmWorkflowUnavailable("realm executor version differs")
+        stream = response.get("Payload")
+        raw = stream.read() if hasattr(stream, "read") else stream
+        if not isinstance(raw, bytes) or len(raw) > 6_000_000:
+            raise RealmWorkflowUnavailable("realm executor response is invalid")
+        try:
+            envelope = json.loads(raw)
+            if not isinstance(envelope, dict) or envelope.get("ok") is not True:
+                raise RealmWorkflowUnavailable("realm executor rejected the invocation")
+            result = ExecutorInvocationResultV2.model_validate(envelope.get("result"))
+        except RealmWorkflowUnavailable:
+            raise
+        except (ValueError, TypeError) as exc:
+            raise RealmWorkflowUnavailable("realm executor response is invalid") from exc
+        if result.action != SensitiveActionV2.EVIDENCE_RETRIEVE:
+            raise RealmWorkflowUnavailable("realm executor action differs")
+        return result
+
+
+class RealmRetrievalWorkflowResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    operation_id: UUID
+    state: str = Field(min_length=1, max_length=40)
+    receipt_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    plaintext_b64: str | None = Field(default=None, max_length=90_000)
+    executor_replayed: bool
+
+
+class RealmPolicyClient(Protocol):
+    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
+
+    def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
+
+
+class RealmRetrievalCoordinator:
+    """Choreograph one exact scoped retrieval across DB, policy, and Lambda."""
+
+    def __init__(
+        self,
+        workflow: PostgresRealmWorkflowStore,
+        policy: RealmPolicyClient,
+        executor: RealmLambdaExecutorInvoker,
+    ) -> None:
+        self._workflow = workflow
+        self._policy = policy
+        self._executor = executor
+
+    def execute(
+        self, permit: SensitiveActionPermitV3, *, idempotency_key: str
+    ) -> RealmRetrievalWorkflowResultV1:
+        if permit.action != SensitiveActionV2.EVIDENCE_RETRIEVE:
+            raise RealmWorkflowUnavailable("retrieval permit required")
+        claim = self._workflow.claim(permit.permit_id, idempotency_key)
+        if claim.operation_id != permit.operation_id:
+            raise RealmWorkflowUnavailable("claimed operation differs from permit")
+        status = self._workflow.status(claim.operation_id)
+        if status.action != permit.action:
+            raise RealmWorkflowUnavailable("operation action differs from permit")
+        if status.state in {"RECONCILED", "REJECTED"}:
+            return RealmRetrievalWorkflowResultV1(
+                operation_id=status.operation_id,
+                state=status.state,
+                receipt_digest=status.receipt_digest,
+                plaintext_b64=None,
+                executor_replayed=True,
+            )
+        if status.state != "CLAIMED":
+            raise RealmWorkflowUnavailable("retrieval operation state is unavailable")
+        frozen = self._workflow.freeze_retrieval(claim.operation_id)
+        grant = self._policy.issue_grant(claim.operation_id)
+        result = self._executor.invoke_retrieval(
+            RetrievalExecutorInvocationV2(
+                permit=permit,
+                execution_grant=grant,
+                package=frozen.package,
+            )
+        )
+        self._policy.attest_receipt(result.receipt)
+        reconciled = self._workflow.reconcile(
+            claim.operation_id, SensitiveActionV2.EVIDENCE_RETRIEVE
+        )
+        return RealmRetrievalWorkflowResultV1(
+            operation_id=reconciled.operation_id,
+            state=reconciled.state,
+            receipt_digest=reconciled.receipt_digest,
+            plaintext_b64=result.plaintext_b64,
+            executor_replayed=result.replayed,
+        )

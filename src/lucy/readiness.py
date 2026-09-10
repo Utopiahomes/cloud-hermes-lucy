@@ -351,11 +351,13 @@ class ServiceReadiness:
             ),
             "evidence": (
                 "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.read_sensitive_operation_status_v1(uuid)",
                 "lucy.freeze_claimed_evidence_package_v2(uuid)",
                 "lucy.reconcile_sensitive_operation_v2(uuid)",
             ),
             "deletion": (
                 "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.read_sensitive_operation_status_v1(uuid)",
                 "lucy.reconcile_scoped_deletion_v2(uuid)",
             ),
         }
