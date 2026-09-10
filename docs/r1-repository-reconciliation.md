@@ -565,6 +565,16 @@ LOGIN. Thirty-four focused Render/AWS deployment-template tests pass. This is a
 configuration contract only: no live Render environment has been mutated and no
 migration credential is assigned to a continuously running service.
 
+On 2026-09-10, all five existing Utopia Render identities were staged on exact
+commit `38b6115604930c346140eb7f9184cadd73ae2361`. The four private services and
+the inert finality cron each reached `live`; all are pinned to
+`codex/r1-tenant-foundation` with auto-deploy off. A content-free API audit then
+confirmed the exact live commit and branch on every identity, capture false on
+routine, and no static AWS credential, migration URL, or maintenance URL on any
+service. They intentionally retain their accepted V1.2 environment until the
+isolated V1.3 database commissioning job and complete configuration bundles are
+ready; this staging evidence does not claim migration or V1.3 runtime admission.
+
 Container admission now selects the security baseline explicitly. V1.3 requires the
 configured PostgreSQL login to match `session_user`, proves that the login has no
 direct customer-table privileges, and admits only its service-mode function surface.
