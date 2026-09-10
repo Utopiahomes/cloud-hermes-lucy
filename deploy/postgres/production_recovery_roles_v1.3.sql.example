@@ -1,0 +1,90 @@
+-- R1-4 execute-only grants for one realm's isolated recovery workloads.
+-- Render with render_recovery_roles_v1_3.py; never edit values into this source.
+-- Realm label: __LUCY_REALM_SLUG__
+
+DO $validation$
+DECLARE
+  v_login text;
+  v_logins text[] := ARRAY[
+    '__LUCY_AUTHORITY_WRITER_LOGIN__','__LUCY_COST_WRITER_LOGIN__',
+    '__LUCY_AUTHORITY_RECOVERY_LOGIN__','__LUCY_COST_RECOVERY_LOGIN__'
+  ];
+BEGIN
+  IF (SELECT count(DISTINCT value) FROM unnest(v_logins) AS value) <> 4 THEN
+    RAISE EXCEPTION 'recovery LOGIN identifiers must be distinct';
+  END IF;
+  FOREACH v_login IN ARRAY v_logins LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_roles WHERE rolname=v_login AND rolcanlogin
+        AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb
+        AND NOT rolinherit AND NOT rolreplication AND NOT rolbypassrls
+    ) THEN
+      RAISE EXCEPTION 'missing or elevated recovery LOGIN: %', v_login;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member
+      WHERE r.rolname=v_login
+    ) THEN
+      RAISE EXCEPTION 'recovery LOGIN has inherited role membership: %', v_login;
+    END IF;
+  END LOOP;
+END
+$validation$;
+
+DO $database_grants$
+BEGIN
+  EXECUTE format(
+    'REVOKE CONNECT, TEMP ON DATABASE %I FROM '
+    '"__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__", '
+    '"__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__"',
+    current_database()
+  );
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO '
+    '"__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__", '
+    '"__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__"',
+    current_database()
+  );
+END
+$database_grants$;
+
+REVOKE ALL ON SCHEMA lucy, public FROM
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA lucy FROM
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA lucy FROM
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA lucy FROM
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+
+GRANT USAGE ON SCHEMA lucy TO
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+GRANT SELECT ON public.alembic_version TO
+  "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+
+GRANT EXECUTE ON FUNCTION
+  lucy.get_pending_authority_event_v1(uuid),
+  lucy.prepare_authority_event_v1(uuid,bigint,text,text)
+TO "__LUCY_AUTHORITY_WRITER_LOGIN__";
+
+GRANT EXECUTE ON FUNCTION
+  lucy.get_pending_cost_event_v1(uuid),
+  lucy.prepare_cost_journal_event_v1(uuid,bigint,text,text)
+TO "__LUCY_COST_WRITER_LOGIN__";
+
+GRANT EXECUTE ON FUNCTION
+  lucy.get_pending_authority_event_v1(uuid),
+  lucy.acknowledge_authority_event_v1(uuid,bigint,text,text)
+TO "__LUCY_AUTHORITY_RECOVERY_LOGIN__";
+
+GRANT EXECUTE ON FUNCTION
+  lucy.get_pending_cost_event_v1(uuid),
+  lucy.acknowledge_provider_reservation_v1(uuid,uuid,text),
+  lucy.acknowledge_provider_outcome_v1(uuid,uuid,text)
+TO "__LUCY_COST_RECOVERY_LOGIN__";

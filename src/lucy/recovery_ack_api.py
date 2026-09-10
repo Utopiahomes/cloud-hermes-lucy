@@ -87,6 +87,8 @@ def _verified_sessions(prefix: str) -> sessionmaker[Session]:
         raise RecoveryJournalError("acknowledgement configuration is incomplete") from None
     if _LOGIN.fullmatch(expected_login) is None:
         raise RecoveryJournalError("acknowledgement database identity is invalid")
+    if not expected_login.endswith(f"_{prefix.lower()}_recovery"):
+        raise RecoveryJournalError("acknowledgement database identity is cross-stream")
     sessions = create_session_factory(database_url)
     with sessions() as session:
         identity = session.execute(

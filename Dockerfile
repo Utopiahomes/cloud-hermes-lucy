@@ -23,9 +23,11 @@ COPY deploy/postgres/provision_realm_bindings_v1_3.py ./deploy/postgres/provisio
 COPY deploy/postgres/provision_synthetic_authority_v1_3.py ./deploy/postgres/provision_synthetic_authority_v1_3.py
 COPY deploy/postgres/render_security_v1_2_sql.py ./deploy/postgres/render_security_v1_2_sql.py
 COPY deploy/postgres/render_security_v1_3_sql.py ./deploy/postgres/render_security_v1_3_sql.py
+COPY deploy/postgres/render_recovery_roles_v1_3.py ./deploy/postgres/render_recovery_roles_v1_3.py
 COPY deploy/postgres/production_bootstrap.sql.example ./deploy/postgres/production_bootstrap.sql.example
 COPY deploy/postgres/production_roles_v1.2.sql.example ./deploy/postgres/production_roles_v1.2.sql.example
 COPY deploy/postgres/production_realm_roles_v1.3.sql.example ./deploy/postgres/production_realm_roles_v1.3.sql.example
+COPY deploy/postgres/production_recovery_roles_v1.3.sql.example ./deploy/postgres/production_recovery_roles_v1.3.sql.example
 COPY deploy/postgres/configure_security_v1.2.sql.example ./deploy/postgres/configure_security_v1.2.sql.example
 COPY alembic.ini hermes.lock ./
 COPY migrations ./migrations

@@ -188,6 +188,17 @@ content-free verification reconnects through every runtime LOGIN and proves that
 the database remains quarantined. Exact replay is supported. The operation never
 opens admission and never enables transcript capture.
 
+R1-4 recovery workloads use a second, additive execute-only role stamp rendered by
+`render_recovery_roles_v1_3.py`. It requires four exact realm-prefixed LOGINs:
+`lucy_<realm>_authority_writer`, `lucy_<realm>_cost_writer`,
+`lucy_<realm>_authority_recovery`, and `lucy_<realm>_cost_recovery`. The stamp
+revokes all inherited schema/table/sequence/function access, grants only schema use
+and schema-version read, then grants the exact pending/prepare or
+pending/acknowledge functions for that identity. It grants no membership in the
+generic prerequisite roles. Production LOGIN creation/password rotation remains a
+quarantined commissioning step; do not place the migration URL on any continuous
+service.
+
 The lower-level foundation and binding commands below remain available for a
 reviewed recovery or diagnostic run.
 
