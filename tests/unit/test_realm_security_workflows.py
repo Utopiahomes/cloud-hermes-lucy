@@ -10,6 +10,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from lucy.contracts.security_v1_2 import DeploymentEnvironment, SensitiveActionV2
 from lucy.contracts.security_v1_3 import (
+    DeletionArtifactClass,
+    DeletionDisposition,
+    DeletionTargetReferenceV2,
     Ed25519V13Signer,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
@@ -20,23 +23,29 @@ from lucy.contracts.security_v1_3 import (
     V13SigningKeyPurpose,
     V13VerificationKeyStatus,
     V13VerificationKeyV1,
+    deletion_targets_digest_v2,
 )
 from lucy.realm_security_workflows import (
     HttpRealmPolicyClient,
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
+    RealmDeletionAuthorityV1,
     RealmGrantAuthorityV1,
     RealmLambdaExecutorInvoker,
     RealmOperationClaimResultV1,
     RealmOperationStatusV1,
+    RealmPolicyDeletionService,
     RealmPolicyGrantService,
     RealmRetrievalCoordinator,
     RealmWorkflowUnavailable,
     VerifiedRealmPolicyAdapter,
 )
+from lucy.scoped_deletion import ScopedDeletionManifestResult
 
 
-def _permit() -> tuple[
+def _permit(
+    action: SensitiveActionV2 = SensitiveActionV2.EVIDENCE_RETRIEVE,
+) -> tuple[
     SensitiveActionPermitV3, V13ContractVerifier, Ed25519V13Signer
 ]:
     now = datetime.now(UTC)
@@ -59,8 +68,12 @@ def _permit() -> tuple[
             environment=DeploymentEnvironment.PRODUCTION,
             issued_at=now,
             permit_id=uuid4(),
-            action=SensitiveActionV2.EVIDENCE_RETRIEVE,
-            reason=SensitiveReasonCode.OWNER_REVIEW,
+            action=action,
+            reason=(
+                SensitiveReasonCode.OWNER_REVIEW
+                if action == SensitiveActionV2.EVIDENCE_RETRIEVE
+                else SensitiveReasonCode.OWNER_REQUEST
+            ),
             principal_id=uuid4(),
             service_principal_id=uuid4(),
             service_binding_id=uuid4(),
@@ -85,8 +98,10 @@ def _permit() -> tuple[
             channel_generation=1,
             permit_claim_deadline=now + timedelta(seconds=30),
             execution_completion_deadline=now + timedelta(minutes=5),
-            max_records=1,
-            max_bytes=65_536,
+            max_records=1 if action == SensitiveActionV2.EVIDENCE_RETRIEVE else 2,
+            max_bytes=(
+                65_536 if action == SensitiveActionV2.EVIDENCE_RETRIEVE else 131_072
+            ),
             nonce=uuid4().hex,
         )
     )
@@ -221,6 +236,12 @@ class _GrantStore:
     def attest_receipt(self, _receipt: Any) -> str:
         raise AssertionError("not used")
 
+    def deletion_authority(self, _operation_id: UUID) -> Any:
+        raise AssertionError("not used")
+
+    def store_manifest(self, _manifest: Any) -> Any:
+        raise AssertionError("not used")
+
 
 def test_policy_grant_service_builds_and_replays_exact_signed_grant() -> None:
     permit, verifier, signer = _permit()
@@ -259,6 +280,82 @@ def test_policy_grant_service_builds_and_replays_exact_signed_grant() -> None:
     store.authority = authority.model_copy(update={"existing_grant": grant})
     assert service.issue_grant(permit.operation_id) == grant
     assert store.grants == [grant, grant]
+
+
+class _DeletionStore:
+    def __init__(self, authority: RealmDeletionAuthorityV1) -> None:
+        self.authority = authority
+        self.manifests: list[Any] = []
+
+    def deletion_authority(self, _operation_id: UUID) -> RealmDeletionAuthorityV1:
+        return self.authority
+
+    def store_manifest(self, manifest: Any) -> ScopedDeletionManifestResult:
+        self.manifests.append(manifest)
+        return ScopedDeletionManifestResult(
+            manifest_id=manifest.manifest_id,
+            manifest_digest=manifest.unsigned_digest_hex(),
+            targets_digest=manifest.targets_digest,
+            target_count=manifest.target_count,
+            replayed=False,
+        )
+
+
+def test_policy_deletion_service_builds_and_replays_exact_manifest() -> None:
+    permit, verifier, signer = _permit(SensitiveActionV2.EVIDENCE_DELETE)
+    evidence_id = permit.resource_selector.object_id
+    representation_id = uuid4()
+    targets = (
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.ENCRYPTED_ARCHIVE,
+            artifact_id=evidence_id,
+            artifact_version=permit.resource_selector.object_version,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=representation_id,
+            wrapped_key_ref=uuid4(),
+        ),
+    )
+    authority = RealmDeletionAuthorityV1(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-delete-once",
+        permit=permit,
+        root_evidence_id=evidence_id,
+        record_version=permit.resource_selector.object_version,
+        root_representation_id=representation_id,
+        targets=targets,
+        target_count=1,
+        targets_digest=deletion_targets_digest_v2(targets),
+        closure_version=1,
+        tombstone_policy_version=1,
+        finality_policy_version=1,
+    )
+    store = _DeletionStore(authority)
+    service = RealmPolicyDeletionService(
+        store,  # type: ignore[arg-type]
+        signer=signer,
+        verifier=verifier,
+        clock=lambda: permit.issued_at + timedelta(seconds=1),
+    )
+    manifest = service.prepare_manifest(permit.operation_id)
+    assert manifest.targets == targets
+    assert manifest.idempotency_key == "claim-delete-once"
+    assert store.manifests == [manifest]
+
+    store.authority = RealmDeletionAuthorityV1(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-delete-once",
+        permit=permit,
+        root_evidence_id=evidence_id,
+        record_version=permit.resource_selector.object_version,
+        existing_manifest=manifest,
+    )
+    assert service.prepare_manifest(permit.operation_id) == manifest
+    assert store.manifests == [manifest]
 
 
 def test_grant_authority_migration_is_policy_only_and_content_free() -> None:

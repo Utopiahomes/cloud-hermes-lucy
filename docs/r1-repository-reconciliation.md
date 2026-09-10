@@ -530,6 +530,10 @@ acquires the established evidence-derivation lock, then rechecks operation state
 the real current completion time before delegating to PostgreSQL's existing exact-
 closure validator. This closes the pre-lock clock/state race found during independent
 review while preserving the existing database-authoritative closure and fence.
+`RealmPolicyDeletionService` consumes that snapshot, live-verifies the stored permit,
+constructs and signs the exact V2 manifest, compares every returned freeze identifier
+and digest, and reuses the already-stored signed manifest on replay without generating
+a new identity, timestamp, nonce, or signature.
 
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
