@@ -8,6 +8,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
+
 from lucy.cost_recovery import CostRecoveryFinalizationV1
 from lucy.recovery_journal import (
     RecoveryActivationHandoffV1,
@@ -65,6 +68,86 @@ class RecoveryStreamTarget:
     journal: ReplayJournal
     restored: RestoredStream
     witness: RecoveryJournalHeadV1
+
+
+class PostgresRecoveryActivator:
+    """Operator-controlled final admission change after the protected handoff."""
+
+    _maintenance_lock = 0x4C5543594D53
+    _admission_lock = 0x4C5543594144
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def activate(
+        self,
+        handoff: RecoveryActivationHandoffV1,
+        replayed_heads: Mapping[StreamKey, RecoveryJournalHeadV1],
+    ) -> None:
+        if {key[0] for key in replayed_heads} != {
+            RecoveryStreamKind.AUTHORITY,
+            RecoveryStreamKind.COST,
+        } or any(
+            head.binding_manifest_digest != handoff.binding_manifest_digest
+            for head in replayed_heads.values()
+        ):
+            raise RecoveryJournalError("recovery activation stream set differs")
+        with self._sessions.begin() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": self._maintenance_lock},
+            )
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": self._admission_lock},
+            )
+            boundary = session.execute(
+                text(
+                    "SELECT a.state,a.storage_epoch,l.state,lucy.capture_boundary_safe_v1() "
+                    "FROM lucy.runtime_admission a CROSS JOIN lucy.lifecycle l "
+                    "WHERE a.singleton AND l.singleton FOR UPDATE OF a"
+                )
+            ).one_or_none()
+            if boundary is None or boundary[2] != "ready" or boundary[3] is not True:
+                raise RecoveryJournalError("recovery activation boundary is unsafe")
+            actual_rows = session.execute(
+                text(
+                    "SELECT stream_kind,stream_id,authority_epoch,independent_store_id,"
+                    "binding_manifest_digest,sequence,event_digest "
+                    "FROM lucy.restored_recovery_heads_v1 ORDER BY stream_kind FOR UPDATE"
+                )
+            ).mappings()
+            actual = {
+                (RecoveryStreamKind(row["stream_kind"]), row["stream_id"]):
+                    RecoveryJournalHeadV1.model_validate(dict(row))
+                for row in actual_rows
+            }
+            if actual != dict(replayed_heads):
+                raise RecoveryJournalError("restored recovery heads changed before activation")
+            cost = session.execute(
+                text(
+                    "SELECT state,operator_review_required,paid_admission_not_before "
+                    "FROM lucy.restored_cost_admission_v1 FOR UPDATE"
+                )
+            ).one_or_none()
+            if cost is None or cost[0] != "finalized" or cost[1] or cost[2] is None:
+                raise RecoveryJournalError("cost recovery is not finalized")
+            if boundary[0] == "ready":
+                if boundary[1] != handoff.target_runtime_epoch:
+                    raise RecoveryJournalError("runtime is ready under another epoch")
+                return
+            if boundary[0] != "quarantined":
+                raise RecoveryJournalError("runtime admission state is invalid")
+            updated = session.execute(
+                text(
+                    "UPDATE lucy.runtime_admission SET state='ready',storage_epoch=:epoch,"
+                    "updated_at=clock_timestamp() WHERE singleton AND state='quarantined' "
+                    "RETURNING singleton"
+                ),
+                {"epoch": handoff.target_runtime_epoch},
+            ).scalar_one_or_none()
+            if updated is not True:
+                raise RecoveryJournalError("runtime activation update was not exact")
 
 
 class RecoveryCoordinator:
