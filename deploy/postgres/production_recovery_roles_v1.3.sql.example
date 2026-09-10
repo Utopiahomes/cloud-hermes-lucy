@@ -80,11 +80,16 @@ TO "__LUCY_COST_WRITER_LOGIN__";
 
 GRANT EXECUTE ON FUNCTION
   lucy.get_pending_authority_event_v1(uuid),
-  lucy.acknowledge_authority_event_v1(uuid,bigint,text,text)
+  lucy.acknowledge_authority_event_v1(uuid,bigint,text,text),
+  lucy.restored_recovery_head_v1(text),
+  lucy.apply_authority_recovery_event_v1(jsonb,jsonb)
 TO "__LUCY_AUTHORITY_RECOVERY_LOGIN__";
 
 GRANT EXECUTE ON FUNCTION
   lucy.get_pending_cost_event_v1(uuid),
   lucy.acknowledge_provider_reservation_v1(uuid,uuid,text),
-  lucy.acknowledge_provider_outcome_v1(uuid,uuid,text)
+  lucy.acknowledge_provider_outcome_v1(uuid,uuid,text),
+  lucy.restored_cost_recovery_head_v1(),
+  lucy.apply_cost_recovery_event_v1(jsonb,jsonb),
+  lucy.finalize_cost_recovery_v1(jsonb)
 TO "__LUCY_COST_RECOVERY_LOGIN__";
