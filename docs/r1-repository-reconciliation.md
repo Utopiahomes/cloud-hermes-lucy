@@ -473,6 +473,17 @@ admission or enable capture, and its result omits database URLs and passwords. T
 focused commissioning tests and static checks pass locally; deployed execution is
 not yet claimed.
 
+`realm_security_workflows.py` now supplies the typed application-side boundary for
+the V1.3 execute-only PostgreSQL functions. The policy adapter verifies the exact
+policy or executor-receipt signing-key purpose before storing a permit, grant, or
+receipt, and compares the returned identifier or digest with the verified contract.
+The workflow adapter claims a permit, freezes and digest-checks the retrieval
+package, and selects retrieval versus deletion reconciliation without accepting a
+realm or database selector. Thirty focused workflow/contract/authorization tests
+pass with Ruff and strict mypy. HTTP routing and construction of post-claim grants
+remain the next increment; V1.3 sensitive endpoints remain unavailable until that
+path is complete.
+
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
