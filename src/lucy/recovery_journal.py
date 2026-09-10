@@ -393,6 +393,14 @@ class InMemoryRecoveryJournal:
         with self._lock:
             if expected != self._head:
                 raise RecoveryJournalError("recovery journal advanced before writer pause")
+            if self._pause is not None and self._pause.pause_id == pause_id:
+                if (
+                    self._pause.recovery_id != recovery_id
+                    or self._pause.held_head_sequence != expected.sequence
+                    or self._pause.held_head_digest != expected.event_digest
+                ):
+                    raise RecoveryJournalError("recovery writer pause ID conflicts")
+                return self._pause
             if self._pause is not None and now < self._pause.expires_at:
                 raise RecoveryJournalError("recovery journal writer is already paused")
             self._fencing_generation += 1
