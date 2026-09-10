@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 
+from lucy.cost_recovery import CostRecoveryFinalizationV1
 from lucy.recovery_coordinator import RecoveryCoordinator, RecoveryStreamTarget, StreamKey
 from lucy.recovery_journal import (
     AuthorityJournalEffectV1,
@@ -34,7 +36,9 @@ def binding(kind: RecoveryStreamKind) -> RecoveryStreamBindingV1:
     )
 
 
-def effect(kind: RecoveryStreamKind):
+def effect(
+    kind: RecoveryStreamKind,
+) -> AuthorityJournalEffectV1 | CostJournalEffectV1:
     if kind is RecoveryStreamKind.AUTHORITY:
         return AuthorityJournalEffectV1(
             transition="membership_revoked",
@@ -113,10 +117,24 @@ class Activator:
     def activate(
         self,
         handoff: RecoveryActivationHandoffV1,
-        replayed_heads: dict[StreamKey, RecoveryJournalHeadV1],
+        replayed_heads: Mapping[StreamKey, RecoveryJournalHeadV1],
     ) -> None:
         assert len(replayed_heads) == 2
         self.handoff = handoff
+
+
+class Finalizer:
+    def __init__(self, result: CostRecoveryFinalizationV1 | None = None) -> None:
+        self.result = result or CostRecoveryFinalizationV1(
+            state="finalized",
+            operator_review_required=False,
+            paid_admission_not_before=datetime.now(UTC) + timedelta(seconds=90),
+        )
+        self.expected: RecoveryJournalHeadV1 | None = None
+
+    def finalize(self, expected: RecoveryJournalHeadV1) -> CostRecoveryFinalizationV1:
+        self.expected = expected
+        return self.result
 
 
 class RacingJournal:
@@ -166,13 +184,18 @@ def test_replays_both_streams_and_activates_only_under_exact_pauses() -> None:
         target(RecoveryStreamKind.COST),
     )
     activator = Activator()
+    finalizer = Finalizer()
     handoff = RecoveryCoordinator(
-        targets, activator, binding_manifest_digest="a" * 64
+        targets,
+        activator,
+        cost_finalizer=finalizer,
+        binding_manifest_digest="a" * 64,
     ).recover_and_activate(target_runtime_epoch=uuid4())
 
     assert activator.handoff == handoff
     assert len(handoff.pauses) == 2
     assert all(item.restored.head() == item.journal.head() for item in targets)
+    assert finalizer.expected == targets[1].restored.head()
 
 
 def test_replays_a_racing_suffix_before_establishing_the_pause() -> None:
@@ -180,7 +203,10 @@ def test_replays_a_racing_suffix_before_establishing_the_pause() -> None:
     cost = target(RecoveryStreamKind.COST)
     activator = Activator()
     RecoveryCoordinator(
-        (authority, cost), activator, binding_manifest_digest="a" * 64
+        (authority, cost),
+        activator,
+        cost_finalizer=Finalizer(),
+        binding_manifest_digest="a" * 64,
     ).recover_and_activate(target_runtime_epoch=uuid4())
 
     assert authority.restored.head().sequence == 2
@@ -196,6 +222,7 @@ def test_rollback_below_witness_never_reaches_activation() -> None:
     coordinator = RecoveryCoordinator(
         (RecoveryStreamTarget(authority.journal, authority.restored, impossible_witness), cost),
         activator,
+        cost_finalizer=Finalizer(),
         binding_manifest_digest="a" * 64,
     )
 
@@ -207,4 +234,64 @@ def test_rollback_below_witness_never_reaches_activation() -> None:
 def test_activation_requires_both_distinct_r1_streams() -> None:
     authority = target(RecoveryStreamKind.AUTHORITY)
     with pytest.raises(ValueError, match="authority and cost"):
-        RecoveryCoordinator((authority,), Activator(), binding_manifest_digest="a" * 64)
+        RecoveryCoordinator(
+            (authority,),
+            Activator(),
+            cost_finalizer=Finalizer(),
+            binding_manifest_digest="a" * 64,
+        )
+
+
+def test_cost_review_prevents_runtime_activation() -> None:
+    targets = (
+        target(RecoveryStreamKind.AUTHORITY),
+        target(RecoveryStreamKind.COST),
+    )
+    activator = Activator()
+    coordinator = RecoveryCoordinator(
+        targets,
+        activator,
+        cost_finalizer=Finalizer(
+            CostRecoveryFinalizationV1(
+                state="replay_in_progress",
+                operator_review_required=True,
+                paid_admission_not_before=None,
+            )
+        ),
+        binding_manifest_digest="a" * 64,
+    )
+
+    with pytest.raises(RecoveryJournalError, match="cost recovery requires operator review"):
+        coordinator.recover_and_activate(target_runtime_epoch=uuid4())
+    assert activator.handoff is None
+
+
+def test_pause_is_rechecked_after_cost_finalization() -> None:
+    targets = (
+        target(RecoveryStreamKind.AUTHORITY),
+        target(RecoveryStreamKind.COST),
+    )
+    activator = Activator()
+    now = [datetime(2026, 9, 10, tzinfo=UTC)]
+
+    class SlowFinalizer:
+        def finalize(self, expected: RecoveryJournalHeadV1) -> CostRecoveryFinalizationV1:
+            assert expected.stream_kind is RecoveryStreamKind.COST
+            now[0] += timedelta(seconds=31)
+            return CostRecoveryFinalizationV1(
+                state="finalized",
+                operator_review_required=False,
+                paid_admission_not_before=now[0] + timedelta(seconds=90),
+            )
+
+    coordinator = RecoveryCoordinator(
+        targets,
+        activator,
+        cost_finalizer=SlowFinalizer(),
+        binding_manifest_digest="a" * 64,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(RecoveryJournalError, match="pause expired"):
+        coordinator.recover_and_activate(target_runtime_epoch=uuid4())
+    assert activator.handoff is None

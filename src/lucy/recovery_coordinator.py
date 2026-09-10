@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from lucy.cost_recovery import CostRecoveryFinalizationV1
 from lucy.recovery_journal import (
     RecoveryActivationHandoffV1,
     RecoveryJournalError,
@@ -55,6 +56,10 @@ class RecoveryActivator(Protocol):
     ) -> None: ...
 
 
+class CostRecoveryFinalizer(Protocol):
+    def finalize(self, expected: RecoveryJournalHeadV1) -> CostRecoveryFinalizationV1: ...
+
+
 @dataclass(frozen=True)
 class RecoveryStreamTarget:
     journal: ReplayJournal
@@ -70,6 +75,7 @@ class RecoveryCoordinator:
         targets: Sequence[RecoveryStreamTarget],
         activator: RecoveryActivator,
         *,
+        cost_finalizer: CostRecoveryFinalizer,
         binding_manifest_digest: str,
         pause_duration: timedelta = timedelta(seconds=30),
         pause_attempts: int = 3,
@@ -94,6 +100,7 @@ class RecoveryCoordinator:
             raise ValueError("recovery binding manifest differs")
         self._targets = tuple(targets)
         self._activator = activator
+        self._cost_finalizer = cost_finalizer
         self._manifest = binding_manifest_digest
         self._pause_duration = pause_duration
         self._pause_attempts = pause_attempts
@@ -124,6 +131,29 @@ class RecoveryCoordinator:
             live_head = target.journal.head()
             replayed[self._key(replayed_head)] = replayed_head
             live[self._key(live_head)] = live_head
+        verify_activation_handoff(
+            handoff,
+            replayed_heads=replayed,
+            live_heads=live,
+            now=self._clock(),
+        )
+        cost_keys = [key for key in replayed if key[0] is RecoveryStreamKind.COST]
+        if len(cost_keys) != 1:
+            raise RecoveryJournalError("recovery handoff has no unique cost stream")
+        cost_finalization = self._cost_finalizer.finalize(replayed[cost_keys[0]])
+        if (
+            cost_finalization.state != "finalized"
+            or cost_finalization.operator_review_required
+        ):
+            raise RecoveryJournalError("cost recovery requires operator review")
+        replayed = {
+            self._key(target.restored.head()): target.restored.head()
+            for target in self._targets
+        }
+        live = {
+            self._key(target.journal.head()): target.journal.head()
+            for target in self._targets
+        }
         verify_activation_handoff(
             handoff,
             replayed_heads=replayed,
