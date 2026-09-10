@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,6 +19,7 @@ from lucy.contracts.security_v1_3 import (
     ExecutionBindingV1,
     OriginScopeV1,
     SensitiveActionPermitV3,
+    SensitiveExecutionGrantV2,
     SensitiveReasonCode,
     V13ContractVerifier,
     V13SigningKeyPurpose,
@@ -462,6 +464,153 @@ def test_deletion_coordinator_returns_terminal_replay_without_lambda() -> None:
     assert result.state == "FINALITY_PENDING"
     assert result.receipt_digest == "d" * 64
     assert result.executor_replayed is True
+
+
+def test_deletion_coordinator_executes_manifest_grant_receipt_then_reconciles() -> None:
+    permit, _verifier, _signer = _permit(SensitiveActionV2.EVIDENCE_DELETE)
+    events: list[str] = []
+
+    class Workflow:
+        def claim(self, permit_id: UUID, key: str) -> RealmOperationClaimResultV1:
+            assert permit_id == permit.permit_id and key == "delete-once"
+            events.append("claim")
+            return RealmOperationClaimResultV1(
+                operation_id=permit.operation_id, replayed=False
+            )
+
+        def status(self, operation_id: UUID) -> RealmOperationStatusV1:
+            assert operation_id == permit.operation_id
+            events.append("status")
+            return RealmOperationStatusV1(
+                operation_id=operation_id,
+                action=SensitiveActionV2.EVIDENCE_DELETE,
+                state="CLAIMED",
+            )
+
+        def reconcile(self, operation_id: UUID, action: SensitiveActionV2) -> Any:
+            assert operation_id == permit.operation_id
+            assert action == SensitiveActionV2.EVIDENCE_DELETE
+            events.append("reconcile")
+            return SimpleNamespace(
+                operation_id=operation_id,
+                state="FINALITY_PENDING",
+                receipt_digest="e" * 64,
+                finality_not_before=datetime.now(UTC) + timedelta(days=30),
+            )
+
+    evidence_id = permit.resource_selector.object_id
+    representation_id = uuid4()
+    targets = (
+        DeletionTargetReferenceV2(
+            artifact_class=DeletionArtifactClass.ENCRYPTED_ARCHIVE,
+            artifact_id=evidence_id,
+            artifact_version=permit.resource_selector.object_version,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=representation_id,
+            wrapped_key_ref=uuid4(),
+        ),
+    )
+    authority = RealmDeletionAuthorityV1(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="delete-once",
+        permit=permit,
+        root_evidence_id=evidence_id,
+        record_version=permit.resource_selector.object_version,
+        root_representation_id=representation_id,
+        targets=targets,
+        target_count=1,
+        targets_digest=deletion_targets_digest_v2(targets),
+        closure_version=1,
+        tombstone_policy_version=1,
+        finality_policy_version=1,
+    )
+    manifest = RealmPolicyDeletionService(
+        _DeletionStore(authority),  # type: ignore[arg-type]
+        signer=_signer,
+        verifier=_verifier,
+        clock=lambda: permit.issued_at + timedelta(seconds=1),
+    ).prepare_manifest(permit.operation_id)
+    alias = (
+        "arn:aws:lambda:us-east-1:123456789012:"
+        "function:lucy-utopia-deletion:realm-v13"
+    )
+    grant = _signer.sign(
+        SensitiveExecutionGrantV2(
+            key_id=permit.key_id,
+            issuer=permit.issuer,
+            environment=permit.environment,
+            issued_at=permit.issued_at + timedelta(seconds=1),
+            grant_id=uuid4(),
+            action=permit.action,
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=permit.operation_id,
+            caller_identity="arn:aws:iam::123456789012:role/lucy-utopia-deletion",
+            target_scope=permit.target_scope,
+            workspace_id=permit.workspace_id,
+            resource_selector=permit.resource_selector,
+            execution_binding=permit.execution_binding,
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(manifest.canonical_unsigned_bytes()),
+            idempotency_key="delete-once",
+            executor_identity="lucy-utopia-deletion-executor",
+            executor_alias_arn=alias,
+            executor_version=1,
+            permit_claimed_at=permit.issued_at,
+            permit_claim_deadline=permit.permit_claim_deadline,
+            execution_completion_deadline=permit.execution_completion_deadline,
+            max_records=permit.max_records,
+            max_bytes=permit.max_bytes,
+            nonce=uuid4().hex,
+        )
+    )
+    receipt = object()
+
+    class Policy:
+        def prepare_deletion_manifest(self, operation_id: UUID) -> Any:
+            assert operation_id == permit.operation_id
+            events.append("manifest")
+            return manifest
+
+        def issue_grant(self, operation_id: UUID) -> Any:
+            assert operation_id == permit.operation_id
+            events.append("grant")
+            return grant
+
+        def attest_receipt(self, candidate: object) -> str:
+            assert candidate is receipt
+            events.append("attest")
+            return "e" * 64
+
+    class Executor:
+        def invoke_deletion(self, invocation: Any) -> Any:
+            assert invocation.permit == permit
+            assert invocation.execution_grant == grant
+            assert invocation.manifest == manifest
+            events.append("invoke")
+            return SimpleNamespace(receipt=receipt, replayed=False)
+
+    result = RealmDeletionCoordinator(
+        Workflow(),  # type: ignore[arg-type]
+        Policy(),  # type: ignore[arg-type]
+        Executor(),  # type: ignore[arg-type]
+    ).execute(permit, idempotency_key="delete-once")
+    assert result.state == "FINALITY_PENDING"
+    assert result.executor_replayed is False
+    assert events == [
+        "claim",
+        "status",
+        "manifest",
+        "grant",
+        "invoke",
+        "attest",
+        "reconcile",
+    ]
 
 
 @pytest.mark.parametrize(
