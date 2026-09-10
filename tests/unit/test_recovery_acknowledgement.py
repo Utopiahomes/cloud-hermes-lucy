@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 
+import lucy.recovery_acknowledgement as acknowledgement_module
 from lucy.authority_recovery import (
     AuthorityTransitionResultV1,
     PendingAuthorityEventV1,
@@ -14,6 +16,7 @@ from lucy.cost_recovery import PendingCostEventV1
 from lucy.recovery_acknowledgement import (
     AuthorityAcknowledgementReceiver,
     CostAcknowledgementReceiver,
+    HttpRecoveryAcknowledgementClient,
 )
 from lucy.recovery_journal import (
     RecoveryAppendAcknowledgementV1,
@@ -21,6 +24,32 @@ from lucy.recovery_journal import (
     RecoveryJournalHeadV1,
     RecoveryStreamKind,
 )
+
+
+class FakeHttpResponse:
+    def __init__(self, body: dict[str, object], status: int = 200) -> None:
+        self.status = status
+        self._body = json.dumps(body).encode("utf-8")
+
+    def read(self, _maximum: int) -> bytes:
+        return self._body
+
+
+class FakeHttpConnection:
+    response: FakeHttpResponse
+    request_values: tuple[tuple[object, ...], dict[str, object]] | None = None
+
+    def __init__(self, host: str, port: int, *, timeout: int) -> None:
+        assert (host, port, timeout) == ("lucy-recovery", 8080, 15)
+
+    def request(self, *values: object, **kwargs: object) -> None:
+        type(self).request_values = values, kwargs
+
+    def getresponse(self) -> FakeHttpResponse:
+        return type(self).response
+
+    def close(self) -> None:
+        pass
 
 
 class FakeJournal:
@@ -146,6 +175,58 @@ def test_receiver_rejects_missing_wrong_kind_or_substituted_digest() -> None:
                 pending.event_id
             )
     assert store.received is None
+
+
+def test_http_client_sends_only_empty_path_request_and_validates_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_id = uuid4()
+    FakeHttpConnection.response = FakeHttpResponse(
+        {"event_id": str(event_id), "stream_kind": "cost", "state": "ADMITTED"}
+    )
+    monkeypatch.setattr(
+        acknowledgement_module.http.client, "HTTPConnection", FakeHttpConnection
+    )
+    client = HttpRecoveryAcknowledgementClient("lucy-recovery:8080", "synthetic")
+    result = client.acknowledge(
+        attempt_id=uuid4(), event_id=event_id, head_digest="a" * 64
+    )
+    assert result.state == "ADMITTED"
+    assert FakeHttpConnection.request_values is not None
+    values, kwargs = FakeHttpConnection.request_values
+    assert values == (
+        "POST",
+        f"/v1/recovery/cost/acknowledgements/{event_id}",
+    )
+    assert kwargs["body"] == b""
+    assert kwargs["headers"] == {
+        "Authorization": "Bearer synthetic",
+        "Content-Length": "0",
+    }
+
+
+def test_http_client_rejects_substituted_or_wrong_state_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_id = uuid4()
+    monkeypatch.setattr(
+        acknowledgement_module.http.client, "HTTPConnection", FakeHttpConnection
+    )
+    client = HttpRecoveryAcknowledgementClient("lucy-recovery:8080", "synthetic")
+    FakeHttpConnection.response = FakeHttpResponse(
+        {"event_id": str(uuid4()), "stream_kind": "cost", "state": "ADMITTED"}
+    )
+    with pytest.raises(RecoveryJournalError, match="differs"):
+        client.acknowledge(
+            attempt_id=uuid4(), event_id=event_id, head_digest="a" * 64
+        )
+    FakeHttpConnection.response = FakeHttpResponse(
+        {"event_id": str(event_id), "stream_kind": "cost", "state": "SETTLED"}
+    )
+    with pytest.raises(RecoveryJournalError, match="reservation.*incomplete"):
+        client.acknowledge(
+            attempt_id=uuid4(), event_id=event_id, head_digest="a" * 64
+        )
 
 
 def _authority_pending() -> PendingAuthorityEventV1:

@@ -38,6 +38,13 @@ empty body and a private bearer credential. The service independently reads the
 permanent DynamoDB acknowledgement; the caller cannot submit a digest, sequence,
 database URL, table, stream ID, or AWS locator.
 
+Writer runtimes use `HttpRecoveryAcknowledgementClient`, configured with the fixed
+private Render host/port and bearer credential. It sends only the stream kind and
+event UUID in the request path with a zero-byte body, then validates the returned
+event, stream, and required terminal state. Attempt IDs and journal-head digests are
+used only by the local workflow contract and are never trusted or transmitted to the
+receiver.
+
 ## V1.3 per-realm template (local preparation only)
 
 `security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.

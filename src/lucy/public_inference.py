@@ -59,11 +59,16 @@ class CostAdmissionGateway(Protocol):
 class CostRecoveryGateway(Protocol):
     def acknowledge(
         self, *, attempt_id: UUID, event_id: UUID, head_digest: str
-    ) -> ProviderAttemptAdmissionV1: ...
+    ) -> CostAcknowledgementResult: ...
 
     def acknowledge_outcome(
         self, *, attempt_id: UUID, event_id: UUID, head_digest: str
-    ) -> ProviderAttemptAdmissionV1: ...
+    ) -> CostAcknowledgementResult: ...
+
+
+class CostAcknowledgementResult(Protocol):
+    @property
+    def state(self) -> str: ...
 
 
 class CostJournalGateway(Protocol):
