@@ -1,7 +1,8 @@
 # Security Baseline AWS deployment
 
-`r1-recovery-journals-v1.3.yaml` is an additive, not-yet-deployed R1 recovery
-boundary. It defines separate retained authority and cost journal tables plus exact
+`r1-recovery-journals-v1.3.yaml` is the additive R1 recovery boundary. The Utopia
+instance is deployed and termination-protected; other realms require their own
+reviewed commissioning. It defines separate retained authority and cost journal tables plus exact
 Render OIDC roles for the two writers and the operator-triggered coordinator. The
 coordinator can write only `PAUSE#...` partitions and condition-check `STREAM#...`;
 it may exact-read content-free stream records and `EVENT#<known-id>` acknowledgements,
@@ -33,6 +34,24 @@ $env:AWS_PROFILE = 'lucy-dev'
 The binding files contain identifiers and digests, not credentials. Keep them in the
 ignored generated-evidence directory. The command relies on the existing short-lived
 AWS SSO session and never accepts or creates static access keys.
+
+After genesis and after every newly accepted journal event, retain a new immutable
+two-stream witness outside PostgreSQL. The capture utility performs only two strongly
+consistent exact-key DynamoDB reads, verifies the shared binding manifest and distinct
+stores/streams, and refuses to overwrite prior evidence:
+
+```powershell
+.\.venv\Scripts\python.exe -m deploy.aws.capture_recovery_witness_v1_3 `
+  --profile lucy-dev `
+  --account-id $AWS_ACCOUNT_ID `
+  --authority-binding secrets\generated\authority-recovery-binding-v1.3.json `
+  --cost-binding secrets\generated\cost-recovery-binding-v1.3.json `
+  --output secrets\generated\utopia-recovery-witness-v1.3.json
+```
+
+Do not replace an older witness. A protected restore uses the latest independently
+retained bundle known to predate the recovery request; falling below either witness
+keeps the runtime quarantined.
 
 After the realm-stack update, run the V1.3 deployed-state verifier. It now fails unless
 both ARN parameters name the exact `${ResourceNamespace}-authority-journal` and

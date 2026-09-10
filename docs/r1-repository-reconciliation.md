@@ -864,5 +864,16 @@ job again reached all three recovery readiness endpoints and succeeded. Render h
 indexed its final log line at collection time; that limitation is explicit in
 `docs/evidence/utopia-r1-4-coordinator-identity-attestation-2026-09-10.json`.
 
+The independently retained Utopia recovery witness is now concrete rather than an
+operator placeholder. A read-only utility verifies account, region, two distinct
+stores/streams, and one binding manifest, then uses two strongly consistent exact-key
+DynamoDB reads and refuses to overwrite its output. The first live capture observed
+both create-only genesis heads at sequence zero; its canonical bundle digest is
+recorded only with that private artifact. Fifteen focused witness, DynamoDB adapter,
+and recovery-coordinator tests passed with strict mypy and focused Ruff on 2026-09-10.
+The complete witness and its digest remain in the ignored local evidence store; no
+derived private-state commitment is exported to Git. Any later accepted journal event
+requires a new witness rather than modifying this one.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
