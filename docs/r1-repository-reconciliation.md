@@ -792,5 +792,19 @@ calling its own DynamoDB verifier. This is an explicit R1 known-identifier resid
 not a claim that the process contains its own compromise. It cannot enumerate pending
 events through its granted SQL surface, create a journal event, or update a journal head.
 
+The three private recovery workloads are now commissioned in the protected Utopia
+Render environment. Their exact environment key sets, commands, branch, disabled
+auto-deploy setting, and capture-off gate were checked without emitting secret values.
+Each workload became live on reviewed commit `6d53b5711eeb016963209d9b96d635596e07ef19`
+and passed its fail-closed PostgreSQL/AWS dependency check. A secret-free one-off job
+inside the same isolated Render network then received `ready` from the authority writer,
+cost writer, and recovery coordinator. The ordinary Lucy services remain suspended and
+runtime admission remains quarantined; this evidence does not authorize paid inference,
+public publication, or transcript capture. The content-free deployment and probe record
+is `docs/evidence/utopia-r1-4-recovery-services-2026-09-10.json`. This evidence is
+invalidated by changes to any recovery service command, environment, credential,
+database role, OIDC trust, journal binding, network boundary, or tested application
+commit.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
