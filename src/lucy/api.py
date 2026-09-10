@@ -54,6 +54,7 @@ from lucy.contracts.security_v1_2 import (
     VerificationKeyV1,
 )
 from lucy.contracts.security_v1_3 import (
+    DeletionTargetManifestV2,
     Ed25519V13Signer,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
@@ -101,7 +102,10 @@ from lucy.realm_security_workflows import (
     HttpRealmPolicyClient,
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
+    RealmDeletionCoordinator,
+    RealmDeletionWorkflowResultV1,
     RealmLambdaExecutorInvoker,
+    RealmPolicyDeletionService,
     RealmPolicyGrantService,
     RealmRetrievalCoordinator,
     RealmRetrievalWorkflowResultV1,
@@ -370,7 +374,11 @@ def _executor_invoker(mode: str) -> BotoLambdaExecutorInvoker:
 
 
 @lru_cache(maxsize=1)
-def _realm_policy_services() -> tuple[RealmPolicyGrantService, VerifiedRealmPolicyAdapter]:
+def _realm_policy_services() -> tuple[
+    RealmPolicyGrantService,
+    RealmPolicyDeletionService,
+    VerifiedRealmPolicyAdapter,
+]:
     try:
         private_seed = base64.b64decode(
             _required_environment("LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64"),
@@ -385,13 +393,19 @@ def _realm_policy_services() -> tuple[RealmPolicyGrantService, VerifiedRealmPoli
         key_id=_required_environment("LUCY_V13_POLICY_KEY_ID"),
         purpose=V13SigningKeyPurpose.POLICY_NOTARY,
     )
+    verifier = V13ContractVerifier(
+        _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
+    )
     return (
         RealmPolicyGrantService(
             store,
             signer=signer,
-            verifier=V13ContractVerifier(
-                _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
-            ),
+            verifier=verifier,
+        ),
+        RealmPolicyDeletionService(
+            store,
+            signer=signer,
+            verifier=verifier,
         ),
         VerifiedRealmPolicyAdapter(
             store,
@@ -416,6 +430,16 @@ def _realm_retrieval_executor() -> RealmLambdaExecutorInvoker:
         boto3.client("lambda", region_name=_required_environment("AWS_REGION")),
         retrieval_alias_arn=_required_environment(
             "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN"
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_deletion_executor() -> RealmLambdaExecutorInvoker:
+    return RealmLambdaExecutorInvoker(
+        boto3.client("lambda", region_name=_required_environment("AWS_REGION")),
+        deletion_alias_arn=_required_environment(
+            "LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN"
         ),
     )
 
@@ -862,6 +886,11 @@ class RetrievalExecuteV3Input(BaseModel):
     permit: SensitiveActionPermitV3
 
 
+class DeletionExecuteV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    permit: SensitiveActionPermitV3
+
+
 _POLICY_PERMIT_STORAGE_FAILURE_CODES = {
     "invalid permit issuance idempotency key": "invalid_idempotency_key",
     "signed authorization contracts must be JSON objects": "invalid_contract_container",
@@ -1135,7 +1164,7 @@ def grant_sensitive_operation_v3(
         raise HTTPException(status_code=404, detail="endpoint unavailable")
     _authorize_policy_gateway(authorization)
     try:
-        grants, _receipts = _realm_policy_services()
+        grants, _deletions, _receipts = _realm_policy_services()
         return grants.issue_grant(operation_id)
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
@@ -1157,10 +1186,30 @@ def attest_executor_receipt_v3(
     if receipt.operation_id != operation_id:
         raise HTTPException(status_code=400, detail="operation identity mismatch")
     try:
-        _grants, receipts = _realm_policy_services()
+        _grants, _deletions, receipts = _realm_policy_services()
         return {"receipt_digest": receipts.attest_receipt(receipt)}
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=403, detail="executor receipt not trusted") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/deletion-manifest",
+    tags=["internal"],
+    response_model=DeletionTargetManifestV2,
+)
+def prepare_deletion_manifest_v3(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> DeletionTargetManifestV2:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        _grants, deletions, _receipts = _realm_policy_services()
+        return deletions.prepare_manifest(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for deletion") from exc
 
 
 @app.post(
@@ -1187,3 +1236,32 @@ def owner_retrieve_evidence_v3(
         ).execute(request.permit, idempotency_key=idempotency_key.strip())
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=409, detail="retrieval failed closed") from exc
+
+
+@app.post(
+    "/owner/v3/evidence/{evidence_id}/delete",
+    tags=["owner"],
+    response_model=RealmDeletionWorkflowResultV1,
+)
+def owner_delete_evidence_v3(
+    evidence_id: UUID,
+    request: DeletionExecuteV3Input,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RealmDeletionWorkflowResultV1:
+    _require_mode("deletion")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_owner(authorization)
+    if request.permit.resource_selector.object_id != evidence_id:
+        raise HTTPException(status_code=400, detail="evidence identity mismatch")
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    try:
+        return RealmDeletionCoordinator(
+            PostgresRealmWorkflowStore(_ready_sessions()),
+            _realm_policy_workflow_client(),
+            _realm_deletion_executor(),
+        ).execute(request.permit, idempotency_key=idempotency_key.strip())
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=409, detail="deletion failed closed") from exc

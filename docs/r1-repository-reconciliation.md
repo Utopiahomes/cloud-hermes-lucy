@@ -508,7 +508,7 @@ qualified non-version Lambda alias, attests the receipt, and reconciles PostgreS
 It never accepts a caller-supplied realm or database role and never returns historical
 plaintext on terminal replay. Fifty-eight focused workflow, deployment-rendering,
 readiness, bootstrap, and API tests pass with Ruff and full-package strict mypy.
-Deletion choreography and deployed PostgreSQL execution remain pending.
+Deletion choreography is documented below; deployed PostgreSQL execution remains pending.
 
 The V1.3 private HTTP transport is now locally wired without reusing V1.2 contract
 configuration. The policy process alone exposes exact-operation grant and receipt-
@@ -533,7 +533,15 @@ review while preserving the existing database-authoritative closure and fence.
 `RealmPolicyDeletionService` consumes that snapshot, live-verifies the stored permit,
 constructs and signs the exact V2 manifest, compares every returned freeze identifier
 and digest, and reuses the already-stored signed manifest on replay without generating
-a new identity, timestamp, nonce, or signature.
+a new identity, timestamp, nonce, or signature. The deletion process now claims the
+exact permit through its workflow-only login, requests that manifest and its subsequent
+grant through the fixed private policy endpoint, invokes only its configured qualified
+deletion alias, attests the content-free receipt, and reconciles into finality. A retry
+already in a terminal/finality state returns the stored content-free status without
+calling policy or Lambda again. The V1.3 owner deletion route checks the evidence path
+against the permit selector before opening workflow storage. Eighty-three focused API,
+workflow, contract, and executor tests pass with Ruff and full-package strict mypy.
+PostgreSQL migration execution and deployed Render/Lambda execution remain pending.
 
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR

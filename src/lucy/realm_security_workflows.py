@@ -30,7 +30,11 @@ from lucy.contracts.security_v1_3 import (
     V13SigningKeyPurpose,
     deletion_targets_digest_v2,
 )
-from lucy.executors.models import ExecutorInvocationResultV2, RetrievalExecutorInvocationV2
+from lucy.executors.models import (
+    DeletionExecutorInvocationV2,
+    ExecutorInvocationResultV2,
+    RetrievalExecutorInvocationV2,
+)
 from lucy.scoped_deletion import ScopedDeletionManifestResult
 
 _QUALIFIED_LAMBDA_ALIAS_ARN = re.compile(
@@ -529,24 +533,61 @@ class PostgresRealmWorkflowStore:
 
 
 class RealmLambdaExecutorInvoker:
-    """Invoke one exact realm retrieval alias and validate its bounded response."""
+    """Invoke one exact realm executor alias and validate its bounded response."""
 
-    def __init__(self, client: Any, *, retrieval_alias_arn: str) -> None:
-        if _QUALIFIED_LAMBDA_ALIAS_ARN.fullmatch(retrieval_alias_arn) is None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        retrieval_alias_arn: str | None = None,
+        deletion_alias_arn: str | None = None,
+    ) -> None:
+        if (retrieval_alias_arn is None) == (deletion_alias_arn is None):
+            raise ValueError("one realm executor alias must be configured")
+        configured_alias = retrieval_alias_arn or deletion_alias_arn
+        if (
+            configured_alias is None
+            or _QUALIFIED_LAMBDA_ALIAS_ARN.fullmatch(configured_alias) is None
+        ):
             raise ValueError("realm executor requires an exact non-version Lambda alias ARN")
         self._client = client
-        self._alias = retrieval_alias_arn
+        self._retrieval_alias = retrieval_alias_arn
+        self._deletion_alias = deletion_alias_arn
 
     def invoke_retrieval(
         self, invocation: RetrievalExecutorInvocationV2
     ) -> ExecutorInvocationResultV2:
-        if invocation.execution_grant.executor_alias_arn != self._alias:
-            raise RealmWorkflowUnavailable("realm executor alias differs from grant")
-        response = self._client.invoke(
-            FunctionName=self._alias,
-            InvocationType="RequestResponse",
-            Payload=canonical_json_bytes(invocation),
+        if self._retrieval_alias is None:
+            raise RealmWorkflowUnavailable("realm retrieval executor is not configured")
+        return self._invoke(
+            self._retrieval_alias, invocation, SensitiveActionV2.EVIDENCE_RETRIEVE
         )
+
+    def invoke_deletion(
+        self, invocation: DeletionExecutorInvocationV2
+    ) -> ExecutorInvocationResultV2:
+        if self._deletion_alias is None:
+            raise RealmWorkflowUnavailable("realm deletion executor is not configured")
+        return self._invoke(
+            self._deletion_alias, invocation, SensitiveActionV2.EVIDENCE_DELETE
+        )
+
+    def _invoke(
+        self,
+        alias: str,
+        invocation: RetrievalExecutorInvocationV2 | DeletionExecutorInvocationV2,
+        action: SensitiveActionV2,
+    ) -> ExecutorInvocationResultV2:
+        if invocation.execution_grant.executor_alias_arn != alias:
+            raise RealmWorkflowUnavailable("realm executor alias differs from grant")
+        try:
+            response = self._client.invoke(
+                FunctionName=alias,
+                InvocationType="RequestResponse",
+                Payload=canonical_json_bytes(invocation),
+            )
+        except Exception as exc:
+            raise RealmWorkflowUnavailable("realm executor invocation failed") from exc
         if response.get("StatusCode") != 200 or response.get("FunctionError"):
             raise RealmWorkflowUnavailable("realm executor invocation failed")
         if response.get("ExecutedVersion") != str(invocation.execution_grant.executor_version):
@@ -564,7 +605,7 @@ class RealmLambdaExecutorInvoker:
             raise
         except (ValueError, TypeError) as exc:
             raise RealmWorkflowUnavailable("realm executor response is invalid") from exc
-        if result.action != SensitiveActionV2.EVIDENCE_RETRIEVE:
+        if result.action != action:
             raise RealmWorkflowUnavailable("realm executor action differs")
         return result
 
@@ -578,7 +619,20 @@ class RealmRetrievalWorkflowResultV1(BaseModel):
     executor_replayed: bool
 
 
+class RealmDeletionWorkflowResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    operation_id: UUID
+    state: str = Field(min_length=1, max_length=40)
+    receipt_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    finality_not_before: datetime | None = None
+    executor_replayed: bool
+
+
 class RealmPolicyClient(Protocol):
+    def prepare_deletion_manifest(
+        self, operation_id: UUID
+    ) -> DeletionTargetManifestV2: ...
+
     def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
 
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
@@ -606,6 +660,14 @@ class HttpRealmPolicyClient:
             f"/internal/v3/security/operations/{operation_id}/grant", {}
         )
         return SensitiveExecutionGrantV2.model_validate(payload)
+
+    def prepare_deletion_manifest(
+        self, operation_id: UUID
+    ) -> DeletionTargetManifestV2:
+        payload = self._post(
+            f"/internal/v3/security/operations/{operation_id}/deletion-manifest", {}
+        )
+        return DeletionTargetManifestV2.model_validate(payload)
 
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str:
         payload = self._post(
@@ -701,5 +763,74 @@ class RealmRetrievalCoordinator:
             state=reconciled.state,
             receipt_digest=reconciled.receipt_digest,
             plaintext_b64=result.plaintext_b64,
+            executor_replayed=result.replayed,
+        )
+
+
+class RealmDeletionCoordinator:
+    """Choreograph one exact scoped deletion across DB, policy, and Lambda."""
+
+    _TERMINAL_STATES = {
+        "REJECTED",
+        "FINALITY_PENDING",
+        "FINALITY_EXTENDED",
+        "FINALITY_VERIFIED",
+    }
+
+    def __init__(
+        self,
+        workflow: PostgresRealmWorkflowStore,
+        policy: RealmPolicyClient,
+        executor: RealmLambdaExecutorInvoker,
+    ) -> None:
+        self._workflow = workflow
+        self._policy = policy
+        self._executor = executor
+
+    def execute(
+        self, permit: SensitiveActionPermitV3, *, idempotency_key: str
+    ) -> RealmDeletionWorkflowResultV1:
+        if permit.action != SensitiveActionV2.EVIDENCE_DELETE:
+            raise RealmWorkflowUnavailable("deletion permit required")
+        claim = self._workflow.claim(permit.permit_id, idempotency_key)
+        if claim.operation_id != permit.operation_id:
+            raise RealmWorkflowUnavailable("claimed operation differs from permit")
+        status = self._workflow.status(claim.operation_id)
+        if status.action != permit.action:
+            raise RealmWorkflowUnavailable("operation action differs from permit")
+        if status.state in self._TERMINAL_STATES:
+            return RealmDeletionWorkflowResultV1(
+                operation_id=status.operation_id,
+                state=status.state,
+                receipt_digest=status.receipt_digest,
+                finality_not_before=status.finality_not_before,
+                executor_replayed=True,
+            )
+        if status.state != "CLAIMED":
+            raise RealmWorkflowUnavailable("deletion operation state is unavailable")
+        manifest = self._policy.prepare_deletion_manifest(claim.operation_id)
+        if (
+            manifest.operation_id != claim.operation_id
+            or manifest.permit_id != permit.permit_id
+            or manifest.root_evidence_id != permit.resource_selector.object_id
+        ):
+            raise RealmWorkflowUnavailable("deletion manifest differs from permit")
+        grant = self._policy.issue_grant(claim.operation_id)
+        result = self._executor.invoke_deletion(
+            DeletionExecutorInvocationV2(
+                permit=permit,
+                execution_grant=grant,
+                manifest=manifest,
+            )
+        )
+        self._policy.attest_receipt(result.receipt)
+        reconciled = self._workflow.reconcile(
+            claim.operation_id, SensitiveActionV2.EVIDENCE_DELETE
+        )
+        return RealmDeletionWorkflowResultV1(
+            operation_id=reconciled.operation_id,
+            state=reconciled.state,
+            receipt_digest=reconciled.receipt_digest,
+            finality_not_before=reconciled.finality_not_before,
             executor_replayed=result.replayed,
         )

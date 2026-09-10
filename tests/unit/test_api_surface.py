@@ -52,6 +52,10 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
         (
             "POST",
+            "/internal/v3/security/operations/{operation_id}/deletion-manifest",
+        ),
+        (
+            "POST",
             "/internal/v3/security/operations/{operation_id}/receipt-attestation",
         ),
     }
@@ -195,7 +199,9 @@ def test_v13_grant_route_is_hidden_from_v12_and_uses_policy_identity_only(
 
     monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
     monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
-    monkeypatch.setattr(api, "_realm_policy_services", lambda: (Grants(), object()))
+    monkeypatch.setattr(
+        api, "_realm_policy_services", lambda: (Grants(), object(), object())
+    )
     assert api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token") is marker
 
 
@@ -214,6 +220,33 @@ def test_v13_receipt_route_rejects_path_body_identity_mismatch_before_policy(
     with pytest.raises(HTTPException) as caught:
         api.attest_executor_receipt_v3(
             uuid4(), receipt, "Bearer policy-token"  # type: ignore[arg-type]
+        )
+    assert caught.value.status_code == 400
+
+
+def test_v13_deletion_route_rejects_path_permit_mismatch_before_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "deletion")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_OWNER_TOKEN", "owner-token")
+    monkeypatch.setattr(
+        api,
+        "_ready_sessions",
+        lambda: pytest.fail("mismatched evidence must not reach workflow storage"),
+    )
+    permit = type(
+        "Permit",
+        (),
+        {"resource_selector": type("Selector", (), {"object_id": uuid4()})()},
+    )()
+    request = type("Request", (), {"permit": permit})()
+    with pytest.raises(HTTPException) as caught:
+        api.owner_delete_evidence_v3(
+            uuid4(),
+            request,  # type: ignore[arg-type]
+            "Bearer owner-token",
+            "delete-once",
         )
     assert caught.value.status_code == 400
 

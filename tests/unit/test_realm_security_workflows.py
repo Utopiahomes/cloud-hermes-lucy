@@ -30,6 +30,7 @@ from lucy.realm_security_workflows import (
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
     RealmDeletionAuthorityV1,
+    RealmDeletionCoordinator,
     RealmGrantAuthorityV1,
     RealmLambdaExecutorInvoker,
     RealmOperationClaimResultV1,
@@ -405,16 +406,23 @@ class _TerminalWorkflow:
         )
 
     def status(self, _operation_id: UUID) -> RealmOperationStatusV1:
+        deletion = self.permit.action == SensitiveActionV2.EVIDENCE_DELETE
         return RealmOperationStatusV1(
             operation_id=self.permit.operation_id,
             action=self.permit.action,
-            state="RECONCILED",
-            result="retrieval_succeeded",
+            state="FINALITY_PENDING" if deletion else "RECONCILED",
+            result="deletion_succeeded" if deletion else "retrieval_succeeded",
             receipt_digest="d" * 64,
+            finality_not_before=(
+                datetime.now(UTC) + timedelta(days=30) if deletion else None
+            ),
         )
 
 
 class _NeverPolicy:
+    def prepare_deletion_manifest(self, _operation_id: UUID) -> Any:
+        raise AssertionError("terminal replay must not prepare a deletion manifest")
+
     def issue_grant(self, _operation_id: UUID) -> Any:
         raise AssertionError("terminal replay must not issue a grant")
 
@@ -424,6 +432,9 @@ class _NeverPolicy:
 
 class _NeverExecutor:
     def invoke_retrieval(self, _invocation: Any) -> Any:
+        raise AssertionError("terminal replay must not reinvoke Lambda")
+
+    def invoke_deletion(self, _invocation: Any) -> Any:
         raise AssertionError("terminal replay must not reinvoke Lambda")
 
 
@@ -440,6 +451,19 @@ def test_retrieval_coordinator_returns_terminal_replay_without_lambda() -> None:
     assert result.executor_replayed is True
 
 
+def test_deletion_coordinator_returns_terminal_replay_without_lambda() -> None:
+    permit, _verifier, _signer = _permit(SensitiveActionV2.EVIDENCE_DELETE)
+    coordinator = RealmDeletionCoordinator(
+        _TerminalWorkflow(permit),  # type: ignore[arg-type]
+        _NeverPolicy(),  # type: ignore[arg-type]
+        _NeverExecutor(),  # type: ignore[arg-type]
+    )
+    result = coordinator.execute(permit, idempotency_key="claim-delete-once")
+    assert result.state == "FINALITY_PENDING"
+    assert result.receipt_digest == "d" * 64
+    assert result.executor_replayed is True
+
+
 @pytest.mark.parametrize(
     "alias",
     [
@@ -452,6 +476,19 @@ def test_retrieval_coordinator_returns_terminal_replay_without_lambda() -> None:
 def test_realm_lambda_invoker_requires_exact_alias(alias: str) -> None:
     with pytest.raises(ValueError, match="exact non-version"):
         RealmLambdaExecutorInvoker(object(), retrieval_alias_arn=alias)
+
+
+def test_realm_lambda_invoker_requires_one_execution_identity() -> None:
+    alias = (
+        "arn:aws:lambda:us-east-1:123456789012:"
+        "function:lucy-utopia-executor:realm-v13"
+    )
+    with pytest.raises(ValueError, match="one realm executor alias"):
+        RealmLambdaExecutorInvoker(object())
+    with pytest.raises(ValueError, match="one realm executor alias"):
+        RealmLambdaExecutorInvoker(
+            object(), retrieval_alias_arn=alias, deletion_alias_arn=alias
+        )
 
 
 @pytest.mark.parametrize(
