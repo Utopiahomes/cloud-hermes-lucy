@@ -220,8 +220,11 @@ def test_r1_recovery_journals_have_separate_tables_and_pause_only_recovery() -> 
     assert "CostJournal" not in authority and "STREAM#cost#" not in authority
     assert "AuthorityJournal" not in cost and "STREAM#authority#" not in cost
     assert "PAUSE#authority#" in recovery and "PAUSE#cost#" in recovery
-    assert "EVENT#" not in recovery
+    assert "EVENT#*" in recovery
     assert "UpdateItem" not in recovery
+    for statement in policies["RecoveryCoordinatorPolicy"]:
+        if statement["Action"] != "dynamodb:GetItem":
+            assert "EVENT#*" not in str(statement)
     for serialized in (authority, cost, recovery):
         assert "TransactWriteItems" in serialized
         assert not any(action in serialized for action in ("Scan", "Query", "DeleteItem"))

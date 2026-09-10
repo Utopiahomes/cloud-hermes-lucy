@@ -16,7 +16,11 @@ from lucy.cost_admission import (
     ProviderCostPolicyV1,
     ProviderCostRecoveryService,
 )
-from lucy.cost_recovery import CostJournalPreparationService, CostJournalWriter
+from lucy.cost_recovery import (
+    CostJournalPreparationService,
+    CostJournalWriter,
+    PendingCostEventV1,
+)
 from lucy.db import create_session_factory
 from lucy.recovery_journal import (
     InMemoryRecoveryJournal,
@@ -169,20 +173,20 @@ def test_unknown_exposure_survives_rollover_and_retry_never_resubmits() -> None:
             event_id=pending.event_id,
             head_digest="0" * 64,
         )
+    with create_engine(RECOVERY_URL).begin() as connection:
+        exact_pending = connection.execute(
+            text("SELECT lucy.get_pending_cost_event_v1(:event_id)"),
+            {"event_id": pending.event_id},
+        ).scalar_one()
+        assert PendingCostEventV1.model_validate(exact_pending).event_id == pending.event_id
+        with pytest.raises(DBAPIError, match="permission denied"):
+            connection.execute(text("SELECT * FROM lucy.cost_recovery_outbox_v1"))
     admitted = recovery.acknowledge(
         attempt_id=request.attempt_id,
         event_id=pending.event_id,
         head_digest=reservation_head,
     )
     assert admitted.state == "ADMITTED"
-    with (
-        create_engine(RECOVERY_URL).begin() as connection,
-        pytest.raises(DBAPIError, match="permission denied"),
-    ):
-        connection.execute(
-            text("SELECT lucy.get_pending_cost_event_v1(:event_id)"),
-            {"event_id": pending.event_id},
-        )
     assert admission.claim_submission(request.attempt_id).state == "SUBMITTED"
     assert admission.mark_unknown(request.attempt_id).state == "UNKNOWN"
     replay = admission.reserve(request)

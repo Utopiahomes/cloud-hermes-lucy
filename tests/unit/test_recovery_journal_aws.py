@@ -198,6 +198,8 @@ def test_append_is_one_conditional_transaction_and_reads_are_consistent() -> Non
     change = _event(bound, before)
     acknowledgement = journal.append(change, before)
     assert acknowledgement.resulting_head == journal.head()
+    assert journal.exact_acknowledgement(change.event_id) == acknowledgement
+    assert journal.exact_acknowledgement(uuid4()) is None
     assert journal.event(1) == change
     assert len(client.transactions[0]) == 4
     assert {next(iter(action)) for action in client.transactions[0]} == {

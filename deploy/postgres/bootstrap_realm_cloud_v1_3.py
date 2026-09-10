@@ -47,8 +47,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0047_r1_authority_replay",
     "0048_r1_cost_replay",
     "0049_r1_cost_recovery_finalize",
+    "0050_r1_recovery_ack_receiver",
 }
-EXPECTED_REVISION = "0049_r1_cost_recovery_finalize"
+EXPECTED_REVISION = "0050_r1_recovery_ack_receiver"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

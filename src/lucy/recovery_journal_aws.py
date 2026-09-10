@@ -103,6 +103,16 @@ class AwsDynamoRecoveryJournal:
         except (TypeError, ValueError):
             raise RecoveryJournalError("independent recovery journal head is invalid") from None
 
+    def exact_acknowledgement(
+        self, event_id: UUID
+    ) -> RecoveryAppendAcknowledgementV1 | None:
+        """Read one permanent acknowledgement without exposing event enumeration."""
+
+        acknowledgement = self._read_ack(event_id)
+        if acknowledgement is not None:
+            self._require_bound_head(acknowledgement.resulting_head)
+        return acknowledgement
+
     def event(self, sequence: int) -> RecoveryJournalEventV1:
         if sequence < 1:
             raise RecoveryJournalError("recovery journal sequence is invalid")

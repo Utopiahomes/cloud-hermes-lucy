@@ -7,7 +7,10 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
-from lucy.authority_recovery import AuthorityTransitionRequestV1, AuthorityTransitionService
+from lucy.authority_recovery import (
+    AuthorityTransitionRequestV1,
+    AuthorityTransitionService,
+)
 from lucy.db import create_session_factory
 from lucy.publication import PublicationRejected, PublicProjectionPublisher, PublicProjectionReader
 from lucy.tenancy import ScopeNotFound, TenancyService
@@ -150,6 +153,7 @@ def test_restrictions_apply_locally_before_separate_durable_acknowledgement() ->
         journal_previous_digest="c" * 64,
         journal_event_digest="b" * 64,
     ).journal_event_digest == "b" * 64
+    assert recovery.pending(withdrawal.event_id).event_id == withdrawal.event_id
     with pytest.raises(DBAPIError, match="preparation conflicts"):
         transition.prepare(
             event_id=withdrawal.event_id,

@@ -4,7 +4,8 @@
 boundary. It defines separate retained authority and cost journal tables plus exact
 Render OIDC roles for the two writers and the operator-triggered coordinator. The
 coordinator can write only `PAUSE#...` partitions and condition-check `STREAM#...`;
-it has no event, head-update, scan, query, delete, KMS, Lambda, or table-administration
+it may exact-read content-free stream records and `EVENT#<known-id>` acknowledgements,
+but has no head-update, scan, query, delete, KMS, Lambda, or table-administration
 authority. Keep this separate from the accepted realm stack until the three Render
 service IDs, genesis heads, CloudTrail integration, and deployed negative-permission
 exercise are ready for one reviewed update.
