@@ -109,6 +109,15 @@ def _environment() -> dict[str, str]:
         result[f"LUCY_{mode.upper()}_DATABASE_URL"] = (
             f"postgresql://{login}:{mode}-secret@{HOST}:5432/{DATABASE}"
         )
+    for mode, login in {
+        "authority_writer": "lucy_utopia_authority_writer",
+        "cost_writer": "lucy_utopia_cost_writer",
+        "authority_recovery": "lucy_utopia_authority_recovery",
+        "cost_recovery": "lucy_utopia_cost_recovery",
+    }.items():
+        result[f"LUCY_{mode.upper()}_DATABASE_URL"] = (
+            f"postgresql://{login}:{mode}-secret@{HOST}:5432/{DATABASE}"
+        )
     return result
 
 
@@ -116,7 +125,14 @@ def test_config_requires_private_capture_off_exact_realm_urls() -> None:
     config = bootstrap.BootstrapConfig.from_environment(_environment())
     assert config.stamp.realm_slug == "utopia"
     assert set(config.runtime_urls) == {"routine", "policy", "workflow", "finality"}
+    assert set(config.recovery_urls) == {
+        "authority_writer",
+        "cost_writer",
+        "authority_recovery",
+        "cost_recovery",
+    }
     assert all(url.query["sslmode"] == "require" for url in config.runtime_urls.values())
+    assert all(url.query["sslmode"] == "require" for url in config.recovery_urls.values())
 
 
 @pytest.mark.parametrize(

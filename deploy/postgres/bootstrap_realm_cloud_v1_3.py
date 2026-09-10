@@ -30,6 +30,7 @@ from deploy.postgres.provision_realm_foundation_v1_3 import (
     RealmFoundationSeedV1,
     apply_foundation,
 )
+from deploy.postgres.render_recovery_roles_v1_3 import render_recovery_roles
 from deploy.postgres.render_security_v1_3_sql import render_realm_roles
 from lucy.realm_provisioning import RealmSecurityStampV1
 
@@ -82,6 +83,7 @@ class BootstrapError(RuntimeError):
 class BootstrapConfig:
     migration_url: URL
     runtime_urls: Mapping[str, URL]
+    recovery_urls: Mapping[str, URL]
     stamp: RealmSecurityStampV1
     seed: RealmFoundationSeedV1
 
@@ -144,7 +146,35 @@ class BootstrapConfig:
             ):
                 raise BootstrapError(f"{mode} URL must target the same private database")
             runtime_urls[mode] = url
-        return cls(migration_url=migration_url, runtime_urls=runtime_urls, stamp=stamp, seed=seed)
+        recovery_logins = {
+            "authority_writer": f"lucy_{stamp.realm_slug}_authority_writer",
+            "cost_writer": f"lucy_{stamp.realm_slug}_cost_writer",
+            "authority_recovery": f"lucy_{stamp.realm_slug}_authority_recovery",
+            "cost_recovery": f"lucy_{stamp.realm_slug}_cost_recovery",
+        }
+        recovery_urls: dict[str, URL] = {}
+        for mode, login in recovery_logins.items():
+            url = _database_url(
+                _required(values, f"LUCY_{mode.upper()}_DATABASE_URL")
+            )
+            if url.username != login or not url.password:
+                raise BootstrapError(
+                    f"{mode} URL must use its exact password-bearing login"
+                )
+            if (url.host, url.port or 5432, url.database) != (
+                migration_url.host,
+                migration_url.port or 5432,
+                migration_url.database,
+            ):
+                raise BootstrapError(f"{mode} URL must target the same private database")
+            recovery_urls[mode] = url
+        return cls(
+            migration_url=migration_url,
+            runtime_urls=runtime_urls,
+            recovery_urls=recovery_urls,
+            stamp=stamp,
+            seed=seed,
+        )
 
 
 def _required(values: Mapping[str, str], name: str) -> str:
@@ -268,9 +298,12 @@ def _validate_prerequisite_memberships(rows: Sequence[Sequence[Any]]) -> None:
 
 
 def _bootstrap_roles(config: BootstrapConfig) -> None:
-    expected = {url.username for url in config.runtime_urls.values()}
-    if None in expected or len(expected) != 4:
-        raise BootstrapError("realm runtime LOGIN set is invalid")
+    expected = {
+        url.username
+        for url in (*config.runtime_urls.values(), *config.recovery_urls.values())
+    }
+    if None in expected or len(expected) != 8:
+        raise BootstrapError("realm runtime and recovery LOGIN set is invalid")
     names = {str(name) for name in expected}
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         prerequisite_rows = _role_rows(connection, _PREREQUISITE_ROLES)
@@ -310,7 +343,7 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
         rows = _role_rows(connection, names)
         for name, flags in rows.items():
             _assert_runtime_role(name, flags)
-        for url in config.runtime_urls.values():
+        for url in (*config.runtime_urls.values(), *config.recovery_urls.values()):
             name = str(url.username)
             password = url.password
             assert password is not None
@@ -413,6 +446,15 @@ def _apply_grants_and_provision(config: BootstrapConfig) -> tuple[str, bool, boo
         workflow_login=config.stamp.workflow_login,
         finality_login=config.stamp.finality_login,
     )
+    recovery_roles_sql = render_recovery_roles(
+        realm_slug=config.stamp.realm_slug,
+        authority_writer_login=str(config.recovery_urls["authority_writer"].username),
+        cost_writer_login=str(config.recovery_urls["cost_writer"].username),
+        authority_recovery_login=str(
+            config.recovery_urls["authority_recovery"].username
+        ),
+        cost_recovery_login=str(config.recovery_urls["cost_recovery"].username),
+    )
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         connection.execute("SET LOCAL lock_timeout = '10s'")
         connection.execute("SET LOCAL statement_timeout = '120s'")
@@ -426,9 +468,12 @@ def _apply_grants_and_provision(config: BootstrapConfig) -> tuple[str, bool, boo
         if boundary != ("quarantined", True, True):
             raise BootstrapError("database left the reviewed commissioning boundary")
         connection.execute(roles_sql, prepare=False)
+        connection.execute(recovery_roles_sql, prepare=False)
         foundation_inserted = apply_foundation(connection, config.stamp, config.seed)
         binding_inserted = apply_manifest(connection, config.stamp)
-    digest = hashlib.sha256(roles_sql.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        (roles_sql + recovery_roles_sql).encode("utf-8")
+    ).hexdigest()
     return digest, foundation_inserted, binding_inserted
 
 
@@ -469,6 +514,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
                 "lucy_public_runtime",
                 "lucy_directory_admission",
                 *(str(url.username) for url in config.runtime_urls.values()),
+                *(str(url.username) for url in config.recovery_urls.values()),
             }
         }
         schema_boundary = connection.execute(
@@ -528,6 +574,26 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             if direct_content:
                 raise BootstrapError(f"{mode} has direct Lucy table authority")
         verified_logins.append(str(url.username))
+    verified_recovery_logins: list[str] = []
+    for mode, url in config.recovery_urls.items():
+        with psycopg.connect(_conninfo(url)) as connection:
+            if _scalar(connection, "SELECT session_user") != url.username:
+                raise BootstrapError(f"{mode} connected as the wrong recovery login")
+            if _scalar(connection, "SELECT version_num FROM public.alembic_version") != (
+                EXPECTED_REVISION
+            ):
+                raise BootstrapError(f"{mode} did not observe the reviewed schema")
+            direct_content = _scalar(
+                connection,
+                "SELECT EXISTS(SELECT 1 FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='lucy' AND c.relkind IN ('r','p') "
+                "AND has_table_privilege(session_user,c.oid,"
+                "'SELECT,INSERT,UPDATE,DELETE,TRUNCATE'))",
+            )
+            if direct_content:
+                raise BootstrapError(f"{mode} has direct Lucy table authority")
+        verified_recovery_logins.append(str(url.username))
     return {
         "migration_revision": revision,
         "runtime_admission": admission,
@@ -539,6 +605,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         "offline_migration_schema_owner": True,
         "function_owner_schema_create_removed": True,
         "verified_runtime_logins": verified_logins,
+        "verified_recovery_logins": verified_recovery_logins,
     }
 
 

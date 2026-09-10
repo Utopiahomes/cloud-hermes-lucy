@@ -181,10 +181,11 @@ It accepts only migration source revisions `0021_recovery_capture_safety`,
 `0050_r1_recovery_ack_receiver`. Before any
 schema or role mutation it takes the
 maintenance and admission locks, verifies TLS and the database-owned capture
-boundary, and closes runtime admission. It then creates or rotates the four inert
-realm LOGINs, migrates to `0050`, applies the reviewed execute-only grants, and
+boundary, and closes runtime admission. It then creates or rotates the four ordinary
+realm LOGINs plus four isolated recovery LOGINs, migrates to `0050`, applies both
+reviewed execute-only grant stamps, and
 transactionally provisions the foundation and immutable bindings at `0050`. Its final
-content-free verification reconnects through every runtime LOGIN and proves that
+content-free verification reconnects through all eight LOGINs and proves that
 the database remains quarantined. Exact replay is supported. The operation never
 opens admission and never enables transcript capture.
 
@@ -195,9 +196,9 @@ R1-4 recovery workloads use a second, additive execute-only role stamp rendered 
 revokes all inherited schema/table/sequence/function access, grants only schema use
 and schema-version read, then grants the exact pending/prepare or
 pending/acknowledge functions for that identity. It grants no membership in the
-generic prerequisite roles. Production LOGIN creation/password rotation remains a
-quarantined commissioning step; do not place the migration URL on any continuous
-service.
+generic prerequisite roles. Production LOGIN creation/password rotation is performed
+by the same quarantine-first bootstrap when the four recovery database URLs are
+supplied. Do not place the migration URL on any continuous service.
 
 The lower-level foundation and binding commands below remain available for a
 reviewed recovery or diagnostic run.
