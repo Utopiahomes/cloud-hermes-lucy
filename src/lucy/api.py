@@ -79,7 +79,9 @@ from lucy.readiness import (
     ReadinessError,
     ServiceReadiness,
     admitted_session_factory,
+    expected_database_login_from_environment,
     expected_storage_epoch,
+    security_baseline_from_environment,
     service_mode_from_environment,
 )
 from lucy.realm_archive_commit import (
@@ -164,7 +166,15 @@ def _require_mode(*allowed: str) -> None:
 
 
 def _require_legacy_sensitive_api_allowed() -> None:
-    if os.getenv("LUCY_SECURITY_ENVIRONMENT", "").strip() == "production":
+    if (
+        os.getenv("LUCY_SECURITY_ENVIRONMENT", "").strip() == "production"
+        or security_baseline_from_environment() == "v1.3"
+    ):
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+
+
+def _require_v12_sensitive_api() -> None:
+    if security_baseline_from_environment() != "v1.2":
         raise HTTPException(status_code=404, detail="endpoint unavailable")
 
 
@@ -174,13 +184,28 @@ def _ready_sessions() -> sessionmaker[Session]:
         raise HTTPException(status_code=503, detail="memory store unavailable")
     try:
         mode = _service_mode()
+        baseline = security_baseline_from_environment()
         epoch = expected_storage_epoch(mode)
         # Cache engines rather than creating a new connection pool per request.
         sessions = _readiness_sessions(database_url)
-        journal = deletion_journal_from_environment() if mode == "routine" else None
-        ServiceReadiness(sessions, mode=mode, storage_epoch=epoch, journal=journal).check()
+        journal = (
+            deletion_journal_from_environment()
+            if baseline == "v1.2" and mode == "routine"
+            else None
+        )
+        ServiceReadiness(
+            sessions,
+            mode=mode,
+            storage_epoch=epoch,
+            journal=journal,
+            baseline=baseline,
+            expected_database_login=expected_database_login_from_environment(baseline),
+        ).check()
         return admitted_session_factory(
-            database_url, epoch, journal, journal_required=mode == "routine"
+            database_url,
+            epoch,
+            journal,
+            journal_required=baseline == "v1.2" and mode == "routine",
         )
     except (ReadinessError, DeletionJournalError, SQLAlchemyError) as exc:
         raise HTTPException(status_code=503, detail="Lucy storage is not admitted") from exc
@@ -816,6 +841,7 @@ def issue_sensitive_action_permit_v2(
     """Accept only a fresh broker-signed owner interaction and issue an exact V2 permit."""
 
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
@@ -865,6 +891,7 @@ def prepare_deletion_manifest_v2(
     authorization: str | None = Header(default=None),
 ) -> DeletionTargetManifestV1:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return _policy_notary().prepare_deletion_manifest(
@@ -888,6 +915,7 @@ def notarize_sensitive_operation_v2(
     authorization: str | None = Header(default=None),
 ) -> SensitiveExecutionGrantV1:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return _policy_notary().notarize_operation(operation_id)
@@ -905,6 +933,7 @@ def attest_executor_receipt_v2(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return {"receipt_digest": _policy_notary().attest_receipt(operation_id, receipt)}
@@ -923,6 +952,7 @@ def owner_retrieve_evidence_v2(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RetrievalWorkflowResultV1:
     _require_mode("evidence")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
@@ -949,6 +979,7 @@ def record_evidence_delivery_v2(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     _require_mode("evidence")
+    _require_v12_sensitive_api()
     _authorize(authorization)
     try:
         state = SqlSecurityWorkflowStore(_ready_sessions()).record_delivery(
@@ -972,6 +1003,7 @@ def owner_delete_evidence_v2(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> DeletionWorkflowResultV1:
     _require_mode("deletion")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if request.permit.evidence_id != evidence_id:
         raise HTTPException(status_code=400, detail="evidence identity mismatch")

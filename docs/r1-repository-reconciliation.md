@@ -454,5 +454,15 @@ Render commissioning remains required before R1-2 can be activated.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 
+Container admission now selects the security baseline explicitly. V1.3 requires the
+configured PostgreSQL login to match `session_user`, proves that the login has no
+direct customer-table privileges, and admits only its service-mode function surface.
+The request path uses the same admission boundary. Both generations of V1.2 sensitive
+HTTP endpoints return unavailable under V1.3, so commissioning cannot accidentally
+route a V1.3 identity through the older workflow while the dedicated V1.3 adapter is
+still pending. The focused API/readiness suite passed 35 tests with Ruff and mypy on
+commit parent `349ce09`; this evidence is invalidated by changes to API routing,
+readiness, baseline selection, or database-role admission.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

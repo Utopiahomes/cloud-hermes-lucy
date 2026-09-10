@@ -156,6 +156,21 @@ def test_production_v12_hides_superseded_sensitive_v1_endpoints(
     assert caught.value.status_code == 404
 
 
+def test_v13_hides_all_v12_sensitive_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_ENVIRONMENT", "development")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+
+    with pytest.raises(HTTPException) as legacy:
+        api._require_legacy_sensitive_api_allowed()
+    with pytest.raises(HTTPException) as v12:
+        api._require_v12_sensitive_api()
+
+    assert legacy.value.status_code == 404
+    assert v12.value.status_code == 404
+
+
 def test_policy_storage_failure_logging_uses_only_an_allowlisted_code() -> None:
     class Diagnostic:
         message_primary = "authorization environment or epoch mismatch"
