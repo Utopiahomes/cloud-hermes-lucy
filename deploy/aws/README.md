@@ -40,8 +40,24 @@ output contains the canonical `RealmSecurityStampV1` and digest consumed by
 the quarantined PostgreSQL provisioner. These preparation tools do not call
 AWS, modify PostgreSQL, enable paid traffic, or enable transcript capture.
 
-The v1.3 template is not production authorization. A dedicated deployed-state
-verifier and synthetic realm acceptance remain required before commissioning.
+The v1.3 template is not production authorization. After deploying one realm,
+run its dedicated read-only verifier before building the security stamp or
+performing synthetic acceptance:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\aws\verify_realm_security_v1_3_deployment.py `
+  --stack-name <realm-stack-name> `
+  --expected-account-id <12-digit-target-account> `
+  --profile lucy-dev `
+  --report secrets\generated\<realm>-aws-deployment-v1.3.json
+```
+
+The verifier pins the CloudFormation parameters and outputs to one realm,
+checks both qualified executor aliases and their immutable versions, rejects
+static AWS credentials, and reuses the accepted KMS, DynamoDB, and public-key
+trust-store checks from v1.2. It performs only read operations through STS,
+CloudFormation, Lambda, KMS, and DynamoDB. Exit status `2` keeps the realm on
+hold. Synthetic realm acceptance remains a separate commissioning gate.
 
 ## V1.2 accepted deployment
 
