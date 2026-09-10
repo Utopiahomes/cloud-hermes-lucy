@@ -235,9 +235,9 @@ def _validate_prerequisite_memberships(rows: Sequence[Sequence[Any]]) -> None:
     }
     caller_grants = grants - owner_grants
     owner_isolated = (
-        len(owner_grants) == 1
-        and next(iter(owner_grants))[1] == "lucy_migration"
-        and next(iter(owner_grants))[4]
+        bool(owner_grants)
+        and all(member == "lucy_migration" for _, member, *_ in owner_grants)
+        and any(set_option for *_, set_option in owner_grants)
     )
     callers_inert = all(
         member == "lucy_migration" and not inherit_option and not set_option

@@ -216,6 +216,7 @@ def test_postgres_creator_admin_rows_do_not_grant_caller_execution() -> None:
     bootstrap._validate_prerequisite_memberships(
         [
             ("lucy_directory_function_owner", "lucy_migration", True, True, True),
+            ("lucy_directory_function_owner", "lucy_migration", True, False, False),
             ("lucy_public_runtime", "lucy_migration", True, False, False),
             ("lucy_directory_admission", "lucy_migration", True, False, False),
         ]
