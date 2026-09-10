@@ -806,5 +806,15 @@ invalidated by changes to any recovery service command, environment, credential,
 database role, OIDC trust, journal binding, network boundary, or tested application
 commit.
 
+The authority-transition coordinator now composes the production-shaped barrier:
+the restrictive change and outbox event commit locally first, the stream-pinned
+private writer appends only that event ID, and the separate acknowledgement service
+exact-reads and reconciles it before the caller receives `DURABLY_RECORDED`. A writer
+failure leaves the local restriction in `PERSISTENCE_PENDING`; replay of an already
+durable operation performs no external write. Eighteen focused authority, writer,
+acknowledgement, and public-inference checks passed with Ruff and strict mypy on
+2026-09-10. This evidence is invalidated by changes to the authority coordinator,
+transition result, writer/acknowledgement client contracts, or their ordering.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

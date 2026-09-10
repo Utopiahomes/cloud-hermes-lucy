@@ -288,6 +288,91 @@ class AuthorityTransitionStore(Protocol):
     ) -> PendingAuthorityEventV1: ...
 
 
+class AuthorityTransitionGateway(Protocol):
+    def revoke_membership(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1: ...
+
+    def withdraw_publication(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1: ...
+
+
+class AuthorityWriterResult(Protocol):
+    event_id: UUID
+    event_digest: str
+
+
+class AuthorityJournalWriterGateway(Protocol):
+    def append_pending(self, event_id: UUID) -> AuthorityWriterResult: ...
+
+
+class AuthorityAcknowledgementResult(Protocol):
+    event_id: UUID
+    state: str
+
+
+class AuthorityAcknowledgementGateway(Protocol):
+    def acknowledge_authority(
+        self, event_id: UUID, *, head_digest: str
+    ) -> AuthorityAcknowledgementResult: ...
+
+
+class AuthorityTransitionCoordinator:
+    """Stage a restriction locally, then require both independent durability barriers."""
+
+    def __init__(
+        self,
+        transitions: AuthorityTransitionGateway,
+        writer: AuthorityJournalWriterGateway,
+        acknowledgements: AuthorityAcknowledgementGateway,
+    ) -> None:
+        self._transitions = transitions
+        self._writer = writer
+        self._acknowledgements = acknowledgements
+
+    def revoke_membership(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._execute("revoke_membership", request)
+
+    def withdraw_publication(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._execute("withdraw_publication", request)
+
+    def _execute(
+        self,
+        operation: Literal["revoke_membership", "withdraw_publication"],
+        request: AuthorityTransitionRequestV1,
+    ) -> AuthorityTransitionResultV1:
+        transition = (
+            self._transitions.revoke_membership
+            if operation == "revoke_membership"
+            else self._transitions.withdraw_publication
+        )
+        staged = transition(request)
+        if staged.state == "DURABLY_RECORDED":
+            return staged
+        if staged.state != "PERSISTENCE_PENDING":
+            raise RecoveryJournalError("authority transition returned an invalid state")
+        writer_result = self._writer.append_pending(staged.event_id)
+        if writer_result.event_id != staged.event_id:
+            raise RecoveryJournalError("authority writer response differs")
+        acknowledgement = self._acknowledgements.acknowledge_authority(
+            staged.event_id, head_digest=writer_result.event_digest
+        )
+        if (
+            acknowledgement.event_id != staged.event_id
+            or acknowledgement.state != "DURABLY_RECORDED"
+        ):
+            raise RecoveryJournalError("authority acknowledgement response differs")
+        completed = transition(request)
+        if completed.event_id != staged.event_id or completed.state != "DURABLY_RECORDED":
+            raise RecoveryJournalError("authority transition did not become durable")
+        return completed
+
+
 class AuthorityJournalWriter:
     """Prepare and append one exact event without holding recovery credentials."""
 
