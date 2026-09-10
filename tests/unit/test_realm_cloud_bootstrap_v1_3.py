@@ -212,14 +212,33 @@ def test_bootstrap_removes_creator_membership_from_caller_roles() -> None:
     assert "GRANT lucy_directory_function_owner TO lucy_migration" in source
 
 
-def test_membership_rows_are_normalized_before_comparison() -> None:
-    class DriverRow:
-        def __getitem__(self, index: int) -> object:
-            return ("lucy_directory_function_owner", "lucy_migration")[index]
+def test_postgres_creator_admin_rows_do_not_grant_caller_execution() -> None:
+    bootstrap._validate_prerequisite_memberships(
+        [
+            ("lucy_directory_function_owner", "lucy_migration", True, True, True),
+            ("lucy_public_runtime", "lucy_migration", True, False, False),
+            ("lucy_directory_admission", "lucy_migration", True, False, False),
+        ]
+    )
 
-    assert bootstrap._membership_pairs([DriverRow()]) == {
-        ("lucy_directory_function_owner", "lucy_migration")
-    }
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        ("lucy_public_runtime", "lucy_migration", True, False, True),
+        ("lucy_directory_admission", "unexpected_runtime", False, True, True),
+    ],
+)
+def test_prerequisite_caller_membership_rejects_privilege_paths(
+    unsafe: tuple[object, ...],
+) -> None:
+    with pytest.raises(bootstrap.BootstrapError, match="not isolated"):
+        bootstrap._validate_prerequisite_memberships(
+            [
+                ("lucy_directory_function_owner", "lucy_migration", True, True, True),
+                unsafe,
+            ]
+        )
 
 
 def test_stage_sanitizes_sqlalchemy_statement_and_parameters() -> None:

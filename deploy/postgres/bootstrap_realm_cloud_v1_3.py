@@ -225,8 +225,26 @@ def _assert_inert_role(name: str, flags: tuple[Any, ...]) -> None:
         raise BootstrapError(f"prerequisite role is not inert: {name}")
 
 
-def _membership_pairs(rows: Sequence[Sequence[Any]]) -> set[tuple[str, str]]:
-    return {(str(row[0]), str(row[1])) for row in rows}
+def _validate_prerequisite_memberships(rows: Sequence[Sequence[Any]]) -> None:
+    grants = {
+        (str(row[0]), str(row[1]), bool(row[2]), bool(row[3]), bool(row[4]))
+        for row in rows
+    }
+    owner_grants = {
+        grant for grant in grants if grant[0] == "lucy_directory_function_owner"
+    }
+    caller_grants = grants - owner_grants
+    owner_isolated = (
+        len(owner_grants) == 1
+        and next(iter(owner_grants))[1] == "lucy_migration"
+        and next(iter(owner_grants))[4]
+    )
+    callers_inert = all(
+        member == "lucy_migration" and not inherit_option and not set_option
+        for _, member, _, inherit_option, set_option in caller_grants
+    )
+    if not owner_isolated or not callers_inert:
+        raise BootstrapError(f"prerequisite role membership is not isolated: {sorted(grants)}")
 
 
 def _bootstrap_roles(config: BootstrapConfig) -> None:
@@ -254,19 +272,14 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
         for name, flags in prerequisite_rows.items():
             _assert_inert_role(name, flags)
         membership_rows = connection.execute(
-            "SELECT parent.rolname,member.rolname FROM pg_auth_members m "
+            "SELECT parent.rolname,member.rolname,m.admin_option,m.inherit_option,m.set_option "
+            "FROM pg_auth_members m "
             "JOIN pg_roles parent ON parent.oid=m.roleid "
             "JOIN pg_roles member ON member.oid=m.member "
             "WHERE parent.rolname=ANY(%s)",
             (sorted(_PREREQUISITE_ROLES),),
         ).fetchall()
-        memberships = _membership_pairs(membership_rows)
-        expected_memberships = {("lucy_directory_function_owner", "lucy_migration")}
-        if memberships != expected_memberships:
-            raise BootstrapError(
-                "prerequisite role membership is not isolated: "
-                f"{sorted(memberships)}"
-            )
+        _validate_prerequisite_memberships(membership_rows)
 
         rows = _role_rows(connection, names)
         for name, flags in rows.items():
