@@ -13,7 +13,7 @@ remain outstanding. Live transcript capture remains disabled.
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0040_r1_grant_authority_snapshot`.
+  head: `0041_r1_deletion_authority_snapshot`.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -78,7 +78,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
-| Clean migration 0001 through `0039` | Disposable pgvector/PostgreSQL 16 tmpfs cluster; invalidated by unexecuted migration `0040` while Docker is unavailable | Migration or bootstrap change |
+| Clean migration 0001 through `0039` | Disposable pgvector/PostgreSQL 16 tmpfs cluster; invalidated by unexecuted migrations `0040`-`0041` while Docker is unavailable | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
 | Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
@@ -120,9 +120,9 @@ durability claim.
 | The realm archive AWS adapter permits only exact-key `GenerateDataKey`, strongly consistent exact-key `GetItem`, and conditional wrapped-key/envelope `PutItem`; it exposes no scan, query, batch-read, decrypt, or delete surface | `tests/unit/test_realm_archive_aws.py`; focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key/envelope metadata |
 | Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
 | Archive capture durably separates PostgreSQL intent, AWS outcome, and PostgreSQL reconciliation; exact retries reuse stable IDs and a persisted DynamoDB envelope, a crash after DynamoDB does not generate a second DEK, withdrawal before reconciliation fails closed, and the production role cannot bypass the protocol | Clean migration 0001-0038; `tests/integration/test_r1_sensitive_permit_claim.py`, `tests/integration/test_r1_production_realm_roles.py`, and realm archive unit tests; 37 affected checks passed plus Ruff and mypy | Migration 0038, staged archive store/service, realm archive backend/envelope, scoped capture gate, or production realm grants |
-| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy. Database evidence is invalidated pending migration 0040; application evidence remains valid. | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
+| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy. Database evidence is invalidated pending migrations 0040-0041; application evidence remains valid. | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
 | The read-only V1.3 deployed-state verifier pins one realm's CloudFormation identity, termination protection, qualified executor versions and configuration, public-only trust stores, KMS keys, DynamoDB protections, and absence of static AWS credentials | `tests/unit/test_realm_security_v1_3_deployment_verifier.py` plus unchanged v1.2 verifier tests; 9 passed plus Ruff and mypy | V1.3 verifier, realm template parameters/outputs, executor environment, or inherited v1.2 deployed-resource rules |
-| V1.3 container admission selects the explicit R1 schema head, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | Unit/static evidence remains valid at head 0040; the prior four-login PostgreSQL admission evidence is invalidated until migration 0040 is exercised because Docker is unavailable | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
+| V1.3 container admission selects the explicit R1 schema head, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | Unit/static evidence remains valid at head 0041; the prior four-login PostgreSQL admission evidence is invalidated until migrations 0040-0041 are exercised because Docker is unavailable | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
 | Per-realm V1.3 policy identity generation writes a private Ed25519 seed and public purpose-bound trust inventory to separate ignored files, refuses overwrite, and removes the private output if public-output creation fails | `tests/unit/test_generate_policy_identity_v1_3.py`; 1 focused check passed plus Ruff and mypy | Generator, V1.3 verification-key contract, purpose, or validity windows |
 | The Utopia V1.3 AWS realm stack is `CREATE_COMPLETE` with termination protection and capture-disabled tags; immutable executor aliases, reviewed artifact/trust digests, exact realm bindings, non-static credentials, three purpose-specific KMS keys, protected/PITR DynamoDB ledgers, and quota TTLs passed the read-only deployed verifier | `secrets/generated/utopia-aws-deployment-v1.3-2026-09-09-pass.json`; stack `lucy-utopia-security-v1-3`; 49 checks passed in `us-east-1` | Stack update, alias/version/configuration change, policy trust rotation, KMS state/policy change, DynamoDB protection/PITR/TTL change, or verifier change |
 | The deployed Utopia CloudFormation identity and the reviewed PostgreSQL binding produce one validated canonical realm security stamp | `secrets/generated/utopia-realm-security-stamp-v1.3.json`; digest `dd2fc2afb6134a2580af00b6b187b3912d57cb2f52244169862ec8b62e6e2959` | Stack realm outputs, PostgreSQL binding description, AWS account/region, or stamp contract/builder change |
@@ -466,7 +466,7 @@ steps into one quarantine-first, replay-safe operation. It accepts only the acce
 V1.2 revision or the exact V1.3 head; acquires the maintenance and admission locks;
 proves TLS and the database-owned capture boundary; closes admission before role or
 schema mutation; creates or rotates four realm-qualified non-inheriting LOGINs;
-migrates through `0040`; applies the reviewed execute-only role stamp; provisions
+migrates through `0041`; applies the reviewed execute-only role stamp; provisions
 the content-free foundation and immutable realm bindings in one transaction; and
 reconnects through all four logins for content-free verification. It cannot open
 admission or enable capture, and its result omits database URLs and passwords. The
@@ -492,7 +492,9 @@ binding, and any already-issued grant. It receives no ciphertext, wrapped key,
 transcript, memory, or enumerating operation. `RealmPolicyGrantService` verifies the
 permit, constructs and signs the exact post-claim V2 grant, and reuses an existing
 signed grant on retry rather than generating a conflicting identity. PostgreSQL still
-rechecks current authority when storing it. The Alembic graph has one head at `0040`;
+rechecks current authority when storing it. Migration `0040` remains the grant
+snapshot layer beneath the additive deletion snapshot; the Alembic graph now has one
+head at `0041`;
 36 focused tests plus Ruff and full-package strict mypy pass. The migration has not
 yet run against PostgreSQL because Docker remains unavailable, so its database proof
 and the prior head-dependent database evidence remain pending.
@@ -518,6 +520,16 @@ private endpoints, untrusted receipts, and all workflow failures fail closed. Th
 does not create an owner-assertion broker or enable capture. The focused API,
 transport, workflow, and readiness checks pass locally; Render variables and deployed
 execution are still pending.
+
+Migration `0041_r1_deletion_authority_snapshot` adds the corresponding policy-side
+deletion input without granting table access. One exact claimed deletion operation
+returns only its signed permit, root/version identifiers, canonical closure targets,
+digests, fixed policy versions, and any already-stored manifest; it cannot enumerate
+operations or read ciphertext. New manifest admission goes through a V3 wrapper that
+acquires the established evidence-derivation lock, then rechecks operation state and
+the real current completion time before delegating to PostgreSQL's existing exact-
+closure validator. This closes the pre-lock clock/state race found during independent
+review while preserving the existing database-authoritative closure and fence.
 
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR

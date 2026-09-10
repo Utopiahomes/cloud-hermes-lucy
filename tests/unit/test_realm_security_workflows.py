@@ -276,6 +276,28 @@ def test_grant_authority_migration_is_policy_only_and_content_free() -> None:
     assert "REVOKE ALL ON FUNCTION lucy.read_sensitive_operation_status_v1" in source
 
 
+def test_deletion_authority_snapshot_is_exact_content_free_and_rechecks_after_lock() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "versions"
+        / "0041_r1_deletion_authority_snapshot.py"
+    ).read_text(encoding="utf-8")
+    assert "session_login=session_user AND actor_role='policy_notary'" in source
+    assert "target_service_binding_id=v_actor.target_service_binding_id" in source
+    assert "serialized_payload" not in source
+    assert "serialized_wrapper" not in source
+    assert "read_claimed_deletion_authority_v1(p_operation_id uuid)" in source
+    assert "store_scoped_deletion_manifest_v3" in source
+    lock = source.index("PERFORM pg_advisory_xact_lock")
+    current_time = source.index("clock_timestamp()>v_deadline")
+    delegated_store = source.index(
+        "RETURN lucy.store_scoped_deletion_manifest_v2", current_time
+    )
+    assert lock < current_time < delegated_store
+    assert "REVOKE ALL ON FUNCTION lucy.read_claimed_deletion_authority_v1" in source
+
+
 class _TerminalWorkflow:
     def __init__(self, permit: SensitiveActionPermitV3) -> None:
         self.permit = permit

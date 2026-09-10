@@ -43,6 +43,9 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
     assert "register_scoped_evidence_v2(jsonb" not in rendered
     assert 'TO "lucy_utopia_policy"' in rendered
     assert "read_claimed_sensitive_authority_v1" in rendered
+    assert "read_claimed_deletion_authority_v1" in rendered
+    assert "store_scoped_deletion_manifest_v3" in rendered
+    assert "store_scoped_deletion_manifest_v2(uuid,jsonb)" not in rendered
     assert "read_sensitive_operation_status_v1" in rendered
     assert 'TO "lucy_utopia_sensitive_workflow"' in rendered
     assert 'TO "lucy_utopia_finality"' in rendered

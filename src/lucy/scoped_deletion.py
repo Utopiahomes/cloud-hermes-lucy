@@ -49,7 +49,7 @@ class PostgresScopedDeletionManifestStore:
             with self._sessions.begin() as session:
                 result = session.execute(
                     text(
-                        "SELECT lucy.store_scoped_deletion_manifest_v2("
+                        "SELECT lucy.store_scoped_deletion_manifest_v3("
                         ":operation,:manifest)"
                     ),
                     {

@@ -94,9 +94,10 @@ TO "__LUCY_REALM_ROUTINE_LOGIN__";
 GRANT EXECUTE ON FUNCTION
   lucy.issue_sensitive_action_permit_v3(jsonb,text),
   lucy.read_claimed_sensitive_authority_v1(uuid),
+  lucy.read_claimed_deletion_authority_v1(uuid),
   lucy.store_sensitive_execution_grant_v2(uuid,jsonb),
   lucy.attest_executor_receipt_v2(uuid,jsonb),
-  lucy.store_scoped_deletion_manifest_v2(uuid,jsonb),
+  lucy.store_scoped_deletion_manifest_v3(uuid,jsonb),
   lucy.store_deletion_execution_grant_v2(uuid,jsonb),
   lucy.attest_deletion_executor_receipt_v2(uuid,jsonb)
 TO "__LUCY_REALM_POLICY_LOGIN__";
