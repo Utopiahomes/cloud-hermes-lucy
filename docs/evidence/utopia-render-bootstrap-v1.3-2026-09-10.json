@@ -1,0 +1,33 @@
+{
+  "active_actor_bindings": 4,
+  "active_executor_bindings": 2,
+  "binding_replayed": false,
+  "capture_enabled": false,
+  "commissioning_commit": "0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c",
+  "content_scope_count": 1,
+  "contract": "lucy.realm-cloud-bootstrap.v1.3",
+  "database_inbound_ip_allowlist": [],
+  "directory_admission_acl_isolated": true,
+  "foundation_digest": "e602cadb4bac55ea72ce906bed29b607bac1860a888b06c06fdef4bc96d8ebaa",
+  "foundation_replayed": false,
+  "function_owner_schema_create_removed": true,
+  "migration_revision": "0041_r1_deletion_auth_snapshot",
+  "offline_migration_schema_owner": true,
+  "realm_slug": "utopia",
+  "render_bootstrap_job_id": "job-dah9rfh594qs73frt08g",
+  "roles_sql_sha256": "b50dc68504634b7e1b64d62a87c54dfc68971238df663be6f3001c2e038dd5dd",
+  "runtime_admission": "quarantined",
+  "security_realm_id": "ac501621-280d-46ff-a065-f65a0566a839",
+  "source_revision": "0021_recovery_capture_safety",
+  "stamp_digest": "0a001a7d341cf597b109bdfb53333fe723ab950bd2a1a9df462efd90125ef881",
+  "status": "passed",
+  "temporary_bootstrap_environment_removed": true,
+  "temporary_bootstrap_service_deleted": true,
+  "temporary_bootstrap_service_id": "crn-dah8tidbedkc739ku260",
+  "verified_runtime_logins": [
+    "lucy_utopia_routine",
+    "lucy_utopia_policy",
+    "lucy_utopia_sensitive_workflow",
+    "lucy_utopia_finality"
+  ]
+}

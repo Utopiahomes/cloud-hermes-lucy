@@ -4,9 +4,11 @@ Status: R1-0 and the R1-1 synthetic local slice are complete. R1-2 contracts,
 single-realm process sessions, authenticated admission, scoped memory, sensitive
 operations, deletion recovery, and scoped off-record enforcement are implemented
 locally. The termination-protected Utopia realm AWS stamp is deployed and its
-read-only deployment verification passes. Its canonical AWS-to-PostgreSQL stamp is
-prepared locally. PostgreSQL/Render commissioning and synthetic deployed execution
-remain outstanding. Live transcript capture remains disabled.
+read-only deployment verification passes. On 2026-09-10 the canonical realm stamp
+was commissioned into Render PostgreSQL 18 at migration `0041` with all four runtime
+logins verified, admission quarantined, and capture disabled. The remaining R1-2 gate
+is V1.3 configuration of the existing Render identities followed by the synthetic
+deployed retrieval/deletion execution path. Live transcript capture remains disabled.
 
 ## Frozen baseline
 
@@ -61,16 +63,17 @@ durability claim.
 
 ## Authority and unresolved deployment facts
 
-- R1-1 local provisioning uses the existing migration/application identity. Website
-  reads use a dedicated `lucy_public_runtime` login with execute-only access to the
-  exact lookup function and no projection-table enumeration. Separate production
-  publisher/approver logins and their rendered grant template remain required before
-  deployment; the current slice does not claim that final credential blast radius.
+- Production commissioning uses the offline `lucy_migration` schema owner only in an
+  ephemeral migration job. Both function-owner roles temporarily receive schema
+  `CREATE` inside the migration transaction and lose it before commit. The four
+  continuously deployed realm logins are non-inheriting, execute-only identities;
+  their V1.3 Render configuration and deployed workflow exercise remain pending.
 - Customer authentication will bind stable issuer/subject pairs. AWS operator SSO is
   not customer authentication. The production IdP, audience, and strong-auth claim
   remain an activation decision.
-- No production DNS, databases, KMS keys, Render services, customer records, paid
-  inference, or transcript capture are authorized by this implementation pass.
+- The Utopia AWS realm resources and Render PostgreSQL foundation are deployed.
+  Production DNS, customer records, paid inference, and transcript capture remain
+  outside this gate and are not enabled.
 - The production hosting quote and exact continuously deployed realm set remain
   R1-5 commissioning inputs. These do not block the synthetic slice.
 
@@ -78,6 +81,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
+| Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
 | Clean migration 0001 through `0039` | Disposable pgvector/PostgreSQL 16 tmpfs cluster; invalidated by unexecuted migrations `0040`-`0041` while Docker is unavailable | Migration or bootstrap change |
 | Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
 | Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
@@ -446,8 +450,8 @@ qualified retrieval/deletion executor aliases and receipt keys. The production
 utility requires the private migration identity, TLS, quarantined admission,
 capture-off state, and both maintenance locks. It applies the entire stamp in one
 transaction, rejects conflicting or partial prior state, and treats an exact replay
-as read-only. The path has been proven on disposable PostgreSQL only; no production
-realm has been provisioned.
+as read-only. The path passed on production Render PostgreSQL 18 for the quarantined
+Utopia realm on 2026-09-10.
 
 `provision_realm_foundation_v1_3.py` closes the production seeding prerequisite
 without weakening that binding gate. Under the same capture-off, TLS, quarantine,
@@ -458,9 +462,8 @@ only labels, issuer, stable wallet ID and provisioning timestamp. It creates no
 public channel, owner membership, credential, content, or capture authorization;
 exact replay is read-only and any partial/conflicting foundation rolls back. Fourteen
 focused foundation/binding/deployment-boundary tests pass with Ruff and mypy. The
-disposable PostgreSQL integration extension is present but not rerun because Docker
-Desktop was unavailable; production execution remains blocked until the branch is
-published and the container is built.
+disposable PostgreSQL integration extension was not rerun because Docker Desktop was
+unavailable; the equivalent production bootstrap passed on Render PostgreSQL 18.
 
 `bootstrap_realm_cloud_v1_3.py` now composes the production database commissioning
 steps into one quarantine-first, replay-safe operation. It accepts only the accepted
@@ -470,9 +473,13 @@ schema mutation; creates or rotates four realm-qualified non-inheriting LOGINs;
 migrates through `0041`; applies the reviewed execute-only role stamp; provisions
 the content-free foundation and immutable realm bindings in one transaction; and
 reconnects through all four logins for content-free verification. It cannot open
-admission or enable capture, and its result omits database URLs and passwords. The
-focused commissioning tests and static checks pass locally; deployed execution is
-not yet claimed.
+admission or enable capture, and its result omits database URLs and passwords. On
+2026-09-10 the operation passed on Render PostgreSQL 18 at exact commit `0a03aed`,
+after a production-discovered Alembic revision-length incompatibility was corrected
+and protected by a regression check. The temporary environment was cleared, the
+database inbound IP allowlist remained empty, and the migration service was deleted.
+The offline `lucy_migration` schema-owner boundary remains an accepted commissioning
+residual; no continuously running service receives that credential.
 
 `realm_security_workflows.py` now supplies the typed application-side boundary for
 the V1.3 execute-only PostgreSQL functions. The policy adapter verifies the exact
@@ -496,9 +503,9 @@ signed grant on retry rather than generating a conflicting identity. PostgreSQL 
 rechecks current authority when storing it. Migration `0040` remains the grant
 snapshot layer beneath the additive deletion snapshot; the Alembic graph now has one
 head at `0041`;
-36 focused tests plus Ruff and full-package strict mypy pass. The migration has not
-yet run against PostgreSQL because Docker remains unavailable, so its database proof
-and the prior head-dependent database evidence remain pending.
+36 focused tests plus Ruff and full-package strict mypy pass. The migration is now
+included in the verified production PostgreSQL 18 head; deployed workflow execution
+remains pending.
 
 The same migration now exposes an exact, content-free operation-status snapshot only
 to the realm-bound sensitive-workflow login. `RealmRetrievalCoordinator` uses that
@@ -542,16 +549,18 @@ already in a terminal/finality state returns the stored content-free status with
 calling policy or Lambda again. The V1.3 owner deletion route checks the evidence path
 against the permit selector before opening workflow storage. Eighty-three focused API,
 workflow, contract, and executor tests pass with Ruff and full-package strict mypy.
-PostgreSQL migration execution and deployed Render/Lambda execution remain pending.
+PostgreSQL migration execution now passes on Render PostgreSQL 18; deployed
+Render/Lambda workflow execution remains pending.
 
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
-revocation race. The Utopia AWS realm stamp is now deployed and passes its read-only
-verification. The next exact R1-2 action is to commission the validated stamp into
-quarantined PostgreSQL and the four existing Render identities, then perform the
-synthetic deployed execution path with capture still disabled. Render/PostgreSQL
-commissioning remains required before R1-2 can be accepted.
+revocation race. The Utopia AWS realm stamp is deployed and passes its read-only
+verification; its PostgreSQL foundation is commissioned and verified in quarantine.
+The next exact R1-2 action is to apply the complete V1.3 configuration to the four
+existing Render identities and perform the synthetic deployed execution path with
+capture still disabled. That execution evidence remains required before R1-2 can be
+accepted.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 
