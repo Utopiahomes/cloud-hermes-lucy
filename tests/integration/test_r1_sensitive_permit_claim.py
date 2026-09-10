@@ -86,6 +86,12 @@ def clean_sensitive_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
+                "UPDATE lucy.runtime_admission SET state='quarantined',storage_epoch=NULL,"
+                "updated_at=now() WHERE singleton"
+            )
+        )
+        connection.execute(
+            text(
                 "TRUNCATE lucy.scoped_authorized_deletion_recovery_targets_v2, "
                 "lucy.scoped_archive_reconciliations_v1, "
                 "lucy.scoped_archive_aws_outcomes_v1, lucy.scoped_archive_intents_v1, "

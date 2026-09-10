@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0045_r1_authority_recovery_staging"
+revision: str = "0045_r1_authority_recovery"
 down_revision: str | None = "0044_r1_cost_outcome_recovery"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -17,27 +17,32 @@ def upgrade() -> None:
           ADD COLUMN authority_generation bigint NOT NULL DEFAULT 1
           CHECK (authority_generation>0);
 
-        CREATE FUNCTION lucy.guard_authority_restriction_writes_v1()
+        CREATE FUNCTION lucy.guard_membership_revocation_v1()
         RETURNS trigger LANGUAGE plpgsql
         SET search_path = pg_catalog, pg_temp AS $function$
         BEGIN
-          IF current_user NOT IN ('lucy_authority_function_owner','lucy_owner') THEN
-            IF TG_TABLE_NAME='node_memberships'
-               AND OLD.status='active' AND NEW.status='revoked'
-            THEN RAISE EXCEPTION 'membership revocation requires authority transition'; END IF;
-            IF TG_TABLE_NAME='public_projection_routes'
-               AND OLD.active_version_id IS NOT NULL AND NEW.active_version_id IS NULL
-            THEN RAISE EXCEPTION 'publication withdrawal requires authority transition'; END IF;
-          END IF;
+          IF current_user NOT IN ('lucy_authority_function_owner','lucy_owner')
+             AND OLD.status='active' AND NEW.status='revoked'
+          THEN RAISE EXCEPTION 'membership revocation requires authority transition'; END IF;
+          RETURN NEW;
+        END
+        $function$;
+        CREATE FUNCTION lucy.guard_publication_withdrawal_v1()
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, pg_temp AS $function$
+        BEGIN
+          IF current_user NOT IN ('lucy_authority_function_owner','lucy_owner')
+             AND OLD.active_version_id IS NOT NULL AND NEW.active_version_id IS NULL
+          THEN RAISE EXCEPTION 'publication withdrawal requires authority transition'; END IF;
           RETURN NEW;
         END
         $function$;
         CREATE TRIGGER node_membership_authority_restriction_guard_v1
           BEFORE UPDATE ON lucy.node_memberships FOR EACH ROW
-          EXECUTE FUNCTION lucy.guard_authority_restriction_writes_v1();
+          EXECUTE FUNCTION lucy.guard_membership_revocation_v1();
         CREATE TRIGGER public_route_authority_restriction_guard_v1
           BEFORE UPDATE ON lucy.public_projection_routes FOR EACH ROW
-          EXECUTE FUNCTION lucy.guard_authority_restriction_writes_v1();
+          EXECUTE FUNCTION lucy.guard_publication_withdrawal_v1();
 
         CREATE TABLE lucy.authority_transition_events_v1 (
           id uuid PRIMARY KEY,
@@ -101,10 +106,15 @@ def upgrade() -> None:
           TO lucy_authority_function_owner;
         GRANT UPDATE ON lucy.node_memberships,lucy.public_projection_routes,
           lucy.authority_recovery_outbox_v1 TO lucy_authority_function_owner;
-        REVOKE ALL ON FUNCTION lucy.guard_authority_restriction_writes_v1()
+        REVOKE ALL ON FUNCTION lucy.guard_membership_revocation_v1()
           FROM PUBLIC,lucy_app,lucy_public_runtime,lucy_authority_transition,
             lucy_authority_recovery_writer;
-        ALTER FUNCTION lucy.guard_authority_restriction_writes_v1()
+        ALTER FUNCTION lucy.guard_membership_revocation_v1()
+          OWNER TO lucy_authority_function_owner;
+        REVOKE ALL ON FUNCTION lucy.guard_publication_withdrawal_v1()
+          FROM PUBLIC,lucy_app,lucy_public_runtime,lucy_authority_transition,
+            lucy_authority_recovery_writer;
+        ALTER FUNCTION lucy.guard_publication_withdrawal_v1()
           OWNER TO lucy_authority_function_owner;
 
         CREATE FUNCTION lucy.authority_transition_result_v1(

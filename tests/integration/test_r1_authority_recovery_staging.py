@@ -90,7 +90,7 @@ def _published_foundation():
         actor_id=publisher_actor,
     )
     publisher.approve(candidate_id=candidate, expected_digest=digest, actor_id=owner)
-    publisher.publish(candidate_id=candidate, expected_digest=digest, actor_id=publisher_actor)
+    publisher.publish(candidate_id=candidate, actor_id=publisher_actor)
     return foundation, owner, owner_membership, publisher_actor, publisher_membership, publisher
 
 

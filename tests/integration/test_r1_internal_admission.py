@@ -355,7 +355,7 @@ def test_authenticated_gateway_rechecks_authority_before_each_memory_effect(
         checked_at=datetime.now(UTC),
     ) == ()
 
-    with app_sessions.begin() as session:
+    with owner_sessions.begin() as session:
         session.execute(
             update(NodeMembershipRow)
             .where(NodeMembershipRow.id == utopia.membership_id)
@@ -373,9 +373,9 @@ def test_authenticated_gateway_rechecks_authority_before_each_memory_effect(
 def test_revoked_membership_blocks_and_cannot_be_reactivated(
     realms: tuple[RealmFixture, RealmFixture, object, object],
 ) -> None:
-    utopia, _raymond, app_sessions, _owner_sessions = realms
+    utopia, _raymond, app_sessions, owner_sessions = realms
     service = _admission(utopia.runtime_binding, "utopia-token")
-    with app_sessions.begin() as session:
+    with owner_sessions.begin() as session:
         session.execute(
             update(NodeMembershipRow)
             .where(NodeMembershipRow.id == utopia.membership_id)
