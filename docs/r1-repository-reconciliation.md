@@ -857,7 +857,12 @@ journal bindings to name that same exact coordinator recovery role. Successful
 DynamoDB reads are no longer treated as a substitute for workload-identity attestation.
 Eighteen focused acknowledgement, API, boundary, and DynamoDB adapter tests passed with
 strict mypy on 2026-09-10; focused Ruff passed after formatting the role-ARN guard.
-Deployment evidence is still required for this stronger startup gate.
+The coordinator then reached `live` on exact commit
+`27170944f2e4a2514ab9414ae7ea9d85a2df488e`, proving the configured Render OIDC
+session passed the new STS and two-binding checks. A retained private-network assertion
+job again reached all three recovery readiness endpoints and succeeded. Render had not
+indexed its final log line at collection time; that limitation is explicit in
+`docs/evidence/utopia-r1-4-coordinator-identity-attestation-2026-09-10.json`.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
