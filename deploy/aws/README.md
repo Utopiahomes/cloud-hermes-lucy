@@ -21,6 +21,16 @@ DynamoDB tables, caller roles, runtime roles, functions, and qualified
 `realm-v13` aliases. The functions derive scope and caller identity only from
 deployment-owned environment values; invocation JSON cannot choose a realm.
 
+Build the committed executor bundle under an unambiguous V1.3 release name:
+
+```powershell
+.\deploy\aws\build-executor-artifact.ps1 `
+  -ArtifactName lucy-security-executors-v1.3.zip
+```
+
+The V1.2 filename remains the wrapper's compatibility default; a V1.3 stack
+must use the explicitly named V1.3 artifact and its adjacent digest manifest.
+
 After a stack is complete and termination-protected, save its read-only
 `describe-stacks` response. Combine that evidence with the reviewed,
 content-free PostgreSQL binding description:

@@ -1,6 +1,7 @@
 param(
   [string]$PythonExecutable = ".\.venv\Scripts\python.exe",
   [string]$OutputDirectory = ".\dist\aws",
+  [string]$ArtifactName = "lucy-security-executors-v1.2.zip",
   [switch]$AllowDirtyForLocalTest
 )
 
@@ -12,7 +13,11 @@ if (-not $outputPath.StartsWith($projectRoot + [System.IO.Path]::DirectorySepara
 }
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lucy-executor-" + [guid]::NewGuid())
 $staging = Join-Path $temporaryRoot "staging"
-$artifact = Join-Path $outputPath "lucy-security-executors-v1.2.zip"
+if ([System.IO.Path]::GetFileName($ArtifactName) -ne $ArtifactName -or
+    -not $ArtifactName.EndsWith(".zip", [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw "ArtifactName must be a .zip filename without a directory"
+}
+$artifact = Join-Path $outputPath $ArtifactName
 
 try {
   $sourceCommit = (& git -C $projectRoot rev-parse HEAD).Trim()
