@@ -43,12 +43,14 @@ The recovery coordinator runs the private acknowledgement surface with
 `python -m lucy.recovery_ack_runtime`. One exact Render service identity owns the
 coordinator role and uses two distinct non-elevated PostgreSQL LOGINs, one per stream.
 It accepts `POST /v1/recovery/{authority|cost}/acknowledgements/{event-id}` with an
-empty body and a private bearer credential. The service independently reads the
+empty body and a stream-specific private bearer credential. Authority and cost
+tokens must be distinct; neither writer token authorizes the other stream. The
+service independently reads the
 permanent DynamoDB acknowledgement; the caller cannot submit a digest, sequence,
 database URL, table, stream ID, or AWS locator.
 
 Writer runtimes use `HttpRecoveryAcknowledgementClient`, configured with the fixed
-private Render host/port and bearer credential. It sends only the stream kind and
+private Render host/port and that writer's stream-specific bearer credential. It sends only the stream kind and
 event UUID in the request path with a zero-byte body, then validates the returned
 event, stream, and required terminal state. Attempt IDs and journal-head digests are
 used only by the local workflow contract and are never trusted or transmitted to the

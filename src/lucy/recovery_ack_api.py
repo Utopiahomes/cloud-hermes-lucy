@@ -67,8 +67,10 @@ def unavailable(_request: Request, _error: Exception) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "acknowledgement unavailable"})
 
 
-def _authorize(authorization: str | None) -> None:
-    token = os.getenv("LUCY_RECOVERY_ACK_TOKEN")
+def _authorize(
+    stream_kind: RecoveryStreamKind, authorization: str | None
+) -> None:
+    token = os.getenv(f"LUCY_{stream_kind.value.upper()}_RECOVERY_ACK_TOKEN")
     if (
         not token
         or authorization is None
@@ -198,7 +200,7 @@ async def acknowledge(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> AcknowledgementResponseV1:
-    _authorize(authorization)
+    _authorize(stream_kind, authorization)
     if await request.body():
         raise HTTPException(status_code=400, detail="acknowledgement body is prohibited")
     dependencies = _dependencies()

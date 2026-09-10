@@ -40,7 +40,8 @@ def test_private_endpoint_accepts_only_bearer_and_path_identifier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_id = uuid4()
-    monkeypatch.setenv("LUCY_RECOVERY_ACK_TOKEN", "synthetic-only")
+    monkeypatch.setenv("LUCY_AUTHORITY_RECOVERY_ACK_TOKEN", "authority-only")
+    monkeypatch.setenv("LUCY_COST_RECOVERY_ACK_TOKEN", "cost-only")
     monkeypatch.setattr(api, "_dependencies", _dependencies)
     monkeypatch.setattr(
         AuthorityAcknowledgementReceiver,
@@ -53,7 +54,7 @@ def test_private_endpoint_accepts_only_bearer_and_path_identifier(
 
     path = f"/v1/recovery/authority/acknowledgements/{event_id}"
     assert client.post(path).status_code == 401
-    headers = {"Authorization": "Bearer synthetic-only"}
+    headers = {"Authorization": "Bearer authority-only"}
     prohibited = client.post(
         path,
         headers=headers,
@@ -67,6 +68,7 @@ def test_private_endpoint_accepts_only_bearer_and_path_identifier(
         "stream_kind": "authority",
         "state": "DURABLY_RECORDED",
     }
+    assert client.post(path, headers={"Authorization": "Bearer cost-only"}).status_code == 401
 
 
 def test_ready_exact_reads_the_bound_journal(monkeypatch: pytest.MonkeyPatch) -> None:
