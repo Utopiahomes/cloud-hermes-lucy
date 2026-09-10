@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import Connection, create_engine, event, text
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
+from lucy.db.session import _psycopg_url
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
@@ -418,7 +419,11 @@ def admitted_session_factory(
     journal_required: bool = True,
 ) -> sessionmaker[Session]:
     return sessionmaker(
-        create_engine(database_url, pool_pre_ping=True, isolation_level="READ COMMITTED"),
+        create_engine(
+            _psycopg_url(database_url),
+            pool_pre_ping=True,
+            isolation_level="READ COMMITTED",
+        ),
         class_=AdmittedSession,
         expire_on_commit=False,
         info={
