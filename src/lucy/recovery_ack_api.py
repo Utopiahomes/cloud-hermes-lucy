@@ -40,6 +40,10 @@ from lucy.recovery_journal import (
 from lucy.recovery_journal_aws import AwsDynamoRecoveryJournal, DynamoRecoveryClient
 
 _LOGIN = re.compile(r"[a-z][a-z0-9_]{2,62}\Z")
+_ROLE_ARN = re.compile(
+    r"arn:aws:iam::(\d{12}):role/(?:[A-Za-z0-9+=,.@_-]+/)*"
+    r"([A-Za-z0-9+=,.@_-]+)\Z"
+)
 
 app = FastAPI(title="Lucy Recovery Acknowledgement API", version="1.0.0")
 
@@ -114,6 +118,7 @@ def _journal(
     client: DynamoRecoveryClient,
     account_id: str,
     region: str,
+    expected_recovery_identity: str,
 ) -> AwsDynamoRecoveryJournal:
     try:
         table_name = os.environ[f"LUCY_{prefix}_RECOVERY_JOURNAL_TABLE"]
@@ -122,6 +127,8 @@ def _journal(
         )
     except (KeyError, TypeError, ValueError, ValidationError):
         raise RecoveryJournalError("acknowledgement journal configuration is incomplete") from None
+    if binding.recovery_identity != expected_recovery_identity:
+        raise RecoveryJournalError("acknowledgement journal recovery identity differs")
     return AwsDynamoRecoveryJournal.from_configuration(
         client,
         region=region,
@@ -131,18 +138,48 @@ def _journal(
     )
 
 
+def _verify_workload_identity(
+    identity: dict[str, Any], *, account_id: str, role_arn: str
+) -> None:
+    match = _ROLE_ARN.fullmatch(role_arn)
+    if match is None or match.group(1) != account_id:
+        raise RecoveryJournalError("acknowledgement AWS role binding is invalid")
+    expected = f"arn:aws:sts::{account_id}:assumed-role/{match.group(2)}/"
+    if identity.get("Account") != account_id or not str(identity.get("Arn", "")).startswith(
+        expected
+    ):
+        raise RecoveryJournalError("active acknowledgement AWS identity differs")
+
+
 @lru_cache
 def _dependencies() -> RecoveryAckDependencies:
     try:
         region = os.environ["AWS_REGION"]
         account_id = os.environ["LUCY_AWS_ACCOUNT_ID"]
+        role_arn = os.environ["AWS_ROLE_ARN"]
     except KeyError:
         raise RecoveryJournalError("acknowledgement AWS identity is incomplete") from None
+    if os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_SECRET_ACCESS_KEY"):
+        raise RecoveryJournalError("static acknowledgement AWS credentials are prohibited")
+    sts: Any = boto3.client("sts", region_name=region)
+    _verify_workload_identity(
+        sts.get_caller_identity(), account_id=account_id, role_arn=role_arn
+    )
     client: Any = boto3.client("dynamodb", region_name=region)
     authority_journal = _journal(
-        "AUTHORITY", client=client, account_id=account_id, region=region
+        "AUTHORITY",
+        client=client,
+        account_id=account_id,
+        region=region,
+        expected_recovery_identity=role_arn,
     )
-    cost_journal = _journal("COST", client=client, account_id=account_id, region=region)
+    cost_journal = _journal(
+        "COST",
+        client=client,
+        account_id=account_id,
+        region=region,
+        expected_recovery_identity=role_arn,
+    )
     authority_sessions = _verified_sessions("AUTHORITY")
     cost_sessions = _verified_sessions("COST")
     return RecoveryAckDependencies(

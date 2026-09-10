@@ -851,5 +851,13 @@ command plus terminal job status rather than claiming that log text was observed
 Auto-deploy and transcript capture remain off. The content-free record is
 `docs/evidence/utopia-r1-4-recovery-rollout-2026-09-10.json`.
 
+The recovery acknowledgement service now verifies its actual AWS assumed role through
+STS at dependency startup, rejects static AWS credentials, and requires both immutable
+journal bindings to name that same exact coordinator recovery role. Successful
+DynamoDB reads are no longer treated as a substitute for workload-identity attestation.
+Eighteen focused acknowledgement, API, boundary, and DynamoDB adapter tests passed with
+strict mypy on 2026-09-10; focused Ruff passed after formatting the role-ARN guard.
+Deployment evidence is still required for this stronger startup gate.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

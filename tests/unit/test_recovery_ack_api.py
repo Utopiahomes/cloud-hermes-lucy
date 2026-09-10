@@ -12,6 +12,7 @@ from lucy.recovery_acknowledgement import (
     AuthorityAcknowledgementReceiver,
     CostAcknowledgementReceiver,
 )
+from lucy.recovery_journal import RecoveryJournalError
 
 
 class FakeJournal:
@@ -102,3 +103,34 @@ def test_runtime_requires_production_v13_capture_off_and_pinned_hermes(
     monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true")
     with pytest.raises(SystemExit, match="startup gate failed"):
         runtime.main()
+
+
+def test_actual_aws_identity_must_match_the_bound_coordinator_role() -> None:
+    account = "123456789012"
+    role = f"arn:aws:iam::{account}:role/security/lucy-recovery-coordinator"
+    api._verify_workload_identity(
+        {
+            "Account": account,
+            "Arn": f"arn:aws:sts::{account}:assumed-role/"
+            "lucy-recovery-coordinator/render-session",
+        },
+        account_id=account,
+        role_arn=role,
+    )
+
+    with pytest.raises(RecoveryJournalError, match="identity differs"):
+        api._verify_workload_identity(
+            {
+                "Account": account,
+                "Arn": f"arn:aws:sts::{account}:assumed-role/wrong/render-session",
+            },
+            account_id=account,
+            role_arn=role,
+        )
+
+    with pytest.raises(RecoveryJournalError, match="role binding"):
+        api._verify_workload_identity(
+            {"Account": account, "Arn": "ignored"},
+            account_id=account,
+            role_arn="not-an-arn",
+        )
