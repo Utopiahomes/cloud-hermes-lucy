@@ -555,6 +555,16 @@ commissioning remains required before R1-2 can be accepted.
 Durable revocation acknowledgement and protected recovery handoff remain R1-4 gates
 and are not pulled forward into R1-2.
 
+The Render V1.3 topology is now explicit in
+`deploy/render/security-baseline-v1.3.yaml.example`. It pins the five existing
+Utopia identities to the commissioning branch with auto-deploy disabled, keeps
+capture false and finality's schedule inert, gives policy no AWS identity, gives
+routine only archive authority, and gives evidence/deletion distinct AWS caller
+roles and aliases while recording their approved shared execute-only workflow
+LOGIN. Thirty-four focused Render/AWS deployment-template tests pass. This is a
+configuration contract only: no live Render environment has been mutated and no
+migration credential is assigned to a continuously running service.
+
 Container admission now selects the security baseline explicitly. V1.3 requires the
 configured PostgreSQL login to match `session_user`, proves that the login has no
 direct customer-table privileges, and admits only its service-mode function surface.

@@ -56,6 +56,16 @@ def _v12_render_environment() -> dict[str, Any]:
     return render["projects"][0]["environments"][0]
 
 
+def _v13_render_services() -> dict[str, dict[str, Any]]:
+    render = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.3.yaml.example").read_text(
+            encoding="utf-8"
+        )
+    )
+    configured = render["projects"][0]["environments"][0]["services"]
+    return {service["name"]: service for service in configured}
+
+
 def _environment_keys(service: dict[str, Any]) -> set[str]:
     return {item["key"] for item in service["envVars"]}
 
@@ -534,6 +544,85 @@ def test_v12_render_callers_can_invoke_only_their_qualified_alias() -> None:
             token in json.dumps(resources[policy_name])
             for token in ("kms:", "dynamodb:", "$LATEST", "UpdateFunction", "UpdateAlias")
         )
+
+
+def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch() -> None:
+    services = _v13_render_services()
+    assert set(services) == {
+        "lucy-routine",
+        "lucy-policy",
+        "lucy-evidence",
+        "lucy-deletion",
+        "lucy-finality-utility",
+    }
+    forbidden = {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "LUCY_MIGRATION_DATABASE_URL",
+        "LUCY_MAINTENANCE_DATABASE_URL",
+    }
+    for service in services.values():
+        assert service["branch"] == "codex/r1-tenant-foundation"
+        assert service["autoDeployTrigger"] == "off"
+        assert forbidden.isdisjoint(_environment_keys(service))
+        environment = {item["key"]: item for item in service["envVars"]}
+        assert environment["LUCY_SECURITY_BASELINE"]["value"] == "v1.3"
+    routine = {item["key"]: item for item in services["lucy-routine"]["envVars"]}
+    assert routine["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert services["lucy-finality-utility"]["schedule"] == "0 0 1 1 *"
+    assert services["lucy-finality-utility"]["dockerCommand"].endswith(
+        "--scheduled-sentinel"
+    )
+
+
+def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
+    services = _v13_render_services()
+    environments = {
+        name: {item["key"]: item for item in service["envVars"]}
+        for name, service in services.items()
+    }
+    expected_logins = {
+        "lucy-routine": "lucy_utopia_routine",
+        "lucy-policy": "lucy_utopia_policy",
+        "lucy-evidence": "lucy_utopia_sensitive_workflow",
+        "lucy-deletion": "lucy_utopia_sensitive_workflow",
+        "lucy-finality-utility": "lucy_utopia_finality",
+    }
+    for name, login in expected_logins.items():
+        assert environments[name]["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == login
+
+    assert "AWS_ROLE_ARN" not in environments["lucy-policy"]
+    assert not any(
+        key.startswith("AWS_") or key.startswith("LUCY_AWS_")
+        for key in environments["lucy-policy"]
+    )
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_EVIDENCE_KEY_ARN",
+        "LUCY_AWS_WRAPPED_KEY_TABLE",
+    } <= environments["lucy-routine"].keys()
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN",
+    } <= environments["lucy-evidence"].keys()
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN",
+    } <= environments["lucy-deletion"].keys()
+    for name in ("lucy-evidence", "lucy-deletion"):
+        assert not any(
+            "KMS" in key or "WRAPPED_KEY" in key for key in environments[name]
+        )
+        assert environments[name]["LUCY_POLICY_HOSTPORT"] == {
+            "key": "LUCY_POLICY_HOSTPORT",
+            "fromService": {
+                "type": "pserv",
+                "name": "lucy-policy",
+                "property": "hostport",
+            },
+        }
 
 
 def test_v12_runtime_roles_have_disjoint_exact_data_and_signing_permissions() -> None:
