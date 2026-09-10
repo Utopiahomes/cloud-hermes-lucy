@@ -263,6 +263,7 @@ def test_migrations_use_one_supplied_transaction_for_temporary_authority() -> No
     upgrade = source.index('command.upgrade(alembic, "head")')
     revoke = source.index("REVOKE CREATE ON SCHEMA lucy")
     assert grant < upgrade < revoke
+    assert "lucy_security_function_owner,lucy_directory_function_owner" in source
     assert 'alembic.attributes["connection"] = connection' in source
     assert 'config.attributes.get("connection")' in environment
 

@@ -343,7 +343,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
 
             connection.execute(
                 text(
-                    "GRANT USAGE, CREATE ON SCHEMA lucy TO lucy_security_function_owner"
+                    "GRANT USAGE, CREATE ON SCHEMA lucy TO "
+                    "lucy_security_function_owner,lucy_directory_function_owner"
                 )
             )
             alembic = Config(str(ROOT / "alembic.ini"))
@@ -351,12 +352,17 @@ def _run_migrations(config: BootstrapConfig) -> None:
             alembic.attributes["connection"] = connection
             command.upgrade(alembic, "head")
             connection.execute(
-                text("REVOKE CREATE ON SCHEMA lucy FROM lucy_security_function_owner")
+                text(
+                    "REVOKE CREATE ON SCHEMA lucy FROM "
+                    "lucy_security_function_owner,lucy_directory_function_owner"
+                )
             )
             residual = connection.execute(
                 text(
                     "SELECT has_schema_privilege("
                     "'lucy_security_function_owner','lucy','CREATE'),"
+                    "has_schema_privilege("
+                    "'lucy_directory_function_owner','lucy','CREATE'),"
                     "EXISTS(SELECT 1 FROM pg_namespace n,"
                     "LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a "
                     "WHERE n.nspname='lucy' AND a.grantee=0 "
@@ -438,6 +444,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         schema_boundary = connection.execute(
             "SELECT n.nspowner::regrole::text,"
             "has_schema_privilege('lucy_security_function_owner','lucy','CREATE'),"
+            "has_schema_privilege('lucy_directory_function_owner','lucy','CREATE'),"
             "EXISTS(SELECT 1 FROM aclexplode(COALESCE(n.nspacl,"
             "acldefault('n',n.nspowner))) "
             "WHERE grantee=0 AND privilege_type='CREATE') "
@@ -449,6 +456,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             str(schema_boundary[0]) != "lucy_migration"
             or schema_boundary[1] is not False
             or schema_boundary[2] is not False
+            or schema_boundary[3] is not False
         )
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed V1.3 migration head")
