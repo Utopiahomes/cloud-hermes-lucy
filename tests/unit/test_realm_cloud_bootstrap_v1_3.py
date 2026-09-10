@@ -268,6 +268,11 @@ def test_migrations_use_one_supplied_transaction_for_temporary_authority() -> No
     assert 'config.attributes.get("connection")' in environment
 
 
+def test_reviewed_revisions_fit_the_deployed_alembic_version_column() -> None:
+    assert all(len(revision) <= 32 for revision in bootstrap.EXPECTED_SOURCE_REVISIONS)
+    assert len(bootstrap.EXPECTED_REVISION) <= 32
+
+
 def test_directory_migration_does_not_hardcode_tenant_logins() -> None:
     migration = (
         ROOT / "migrations/versions/0024_r1_internal_directory_admission.py"

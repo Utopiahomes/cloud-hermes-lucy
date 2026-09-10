@@ -13,7 +13,7 @@ remain outstanding. Live transcript capture remains disabled.
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0041_r1_deletion_authority_snapshot`.
+  head: `0041_r1_deletion_auth_snapshot`.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -522,7 +522,7 @@ does not create an owner-assertion broker or enable capture. The focused API,
 transport, workflow, and readiness checks pass locally; Render variables and deployed
 execution are still pending.
 
-Migration `0041_r1_deletion_authority_snapshot` adds the corresponding policy-side
+Migration `0041_r1_deletion_auth_snapshot` adds the corresponding policy-side
 deletion input without granting table access. One exact claimed deletion operation
 returns only its signed permit, root/version identifiers, canonical closure targets,
 digests, fixed policy versions, and any already-stored manifest; it cannot enumerate
