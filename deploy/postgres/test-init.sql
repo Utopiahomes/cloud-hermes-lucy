@@ -11,6 +11,10 @@ CREATE ROLE lucy_alpha_routine LOGIN PASSWORD 'synthetic-alpha-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_directory_admission LOGIN PASSWORD 'synthetic-directory-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE lucy_cost_admission LOGIN PASSWORD 'synthetic-cost-admission-only'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE lucy_cost_recovery_writer LOGIN PASSWORD 'synthetic-cost-recovery-only'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_utopia_policy LOGIN PASSWORD 'synthetic-utopia-policy-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_utopia_sensitive_workflow LOGIN PASSWORD 'synthetic-utopia-workflow-only'
@@ -27,12 +31,16 @@ CREATE ROLE lucy_security_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATE
   NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_directory_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
   NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE lucy_cost_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOINHERIT NOREPLICATION NOBYPASSRLS;
 GRANT lucy_security_function_owner TO lucy_owner;
 GRANT lucy_directory_function_owner TO lucy_owner;
+GRANT lucy_cost_function_owner TO lucy_owner;
 GRANT lucy_migration TO lucy_owner;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_app;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_public_runtime;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_directory_admission;
+GRANT CONNECT ON DATABASE lucy_test TO lucy_cost_admission, lucy_cost_recovery_writer;
 GRANT CONNECT ON DATABASE lucy_test TO
   lucy_raymond_routine, lucy_utopia_routine, lucy_alpha_routine;
 GRANT CONNECT ON DATABASE lucy_test TO
@@ -44,6 +52,7 @@ CREATE SCHEMA lucy AUTHORIZATION lucy_owner;
 GRANT USAGE ON SCHEMA lucy TO lucy_app;
 GRANT USAGE ON SCHEMA lucy TO lucy_public_runtime;
 GRANT USAGE ON SCHEMA lucy TO lucy_directory_admission;
+GRANT USAGE ON SCHEMA lucy TO lucy_cost_admission, lucy_cost_recovery_writer;
 GRANT USAGE ON SCHEMA lucy TO
   lucy_raymond_routine, lucy_utopia_routine, lucy_alpha_routine;
 GRANT USAGE ON SCHEMA lucy TO

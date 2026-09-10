@@ -40,8 +40,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0040_r1_grant_authority_snapshot",
     "0041_r1_deletion_auth_snapshot",
     "0042_r1_permit_authority",
+    "0043_r1_provider_cost_admission",
 }
-EXPECTED_REVISION = "0042_r1_permit_authority"
+EXPECTED_REVISION = "0043_r1_provider_cost_admission"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
@@ -52,6 +53,13 @@ _PREREQUISITE_ROLES = {
     "lucy_public_runtime",
     "lucy_directory_function_owner",
     "lucy_directory_admission",
+    "lucy_cost_function_owner",
+    "lucy_cost_admission",
+    "lucy_cost_recovery_writer",
+}
+_FUNCTION_OWNER_ROLES = {
+    "lucy_directory_function_owner",
+    "lucy_cost_function_owner",
 }
 
 
@@ -233,9 +241,7 @@ def _validate_prerequisite_memberships(rows: Sequence[Sequence[Any]]) -> None:
         (str(row[0]), str(row[1]), bool(row[2]), bool(row[3]), bool(row[4]))
         for row in rows
     }
-    owner_grants = {
-        grant for grant in grants if grant[0] == "lucy_directory_function_owner"
-    }
+    owner_grants = {grant for grant in grants if grant[0] in _FUNCTION_OWNER_ROLES}
     caller_grants = grants - owner_grants
     owner_isolated = (
         bool(owner_grants)
@@ -267,8 +273,11 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
                 ).format(sql.Identifier(name))
             )
         connection.execute("GRANT lucy_directory_function_owner TO lucy_migration")
+        connection.execute("GRANT lucy_cost_function_owner TO lucy_migration")
         connection.execute("REVOKE lucy_public_runtime FROM lucy_migration")
         connection.execute("REVOKE lucy_directory_admission FROM lucy_migration")
+        connection.execute("REVOKE lucy_cost_admission FROM lucy_migration")
+        connection.execute("REVOKE lucy_cost_recovery_writer FROM lucy_migration")
         prerequisite_rows = _role_rows(connection, _PREREQUISITE_ROLES)
         if set(prerequisite_rows) != _PREREQUISITE_ROLES:
             raise BootstrapError("one or more prerequisite roles are missing")
@@ -345,7 +354,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
             connection.execute(
                 text(
                     "GRANT USAGE, CREATE ON SCHEMA lucy TO "
-                    "lucy_security_function_owner,lucy_directory_function_owner"
+                    "lucy_security_function_owner,lucy_directory_function_owner,"
+                    "lucy_cost_function_owner"
                 )
             )
             alembic = Config(str(ROOT / "alembic.ini"))
@@ -355,7 +365,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
             connection.execute(
                 text(
                     "REVOKE CREATE ON SCHEMA lucy FROM "
-                    "lucy_security_function_owner,lucy_directory_function_owner"
+                    "lucy_security_function_owner,lucy_directory_function_owner,"
+                    "lucy_cost_function_owner"
                 )
             )
             residual = connection.execute(
@@ -364,6 +375,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
                     "'lucy_security_function_owner','lucy','CREATE'),"
                     "has_schema_privilege("
                     "'lucy_directory_function_owner','lucy','CREATE'),"
+                    "has_schema_privilege("
+                    "'lucy_cost_function_owner','lucy','CREATE'),"
                     "EXISTS(SELECT 1 FROM pg_namespace n,"
                     "LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a "
                     "WHERE n.nspname='lucy' AND a.grantee=0 "
@@ -446,6 +459,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             "SELECT n.nspowner::regrole::text,"
             "has_schema_privilege('lucy_security_function_owner','lucy','CREATE'),"
             "has_schema_privilege('lucy_directory_function_owner','lucy','CREATE'),"
+            "has_schema_privilege('lucy_cost_function_owner','lucy','CREATE'),"
             "EXISTS(SELECT 1 FROM aclexplode(COALESCE(n.nspacl,"
             "acldefault('n',n.nspowner))) "
             "WHERE grantee=0 AND privilege_type='CREATE') "
@@ -458,6 +472,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
             or schema_boundary[1] is not False
             or schema_boundary[2] is not False
             or schema_boundary[3] is not False
+            or schema_boundary[4] is not False
         )
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed V1.3 migration head")

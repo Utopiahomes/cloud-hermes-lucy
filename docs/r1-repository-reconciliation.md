@@ -7,8 +7,9 @@ archive, retrieval, and deletion path passed exact-replay and negative-permissio
 checks. The metadata-only finality observer found no exceptional copies and correctly
 recorded `EXTENDED` while the fixed 30-day recovery window remains open. Admission is
 quarantined, all four continuous services are suspended, and live transcript capture
-remains disabled. R1-3 spending controls and R1-4 durable authority recovery remain
-separate gates.
+remains disabled. R1-3 spending controls are now in local implementation; their
+PostgreSQL execution evidence remains pending because the local Docker engine is
+unavailable. R1-4 durable authority recovery remains a separate gate.
 
 ## Frozen baseline
 
@@ -81,6 +82,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
+| R1-3 cost-policy and provider-attempt contracts require complete numeric/model/rate limits and canonical content-free commitments; the additive schema exposes reservation/submission/unknown/settlement only through distinct cost-admission and recovery-writer functions | `tests/unit/test_cost_admission.py` plus bootstrap/deployment-boundary checks; 30 focused tests passed; full unit suite 503 passed; Ruff and strict mypy passed. PostgreSQL execution is not yet claimed. | Cost contract/service, migration `0043`, cost roles/bootstrap, canonicalization, or provider-call integration change |
 | Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
 | Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
 | Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
@@ -607,6 +609,35 @@ route a V1.3 identity through the older workflow while the dedicated V1.3 adapte
 still pending. The focused API/readiness suite passed 35 tests with Ruff and mypy on
 commit parent `349ce09`; this evidence is invalidated by changes to API routing,
 readiness, baseline selection, or database-role admission.
+
+## R1-3 checkpoint
+
+`cost_admission.py` introduces immutable V1 contracts for a fully specified provider
+policy and a content-free request attempt. The policy cannot omit platform, node,
+site, provider, outstanding-exposure, concurrency, rate, token, byte, timeout,
+model, or rate-version limits. Attempts retain keyed/hashed commitments rather than
+request, session, IP, or provider-reference plaintext.
+
+Migration `0043_r1_provider_cost_admission` adds immutable policy/event records,
+attempts, exact exposure reservations, and an acknowledgement outbox. One global
+advisory lock serializes admission so concurrent requests cannot oversubscribe a
+cap. Daily accounting includes incurred plus unresolved exposure; the global
+outstanding limit includes unresolved attempts from older periods. Submission is
+unavailable while a reservation is `PERSISTENCE_PENDING`, an admitted attempt can
+be claimed only once, and an ambiguous provider outcome stays `UNKNOWN` without
+releasing exposure or authorizing an automatic retry. An actual charge above the
+reservation is stored as `OVER_CAP`; subsequent admission stays blocked until a
+newer reviewed policy becomes effective.
+
+The cost-admission identity can execute reservation, submission, unknown-outcome,
+and settlement transitions but cannot read backing tables. A separate recovery
+writer can acknowledge only an exact reservation event. The independent journal
+head and protected activation handoff are intentionally R1-4 work, so no production
+provider call is authorized by this checkpoint. Contract, static boundary,
+bootstrap, Ruff, strict-mypy, and all 503 unit checks pass. The prepared PostgreSQL
+concurrency/retry/period-rollover test is not yet executed: Docker Desktop's engine
+remains unavailable because Windows cannot access its stale Unix-socket reparse
+points. No database migration or production deployment has been attempted.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
