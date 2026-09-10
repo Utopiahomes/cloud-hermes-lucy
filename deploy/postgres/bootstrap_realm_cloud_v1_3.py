@@ -336,8 +336,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
                     "FROM pg_namespace n WHERE n.nspname='lucy'"
                 )
             ).one()
-            if boundary[0] in {"lucy_migration", "lucy_security_function_owner"}:
-                raise BootstrapError("migration roles must not own the Lucy schema")
+            if boundary[0] != "lucy_migration":
+                raise BootstrapError("Lucy schema owner is not the reviewed migration principal")
             if boundary[1] is not False or boundary[2] is not False or boundary[3] is not False:
                 raise BootstrapError("migration schema authority boundary is unsafe")
 
@@ -355,8 +355,8 @@ def _run_migrations(config: BootstrapConfig) -> None:
             )
             residual = connection.execute(
                 text(
-                    "SELECT has_schema_privilege('lucy_migration','lucy','CREATE'),"
-                    "has_schema_privilege('lucy_security_function_owner','lucy','CREATE'),"
+                    "SELECT has_schema_privilege("
+                    "'lucy_security_function_owner','lucy','CREATE'),"
                     "EXISTS(SELECT 1 FROM pg_namespace n,"
                     "LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a "
                     "WHERE n.nspname='lucy' AND a.grantee=0 "
@@ -364,7 +364,7 @@ def _run_migrations(config: BootstrapConfig) -> None:
                 )
             ).one()
             if any(value is not False for value in residual):
-                raise BootstrapError("migration schema CREATE authority was not removed")
+                raise BootstrapError("temporary function-owner schema CREATE was not removed")
     finally:
         engine.dispose()
 
@@ -435,9 +435,20 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
                 *(str(url.username) for url in config.runtime_urls.values()),
             }
         }
-        residual_schema_create = any(
-            _scalar(connection, "SELECT has_schema_privilege(%s,'lucy','CREATE')", (name,))
-            for name in ("lucy_migration", "lucy_security_function_owner")
+        schema_boundary = connection.execute(
+            "SELECT n.nspowner::regrole::text,"
+            "has_schema_privilege('lucy_security_function_owner','lucy','CREATE'),"
+            "EXISTS(SELECT 1 FROM aclexplode(COALESCE(n.nspacl,"
+            "acldefault('n',n.nspowner))) "
+            "WHERE grantee=0 AND privilege_type='CREATE') "
+            "FROM pg_namespace n WHERE n.nspname='lucy'"
+        ).fetchone()
+        if schema_boundary is None:
+            raise BootstrapError("Lucy schema authority boundary is unavailable")
+        residual_schema_create = (
+            str(schema_boundary[0]) != "lucy_migration"
+            or schema_boundary[1] is not False
+            or schema_boundary[2] is not False
         )
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed V1.3 migration head")
@@ -452,7 +463,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
     ):
         raise BootstrapError("directory admission function ACL is not isolated")
     if residual_schema_create:
-        raise BootstrapError("migration schema CREATE authority was not removed")
+        raise BootstrapError("temporary function-owner schema CREATE was not removed")
 
     verified_logins: list[str] = []
     for mode, url in config.runtime_urls.items():
@@ -483,7 +494,8 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         "active_actor_bindings": actor_count,
         "active_executor_bindings": executor_count,
         "directory_admission_acl_isolated": True,
-        "migration_schema_create_removed": True,
+        "offline_migration_schema_owner": True,
+        "function_owner_schema_create_removed": True,
         "verified_runtime_logins": verified_logins,
     }
 
