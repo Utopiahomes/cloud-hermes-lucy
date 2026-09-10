@@ -575,6 +575,17 @@ service. They intentionally retain their accepted V1.2 environment until the
 isolated V1.3 database commissioning job and complete configuration bundles are
 ready; this staging evidence does not claim migration or V1.3 runtime admission.
 
+Before Render received any V1.3 policy secret, the initial local policy seed was
+invalidated after appearing in local command output. A replacement identity
+`utopia-policy-v13-2` was generated; CloudFormation reached `UPDATE_COMPLETE`
+with termination protection still enabled and public trust digest
+`593754a54103d9b9d9ac484175409df02b2bb0410cfda7d2a7f004fc3541f9bc`.
+The full read-only realm verifier passed all 49 AWS checks, and the realm stamp
+and two-key public receipt trust were rebuilt from the updated stack. The old
+private seed was not deployed and was removed locally after AWS stopped trusting
+its public key. The receipt-trust builder now accepts both successful create and
+successful update completion states; rollback-complete states remain rejected.
+
 Container admission now selects the security baseline explicitly. V1.3 requires the
 configured PostgreSQL login to match `session_user`, proves that the login has no
 direct customer-table privileges, and admits only its service-mode function surface.

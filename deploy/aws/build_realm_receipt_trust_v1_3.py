@@ -20,6 +20,8 @@ from lucy.contracts.security_v1_3 import (
     V13VerificationKeyV1,
 )
 
+COMPLETE_STACK_STATUSES = {"CREATE_COMPLETE", "UPDATE_COMPLETE"}
+
 _REQUIRED_OUTPUTS = {
     "RetrievalExecutorIdentity",
     "RetrievalReceiptKeyArn",
@@ -113,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     session = boto3.Session(profile_name=arguments.profile, region_name=arguments.region)
     cloudformation = session.client("cloudformation")
     stacks = cloudformation.describe_stacks(StackName=arguments.stack_name).get("Stacks", [])
-    if len(stacks) != 1 or stacks[0].get("StackStatus") != "CREATE_COMPLETE":
+    if len(stacks) != 1 or stacks[0].get("StackStatus") not in COMPLETE_STACK_STATUSES:
         raise RuntimeError("realm stack is not in its reviewed complete state")
     stack = stacks[0]
     outputs = _outputs(stack)

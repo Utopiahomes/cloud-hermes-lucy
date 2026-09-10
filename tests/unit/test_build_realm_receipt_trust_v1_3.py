@@ -92,3 +92,9 @@ def test_rejects_a_key_without_exact_signing_metadata() -> None:
             public_keys=responses,
             valid_from=datetime(2026, 9, 9, tzinfo=UTC),
         )
+
+
+def test_accepts_only_successful_create_or_update_stack_states() -> None:
+    module = _module()
+    assert {"CREATE_COMPLETE", "UPDATE_COMPLETE"} == module.COMPLETE_STACK_STATUSES
+    assert "UPDATE_ROLLBACK_COMPLETE" not in module.COMPLETE_STACK_STATUSES
