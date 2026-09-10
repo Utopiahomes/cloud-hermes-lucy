@@ -30,6 +30,14 @@ The binding files contain identifiers and digests, not credentials. Keep them in
 ignored generated-evidence directory. The command relies on the existing short-lived
 AWS SSO session and never accepts or creates static access keys.
 
+The recovery coordinator runs the private acknowledgement surface with
+`python -m lucy.recovery_ack_runtime`. One exact Render service identity owns the
+coordinator role and uses two distinct non-elevated PostgreSQL LOGINs, one per stream.
+It accepts `POST /v1/recovery/{authority|cost}/acknowledgements/{event-id}` with an
+empty body and a private bearer credential. The service independently reads the
+permanent DynamoDB acknowledgement; the caller cannot submit a digest, sequence,
+database URL, table, stream ID, or AWS locator.
+
 ## V1.3 per-realm template (local preparation only)
 
 `security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.

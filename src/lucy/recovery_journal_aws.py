@@ -71,6 +71,24 @@ class AwsDynamoRecoveryJournal:
             raise RecoveryJournalError(
                 "production recovery journal configuration is incomplete"
             ) from None
+        return cls.from_configuration(
+            _aws_client(region),
+            region=region,
+            account_id=account_id,
+            table_name=table_name,
+            binding=binding,
+        )
+
+    @classmethod
+    def from_configuration(
+        cls,
+        client: DynamoRecoveryClient,
+        *,
+        region: str,
+        account_id: str,
+        table_name: str,
+        binding: RecoveryStreamBindingV1,
+    ) -> AwsDynamoRecoveryJournal:
         if region != "us-east-1" or re.fullmatch(r"\d{12}", account_id) is None:
             raise RecoveryJournalError("production recovery journal identity is invalid")
         expected_store = f"arn:aws:dynamodb:{region}:{account_id}:table/{table_name}"
@@ -82,7 +100,7 @@ class AwsDynamoRecoveryJournal:
             or binding.writer_identity == binding.recovery_identity
         ):
             raise RecoveryJournalError("production recovery journal binding is invalid")
-        return cls(_aws_client(region), table_name=table_name, binding=binding)
+        return cls(client, table_name=table_name, binding=binding)
 
     def head(self) -> RecoveryJournalHeadV1:
         item = self._get({"pk": {"S": self._stream_key}, "sk": {"S": "HEAD"}})
