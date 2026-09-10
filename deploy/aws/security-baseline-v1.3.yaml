@@ -36,6 +36,14 @@ Parameters:
   NodeAuthzEpoch:
     Type: Number
     MinValue: 1
+  AuthorityRecoveryJournalTableArn:
+    Type: String
+    AllowedPattern: "arn:aws:dynamodb:us-east-1:[0-9]{12}:table/[A-Za-z0-9_.-]+"
+    Description: ARN of this realm's independently deployed authority journal
+  CostRecoveryJournalTableArn:
+    Type: String
+    AllowedPattern: "arn:aws:dynamodb:us-east-1:[0-9]{12}:table/[A-Za-z0-9_.-]+"
+    Description: ARN of this realm's independently deployed cost journal
   SecurityEnvironment:
     Type: String
     Default: production
@@ -942,6 +950,8 @@ Resources:
                 - !GetAtt DeletionExecutionIntents.Arn
                 - !GetAtt DeletionJournalHead.Arn
                 - !GetAtt DeletionJournalIntents.Arn
+                - !Ref AuthorityRecoveryJournalTableArn
+                - !Ref CostRecoveryJournalTableArn
             - Type: AWS::Lambda::Function
               Values:
                 - !GetAtt RetrievalExecutorFunction.Arn

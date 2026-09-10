@@ -59,6 +59,15 @@ def _parameters() -> dict[str, str]:
         "DeploymentId": "66666666-6666-4666-8666-666666666666",
         "RealmBindingGeneration": "1",
         "NodeAuthzEpoch": "1",
+        "ResourceNamespace": "lucy-utopia-v13",
+        "AuthorityRecoveryJournalTableArn": (
+            f"arn:aws:dynamodb:us-east-1:{ACCOUNT}:table/"
+            "lucy-utopia-v13-authority-journal"
+        ),
+        "CostRecoveryJournalTableArn": (
+            f"arn:aws:dynamodb:us-east-1:{ACCOUNT}:table/"
+            "lucy-utopia-v13-cost-journal"
+        ),
         "StorageEpoch": "1",
         "RetrievalMinuteLimit": "5",
         "RetrievalDayLimit": "20",
@@ -120,7 +129,7 @@ def test_realm_stack_requires_exact_protected_identity() -> None:
         "Outputs": _items(_outputs(module), "OutputKey", "OutputValue"),
         "Parameters": _items(_parameters(), "ParameterKey", "ParameterValue"),
     }
-    checks, _, _ = module.verify_realm_stack(stack)
+    checks, _, _ = module.verify_realm_stack(stack, expected_account_id=ACCOUNT)
     assert all(check.passed for check in checks)
 
     stack["Outputs"] = _items(
@@ -128,10 +137,53 @@ def test_realm_stack_requires_exact_protected_identity() -> None:
         "OutputKey",
         "OutputValue",
     )
-    checks, _, _ = module.verify_realm_stack(stack)
+    checks, _, _ = module.verify_realm_stack(stack, expected_account_id=ACCOUNT)
     assert "cloudformation.realm_binding" in {
         check.name for check in checks if not check.passed
     }
+
+    stack["Outputs"] = _items(_outputs(module), "OutputKey", "OutputValue")
+    stack["Parameters"] = _items(
+        {
+            **_parameters(),
+            "CostRecoveryJournalTableArn": (
+                f"arn:aws:dynamodb:us-east-1:{ACCOUNT}:table/wrong-cost-journal"
+            ),
+        },
+        "ParameterKey",
+        "ParameterValue",
+    )
+    checks, _, _ = module.verify_realm_stack(stack, expected_account_id=ACCOUNT)
+    assert "cloudformation.recovery_journal_audit_bindings" in {
+        check.name for check in checks if not check.passed
+    }
+
+
+def test_recovery_audit_selectors_require_both_exact_tables() -> None:
+    module = _module("verify_realm_security_v1_3_deployment.py")
+    parameters = _parameters()
+    values = [
+        parameters["AuthorityRecoveryJournalTableArn"],
+        parameters["CostRecoveryJournalTableArn"],
+    ]
+    response = {
+        "EventSelectors": [
+            {
+                "DataResources": [
+                    {"Type": "AWS::DynamoDB::Table", "Values": values}
+                ]
+            }
+        ]
+    }
+    assert all(
+        check.passed
+        for check in module.verify_recovery_audit_selectors(response, parameters)
+    )
+    response["EventSelectors"][0]["DataResources"][0]["Values"] = values[:1]
+    assert not all(
+        check.passed
+        for check in module.verify_recovery_audit_selectors(response, parameters)
+    )
 
 
 def _executor(

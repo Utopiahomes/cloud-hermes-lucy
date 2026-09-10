@@ -80,7 +80,15 @@ def derive_v1_3(source: bytes) -> str:
         "    MinValue: 1\n"
         "  NodeAuthzEpoch:\n"
         "    Type: Number\n"
-        "    MinValue: 1\n",
+        "    MinValue: 1\n"
+        "  AuthorityRecoveryJournalTableArn:\n"
+        "    Type: String\n"
+        '    AllowedPattern: "arn:aws:dynamodb:us-east-1:[0-9]{12}:table/[A-Za-z0-9_.-]+"\n'
+        "    Description: ARN of this realm's independently deployed authority journal\n"
+        "  CostRecoveryJournalTableArn:\n"
+        "    Type: String\n"
+        '    AllowedPattern: "arn:aws:dynamodb:us-east-1:[0-9]{12}:table/[A-Za-z0-9_.-]+"\n'
+        "    Description: ARN of this realm's independently deployed cost journal\n",
         count=1,
     )
     text = _replace(
@@ -292,6 +300,16 @@ def derive_v1_3(source: bytes) -> str:
     text = _replace(text, "CloudLucy/SecurityV1_2", "CloudLucy/SecurityV1_3", count=16)
     text = _replace(text, "Cloud Lucy v1.2", "Cloud Lucy v1.3", count=5)
     text = _replace(text, "Security Baseline v1.2", "Security Baseline v1.3", count=2)
+    text = _replace(
+        text,
+        "                - !GetAtt DeletionJournalIntents.Arn\n"
+        "            - Type: AWS::Lambda::Function",
+        "                - !GetAtt DeletionJournalIntents.Arn\n"
+        "                - !Ref AuthorityRecoveryJournalTableArn\n"
+        "                - !Ref CostRecoveryJournalTableArn\n"
+        "            - Type: AWS::Lambda::Function",
+        count=1,
+    )
     text = _replace(
         text,
         "  RetrievalExecutorIdentity: {Value: lucy-evidence-executor}",

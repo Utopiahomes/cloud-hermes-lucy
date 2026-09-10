@@ -7,8 +7,12 @@ coordinator can write only `PAUSE#...` partitions and condition-check `STREAM#..
 it may exact-read content-free stream records and `EVENT#<known-id>` acknowledgements,
 but has no head-update, scan, query, delete, KMS, Lambda, or table-administration
 authority. Keep this separate from the accepted realm stack until the three Render
-service IDs, genesis heads, CloudTrail integration, and deployed negative-permission
-exercise are ready for one reviewed update.
+service IDs, genesis heads, and deployed negative-permission exercise are ready for
+one reviewed update. CloudTrail integration is prepared in the realm template: first
+deploy this recovery stack, then update the realm stack with the exact
+`AuthorityRecoveryJournalTableArn` and `CostRecoveryJournalTableArn` outputs. The
+existing realm trail will then record data events for both journal tables without a
+second trail or a selector-mutating custom resource.
 
 After deployment, create the two genesis heads with the human security-administrator
 identity. The initializer validates the account, region, table ARNs, stream kinds,
@@ -29,6 +33,11 @@ $env:AWS_PROFILE = 'lucy-dev'
 The binding files contain identifiers and digests, not credentials. Keep them in the
 ignored generated-evidence directory. The command relies on the existing short-lived
 AWS SSO session and never accepts or creates static access keys.
+
+After the realm-stack update, run the V1.3 deployed-state verifier. It now fails unless
+both ARN parameters name the exact `${ResourceNamespace}-authority-journal` and
+`${ResourceNamespace}-cost-journal` tables in the expected account and `us-east-1`,
+and unless the live CloudTrail selector contains both exact ARNs.
 
 The recovery coordinator runs the private acknowledgement surface with
 `python -m lucy.recovery_ack_runtime`. One exact Render service identity owns the

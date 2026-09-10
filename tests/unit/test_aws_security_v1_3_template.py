@@ -65,12 +65,35 @@ def test_v13_stamp_requires_one_explicit_realm_identity() -> None:
         "DeploymentId",
         "RealmBindingGeneration",
         "NodeAuthzEpoch",
+        "AuthorityRecoveryJournalTableArn",
+        "CostRecoveryJournalTableArn",
     }
     assert required <= parameters.keys()
     assert all("Default" not in parameters[name] for name in required)
     assert "RetrievalFunctionName" not in parameters
     assert "DeletionFunctionName" not in parameters
     assert template["Outputs"]["SecurityRealmId"] == {"Value": {"Ref": "SecurityRealmId"}}
+
+
+def test_v13_existing_trail_covers_both_independent_recovery_journals() -> None:
+    _, template = _template()
+    selectors = template["Resources"]["AuditTrail"]["Properties"]["EventSelectors"]
+    dynamodb = next(
+        resource
+        for resource in selectors[0]["DataResources"]
+        if resource["Type"] == "AWS::DynamoDB::Table"
+    )
+    assert {"Ref": "AuthorityRecoveryJournalTableArn"} in dynamodb["Values"]
+    assert {"Ref": "CostRecoveryJournalTableArn"} in dynamodb["Values"]
+    for name in (
+        "AuthorityRecoveryJournalTableArn",
+        "CostRecoveryJournalTableArn",
+    ):
+        parameter = template["Parameters"][name]
+        assert "Default" not in parameter
+        assert parameter["AllowedPattern"].startswith(
+            "arn:aws:dynamodb:us-east-1:"
+        )
 
 
 def test_v13_executors_are_environment_pinned_to_the_realm() -> None:

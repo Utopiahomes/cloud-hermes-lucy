@@ -60,7 +60,7 @@ _STATIC_CREDENTIALS = {
 
 
 def verify_realm_stack(
-    stack: Mapping[str, Any],
+    stack: Mapping[str, Any], *, expected_account_id: str
 ) -> tuple[list[Check], dict[str, str], dict[str, str]]:
     checks, outputs, parameters = verify_stack(stack)
     exact_realm_binding = all(
@@ -76,6 +76,17 @@ def verify_realm_stack(
         parameters.get(name, "").isdigit() and int(parameters[name]) > 0
         for name in ("TenureEpoch", "RealmBindingGeneration", "NodeAuthzEpoch")
     )
+    namespace = parameters.get("ResourceNamespace", "")
+    expected_journals = {
+        "AuthorityRecoveryJournalTableArn": (
+            f"arn:aws:dynamodb:us-east-1:{expected_account_id}:"
+            f"table/{namespace}-authority-journal"
+        ),
+        "CostRecoveryJournalTableArn": (
+            f"arn:aws:dynamodb:us-east-1:{expected_account_id}:"
+            f"table/{namespace}-cost-journal"
+        ),
+    }
     checks.extend(
         (
             Check(
@@ -96,9 +107,48 @@ def verify_realm_stack(
                 outputs.keys() >= (_REQUIRED_OUTPUTS | _REALM_OUTPUT_PARAMETERS),
                 "every reviewed V1.3 realm output must exist",
             ),
+            Check(
+                "cloudformation.recovery_journal_audit_bindings",
+                all(parameters.get(name) == arn for name, arn in expected_journals.items()),
+                "recovery journal audit bindings must name this realm's exact tables",
+            ),
         )
     )
     return checks, outputs, parameters
+
+
+def verify_recovery_audit_selectors(
+    response: Mapping[str, Any], parameters: Mapping[str, str]
+) -> list[Check]:
+    table_values: set[str] = set()
+    selectors = response.get("EventSelectors")
+    if isinstance(selectors, Sequence) and not isinstance(selectors, (str, bytes)):
+        for selector in selectors:
+            if not isinstance(selector, Mapping):
+                continue
+            resources = selector.get("DataResources")
+            if not isinstance(resources, Sequence) or isinstance(resources, (str, bytes)):
+                continue
+            for resource in resources:
+                if (
+                    not isinstance(resource, Mapping)
+                    or resource.get("Type") != "AWS::DynamoDB::Table"
+                ):
+                    continue
+                values = resource.get("Values")
+                if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+                    table_values.update(value for value in values if isinstance(value, str))
+    expected = {
+        parameters.get("AuthorityRecoveryJournalTableArn"),
+        parameters.get("CostRecoveryJournalTableArn"),
+    }
+    return [
+        Check(
+            "cloudtrail.recovery_journal_data_events",
+            None not in expected and expected <= table_values,
+            "CloudTrail must select both exact independent recovery journal tables",
+        )
+    ]
 
 
 def _expected_scope(parameters: Mapping[str, str]) -> dict[str, object]:
@@ -308,8 +358,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         cloudformation = session.client("cloudformation")
         stack = cloudformation.describe_stacks(StackName=args.stack_name)["Stacks"][0]
-        stack_checks, outputs, parameters = verify_realm_stack(stack)
+        stack_checks, outputs, parameters = verify_realm_stack(
+            stack, expected_account_id=args.expected_account_id
+        )
         checks.extend(stack_checks)
+        checks.extend(
+            verify_recovery_audit_selectors(
+                session.client("cloudtrail").get_event_selectors(
+                    TrailName=outputs["AuditTrailName"]
+                ),
+                parameters,
+            )
+        )
 
         lambdas = session.client("lambda")
         for kind in ("retrieval", "deletion"):
