@@ -816,5 +816,18 @@ acknowledgement, and public-inference checks passed with Ruff and strict mypy on
 2026-09-10. This evidence is invalidated by changes to the authority coordinator,
 transition result, writer/acknowledgement client contracts, or their ordering.
 
+The production recovery role stamp was reapplied on 2026-09-10 after the replay
+surface was completed. The trusted workstation connected over TLS through a temporary
+exact `/32` Render PostgreSQL allow-list entry; cleanup restored the allow-list to
+empty. No credential was rotated or copied into an additional Render service. All four
+ordinary Lucy services remained suspended, transcript capture remained disabled, and
+runtime admission remained quarantined. The four recovery LOGINs expose 14 exact
+stream-specific function grants in total, with no direct Lucy table authority or
+inherited role membership. The content-free result is
+`docs/evidence/utopia-r1-4-recovery-replay-restamp-2026-09-10.json`. This evidence is
+invalidated by a change to the recovery grant template, any recovery LOGIN membership
+or function ACL, the schema revision, admission/capture state, or the database network
+allow-list.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.

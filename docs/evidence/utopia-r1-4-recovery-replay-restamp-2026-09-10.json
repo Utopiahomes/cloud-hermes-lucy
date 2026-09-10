@@ -1,0 +1,19 @@
+{
+  "continuous_services_suspended": true,
+  "contract": "lucy.recovery-replay-restamp.v1.3",
+  "credential_rotation": false,
+  "external_allow_list_restored_empty": true,
+  "function_surface_count": 14,
+  "recovery_logins_verified": [
+    "lucy_utopia_authority_recovery",
+    "lucy_utopia_authority_writer",
+    "lucy_utopia_cost_recovery",
+    "lucy_utopia_cost_writer"
+  ],
+  "roles_sql_sha256": "d5e1643d67b9af446568184cccb6c148789e86ef91978eed97ea9c243eccf0fc",
+  "runtime_admission": "quarantined",
+  "schema_revision": "0050_r1_recovery_ack_receiver",
+  "status": "passed",
+  "temporary_service_environment": false,
+  "transcript_capture_enabled": false
+}
