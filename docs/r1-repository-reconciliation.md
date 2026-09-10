@@ -841,5 +841,15 @@ runner, coordinator, and DynamoDB adapter tests passed with Ruff and strict mypy
 URL and operator authorization must never remain on the continuous acknowledgement
 service after the one-off recovery job.
 
+All three commissioned recovery services were rolled forward without environment or
+command changes to exact commit `9cb8f28ccbc8d4c49e61e5a916351895706a041f`.
+Authority writer, cost writer, and recovery coordinator each reached `live`; a new
+secret-free private-network job then exited successfully only after asserting `ready`
+from all three fixed service endpoints. Render had not indexed the job's final log line
+when evidence was collected, so the record relies on the retained exact assertion
+command plus terminal job status rather than claiming that log text was observed.
+Auto-deploy and transcript capture remain off. The content-free record is
+`docs/evidence/utopia-r1-4-recovery-rollout-2026-09-10.json`.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
