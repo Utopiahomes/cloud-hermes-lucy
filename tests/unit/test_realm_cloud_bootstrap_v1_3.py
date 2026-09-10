@@ -254,6 +254,19 @@ def test_stage_sanitizes_sqlalchemy_statement_and_parameters() -> None:
     assert "SELECT" not in str(captured.value)
 
 
+def test_migrations_use_one_supplied_transaction_for_temporary_authority() -> None:
+    source = (ROOT / "deploy/postgres/bootstrap_realm_cloud_v1_3.py").read_text(
+        encoding="utf-8"
+    )
+    environment = (ROOT / "migrations/env.py").read_text(encoding="utf-8")
+    grant = source.index("GRANT USAGE, CREATE ON SCHEMA lucy")
+    upgrade = source.index('command.upgrade(alembic, "head")')
+    revoke = source.index("REVOKE CREATE ON SCHEMA lucy")
+    assert grant < upgrade < revoke
+    assert 'alembic.attributes["connection"] = connection' in source
+    assert 'config.attributes.get("connection")' in environment
+
+
 def test_directory_migration_does_not_hardcode_tenant_logins() -> None:
     migration = (
         ROOT / "migrations/versions/0024_r1_internal_directory_admission.py"

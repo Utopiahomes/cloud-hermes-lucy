@@ -20,8 +20,10 @@ from alembic import command
 from alembic.config import Config
 from psycopg import sql
 from pydantic import ValidationError
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.pool import NullPool
 
 from deploy.postgres.provision_realm_bindings_v1_3 import apply_manifest
 from deploy.postgres.provision_realm_foundation_v1_3 import (
@@ -314,19 +316,57 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
 
 
 def _run_migrations(config: BootstrapConfig) -> None:
-    previous = os.environ.get("LUCY_MIGRATION_DATABASE_URL")
-    os.environ["LUCY_MIGRATION_DATABASE_URL"] = config.migration_url.render_as_string(
-        hide_password=False
-    )
+    engine = create_engine(config.migration_url, poolclass=NullPool)
     try:
-        alembic = Config(str(ROOT / "alembic.ini"))
-        alembic.set_main_option("script_location", str(ROOT / "migrations"))
-        command.upgrade(alembic, "head")
+        with engine.begin() as connection:
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": _MAINTENANCE_LOCK},
+            )
+            connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADMISSION_LOCK})
+            boundary = connection.execute(
+                text(
+                    "SELECT n.nspowner::regrole::text,"
+                    "(SELECT rolsuper FROM pg_roles WHERE rolname='lucy_migration'),"
+                    "(SELECT rolsuper FROM pg_roles "
+                    " WHERE rolname='lucy_security_function_owner'),"
+                    "EXISTS(SELECT 1 FROM aclexplode(COALESCE(n.nspacl,"
+                    " acldefault('n',n.nspowner))) "
+                    " WHERE grantee=0 AND privilege_type='CREATE') "
+                    "FROM pg_namespace n WHERE n.nspname='lucy'"
+                )
+            ).one()
+            if boundary[0] in {"lucy_migration", "lucy_security_function_owner"}:
+                raise BootstrapError("migration roles must not own the Lucy schema")
+            if boundary[1] is not False or boundary[2] is not False or boundary[3] is not False:
+                raise BootstrapError("migration schema authority boundary is unsafe")
+
+            connection.execute(
+                text(
+                    "GRANT USAGE, CREATE ON SCHEMA lucy TO lucy_security_function_owner"
+                )
+            )
+            alembic = Config(str(ROOT / "alembic.ini"))
+            alembic.set_main_option("script_location", str(ROOT / "migrations"))
+            alembic.attributes["connection"] = connection
+            command.upgrade(alembic, "head")
+            connection.execute(
+                text("REVOKE CREATE ON SCHEMA lucy FROM lucy_security_function_owner")
+            )
+            residual = connection.execute(
+                text(
+                    "SELECT has_schema_privilege('lucy_migration','lucy','CREATE'),"
+                    "has_schema_privilege('lucy_security_function_owner','lucy','CREATE'),"
+                    "EXISTS(SELECT 1 FROM pg_namespace n,"
+                    "LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a "
+                    "WHERE n.nspname='lucy' AND a.grantee=0 "
+                    "AND a.privilege_type='CREATE')"
+                )
+            ).one()
+            if any(value is not False for value in residual):
+                raise BootstrapError("migration schema CREATE authority was not removed")
     finally:
-        if previous is None:
-            os.environ.pop("LUCY_MIGRATION_DATABASE_URL", None)
-        else:
-            os.environ["LUCY_MIGRATION_DATABASE_URL"] = previous
+        engine.dispose()
 
 
 def _apply_grants_and_provision(config: BootstrapConfig) -> tuple[str, bool, bool]:
@@ -395,6 +435,10 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
                 *(str(url.username) for url in config.runtime_urls.values()),
             }
         }
+        residual_schema_create = any(
+            _scalar(connection, "SELECT has_schema_privilege(%s,'lucy','CREATE')", (name,))
+            for name in ("lucy_migration", "lucy_security_function_owner")
+        )
     if revision != EXPECTED_REVISION:
         raise BootstrapError("database did not reach the reviewed V1.3 migration head")
     if admission != "quarantined" or safe is not True:
@@ -407,6 +451,8 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         if name != "lucy_directory_admission"
     ):
         raise BootstrapError("directory admission function ACL is not isolated")
+    if residual_schema_create:
+        raise BootstrapError("migration schema CREATE authority was not removed")
 
     verified_logins: list[str] = []
     for mode, url in config.runtime_urls.items():
@@ -437,6 +483,7 @@ def _verify(config: BootstrapConfig) -> dict[str, Any]:
         "active_actor_bindings": actor_count,
         "active_executor_bindings": executor_count,
         "directory_admission_acl_isolated": True,
+        "migration_schema_create_removed": True,
         "verified_runtime_logins": verified_logins,
     }
 
