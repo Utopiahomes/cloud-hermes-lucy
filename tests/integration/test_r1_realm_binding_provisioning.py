@@ -13,6 +13,10 @@ from deploy.postgres.provision_realm_bindings_v1_3 import (
     RealmProvisioningError,
     apply_manifest,
 )
+from deploy.postgres.provision_realm_foundation_v1_3 import (
+    RealmFoundationSeedV1,
+    apply_foundation,
+)
 from lucy.db import create_session_factory
 from lucy.db.models import RealmBindingRow
 from lucy.realm_provisioning import RealmExecutorStampV1, RealmSecurityStampV1
@@ -174,3 +178,45 @@ def test_exact_realm_stamp_is_idempotent() -> None:
             "(SELECT count(*) FROM lucy.realm_sensitive_actor_bindings_v1),"
             "(SELECT count(*) FROM lucy.realm_executor_bindings_v2)"
         ).fetchone() == (1, 1, 4, 2)
+
+
+def test_exact_foundation_replays_and_admits_the_security_stamp() -> None:
+    stamp = _stamp()
+    seed = RealmFoundationSeedV1(
+        realm_slug="utopia",
+        account_slug="realm-stamp-test",
+        account_display_name="Realm stamp test",
+        node_slug="realm-stamp-test",
+        node_display_name="Realm stamp test",
+        node_kind="organization",
+        workspace_slug="private",
+        service_issuer="lucy://utopia/services",
+        wallet_id=uuid4(),
+        provisioned_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    with psycopg.connect(_conninfo()) as connection:
+        connection.execute(
+            "TRUNCATE lucy.realm_executor_bindings_v2, "
+            "lucy.realm_sensitive_actor_bindings_v1, lucy.realm_service_bindings_v1, "
+            "lucy.realm_content_scopes_v1, lucy.channel_bindings, "
+            "lucy.wallet_registrations, lucy.workspaces, lucy.realm_bindings, "
+            "lucy.node_tenures, lucy.security_realms, lucy.nodes, "
+            "lucy.tenant_accounts, lucy.principals CASCADE"
+        )
+    with psycopg.connect(_conninfo()) as connection:
+        assert apply_foundation(connection, stamp, seed) is True
+    with psycopg.connect(_conninfo()) as connection:
+        assert apply_foundation(connection, stamp, seed) is False
+        assert apply_manifest(connection, stamp) is True
+        assert connection.execute(
+            "SELECT (SELECT count(*) FROM lucy.tenant_accounts),"
+            "(SELECT count(*) FROM lucy.nodes),"
+            "(SELECT count(*) FROM lucy.node_tenures),"
+            "(SELECT count(*) FROM lucy.security_realms),"
+            "(SELECT count(*) FROM lucy.realm_bindings),"
+            "(SELECT count(*) FROM lucy.workspaces),"
+            "(SELECT count(*) FROM lucy.wallet_registrations),"
+            "(SELECT count(*) FROM lucy.principals),"
+            "(SELECT count(*) FROM lucy.channel_bindings),"
+            "(SELECT count(*) FROM lucy.node_memberships)"
+        ).fetchone() == (1, 1, 1, 1, 1, 1, 1, 4, 0, 0)

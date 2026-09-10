@@ -152,7 +152,28 @@ service, remove the temporary migration resource and its environment snapshot,
 and verify the database inbound allowlist is still empty. Never retain the
 migration-owner URL on a continuously running service.
 
-## Provision one V1.3 realm binding stamp
+## Provision one V1.3 realm foundation and binding stamp
+
+Before binding authority, create the content-free tenant/node/tenure/realm,
+private workspace, four service principals, and nonspendable wallet with:
+
+```text
+python deploy/postgres/provision_realm_foundation_v1_3.py
+```
+
+This temporary migration-only operation requires production Render, disabled
+transcript capture, quarantined runtime admission, TLS, the private
+`lucy_migration` URL, and the exact authorization marker
+`security-v1.3-quarantined-realm-foundation`. Supply the reviewed realm stamp
+and digest as `LUCY_REALM_SECURITY_STAMP_JSON` and
+`LUCY_REALM_SECURITY_STAMP_SHA256`, plus the content-free
+`lucy.realm-foundation-seed.v1` and its canonical digest as
+`LUCY_REALM_FOUNDATION_SEED_JSON` and
+`LUCY_REALM_FOUNDATION_SEED_SHA256`. The seed contains only labels, one stable
+wallet ID, a service-principal issuer, and a fixed provisioning timestamp. It
+does not create a public channel, membership, transcript, credential, or
+capture authorization. Exact replay is read-only; partial or conflicting state
+fails and rolls back.
 
 After the realm LOGIN role stamp is applied and the tenant/node/tenure/realm,
 workspace, four service principals, and AWS executor aliases exist, apply their

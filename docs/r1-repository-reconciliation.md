@@ -448,6 +448,19 @@ transaction, rejects conflicting or partial prior state, and treats an exact rep
 as read-only. The path has been proven on disposable PostgreSQL only; no production
 realm has been provisioned.
 
+`provision_realm_foundation_v1_3.py` closes the production seeding prerequisite
+without weakening that binding gate. Under the same capture-off, TLS, quarantine,
+maintenance-lock and admission-lock boundary, it inserts the exact stamped
+tenant/node/tenure/realm/private-workspace and four service principals plus one
+registered-nonspendable wallet. A separate canonical content-free seed supplies
+only labels, issuer, stable wallet ID and provisioning timestamp. It creates no
+public channel, owner membership, credential, content, or capture authorization;
+exact replay is read-only and any partial/conflicting foundation rolls back. Fourteen
+focused foundation/binding/deployment-boundary tests pass with Ruff and mypy. The
+disposable PostgreSQL integration extension is present but not rerun because Docker
+Desktop was unavailable; production execution remains blocked until the branch is
+published and the container is built.
+
 The scoped retrieval, deletion, and new-capture chains are complete locally through
 reconciliation, finality observation, quarantined restore replay, scoped OTR
 enforcement, ambiguous archive-write recovery, and the documented post-grant
