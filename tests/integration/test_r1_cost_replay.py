@@ -201,6 +201,9 @@ def test_missing_attempt_replays_to_nonexecutable_cost_projection() -> None:
     final_head = restored.apply(journal.event(2), reservation_head)
     assert final_head == journal.head()
     assert restored.apply(journal.event(1), genesis) == reservation_head
+    finalized = restored.finalize(final_head)
+    assert finalized.state == "finalized"
+    assert not finalized.operator_review_required
 
     with create_engine(OWNER_URL).connect() as connection:
         projection = connection.execute(
@@ -219,6 +222,47 @@ def test_missing_attempt_replays_to_nonexecutable_cost_projection() -> None:
     )
     with pytest.raises(DBAPIError, match="cost recovery is not finalized"):
         admission.reserve(retry)
+
+    with create_engine(OWNER_URL).begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.restored_cost_admission_v1 "
+                "SET paid_admission_not_before=now()-interval '1 second'"
+            )
+        )
+    assert admission.reserve(retry).state == "PERSISTENCE_PENDING"
+
+
+def test_present_admitted_attempt_is_fenced_before_cost_recovery_finalizes() -> None:
+    assert COST_URL is not None and RECOVERY_URL is not None and OWNER_URL is not None
+    _, attempt = _foundation_policy_attempt()
+    admission = ProviderCostAdmissionService(create_session_factory(COST_URL))
+    recovery = ProviderCostRecoveryService(create_session_factory(RECOVERY_URL))
+    binding = _binding()
+    journal = InMemoryRecoveryJournal(binding)
+    writer = CostJournalWriter(
+        CostJournalPreparationService(create_session_factory(COST_URL)), journal
+    )
+    reserved = admission.reserve(attempt)
+    reservation_digest = writer.append_reservation(reserved)
+    recovery.acknowledge(
+        attempt_id=attempt.attempt_id,
+        event_id=reserved.event_id,
+        head_digest=reservation_digest,
+    )
+
+    restored = PostgresCostReplayStore(create_session_factory(RECOVERY_URL), binding)
+    head = restored.apply(journal.event(1), restored.head())
+    finalized = restored.finalize(head)
+    assert finalized.state == "finalized"
+    with create_engine(OWNER_URL).connect() as connection:
+        state = connection.scalar(
+            text("SELECT state FROM lucy.provider_attempts_v1 WHERE id=:attempt"),
+            {"attempt": attempt.attempt_id},
+        )
+        assert state == "UNKNOWN"
+    replay = admission.claim_submission(attempt.attempt_id)
+    assert replay.state == "UNKNOWN" and replay.replayed
 
 
 def test_cost_replay_identity_is_execute_only_and_strict() -> None:

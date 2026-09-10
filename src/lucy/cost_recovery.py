@@ -107,6 +107,28 @@ class PendingCostEventV1(BaseModel):
         )
 
 
+class CostRecoveryFinalizationV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["replay_in_progress", "finalized"]
+    operator_review_required: bool
+    paid_admission_not_before: datetime | None
+
+    @model_validator(mode="after")
+    def finalization_is_complete(self) -> CostRecoveryFinalizationV1:
+        if self.state == "finalized":
+            if self.operator_review_required or self.paid_admission_not_before is None:
+                raise ValueError("cost recovery finalization is incomplete")
+        elif not self.operator_review_required or self.paid_admission_not_before is not None:
+            raise ValueError("cost recovery review state is incomplete")
+        if self.paid_admission_not_before is not None and (
+            self.paid_admission_not_before.tzinfo is None
+            or self.paid_admission_not_before.utcoffset() is None
+        ):
+            raise ValueError("cost recovery admission time must be timezone-aware")
+        return self
+
+
 class CostJournalPreparationService:
     """Cost-admission identity operations for one frozen journal event."""
 
@@ -322,6 +344,15 @@ class PostgresCostReplayStore:
         if applied != predicted:
             raise RecoveryJournalError("cost recovery applied an inexact event")
         return applied
+
+    def finalize(self, expected: RecoveryJournalHeadV1) -> CostRecoveryFinalizationV1:
+        self._require_binding(expected)
+        with self._sessions.begin() as session:
+            result = session.execute(
+                text("SELECT lucy.finalize_cost_recovery_v1(CAST(:expected AS jsonb))"),
+                {"expected": json.dumps(expected.model_dump(mode="json"))},
+            ).scalar_one()
+        return CostRecoveryFinalizationV1.model_validate(result)
 
     def _genesis(self) -> RecoveryJournalHeadV1:
         return RecoveryJournalHeadV1(

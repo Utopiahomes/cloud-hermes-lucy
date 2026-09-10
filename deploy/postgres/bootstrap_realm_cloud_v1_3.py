@@ -46,8 +46,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0046_r1_cost_journal",
     "0047_r1_authority_replay",
     "0048_r1_cost_replay",
+    "0049_r1_cost_recovery_finalize",
 }
-EXPECTED_REVISION = "0048_r1_cost_replay"
+EXPECTED_REVISION = "0049_r1_cost_recovery_finalize"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
