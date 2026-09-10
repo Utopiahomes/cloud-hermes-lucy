@@ -188,3 +188,47 @@ def test_v13_archive_role_can_reconcile_only_exact_wrapped_key_records() -> None
     assert "Query" not in serialized
     assert "BatchGetItem" not in serialized
     assert "DeleteItem" not in serialized
+
+
+def test_r1_recovery_journals_have_separate_tables_and_pause_only_recovery() -> None:
+    text = (AWS_DEPLOY / "r1-recovery-journals-v1.3.yaml").read_text(encoding="utf-8")
+    template = _load_cloudformation(text)
+    resources = template["Resources"]
+    for name in ("AuthorityJournal", "CostJournal"):
+        table = resources[name]
+        assert table["DeletionPolicy"] == "Retain"
+        properties = table["Properties"]
+        assert properties["DeletionProtectionEnabled"] is True
+        assert properties["BillingMode"] == "PAY_PER_REQUEST"
+        assert properties["PointInTimeRecoverySpecification"] == {
+            "PointInTimeRecoveryEnabled": True,
+            "RecoveryPeriodInDays": 30,
+        }
+        assert "TimeToLiveSpecification" not in properties
+
+    policies = {
+        name: resources[name]["Properties"]["PolicyDocument"]["Statement"]
+        for name in (
+            "AuthorityWriterPolicy",
+            "CostWriterPolicy",
+            "RecoveryCoordinatorPolicy",
+        )
+    }
+    authority = str(policies["AuthorityWriterPolicy"])
+    cost = str(policies["CostWriterPolicy"])
+    recovery = str(policies["RecoveryCoordinatorPolicy"])
+    assert "CostJournal" not in authority and "STREAM#cost#" not in authority
+    assert "AuthorityJournal" not in cost and "STREAM#authority#" not in cost
+    assert "PAUSE#authority#" in recovery and "PAUSE#cost#" in recovery
+    assert "EVENT#" not in recovery
+    assert "UpdateItem" not in recovery
+    for serialized in (authority, cost, recovery):
+        assert "TransactWriteItems" in serialized
+        assert not any(action in serialized for action in ("Scan", "Query", "DeleteItem"))
+
+    trusts = [
+        str(resources[name]["Properties"]["AssumeRolePolicyDocument"])
+        for name in ("AuthorityWriterRole", "CostWriterRole", "RecoveryCoordinatorRole")
+    ]
+    assert len(set(trusts)) == 3
+    assert all("sts.amazonaws.com" in trust and ":service:" in trust for trust in trusts)

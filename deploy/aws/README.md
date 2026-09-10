@@ -1,5 +1,14 @@
 # Security Baseline AWS deployment
 
+`r1-recovery-journals-v1.3.yaml` is an additive, not-yet-deployed R1 recovery
+boundary. It defines separate retained authority and cost journal tables plus exact
+Render OIDC roles for the two writers and the operator-triggered coordinator. The
+coordinator can write only `PAUSE#...` partitions and condition-check `STREAM#...`;
+it has no event, head-update, scan, query, delete, KMS, Lambda, or table-administration
+authority. Keep this separate from the accepted realm stack until the three Render
+service IDs, genesis heads, CloudTrail integration, and deployed negative-permission
+exercise are ready for one reviewed update.
+
 ## V1.3 per-realm template (local preparation only)
 
 `security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.
