@@ -56,6 +56,13 @@ event, stream, and required terminal state. Attempt IDs and journal-head digests
 used only by the local workflow contract and are never trusted or transmitted to the
 receiver.
 
+Each journal writer is also a separate private Render workload running
+`python -m lucy.recovery_writer_runtime`. Its path-only API accepts a zero-byte POST
+containing one event UUID, exact-reads and prepares that event through its dedicated
+PostgreSQL LOGIN, and conditionally appends through its one stream-bound AWS role.
+The authority and cost writer services, tokens, database LOGINs, tables, bindings,
+and OIDC subjects are distinct.
+
 ## V1.3 per-realm template (local preparation only)
 
 `security-baseline-v1.2.yaml` remains the accepted, frozen single-realm source.

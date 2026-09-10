@@ -554,6 +554,9 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
         "lucy-evidence",
         "lucy-deletion",
         "lucy-finality-utility",
+        "lucy-authority-writer",
+        "lucy-cost-writer",
+        "lucy-recovery-coordinator",
     }
     forbidden = {
         "AWS_ACCESS_KEY_ID",
@@ -577,6 +580,23 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
     assert services["lucy-finality-utility"]["dockerCommand"].endswith(
         "--scheduled-sentinel"
     )
+    for name in (
+        "lucy-authority-writer",
+        "lucy-cost-writer",
+        "lucy-recovery-coordinator",
+    ):
+        environment = {item["key"]: item for item in services[name]["envVars"]}
+        assert environment["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+        assert "AWS_ROLE_ARN" in environment
+    assert services["lucy-authority-writer"]["dockerCommand"] == (
+        "python -m lucy.recovery_writer_runtime"
+    )
+    assert services["lucy-cost-writer"]["dockerCommand"] == (
+        "python -m lucy.recovery_writer_runtime"
+    )
+    assert services["lucy-recovery-coordinator"]["dockerCommand"] == (
+        "python -m lucy.recovery_ack_runtime"
+    )
 
 
 def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
@@ -594,6 +614,23 @@ def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
     }
     for name, login in expected_logins.items():
         assert environments[name]["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == login
+
+    assert environments["lucy-authority-writer"][
+        "LUCY_RECOVERY_WRITER_DATABASE_LOGIN"
+    ]["value"] == "lucy_utopia_authority_writer"
+    assert environments["lucy-cost-writer"]["LUCY_RECOVERY_WRITER_DATABASE_LOGIN"][
+        "value"
+    ] == "lucy_utopia_cost_writer"
+    coordinator = environments["lucy-recovery-coordinator"]
+    assert coordinator["LUCY_AUTHORITY_RECOVERY_DATABASE_LOGIN"]["value"] == (
+        "lucy_utopia_authority_recovery"
+    )
+    assert coordinator["LUCY_COST_RECOVERY_DATABASE_LOGIN"]["value"] == (
+        "lucy_utopia_cost_recovery"
+    )
+    assert coordinator["LUCY_AUTHORITY_RECOVERY_ACK_TOKEN"] != coordinator[
+        "LUCY_COST_RECOVERY_ACK_TOKEN"
+    ]
 
     assert "AWS_ROLE_ARN" not in environments["lucy-policy"]
     assert not any(

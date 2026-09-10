@@ -162,6 +162,17 @@ def test_reservation_is_frozen_before_append_and_exactly_replayed() -> None:
     assert preparations.value.journal_previous_digest == "0" * 64
 
 
+def test_private_cost_writer_appends_by_exact_event_identifier() -> None:
+    pending = PendingCostEventV1.model_validate(pending_values())
+    preparations = FakePreparations(pending)
+    acknowledgement = CostJournalWriter(preparations, journal()).append_pending(
+        pending.event_id
+    )
+    assert acknowledgement.event_id == pending.event_id
+    assert acknowledgement.resulting_head.sequence == 1
+    assert acknowledgement.event_digest == preparations.value.journal_event_digest
+
+
 def test_outcome_replay_survives_lost_append_response() -> None:
     pending = PendingCostEventV1.model_validate(pending_values("settlement"))
     preparations = FakePreparations(pending)

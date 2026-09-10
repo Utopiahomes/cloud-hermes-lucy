@@ -213,6 +213,11 @@ class CostJournalWriter:
         acknowledgement = self._append(pending)
         return acknowledgement.event_digest
 
+    def append_pending(self, event_id: UUID) -> RecoveryAppendAcknowledgementV1:
+        """Append one exact prepared or unprepared event for the private writer API."""
+
+        return self._append(self._preparations.pending(event_id))
+
     def append_outcome(
         self,
         *,
