@@ -11,7 +11,9 @@ from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_en
 from lucy.readiness import (
     ReadinessError,
     ServiceReadiness,
+    expected_database_login_from_environment,
     expected_storage_epoch,
+    security_baseline_from_environment,
     service_mode_from_environment,
 )
 
@@ -42,16 +44,23 @@ def main() -> None:
     if observed != _expected_commit():
         raise SystemExit("Lucy startup gate failed: Hermes pin mismatch")
     mode = service_mode_from_environment()
+    baseline = security_baseline_from_environment()
     print(f"Lucy startup admission check beginning for isolated {mode} identity")
     try:
         # V1.2 evidence/deletion callers have no DynamoDB credentials. Only the
         # routine/archive boundary reads the bounded journal head at admission.
-        journal = deletion_journal_from_environment() if mode == "routine" else None
+        journal = (
+            deletion_journal_from_environment()
+            if baseline == "v1.2" and mode == "routine"
+            else None
+        )
         ServiceReadiness(
             sessions,
             mode=mode,
             storage_epoch=expected_storage_epoch(mode),
             journal=journal,
+            baseline=baseline,
+            expected_database_login=expected_database_login_from_environment(baseline),
         ).check()
     except (ReadinessError, DeletionJournalError) as exc:
         raise SystemExit(f"Lucy startup gate failed: {exc}") from exc

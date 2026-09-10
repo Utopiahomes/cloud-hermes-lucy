@@ -8,7 +8,9 @@ import pytest
 import lucy.runtime as runtime
 from lucy.readiness import (
     ReadinessError,
+    expected_database_login_from_environment,
     expected_storage_epoch,
+    security_baseline_from_environment,
     service_mode_from_environment,
 )
 from lucy.rejoining import RejoiningService
@@ -62,6 +64,27 @@ def test_aws_backend_always_requires_isolated_identity(monkeypatch: pytest.Monke
     monkeypatch.delenv("LUCY_SERVICE_MODE", raising=False)
     with pytest.raises(ReadinessError):
         service_mode_from_environment()
+
+
+def test_v13_requires_an_explicit_expected_database_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.delenv("LUCY_EXPECTED_DATABASE_LOGIN", raising=False)
+    assert security_baseline_from_environment() == "v1.3"
+    with pytest.raises(ReadinessError, match="database identity"):
+        expected_database_login_from_environment("v1.3")
+    monkeypatch.setenv("LUCY_EXPECTED_DATABASE_LOGIN", "lucy_utopia_routine")
+    assert (
+        expected_database_login_from_environment("v1.3")
+        == "lucy_utopia_routine"
+    )
+
+
+def test_unknown_security_baseline_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "moving-main")
+    with pytest.raises(ReadinessError, match="security baseline"):
+        security_baseline_from_environment()
 
 
 def test_policy_startup_never_requests_an_aws_journal(

@@ -69,8 +69,11 @@ GRANT USAGE ON SCHEMA lucy TO
 GRANT SELECT ON public.alembic_version TO
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
   "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
-GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission
-  TO "__LUCY_REALM_ROUTINE_LOGIN__";
+-- Content-free startup/transaction admission is readable by every realm
+-- process. No customer content or authority-directory rows are exposed.
+GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission TO
+  "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
 
 -- Normal/private Lucy plus archive ingestion. Every operation derives its one
 -- content scope from session_user; there is no request-selected realm.

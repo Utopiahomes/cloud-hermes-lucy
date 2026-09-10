@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
+R1_SCHEMA_REVISION = "0039_r1_scoped_capture_runtime"
 SERVICE_ROLES = {
     "routine": "lucy_routine",
     "policy": "lucy_policy",
@@ -19,6 +20,7 @@ SERVICE_ROLES = {
     "deletion": "lucy_evidence_deleter",
 }
 SERVICE_MODES = {*SERVICE_ROLES, "all-local"}
+SECURITY_BASELINES = {"v1.2", "v1.3"}
 ADMISSION_LOCK = 0x4C5543594144
 
 
@@ -35,6 +37,22 @@ def service_mode_from_environment() -> str:
     if mode not in SERVICE_MODES or (production and mode == "all-local"):
         raise ReadinessError("explicit isolated service identity required")
     return mode
+
+
+def security_baseline_from_environment() -> str:
+    baseline = os.getenv("LUCY_SECURITY_BASELINE", "v1.2").strip()
+    if baseline not in SECURITY_BASELINES:
+        raise ReadinessError("security baseline is missing or invalid")
+    return baseline
+
+
+def expected_database_login_from_environment(baseline: str) -> str | None:
+    value = os.getenv("LUCY_EXPECTED_DATABASE_LOGIN", "").strip()
+    if baseline == "v1.2":
+        return value or None
+    if not value or len(value) > 63:
+        raise ReadinessError("expected realm database identity is missing or invalid")
+    return value
 
 
 def expected_storage_epoch(mode: str) -> UUID | None:
@@ -55,6 +73,8 @@ class ServiceReadiness:
         mode: str,
         storage_epoch: UUID | None,
         journal: DeletionJournal | None = None,
+        baseline: str = "v1.2",
+        expected_database_login: str | None = None,
     ) -> None:
         if mode not in SERVICE_MODES or (mode != "all-local" and storage_epoch is None):
             raise ReadinessError("service admission configuration is incomplete")
@@ -62,6 +82,12 @@ class ServiceReadiness:
         self._mode = mode
         self._epoch = storage_epoch
         self._journal = journal
+        if baseline not in SECURITY_BASELINES:
+            raise ReadinessError("security baseline is missing or invalid")
+        if baseline == "v1.3" and not expected_database_login:
+            raise ReadinessError("expected realm database identity is missing or invalid")
+        self._baseline = baseline
+        self._expected_database_login = expected_database_login
 
     def check(self) -> None:
         with self._sessions.begin() as session:
@@ -79,7 +105,8 @@ class ServiceReadiness:
                     )
                 )
             )
-            if revisions != [SCHEMA_REVISION]:
+            expected_revision = R1_SCHEMA_REVISION if self._baseline == "v1.3" else SCHEMA_REVISION
+            if revisions != [expected_revision]:
                 raise ReadinessError("database schema is not the reviewed revision")
             admission = session.execute(
                 text(
@@ -100,10 +127,14 @@ class ServiceReadiness:
                 raise ReadinessError("control-plane recovery row is unavailable")
             if lifecycle.state != "ready":
                 raise ReadinessError("control-plane recovery is not ready")
-            if self._mode in {"routine", "all-local"}:
+            if self._baseline == "v1.2" and self._mode in {"routine", "all-local"}:
                 check_journal_admission(session.connection(), self._journal)
 
     def _check_identity(self, session: Session) -> None:
+        if self._expected_database_login is not None:
+            actual_login = session.scalar(text("SELECT session_user"))
+            if actual_login != self._expected_database_login:
+                raise ReadinessError("service database identity mismatch")
         elevated = session.scalar(
             text(
                 "SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls "
@@ -133,6 +164,9 @@ class ServiceReadiness:
         )
         if elevated_storage:
             raise ReadinessError("service login can administer storage")
+        if self._baseline == "v1.3":
+            self._check_v13_identity(session)
+            return
         forbidden = [
             ("lucy.deletion_journal_binding", "INSERT,UPDATE,DELETE,TRUNCATE"),
             ("lucy.deletion_journal_receipts", "UPDATE,DELETE,TRUNCATE"),
@@ -270,6 +304,66 @@ class ServiceReadiness:
                 {"table": table},
             ):
                 raise ReadinessError("service login lacks readiness permissions")
+
+    def _check_v13_identity(self, session: Session) -> None:
+        # V1.3 realm logins are execute-only. The two gate tables and Alembic
+        # revision contain no customer content and are the sole direct reads.
+        allowed_reads = {
+            "lucy.lifecycle",
+            "lucy.runtime_admission",
+            "public.alembic_version",
+        }
+        tables = session.execute(
+            text(
+                "SELECT n.nspname || '.' || c.relname AS relation "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname IN ('lucy','public') AND c.relkind IN ('r','p')"
+            )
+        ).scalars()
+        for table in tables:
+            privileges = "INSERT,UPDATE,DELETE,TRUNCATE"
+            if table not in allowed_reads:
+                privileges = "SELECT," + privileges
+            if session.scalar(
+                text("SELECT has_table_privilege(session_user, :table, :privileges)"),
+                {"table": table, "privileges": privileges},
+            ):
+                raise ReadinessError("realm service login exceeds execute-only capabilities")
+        for table in allowed_reads:
+            if not session.scalar(
+                text("SELECT has_table_privilege(session_user, :table, 'SELECT')"),
+                {"table": table},
+            ):
+                raise ReadinessError("realm service login lacks readiness permissions")
+        required_functions = {
+            "routine": (
+                "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint)",
+                "lucy.search_scoped_memory_v1(text,integer)",
+                "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
+                "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
+                "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
+            ),
+            "policy": (
+                "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
+                "lucy.store_sensitive_execution_grant_v2(uuid,jsonb)",
+                "lucy.attest_executor_receipt_v2(uuid,jsonb)",
+            ),
+            "evidence": (
+                "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.freeze_claimed_evidence_package_v2(uuid)",
+                "lucy.reconcile_sensitive_operation_v2(uuid)",
+            ),
+            "deletion": (
+                "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.reconcile_scoped_deletion_v2(uuid)",
+            ),
+        }
+        for function in required_functions.get(self._mode, ()):
+            if not session.scalar(
+                text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),
+                {"function": function},
+            ):
+                raise ReadinessError("realm service login lacks its exact function grants")
 
 
 class AdmittedSession(Session):

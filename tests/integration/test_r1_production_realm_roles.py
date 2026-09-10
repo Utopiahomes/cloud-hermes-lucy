@@ -4,11 +4,15 @@ import importlib.util
 import os
 from pathlib import Path
 from types import ModuleType
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
+
+from lucy.readiness import ServiceReadiness
 
 ROOT = Path(__file__).parents[2]
 OWNER_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
@@ -82,4 +86,54 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
     with pytest.raises(DBAPIError, match="permission denied"), routine.connect() as connection:
         connection.execute(text("SELECT * FROM lucy.scoped_capture_receipts_v1"))
     routine.dispose()
+    owner.dispose()
+
+
+def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login() -> None:
+    assert OWNER_URL
+    parsed = make_url(OWNER_URL)
+    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
+        raise RuntimeError("refusing to alter admission outside the disposable test database")
+    sql = _renderer().render_realm_roles(
+        realm_slug="utopia",
+        routine_login="lucy_utopia_routine",
+        policy_login="lucy_utopia_policy",
+        workflow_login="lucy_utopia_sensitive_workflow",
+        finality_login="lucy_utopia_finality",
+    )
+    owner = create_engine(OWNER_URL)
+    epoch = uuid4()
+    with owner.begin() as connection:
+        connection.execute(text(sql))
+        connection.execute(
+            text("UPDATE lucy.runtime_admission SET state='ready',storage_epoch=:epoch"),
+            {"epoch": epoch},
+        )
+        connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
+    boundaries = (
+        ("routine", "lucy_utopia_routine", "synthetic-utopia-only"),
+        ("policy", "lucy_utopia_policy", "synthetic-utopia-policy-only"),
+        (
+            "evidence",
+            "lucy_utopia_sensitive_workflow",
+            "synthetic-utopia-workflow-only",
+        ),
+        (
+            "deletion",
+            "lucy_utopia_sensitive_workflow",
+            "synthetic-utopia-workflow-only",
+        ),
+    )
+    for mode, login, password in boundaries:
+        url = parsed.set(username=login, password=password)
+        engine = create_engine(url)
+        sessions = sessionmaker(engine, class_=Session)
+        ServiceReadiness(
+            sessions,
+            mode=mode,
+            storage_epoch=epoch,
+            baseline="v1.3",
+            expected_database_login=login,
+        ).check()
+        engine.dispose()
     owner.dispose()
