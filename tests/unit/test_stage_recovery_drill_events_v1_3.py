@@ -73,6 +73,7 @@ def _environment() -> dict[str, str]:
     stamp = _stamp()
     fixture = _fixture(stamp)
     events = _events(stamp, fixture)
+    binding = _binding(stamp)
     return {
         "RENDER": "true",
         "LUCY_ENVIRONMENT": "production",
@@ -86,7 +87,8 @@ def _environment() -> dict[str, str]:
         "LUCY_RECOVERY_DRILL_FIXTURE_MANIFEST_JSON": fixture.model_dump_json(),
         "LUCY_RECOVERY_DRILL_EVENT_MANIFEST_JSON": events.model_dump_json(),
         "LUCY_RECOVERY_DRILL_EVENT_MANIFEST_SHA256": events.digest_hex(),
-        "LUCY_AUTHORITY_RECOVERY_STREAM_BINDING_JSON": _binding(stamp).model_dump_json(),
+        "LUCY_AUTHORITY_RECOVERY_STREAM_BINDING_JSON": binding.model_dump_json(),
+        "LUCY_RECOVERY_BINDING_MANIFEST_DIGEST": binding.binding_manifest_digest,
     }
 
 
@@ -104,6 +106,7 @@ def test_event_config_is_fixture_and_authority_stream_bound() -> None:
         ("LUCY_RECOVERY_DRILL_EVENT_AUTHORIZATION", "wrong"),
         ("LUCY_MIGRATION_DATABASE_URL", "postgresql://lucy_migration:x@public/db"),
         ("LUCY_RECOVERY_DRILL_EVENT_MANIFEST_SHA256", "0" * 64),
+        ("LUCY_RECOVERY_BINDING_MANIFEST_DIGEST", "0" * 64),
     ],
 )
 def test_event_config_rejects_boundary_drift(name: str, value: str) -> None:

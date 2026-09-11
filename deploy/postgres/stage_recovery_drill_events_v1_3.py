@@ -101,6 +101,7 @@ class RecoveryDrillEventConfig(BaseModel):
     fixture: RecoveryDrillFixtureManifestV1
     events: RecoveryDrillEventManifestV1
     authority_binding: RecoveryStreamBindingV1
+    binding_manifest_digest: str
 
     @classmethod
     def from_environment(
@@ -140,11 +141,16 @@ class RecoveryDrillEventConfig(BaseModel):
             raise RealmProvisioningError("recovery event staging input is invalid") from exc
         reviewed = _required(values, "LUCY_RECOVERY_DRILL_EVENT_MANIFEST_SHA256")
         stamp_digest = _required(values, "LUCY_REALM_SECURITY_STAMP_SHA256")
+        binding_manifest_digest = _required(
+            values, "LUCY_RECOVERY_BINDING_MANIFEST_DIGEST"
+        )
         if (
             _DIGEST.fullmatch(reviewed) is None
             or reviewed != events.digest_hex()
             or _DIGEST.fullmatch(stamp_digest) is None
             or stamp_digest != stamp.digest_hex()
+            or _DIGEST.fullmatch(binding_manifest_digest) is None
+            or authority_binding.binding_manifest_digest != binding_manifest_digest
         ):
             raise RealmProvisioningError("recovery event manifest digest does not match")
         if (
@@ -160,6 +166,7 @@ class RecoveryDrillEventConfig(BaseModel):
             fixture=fixture,
             events=events,
             authority_binding=authority_binding,
+            binding_manifest_digest=binding_manifest_digest,
         )
 
 

@@ -215,6 +215,7 @@ point after that anchor and before the later events.
 `stage_recovery_drill_events_v1_3.py` then stages exactly one membership revocation
 and one one-micro-USD reservation. Its reviewed event manifest pins the fixture
 digest, idempotency keys, attempt ID, commitments, and request time. The command uses
+the authority stream only when it matches the reviewed recovery-binding manifest,
 the offline migration session with `SET LOCAL ROLE` only for the two existing function
 owners, commits through the production staging functions, closes those sessions, and
 stops at `PERSISTENCE_PENDING`. It never appends, acknowledges, submits, settles, or
