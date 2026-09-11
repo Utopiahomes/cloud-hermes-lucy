@@ -1,0 +1,43 @@
+{
+  "contract": "lucy.utopia.r1.activation-manifest.v1",
+  "environment": "production",
+  "realm_slug": "utopia",
+  "activation_decision_id": "replace-with-reviewed-decision-id",
+  "artifacts": {
+    "source_commit": "replace-with-40-lowercase-hex-characters",
+    "rollback_commit": "replace-with-40-lowercase-hex-characters",
+    "image_digest": "replace-with-64-lowercase-hex-characters",
+    "base_image_digest": "replace-with-64-lowercase-hex-characters",
+    "schema_revision": "0050_r1_recovery_ack_receiver",
+    "aws_realm_template_sha256": "replace-with-64-lowercase-hex-characters",
+    "aws_recovery_template_sha256": "replace-with-64-lowercase-hex-characters"
+  },
+  "customer_identity": {
+    "issuer": "https://replace-with-customer-idp.example/",
+    "audience": "replace-with-exact-audience",
+    "owner_subjects": ["replace-with-stable-owner-subject"],
+    "strong_auth_claim": "replace-with-strong-auth-claim",
+    "strong_auth_values": ["replace-with-accepted-strong-auth-value"]
+  },
+  "ingress": {
+    "public_hostnames": ["replace-public.utopiahomes.com"],
+    "private_hostnames": ["replace-private.utopiahomes.com"],
+    "allowed_origins": ["https://replace-public.utopiahomes.com"],
+    "trust_forwarded_host": false,
+    "max_request_bytes": 65536,
+    "requests_per_ip_per_minute": 20,
+    "requests_per_session_per_minute": 30,
+    "session_ttl_seconds": 3600
+  },
+  "paid_inference_enabled": false,
+  "paid_inference": null,
+  "transcript_capture_enabled": false,
+  "public_seed": {
+    "snapshot_sha256": "replace-with-64-lowercase-hex-characters",
+    "source_lineage": ["replace-with-reviewed-source-version"]
+  },
+  "permitted_data_classes": ["approved-public-faq"],
+  "permitted_actions": ["public-read-only-answer"],
+  "operations_contact": "replace-with-operations-contact",
+  "rollback_owner": "replace-with-rollback-owner"
+}

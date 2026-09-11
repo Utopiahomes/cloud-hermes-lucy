@@ -78,6 +78,12 @@ and review all of the following in one bounded manifest:
 - an explicit, separate decision for transcript capture. Capture remains false unless
   that decision is approved after the encryption/deletion boundary review.
 
+Start from `deploy/render/utopia-r1-activation-manifest.v1.json.example` and keep the
+populated manifest in the ignored operator evidence store. Validate it with
+`python deploy/render/validate_activation_manifest_v1_3.py <manifest>`; the validator
+prints only a content-free result and rejects moving revisions, undeclared origins,
+forwarded-host trust, incomplete paid-inference limits, and capture enablement.
+
 Immediately before activation, verify drift against the accepted evidence, deploy the
 same exact reviewed revision to the selected services, prove negative authentication,
 cross-realm, direct-SQL, and AWS-role controls, then perform a protected handoff. No
