@@ -1,6 +1,6 @@
 # R1 repository reconciliation
 
-Status: R1-0, the R1-1 synthetic local slice, and R1-2 cloud acceptance are complete.
+Status: R1-0 through R1-4 are complete. R1-5 product commissioning remains.
 The Utopia realm database is commissioned at migration `0050`; its four ordinary
 private services remain suspended and pinned to commit
 `9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
@@ -21,9 +21,11 @@ separate protected handoff. The AWS journal boundary defines separate protected
 authority and cost tables, three exact Render OIDC roles, and a create-only operator
 genesis initializer. Those AWS resources and the three private recovery workloads are
 deployed and identity-attested. One synthetic authority restriction and one one-micro-USD
-cost reservation are now independently durable in both DynamoDB streams and acknowledged
-in PostgreSQL. The remaining R1-4 exit item is their protected replay and final handoff
-against an isolated quarantined point-in-time restore.
+cost reservation are independently durable in both DynamoDB streams and acknowledged
+in PostgreSQL. Their protected replay and final handoff passed against an isolated
+pre-event point-in-time restore on 2026-09-11. The restore was returned to quarantine,
+its one-use activation login was destroyed, and the database was deleted. Live capture
+remains disabled.
 
 ## Frozen baseline
 
@@ -80,7 +82,9 @@ durability claim.
 ## Authority and unresolved deployment facts
 
 - Production commissioning uses the offline `lucy_migration` schema owner only in an
-  ephemeral migration job. Both function-owner roles temporarily receive schema
+  ephemeral migration job. Protected restore activation instead creates a fresh,
+  non-elevated `_recovery_activation` LOGIN with exact metadata and column grants;
+  the restored schema owner is never supplied to the recovery service. Both function-owner roles temporarily receive schema
   `CREATE` inside the migration transaction and lose it before commit. The four
   continuously deployed realm logins are non-inheriting, execute-only identities;
   their V1.3 Render configuration and deployed workflow exercise remain pending.
@@ -105,6 +109,7 @@ durability claim.
 | R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
 | The R1-4 DynamoDB adapter performs one conditional append transaction over the event, permanent event-ID acknowledgement, exact expected head, and writer-pause fence; exact acknowledgement is recovered after an ambiguous response, all reads are strongly consistent and exact-key, and event/head/pause metadata substitution fails closed. Its production constructor pins `us-east-1`, account, table ARN/name, stream binding, and distinct same-account writer/recovery roles before client creation. Pause state uses a distinct `PAUSE#{kind}#{stream_id}` partition, allowing IAM to permit recovery pause writes without permitting writes to the `STREAM#...` head/event partition; the first pause request contains no unused expression values. | `src/lucy/recovery_journal_aws.py`, `tests/unit/test_recovery_journal_aws.py`; 6 adapter checks plus 15 unchanged recovery/coordinator checks passed with Ruff and strict mypy on 2026-09-10 | DynamoDB adapter/key layout/transaction shape, environment binding, event serialization, pause fencing, or recovery contracts change |
 | The deployed Utopia recovery path durably appended one synthetic authority restriction and one one-micro-USD cost reservation through the two private writers, then reconciled both through the separate acknowledgement receiver. Independent strongly consistent exact-key reads observed both DynamoDB heads at sequence 1; exact PostgreSQL inspection observed authority `DURABLY_RECORDED` at sequence 1 and cost `ADMITTED`, acknowledged at sequence 1, with one micro-USD unresolved. The utility returned to its secret-free sentinel, all four one-use tokens were rotated afterward, the ordinary services remained suspended, capture remained off, and the temporary PostgreSQL allow-list returned to empty. | Ignored operator evidence `utopia-recovery-baked-cron-execution-v1.3.json`, `utopia-recovery-witness-durable-v1.3.json`, and token-rotation record; application commit `3a35968250d325baf64f734e146dd48113bc4328`; 8 focused adapter tests, Ruff, and strict mypy passed on 2026-09-10 | Either journal head/event, synthetic PostgreSQL fixture, recovery writer/ack service, token/configuration, Render workload commit, database role/grant, or capture/admission/network state change |
+| The Utopia R1-4 protected recovery selected an isolated point after the synthetic fixture but before either durable event, then replayed the authority revocation and one-micro-USD reservation exactly once from independent DynamoDB heads. The restored member advanced from active generation 1 to revoked generation 2; no executable provider attempt was fabricated; the unresolved reservation remained charged to recovered capacity; cost finalization required no operator review; and the protected handoff reached a capture-safe ready epoch. Cleanup returned the restore to quarantine, removed the epoch and temporary non-elevated activation LOGIN, restored the normal coordinator, removed all one-off environment values, kept the source allow-list empty, and deleted the isolated database. No provider call or transcript capture occurred. | `docs/evidence/utopia-r1-4-protected-recovery-2026-09-11.json`; exact resource IDs retained only in ignored operator evidence; application commit `d294b38990aa6553b169bff76d14ed14db7cfb3e`; 31 focused runner/role tests passed with Ruff and strict mypy, and final read-only Render cleanup verification passed on 2026-09-11 | Recovery runner/coordinator, activation or recovery-role grants, schema revision, authority/cost journals or witnesses, source fixture, Render service/environment/network boundary, or restore lifecycle change |
 | Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
 | Normal public-cost execution and independent cost acknowledgement use disjoint Python client interfaces as well as disjoint PostgreSQL roles. The admission client cannot acknowledge persistence; the recovery client cannot reserve, submit, mark unknown, or settle spend. | 11 focused unit checks and all 4 provider-cost PostgreSQL boundary checks passed with Ruff and strict mypy on 2026-09-10 | Cost client interfaces, public-inference orchestration, recovery service wiring, or database grants change |
 | Migration `0045` atomically blocks membership/publication authority before staging a content-free recovery event, closes ordinary Lucy's legacy direct-withdrawal path, and separates transition from exact acknowledgement identities. The intended journal sequence, previous digest, and event digest are frozen before the external append, allowing exact response-loss replay. | Clean migration 0001→0045; 21 focused authority/journal unit checks, 6 authority/public PostgreSQL checks, 7 unchanged internal-admission checks, and 2 V1.3 runtime-role/readiness checks passed with Ruff and strict mypy on 2026-09-10 | Migration/service/role/readiness/bootstrap change |
@@ -722,7 +727,7 @@ At this earlier implementation checkpoint, the remaining R1-4 work was
 cost-projection finalization and old-runtime fencing, infrastructure/IAM provisioning
 for the two journal streams, the independently deployed acknowledgement receiver, and
 protected activation integration. Those implementation and commissioning items are now
-complete; the isolated restored-database drill remains outstanding.
+complete; the isolated restored-database drill subsequently passed on 2026-09-11.
 
 Migration `0045_r1_authority_recovery` implements the first half
 of domain authority durability. A membership revocation or public withdrawal takes
@@ -780,20 +785,19 @@ only failed runtime sockets, not images, volumes, or project data.
 The two-stream AWS/IAM boundary and create-only genesis path were first completed
 locally at this checkpoint. They have since been deployed with negative-permission
 checks, journal bindings, the CloudTrail selector, and independently deployed
-acknowledgement receiver. Exercising the protected recovery handoff against an isolated
-restore with synthetic state is the remaining R1-4 exit item.
+acknowledgement receiver. The protected recovery handoff against an isolated restore
+with synthetic state subsequently passed and closed the R1-4 exit item.
 
 The receiver core and its exact-record PostgreSQL grants are implemented at `0050`;
-the private path-only ASGI surface and fail-closed runtime are also implemented, while
-production login/Render wiring remains. One coordinator process verifies two distinct
+the private path-only ASGI surface and fail-closed runtime are also implemented and
+commissioned. One coordinator process verifies two distinct
 non-elevated database identities and both independent journal heads at startup. A
 caller supplies only the stream kind and event UUID; request bodies are prohibited.
 The writer-side client is also implemented: it uses a fixed private Render endpoint,
 sends no workflow metadata in the body, and rejects a mismatched event, stream, or
 terminal state. The separate authority-writer, cost-writer, and recovery-coordinator
-workloads are declared locally with capture false and auto-deploy disabled. Production
-secrets, exact Render service IDs, and service creation remain disabled deployment
-work; LOGIN provisioning is now part of the prepared quarantine-first bootstrap.
+workloads are commissioned with capture false and auto-deploy disabled. Their exact
+service IDs and LOGIN provisioning are recorded in the R1-4 evidence above.
 A completely compromised receiver process
 could use its database credential to falsely acknowledge a known prepared event without
 calling its own DynamoDB verifier. This is an explicit R1 known-identifier residual risk,
@@ -829,7 +833,7 @@ surface was completed. The trusted workstation connected over TLS through a temp
 exact `/32` Render PostgreSQL allow-list entry; cleanup restored the allow-list to
 empty. No credential was rotated or copied into an additional Render service. All four
 ordinary Lucy services remained suspended, transcript capture remained disabled, and
-runtime admission remained quarantined. The four recovery LOGINs expose 14 exact
+runtime admission remained quarantined. The four recovery LOGINs expose 16 exact
 stream-specific function grants in total, with no direct Lucy table authority or
 inherited role membership. The content-free result is
 `docs/evidence/utopia-r1-4-recovery-replay-restamp-2026-09-10.json`. This evidence is
@@ -837,18 +841,17 @@ invalidated by a change to the recovery grant template, any recovery LOGIN membe
 or function ACL, the schema revision, admission/capture state, or the database network
 allow-list.
 
-The operator-only protected recovery runner is now implemented locally. Its production
-configuration binds two distinct journals, two independently retained witness heads,
-the exact authority/cost recovery LOGINs, the private migration login, and a fresh
-runtime epoch. It rejects static AWS keys, verifies the actual Render OIDC assumed role
-through STS, and attests that the migration session is the non-superuser Lucy schema
-owner at exact revision `0050` over TLS while admission is quarantined and capture is
-safe. It then replays both streams, obtains the coordinated writer pauses, finalizes
-recovered cost state, rechecks the handoff, and activates only through that offline
-migration identity. Thirty-three focused runner, coordinator, and DynamoDB adapter
-tests passed with Ruff and strict mypy on 2026-09-10. The utility has not yet been run
-against an isolated Utopia restore; its migration URL and operator authorization must
-never remain on the continuous acknowledgement service after the one-off recovery job.
+The operator-only protected recovery runner now passed the Utopia isolated-restore
+drill. It binds two distinct journals, two independently retained witness heads, the
+exact authority/cost recovery LOGINs, and a fresh one-use activation LOGIN. It rejects
+static AWS keys and the restored elevated schema owner, verifies the actual Render OIDC
+assumed role through STS, and attests each exact login at revision `0050` over TLS.
+The runner replays both streams, obtains coordinated writer pauses, finalizes recovered
+cost state, rechecks the handoff, and activates a fresh runtime epoch. Cleanup returns
+the isolated database to quarantine, destroys the activation login, removes the
+one-off environment, restores the continuous coordinator, and deletes the restore.
+The passing evidence is
+`docs/evidence/utopia-r1-4-protected-recovery-2026-09-11.json`.
 
 All three commissioned recovery services were rolled forward without environment or
 command changes to exact commit `9cb8f28ccbc8d4c49e61e5a916351895706a041f`.
@@ -892,9 +895,9 @@ two existing function owners for one membership revocation and one reservation, 
 those sessions, and stops at `PERSISTENCE_PENDING`. It cannot append, acknowledge,
 submit, settle, or call a provider. This deliberately avoids commissioning temporary
 caller credentials or implying that the deferred shared controller topology exists.
-The deployed writer and acknowledgement services must still durably complete both
-events, and their permanent production-stream history will not be rewritten as test
-cleanup. The fixture was provisioned in the quarantined production database on
+The deployed writer and acknowledgement services durably completed both events, and
+their permanent production-stream history was not rewritten as test cleanup. The
+fixture was provisioned in the quarantined production database on
 2026-09-10 with temporary exact `/32` access restored to empty. The first staging
 attempt committed the exact revocation and exposed an overly strict second-transaction
 fixture check; no cost event or provider call occurred. The stager now accepts only
@@ -904,7 +907,7 @@ every event identity and commitment. The same event resumed idempotently and bot
 events are now `PERSISTENCE_PENDING`. Private reports and manifests remain in the
 ignored operator evidence directory. Twenty focused builder/stager checks pass with
 Ruff and strict mypy on 2026-09-10. Durable writer acknowledgement and PITR replay
-remain open.
+passed on 2026-09-11; R1-4 is complete.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
