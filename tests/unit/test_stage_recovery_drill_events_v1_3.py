@@ -137,3 +137,16 @@ def test_stager_uses_owner_roles_only_for_staging_and_never_calls_provider() -> 
     assert "acknowledge_" not in source
     assert "claim_provider_submission" not in source
     assert "DELETE FROM" not in source
+
+
+def test_stager_accepts_only_pristine_or_exactly_staged_member_state() -> None:
+    source = (
+        ROOT / "deploy" / "postgres" / "stage_recovery_drill_events_v1_3.py"
+    ).read_text(encoding="utf-8")
+    assert "m.status='active' AND m.generation=1" in source
+    assert "m.status='revoked' AND " in source
+    assert "m.generation=2 AND EXISTS" in source
+    assert "e.idempotency_key=%s" in source
+    assert "e.source_authority_digest=%s" in source
+    assert "e.previous_generation=1" in source
+    assert "e.new_generation=2" in source

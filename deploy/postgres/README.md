@@ -230,6 +230,13 @@ python -m deploy.postgres.build_recovery_drill_manifests_v1_3 events `
   --output secrets\generated\utopia-recovery-drill-events-v1.3.json
 ```
 
+If staging is interrupted after the authority transaction but before the cost
+transaction, preserve the first event manifest and pass it back with `--resume-from`
+to a new output path. The builder refreshes only `requested_at`; every event identity,
+idempotency key, commitment, and fixture binding remains exact. The stager accepts a
+revoked member only when the matching generation-1-to-2 transition has every reviewed
+field, so the retry cannot adopt an unrelated revocation.
+
 `stage_recovery_drill_events_v1_3.py` then stages exactly one membership revocation
 and one one-micro-USD reservation. Its reviewed event manifest pins the fixture
 digest, idempotency keys, attempt ID, commitments, and request time. The command uses

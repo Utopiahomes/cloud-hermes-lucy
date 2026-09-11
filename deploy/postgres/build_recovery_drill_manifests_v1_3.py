@@ -97,6 +97,28 @@ def build_events(
     )
 
 
+def refresh_events(
+    stamp: RealmSecurityStampV1,
+    fixture: RecoveryDrillFixtureManifestV1,
+    authority_binding: RecoveryStreamBindingV1,
+    previous: RecoveryDrillEventManifestV1,
+    *,
+    binding_manifest_digest: str,
+    created_at: datetime,
+) -> RecoveryDrillEventManifestV1:
+    if (
+        fixture.realm_slug != stamp.realm_slug
+        or previous.realm_slug != stamp.realm_slug
+        or previous.fixture_manifest_digest != fixture.digest_hex()
+        or authority_binding.stream_kind is not RecoveryStreamKind.AUTHORITY
+        or authority_binding.binding_manifest_digest != binding_manifest_digest
+        or created_at.tzinfo is None
+        or created_at.utcoffset() is None
+    ):
+        raise RecoveryDrillManifestError("resumed event inputs are outside the recovery boundary")
+    return previous.model_copy(update={"requested_at": created_at.astimezone(UTC)})
+
+
 def _object(path: Path) -> Mapping[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -140,6 +162,19 @@ def _binding(path: Path) -> RecoveryStreamBindingV1:
         raise RecoveryDrillManifestError("authority binding is invalid") from exc
 
 
+def _events(path: Path) -> RecoveryDrillEventManifestV1:
+    value = _object(path)
+    if set(value) != {"event_manifest", "event_manifest_sha256"}:
+        raise RecoveryDrillManifestError("event manifest envelope differs")
+    try:
+        events = RecoveryDrillEventManifestV1.model_validate(value["event_manifest"])
+    except ValidationError as exc:
+        raise RecoveryDrillManifestError("event manifest is invalid") from exc
+    if value["event_manifest_sha256"] != events.digest_hex():
+        raise RecoveryDrillManifestError("event manifest digest differs")
+    return events
+
+
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to overwrite recovery manifest: {path}")
@@ -163,6 +198,7 @@ def _parser() -> argparse.ArgumentParser:
     events.add_argument("--fixture", type=Path, required=True)
     events.add_argument("--authority-binding", type=Path, required=True)
     events.add_argument("--binding-manifest-digest", required=True)
+    events.add_argument("--resume-from", type=Path)
     events.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -178,13 +214,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             "fixture_manifest_sha256": fixture_manifest.digest_hex(),
         }
     else:
-        event_manifest = build_events(
-            stamp,
-            _fixture(args.fixture),
-            _binding(args.authority_binding),
-            binding_manifest_digest=args.binding_manifest_digest,
-            created_at=now,
-        )
+        fixture_manifest = _fixture(args.fixture)
+        authority_binding = _binding(args.authority_binding)
+        if args.resume_from is None:
+            event_manifest = build_events(
+                stamp,
+                fixture_manifest,
+                authority_binding,
+                binding_manifest_digest=args.binding_manifest_digest,
+                created_at=now,
+            )
+        else:
+            event_manifest = refresh_events(
+                stamp,
+                fixture_manifest,
+                authority_binding,
+                _events(args.resume_from),
+                binding_manifest_digest=args.binding_manifest_digest,
+                created_at=now,
+            )
         payload = {
             "event_manifest": event_manifest.model_dump(mode="json"),
             "event_manifest_sha256": event_manifest.digest_hex(),

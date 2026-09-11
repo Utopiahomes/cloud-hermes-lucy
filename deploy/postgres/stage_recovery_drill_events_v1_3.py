@@ -182,13 +182,11 @@ def _verify_boundary(connection: psycopg.Connection[Any]) -> None:
 
 
 def _verify_fixture(connection: psycopg.Connection[Any], config: RecoveryDrillEventConfig) -> None:
-    fixture, stamp = config.fixture, config.stamp
+    fixture, stamp, events = config.fixture, config.stamp, config.events
     policy = _policy_for(fixture, stamp)
     row = connection.execute(
         "SELECT EXISTS(SELECT 1 FROM lucy.node_memberships WHERE id=%s "
         "AND principal_id=%s AND workspace_id=%s AND role='owner' AND status='active' "
-        "AND generation=1),EXISTS(SELECT 1 FROM lucy.node_memberships WHERE id=%s "
-        "AND principal_id=%s AND workspace_id=%s AND role='member' AND status='active' "
         "AND generation=1),EXISTS(SELECT 1 FROM lucy.channel_bindings WHERE id=%s "
         "AND node_id=%s AND tenure_id=%s AND workspace_id=%s AND channel_kind='website_public' "
         "AND hostname=%s AND active AND generation=1),EXISTS(SELECT 1 FROM "
@@ -197,9 +195,6 @@ def _verify_fixture(connection: psycopg.Connection[Any], config: RecoveryDrillEv
         (
             fixture.owner_membership_id,
             fixture.owner_principal_id,
-            stamp.workspace_id,
-            fixture.member_membership_id,
-            fixture.member_principal_id,
             stamp.workspace_id,
             fixture.channel_binding_id,
             stamp.node_id,
@@ -212,7 +207,29 @@ def _verify_fixture(connection: psycopg.Connection[Any], config: RecoveryDrillEv
             policy.digest_hex(),
         ),
     ).fetchone()
-    if row != (True, True, True, True):
+    member = connection.execute(
+        "SELECT EXISTS(SELECT 1 FROM lucy.node_memberships m WHERE m.id=%s "
+        "AND m.principal_id=%s AND m.workspace_id=%s AND m.role='member' AND "
+        "((m.status='active' AND m.generation=1) OR (m.status='revoked' AND "
+        "m.generation=2 AND EXISTS(SELECT 1 FROM lucy.authority_transition_events_v1 e "
+        "WHERE e.idempotency_key=%s AND e.event_type='membership_revoked' "
+        "AND e.subject_id=m.id AND e.actor_id=%s AND e.stream_id=%s "
+        "AND e.authority_epoch=%s AND e.source_authority_ref=%s "
+        "AND e.source_authority_digest=%s AND e.previous_generation=1 "
+        "AND e.new_generation=2))))",
+        (
+            fixture.member_membership_id,
+            fixture.member_principal_id,
+            stamp.workspace_id,
+            events.authority_idempotency_key,
+            fixture.owner_principal_id,
+            config.authority_binding.stream_id,
+            config.authority_binding.authority_epoch,
+            events.source_authority_ref,
+            events.fixture_manifest_digest,
+        ),
+    ).fetchone()
+    if row != (True, True, True) or member != (True,):
         raise RealmProvisioningError("pre-target recovery fixture differs")
 
 

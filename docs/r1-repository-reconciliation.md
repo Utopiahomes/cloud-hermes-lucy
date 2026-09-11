@@ -892,8 +892,17 @@ submit, settle, or call a provider. This deliberately avoids commissioning tempo
 caller credentials or implying that the deferred shared controller topology exists.
 The deployed writer and acknowledgement services must still durably complete both
 events, and their permanent production-stream history will not be rewritten as test
-cleanup. Thirty-four focused fixture, staging, and protected-runner checks pass with
-Ruff and strict mypy on 2026-09-10. Cloud execution has not started.
+cleanup. The fixture was provisioned in the quarantined production database on
+2026-09-10 with temporary exact `/32` access restored to empty. The first staging
+attempt committed the exact revocation and exposed an overly strict second-transaction
+fixture check; no cost event or provider call occurred. The stager now accepts only
+the pristine member or its exact reviewed generation-1-to-2 revocation, and the
+manifest builder can refresh only the short-lived cost admission time while preserving
+every event identity and commitment. The same event resumed idempotently and both
+events are now `PERSISTENCE_PENDING`. Private reports and manifests remain in the
+ignored operator evidence directory. Twenty focused builder/stager checks pass with
+Ruff and strict mypy on 2026-09-10. Durable writer acknowledgement and PITR replay
+remain open.
 
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
