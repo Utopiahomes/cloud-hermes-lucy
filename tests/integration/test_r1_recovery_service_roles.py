@@ -53,12 +53,14 @@ def test_recovery_logins_have_only_their_exact_function_surface() -> None:
             "lucy.prepare_cost_journal_event_v1(uuid,bigint,text,text)",
         },
         "lucy_utopia_authority_recovery": {
+            "lucy.capture_boundary_safe_v1()",
             "lucy.get_pending_authority_event_v1(uuid)",
             "lucy.acknowledge_authority_event_v1(uuid,bigint,text,text)",
             "lucy.restored_recovery_head_v1(text)",
             "lucy.apply_authority_recovery_event_v1(jsonb,jsonb)",
         },
         "lucy_utopia_cost_recovery": {
+            "lucy.capture_boundary_safe_v1()",
             "lucy.get_pending_cost_event_v1(uuid)",
             "lucy.acknowledge_provider_reservation_v1(uuid,uuid,text)",
             "lucy.acknowledge_provider_outcome_v1(uuid,uuid,text)",

@@ -68,6 +68,9 @@ GRANT SELECT ON public.alembic_version TO
   "__LUCY_AUTHORITY_WRITER_LOGIN__", "__LUCY_COST_WRITER_LOGIN__",
   "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
 
+GRANT EXECUTE ON FUNCTION lucy.capture_boundary_safe_v1() TO
+  "__LUCY_AUTHORITY_RECOVERY_LOGIN__", "__LUCY_COST_RECOVERY_LOGIN__";
+
 GRANT EXECUTE ON FUNCTION
   lucy.get_pending_authority_event_v1(uuid),
   lucy.prepare_authority_event_v1(uuid,bigint,text,text)

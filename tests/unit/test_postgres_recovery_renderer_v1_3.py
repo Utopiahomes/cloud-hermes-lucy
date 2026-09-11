@@ -33,8 +33,9 @@ def _values() -> dict[str, str]:
 def test_recovery_renderer_grants_only_exact_functions() -> None:
     sql = _module().render_recovery_roles(**_values())
     assert "__LUCY_" not in sql
-    assert sql.count("GRANT EXECUTE ON FUNCTION") == 4
+    assert sql.count("GRANT EXECUTE ON FUNCTION") == 5
     assert "GRANT SELECT ON public.alembic_version" in sql
+    assert "lucy.capture_boundary_safe_v1()" in sql
     assert "GRANT SELECT ON lucy." not in sql
     assert "GRANT INSERT" not in sql
     assert "GRANT UPDATE" not in sql
