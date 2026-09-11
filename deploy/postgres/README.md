@@ -201,6 +201,32 @@ generic prerequisite roles. Production LOGIN creation/password rotation is perfo
 by the same quarantine-first bootstrap when the four recovery database URLs are
 supplied. Do not place the migration URL on any continuous service.
 
+## Prepare the synthetic V1.3 recovery drill
+
+`provision_recovery_drill_fixture_v1_3.py` creates the content-free state that must
+exist before the selected PITR target: a synthetic owner and member, an unreachable
+`.invalid` website channel, and an immutable one-micro-USD cost policy. It requires
+the reviewed realm stamp and fixture manifest with both canonical digests, production
+Render, the private migration URL, quarantine, capture off, and the exact marker
+`security-v1.3-synthetic-recovery-fixture`. It does not stage a journal event or call
+a provider. Retain its `restore_anchor_at`; do not proceed until Render can restore a
+point after that anchor and before the later events.
+
+`stage_recovery_drill_events_v1_3.py` then stages exactly one membership revocation
+and one one-micro-USD reservation. Its reviewed event manifest pins the fixture
+digest, idempotency keys, attempt ID, commitments, and request time. The command uses
+the offline migration session with `SET LOCAL ROLE` only for the two existing function
+owners, commits through the production staging functions, closes those sessions, and
+stops at `PERSISTENCE_PENDING`. It never appends, acknowledges, submits, settles, or
+calls a provider. The deployed authority/cost writers and acknowledgement coordinator
+must durably complete both event IDs afterward. Exact retries must return the same two
+events without advancing either journal twice.
+
+These operator fixture actions prove the recovery path, not production caller-login
+commissioning or the deferred shared controller topology. The synthetic source rows,
+events, acknowledgements, and unresolved one-micro-USD exposure remain aligned with
+the permanent production journals; do not delete or rewrite them as test cleanup.
+
 ## Run a protected V1.3 recovery handoff
 
 `run_protected_recovery_v1_3.py` is an operator-only, one-off recovery utility. It

@@ -882,5 +882,18 @@ The complete witness and its digest remain in the ignored local evidence store; 
 derived private-state commitment is exported to Git. Any later accepted journal event
 requires a new witness rather than modifying this one.
 
+The synthetic protected-handoff fixture and staging boundaries are now implemented
+locally. The fixture creates only a synthetic owner/member, an unreachable `.invalid`
+channel, and a one-micro-USD immutable policy before the chosen PITR target. The event
+stager then uses the ephemeral offline migration session with `SET LOCAL ROLE` to the
+two existing function owners for one membership revocation and one reservation, closes
+those sessions, and stops at `PERSISTENCE_PENDING`. It cannot append, acknowledge,
+submit, settle, or call a provider. This deliberately avoids commissioning temporary
+caller credentials or implying that the deferred shared controller topology exists.
+The deployed writer and acknowledgement services must still durably complete both
+events, and their permanent production-stream history will not be rewritten as test
+cleanup. Thirty-four focused fixture, staging, and protected-runner checks pass with
+Ruff and strict mypy on 2026-09-10. Cloud execution has not started.
+
 R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
 rehosting, and StoinNet execution are explicitly deferred.
