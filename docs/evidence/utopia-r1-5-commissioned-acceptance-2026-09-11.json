@@ -1,0 +1,82 @@
+{
+  "contract": "lucy.r1.commissioned-acceptance.evidence.v1",
+  "status": "passed",
+  "captured_at": "2026-09-11T00:58:46-04:00",
+  "scope": {
+    "production_ready_realm": "Utopia",
+    "synthetic_isolation_realms": ["Raymond", "Alpha"],
+    "registered_only_nodes": ["SC Consulting", "Cloud Lucy Service"],
+    "transcript_capture_enabled": false,
+    "runtime_admission": "quarantined",
+    "paid_inference_enabled": false
+  },
+  "source": {
+    "verification_commit": "df8902acae8de8d74d4388310871af15d50ad133",
+    "migration_revision": "0050_r1_recovery_ack_receiver",
+    "dockerfile_sha256": "abb872cd5f619909cbf6f869c99ec26976f043456e740d6dd31f2e745c44eeae",
+    "base_image": "python:3.12.11-slim@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+    "realm_template_sha256": "6a5c914bc727c6efca0ac37cfb0d8518d56d2a17d5181922fdbbd3e0f7c04e6e",
+    "recovery_template_sha256": "de2b711426fb99d28a73f55678d3a0c53e87d46d1f10dcf27f17d6b3d800d9ac",
+    "render_template_sha256": "6ca2f692ed5dfc889b2de1a566e77388e3dcd750f217d7e4cf78311a9acd2070"
+  },
+  "deployed_boundaries": {
+    "ordinary_services": {
+      "names": ["lucy-routine", "lucy-policy", "lucy-evidence", "lucy-deletion"],
+      "state": "suspended",
+      "commit": "9fb64891fa1703ba5ac526940d8a415e9e468a34"
+    },
+    "finality_service": "lucy-finality-utility",
+    "recovery_services": ["lucy-authority-writer", "lucy-cost-writer", "lucy-recovery-coordinator"],
+    "auto_deploy_enabled": false,
+    "static_aws_credentials_present": false
+  },
+  "verification": {
+    "aws_deployed_checks": {"passed": 51, "failed": 0},
+    "postgresql": {
+      "status": "passed",
+      "active_actor_bindings": 4,
+      "active_executor_bindings": 2,
+      "recovery_logins": 4,
+      "runtime_logins": 4,
+      "direct_table_authority_denied": true,
+      "directory_admission_acl_isolated": true,
+      "function_owner_schema_create_removed": true,
+      "public_ip_allow_list_restored_empty": true
+    },
+    "render": {"identities_checked": 8, "blank_required_values": 0},
+    "privacy": {
+      "render_log_messages_scanned": 8000,
+      "aws_log_messages_scanned": 2652,
+      "exact_deployed_secret_values_compared": 18,
+      "prohibited_matches": 0
+    },
+    "local": {"focused_tests_passed": 74, "ruff": "passed", "mypy": "passed"},
+    "deferred_endpoint_inventory": "absent"
+  },
+  "cost": {
+    "aws_month_to_date_unblended_usd": "0.864755",
+    "aws_scope": "account-wide; billing data may lag and is not Lucy-tag-isolated",
+    "render_steady_holding_estimate_usd_per_month": "66.20",
+    "render_estimate_scope": "Pro workspace, three active recovery services, and one 5 GB PostgreSQL database; excludes usage, traffic, cron runtime, and AWS",
+    "render_estimated_if_four_ordinary_services_activated_usd_per_month": "94.20"
+  },
+  "recovery": {
+    "protected_drill": "passed",
+    "restore_time": "2026-09-11T00:26:36Z",
+    "exact_once_replay": true,
+    "restriction_recovered": true,
+    "unresolved_exposure_recovered": true,
+    "provider_called": false,
+    "cleanup_verified": true
+  },
+  "exceptions": [
+    "Live customer identity provider, DNS and ingress are activation inputs, not part of this capture-disabled technical acceptance.",
+    "Provider keys and numeric paid-inference limits are absent; paid inference therefore remains fail-closed.",
+    "Render cost is a list-price estimate because the service API does not expose an invoice total.",
+    "Plaintext structured memory remains the explicitly accepted Phase 1 residual confidentiality boundary."
+  ],
+  "activation_authorized": false,
+  "resource_identifiers_exported": false,
+  "private_witness_digests_exported": false,
+  "transcript_content_exported": false
+}

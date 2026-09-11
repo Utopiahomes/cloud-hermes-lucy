@@ -5,7 +5,7 @@ import json
 import pytest
 
 import deploy.postgres.verify_realm_cloud_v1_3 as verifier
-from deploy.postgres.bootstrap_realm_cloud_v1_3 import BootstrapError
+from deploy.postgres.bootstrap_realm_cloud_v1_3 import BootstrapConfig, BootstrapError
 
 
 def test_report_is_content_free_and_counts_verified_logins(
@@ -40,7 +40,7 @@ def test_main_never_echoes_unexpected_secret(
 ) -> None:
     secret = "never-print-this-private-database-url"
     monkeypatch.setattr(
-        verifier.BootstrapConfig,
+        BootstrapConfig,
         "from_environment",
         lambda: (_ for _ in ()).throw(BootstrapError(secret)),
     )

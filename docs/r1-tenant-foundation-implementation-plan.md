@@ -1,11 +1,11 @@
 # R1 tenant foundation — implementation plan
 
-Status: approved; R1-0 and the R1-1 synthetic local slice are complete; R1-2 scoped
-contracts, single-realm credential selection, database-backed Utopia/Raymond
-authorization, and a current-admission-gated execute-only memory path are implemented
-locally. No cloud
-deployment, production data migration or activation performed. Read with the original
-Node/Tenancy v1.1 specification and correction addendum A1; A1 controls conflicts.
+Status: R1-0 through R1-5 technical acceptance completed for the commissioned Utopia
+realm on 2026-09-11. Live customer activation, paid inference, and transcript capture
+remain disabled and require their separate bounded manifests/approvals. Read with the
+original Node/Tenancy v1.1 specification and correction addendum A1; A1 controls
+conflicts. Final evidence is in
+`docs/security-baseline-v1.3-r1-final-acceptance-2026-09-11.md`.
 
 ## Finish line
 

@@ -61,6 +61,37 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
     }
 
 
+def test_r1_owner_surface_is_exact_and_deferred_r2_r3_routes_are_absent() -> None:
+    paths = {route.path for route in app.routes}
+    assert {path for path in paths if path.startswith("/owner/")} == {
+        "/owner/v1/evidence/retrieve",
+        "/owner/v1/evidence/{evidence_id}/delete",
+        "/owner/v1/sensitive-action-permits",
+        "/owner/v2/evidence/retrieve",
+        "/owner/v2/evidence/{evidence_id}/delete",
+        "/owner/v2/security/permits",
+        "/owner/v3/evidence/retrieve",
+        "/owner/v3/evidence/{evidence_id}/delete",
+    }
+    deferred_route_fragments = {
+        "/jobs",
+        "/wallets",
+        "/credits",
+        "/consulting",
+        "/grants",
+        "/runners",
+        "/exports",
+        "/rehost",
+        "/transfer",
+        "/stoinnet",
+    }
+    assert not {
+        path
+        for path in paths
+        if any(fragment in path.lower() for fragment in deferred_route_fragments)
+    }
+
+
 def test_archive_service_selects_v13_realm_runtime_only_for_exact_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

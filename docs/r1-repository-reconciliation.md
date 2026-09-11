@@ -1,6 +1,7 @@
 # R1 repository reconciliation
 
-Status: R1-0 through R1-4 are complete. R1-5 product commissioning remains.
+Status: R1-0 through R1-5 technical acceptance is complete for the commissioned Utopia
+realm. Customer-facing activation remains a separate fail-closed change.
 The Utopia realm database is commissioned at migration `0050`; its four ordinary
 private services remain suspended and pinned to commit
 `9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
@@ -10,7 +11,7 @@ recorded `EXTENDED` while the fixed 30-day recovery window remains open. Admissi
 quarantined, all four continuous services are suspended, and live transcript capture
 remains disabled. R1-3 spending controls now pass local contract, coordinator,
 clean-migration, PostgreSQL concurrency/retry/rollover, and service-boundary checks.
-R1-5 product commissioning has not been attempted. R1-4 durable authority recovery
+R1-5 commissioned acceptance passed on 2026-09-11. R1-4 durable authority recovery
 now has its content-free journal/head/handoff contracts, DynamoDB conditional provider,
 and independently acknowledged cost-outcome lifecycle. Authority restriction staging and
 crash-safe authority and cost journal preparation now pass clean local PostgreSQL execution.
@@ -101,6 +102,7 @@ durability claim.
 
 | Check | Evidence | Invalidated by |
 | --- | --- | --- |
+| R1-5 commissioned acceptance rechecked the exact Utopia AWS stack (51 checks), all eight Render identities, PostgreSQL role/function/table/network boundaries, capture/admission state, privacy-safe logs, and the absence of deferred R2/R3 endpoints. The focused cumulative current run passed 74 tests with Ruff and strict mypy. | `docs/evidence/utopia-r1-5-commissioned-acceptance-2026-09-11.json`, `docs/security-baseline-v1.3-r1-final-acceptance-2026-09-11.md`, and `docs/r1-coverage-registry.md`; verification source commit `df8902acae8de8d74d4388310871af15d50ad133` | Utopia AWS stack/IAM/KMS/Lambda/DynamoDB/CloudTrail, Render identity/environment/commit, PostgreSQL schema/roles/ACL/network policy, API routes, capture/admission state, or accepted source/artifact change |
 | R1-3 cost-policy and provider-attempt contracts require complete numeric/model/rate limits and canonical content-free commitments; the additive schema exposes reservation/submission/unknown/settlement only through distinct cost-admission and recovery-writer functions; the coordinator cannot call a provider before durable acknowledgement and an exact one-time submission claim | `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and affected readiness/realm-role checks; the full 508-test unit suite passed before database execution, then 63 affected unit checks, a clean migration through `0043`, 2 cost PostgreSQL checks, 3 unchanged public-slice checks, and 2 realm-role integration checks passed after the integration fixes. Focused Ruff and strict mypy pass. | Cost contract/service, migration `0043`, cost roles/bootstrap, readiness revision, public coordinator, canonicalization, or provider-call integration change |
 | Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
 | Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
