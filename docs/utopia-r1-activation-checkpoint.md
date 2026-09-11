@@ -1,19 +1,14 @@
 # Utopia R1 activation checkpoint
 
-Status: Stage 1 database and authority commissioning passed. The production database is
-at `0053_r1_telegram_authority`; the Utopia Telegram channel is active at generation 2
-only after its independent authority-journal acknowledgement. The Render gateway exists
-as suspended service `srv-dai3hmu743jc73do9ebg`. Both services remain suspended,
-auto-deploy remains off, capture remains disabled, and no static AWS credentials are
-present. The routine and gateway now share the existing adapter credential, and the
-gateway has its exact approved bot/OpenRouter configuration. Admission remains
-quarantined after a safe failed opening attempt reported an unspecified database capture
-boundary. Exact diagnostics then proved that only the approved R1-2 synthetic receipt
-needed an exception; with that exact exception, the capture boundary passed. Admission
-then identified two expired, unclaimed permits that the old inventory incorrectly counted
-as live authority. The deadline-aware correction is implemented and focused tests pass;
-deployment of that exact correction, admission opening, the one-gateway handoff, and live
-acceptance remain.
+Status: Stage 1 private Telegram activation passed on 2026-09-11 at application commit
+`3563a9b2a1d847e043594a78948675130c760017` and PostgreSQL revision
+`0053_r1_telegram_authority`. The routine service and corrected cloud gateway are live;
+the local gateway is stopped and the replaced cloud gateway is suspended. Admission is
+ready, auto-deploy is off, transcript capture and automatic memory writes remain disabled,
+and no static AWS credentials or gateway persistent disk are present. Owner transport,
+realm scope, restart recovery, duplicate replay, one-operation/one-settlement accounting,
+content-free persistence, sampled logs, and the compatible rollback route passed. The
+complete record is `docs/private-telegram-stage1-acceptance-2026-09-11.md`.
 
 ## Completed preparation
 
@@ -58,13 +53,9 @@ acceptance remain.
 
 ## Exact next action
 
-Commit and push the verified Stage 1 candidate, deploy compatible authority writer and
-recovery acknowledgement readers, migrate the quarantined production database through
-`0053`, and commission the exact inactive Telegram binding. Append and acknowledge the
-activation through the independent authority journal before starting the Render gateway.
-Only after the cloud worker is ready may the local gateway relinquish the bot lease.
-Commissioning must verify owner-only access, restart/deduplication, one model settlement,
-content-free logs, and rollback without reverting authority or deletion history.
+Use private Lucy through the commissioned Telegram bot while preserving the Stage 1
+capture-off boundary. Stage 2 encrypted transcript retention requires a separate review
+and explicit activation approval.
 
 ## Stage 1 verification ledger
 
@@ -106,16 +97,21 @@ content-free logs, and rollback without reverting authority or deletion history.
   indefinitely. It now blocks only still-claimable issued permits while continuing to
   block every claimed/ambiguous operation; expired unclaimed permits remain separately
   counted for audit. Sixteen focused tests, Ruff, and strict mypy pass locally.
-- Deployed owner, unauthorized-caller, restart, duplicate-delivery, budget settlement,
-  log-content, and rollback checks: not yet executed. These require the exact production
-  candidate and invalidate only if its source/configuration/environment changes.
+- Owner transport and inference passed through the active cloud gateway. The owner event
+  produced one model operation and one successful settlement, with no new capture receipt,
+  evidence, scoped memory, or legacy memory row.
+- Restart recovery and post-restart duplicate replay passed: the new lease fence advanced,
+  the old delivery remained sent, the replay was not admitted, and no second operation was
+  created.
+- The deployed numeric allowlist and focused pre-inference unauthorized-owner test passed;
+  a second live Telegram account was not used.
+- The final cloud-boundary check passed all 12 assertions and found neither conversation
+  content nor deployed secrets in 600 sampled Render log messages.
 
 ## Current blocker
 
-Commit and deploy the deadline-aware admission correction, regenerate the exact activation
-manifest, and rerun capture-disabled admission. If no claimed/ambiguous operation remains,
-deploy routine, stop the local bot consumer, start the cloud gateway, and execute the
-remaining live acceptance checks. Do not alter the expected 30-day deletion finality item.
+None for Stage 1 private Telegram use. Stage 2 transcript capture remains intentionally
+unauthorized and disabled.
 
 ## Follow-on, not an activation prerequisite
 

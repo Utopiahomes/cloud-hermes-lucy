@@ -26,10 +26,11 @@ cost reservation are independently durable in both DynamoDB streams and acknowle
 in PostgreSQL. Their protected replay and final handoff passed against an isolated
 pre-event point-in-time restore on 2026-09-11. The restore was returned to quarantine,
 its one-use activation login was destroyed, and the database was deleted. Live capture
-remains disabled. The reviewed local activation line now reaches
-`0053_r1_telegram_authority`, including the unactivated Stage 1 Telegram gateway,
-budget ledger, and journal-acknowledged channel authority boundary. Migrations
-`0051` through `0053` have not been applied to production.
+remains disabled. Production now reaches `0053_r1_telegram_authority`. Stage 1 private
+Telegram is active at exact application commit
+`3563a9b2a1d847e043594a78948675130c760017`; the owner-only gateway, budget ledger,
+journal-acknowledged channel authority, restart/deduplication, and capture-off boundary
+passed commissioning. Stage 2 transcript capture remains disabled and unauthorized.
 
 ## Frozen baseline
 
@@ -100,10 +101,10 @@ website activation, DNS changes, or opening database admission.
   suites are not claimed at this moving checkpoint because the concurrent Stage 1
   task is still changing the profile and exact Render service inventory.
 
-Next protected action: after the concurrent Stage 1 work is reconciled and the local
-verification ledger is complete, prepare a digest-pinned public snapshot provisioning
-artifact for review. Do not execute it against production without a new explicit
-authorization.
+Stage 1 reconciliation is complete; its acceptance is recorded in
+`docs/private-telegram-stage1-acceptance-2026-09-11.md`. The next protected public
+action remains a digest-pinned public snapshot provisioning artifact for review. Do not
+execute it against production without a new explicit authorization.
 
 ## R1-1 change record
 
