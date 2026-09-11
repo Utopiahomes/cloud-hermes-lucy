@@ -256,6 +256,11 @@ def test_r1_recovery_journals_have_separate_tables_and_pause_only_recovery() -> 
             assert statement["Condition"]["Null"] == {
                 "dynamodb:LeadingKeys": "false"
             }
+            if statement["Action"] == "dynamodb:ConditionCheckItem":
+                assert "StringEquals" not in statement["Condition"]
+                assert set(
+                    statement["Condition"]["ForAllValues:StringEquals"]
+                ) == {"dynamodb:LeadingKeys"}
 
     trusts = [
         str(resources[name]["Properties"]["AssumeRolePolicyDocument"])
