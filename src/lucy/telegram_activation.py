@@ -81,3 +81,59 @@ class TelegramStage1ActivationManifest(_StrictModel):
     automatic_memory_writes_enabled: Literal[False]
     raw_evidence_retrieval_enabled: Literal[False]
     rollback_preserves_authority_and_deletion_history: Literal[True]
+
+
+class TelegramStage2Artifacts(_StrictModel):
+    source_commit: str
+    rollback_commit: str
+    gateway_dockerfile_sha256: str
+    profile_sha256: str
+    hermes_release: Literal["v2026.8.19"]
+    hermes_version: Literal["0.20.5"]
+    hermes_source_commit: Literal["fcbd1076a93841fa88855acce810e342a5b78101"]
+    hermes_manifest_digest: Literal[
+        "3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
+    ]
+    hermes_platform_digest: Literal[
+        "f3cba556e7b35dbe20a67d32b715090d9babd5907798c79721380757d9a12bb6"
+    ]
+    target_platform: Literal["linux/amd64"]
+    schema_revision: Literal["0054_stage2_scoped_turn_commit"]
+
+    @model_validator(mode="after")
+    def validate_hashes(self) -> TelegramStage2Artifacts:
+        if any(
+            _GIT_SHA.fullmatch(value) is None
+            for value in (self.source_commit, self.rollback_commit)
+        ):
+            raise ValueError("source and rollback commits must be full lowercase Git SHAs")
+        if any(
+            _SHA256.fullmatch(value) is None
+            for value in (self.gateway_dockerfile_sha256, self.profile_sha256)
+        ):
+            raise ValueError("artifact hashes must be lowercase SHA-256 values")
+        return self
+
+
+class TelegramStage2ActivationManifest(_StrictModel):
+    """Fail-closed production promotion contract for encrypted Telegram capture."""
+
+    contract: Literal["lucy.telegram.private.stage2.activation.v1"]
+    environment: Literal["production"]
+    realm_slug: Literal["utopia"]
+    activation_decision_id: str = Field(min_length=1, max_length=256)
+    artifacts: TelegramStage2Artifacts
+    realm: TelegramStage1Realm
+    bot_id: int = Field(gt=0)
+    owner_telegram_user_id: int = Field(gt=0)
+    one_active_gateway: Literal[True]
+    unauthorized_dm_behavior: Literal["ignore"]
+    budget: TelegramStage1Budget
+    transcript_capture_enabled: Literal[True]
+    encrypted_evidence_archive_enabled: Literal[True]
+    authoritative_two_message_commit: Literal[True]
+    off_record_history_rotation: Literal[True]
+    automatic_memory_writes_enabled: Literal[False]
+    raw_evidence_retrieval_enabled: Literal[False]
+    sensitive_gateway_tools_enabled: Literal[False]
+    rollback_preserves_authority_and_deletion_history: Literal[True]

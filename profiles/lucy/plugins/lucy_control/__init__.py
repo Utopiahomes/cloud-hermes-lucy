@@ -23,6 +23,7 @@ BLOCKED_MESSAGE = "Lucy blocked this model call because its budget gate is unava
 MAX_OUTPUT_TOKENS = 1_024
 MAX_PROMPT_USD_PER_MILLION = 0.10
 MAX_COMPLETION_USD_PER_MILLION = 0.50
+MAX_LINEAGE_SOURCES = 32
 OFF_RECORD_NOTICE = (
     "🔒 Off the record — Lucy is not archiving this exchange. Telegram, Hermes, "
     "and the configured model provider still process it under their own policies."
@@ -259,6 +260,11 @@ def _archive_conversation_message(
     sources = sorted(turn.get("source_evidence_ids", set())) if (
         role == "assistant" and turn is not None and turn.get("turn_id") == turn_id
     ) else []
+    current_input_evidence_id = (
+        turn.get("current_input_evidence_id")
+        if role == "assistant" and turn is not None and turn.get("turn_id") == turn_id
+        else None
+    )
     try:
         result = _request_json(
             "/internal/v1/conversations/messages",
@@ -271,6 +277,7 @@ def _archive_conversation_message(
                 "role": role,
                 "content": content,
                 "source_evidence_ids": sources,
+                "current_input_evidence_id": current_input_evidence_id,
             },
             extra_headers={
                 "Idempotency-Key": (
@@ -282,7 +289,12 @@ def _archive_conversation_message(
         return None
     if result.get("archived") is not True:
         return result if result.get("capture_enabled") is False else None
-    if not result.get("evidence_id") or not result.get("keyed_commitment"):
+    # Legacy archive responses include the keyed commitment; the realm archive
+    # deliberately keeps it inside its AWS envelope.  Both must return one
+    # durable operation identity and evidence identity.
+    if not result.get("evidence_id") or not (
+        result.get("keyed_commitment") or result.get("operation_id")
+    ):
         return None
     return result
 
@@ -372,12 +384,16 @@ def _accept_turn(session_id: str, turn_id: str) -> bool | None:
 
 def _set_capture_mode(*, session_id: str, turn_id: str, capture_enabled: bool) -> bool:
     try:
+        stage2 = os.getenv("LUCY_TELEGRAM_STAGE") == "2"
         result = _request_json(
-            "/internal/v1/conversations/capture-mode",
+            "/internal/v1/conversations/capture-mode-and-accept"
+            if stage2
+            else "/internal/v1/conversations/capture-mode",
             method="POST",
             payload={
                 "platform": "telegram",
                 "source_conversation_id": session_id,
+                **({"source_turn_id": turn_id} if stage2 else {}),
                 "capture_enabled": capture_enabled,
             },
             extra_headers={
@@ -410,6 +426,7 @@ def _pre_llm_call(
         return None
     _TURN_CONTEXT.set((session_id, turn_id))
     _TURN_ARCHIVE_READY.discard((session_id, turn_id))
+    telegram_stage = os.getenv("LUCY_TELEGRAM_STAGE")
     forget_last = _normalized_command(user_message) == "forget the last message"
     command = _capture_command(user_message)
     # The transition into off-record mode is itself excluded. Commands which
@@ -419,7 +436,12 @@ def _pre_llm_call(
     forgot = False
     archive_result: dict[str, Any] | None = None
     ready = True
-    if forget_last:
+    if forget_last and telegram_stage == "2":
+        # The first Stage 2 boundary gives the gateway only its routine archive
+        # credential.  Do not let a phrase silently expand it into policy,
+        # evidence, or deletion authority.
+        ready = False
+    elif forget_last:
         forgot = _forget_last_message(session_id=session_id, turn_id=turn_id)
         ready = forgot
     elif command is not None:
@@ -428,7 +450,10 @@ def _pre_llm_call(
             turn_id=turn_id,
             capture_enabled=command,
         )
-    capture_enabled = _accept_turn(session_id, turn_id)
+    capture_enabled = (
+        command if command is not None and telegram_stage == "2" and ready
+        else _accept_turn(session_id, turn_id)
+    )
     if capture_enabled is None:
         ready = False
         capture_enabled = True
@@ -439,6 +464,13 @@ def _pre_llm_call(
         )
         ready = archive_result is not None and archive_result.get("archived") is True
     previous = _SESSION_TURN.get(session_id, {})
+    current_sources = (
+        previous.get("source_evidence_ids", set())
+        if previous.get("turn_id") == turn_id
+        else set()
+    )
+    if archive_result is not None and archive_result.get("evidence_id"):
+        current_sources = current_sources | {str(archive_result["evidence_id"])}
     _SESSION_TURN[session_id] = {
         "turn_id": turn_id,
         "capture_enabled": capture_enabled,
@@ -446,8 +478,14 @@ def _pre_llm_call(
         "active": ready,
         "proposal_keys": previous.get("proposal_keys", {})
         if previous.get("turn_id") == turn_id else {},
-        "source_evidence_ids": previous.get("source_evidence_ids", set())
-        if previous.get("turn_id") == turn_id else set(),
+        "source_evidence_ids": current_sources,
+        "current_input_evidence_id": (
+            str(archive_result["evidence_id"])
+            if archive_result is not None and archive_result.get("evidence_id")
+            else previous.get("current_input_evidence_id")
+            if previous.get("turn_id") == turn_id
+            else None
+        ),
     }
     if ready:
         _TURN_ARCHIVE_READY.add((session_id, turn_id))
@@ -604,7 +642,7 @@ def _memory_lookup(
                 if not isinstance(ids, list) or not ids:
                     raise ValueError("missing source manifest")
                 sources.update(str(UUID(value)) for value in ids)
-            if len(sources | turn.get("source_evidence_ids", set())) > 512:
+            if len(sources | turn.get("source_evidence_ids", set())) > MAX_LINEAGE_SOURCES:
                 raise ValueError("source limit")
         except (KeyError, ValueError, TypeError, AttributeError):
             return _tool_failure("invalid_companion_provenance")
@@ -748,7 +786,7 @@ def _evidence_retrieve(
         return _tool_failure("invalid_companion_response")
     if turn.get("capture_enabled") is True:
         sources = turn.setdefault("source_evidence_ids", set())
-        if len(sources | {evidence_id}) > 512:
+        if len(sources | {evidence_id}) > MAX_LINEAGE_SOURCES:
             return _tool_failure("provenance_limit")
         sources.add(evidence_id)
     return _tool_result(
@@ -917,7 +955,9 @@ def _execution_middleware(
     base_url: str = "",
     **_: Any,
 ) -> Any:
-    stage1 = os.getenv("LUCY_TELEGRAM_STAGE") == "1"
+    telegram_stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    stage1 = telegram_stage == "1"
+    managed_telegram = telegram_stage in {"1", "2"}
     if platform == "telegram" and not stage1 and (
         session_id,
         turn_id,
@@ -928,7 +968,7 @@ def _execution_middleware(
             "not be established safely.",
         )
     telegram_identity: dict[str, Any] | None = None
-    if platform == "telegram" and stage1:
+    if platform == "telegram" and managed_telegram:
         try:
             from sitecustomize import next_model_operation  # type: ignore[import-not-found]
 
@@ -1007,12 +1047,24 @@ def register(ctx: Any) -> None:
         description=MEMORY_LOOKUP_SCHEMA["description"],
         emoji="🔎",
     )
-    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+    telegram_stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    if telegram_stage == "1":
         # Stage 1 is deliberately read-only: no transcript capture, raw evidence
         # retrieval, memory proposal, or session-end persistence hook is exposed.
         ctx.register_middleware("llm_request", _request_middleware)
         ctx.register_middleware("llm_execution", _execution_middleware)
         ctx.register_middleware("tool_execution", _tool_execution_middleware)
+        return
+    if telegram_stage == "2":
+        # Stage 2 adds encrypted capture and deterministic capture controls while
+        # retaining only the routine credential. Sensitive tools require their
+        # own later owner-event broker and are intentionally not registered.
+        ctx.register_middleware("llm_request", _request_middleware)
+        ctx.register_middleware("llm_execution", _execution_middleware)
+        ctx.register_middleware("tool_execution", _tool_execution_middleware)
+        ctx.register_hook("pre_llm_call", _pre_llm_call)
+        ctx.register_hook("transform_llm_output", _transform_llm_output)
+        ctx.register_hook("on_session_end", _on_session_end)
         return
     ctx.register_tool(
         name="lucy_memory_propose",

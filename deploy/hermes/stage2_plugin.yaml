@@ -1,0 +1,11 @@
+name: lucy_control
+version: 2.2.0
+description: Encrypted Telegram capture with read-only Lucy memory and governed consent.
+author: Lucy
+kind: standalone
+provides_tools:
+  - lucy_memory_lookup
+provides_hooks:
+  - pre_llm_call
+  - transform_llm_output
+  - on_session_end

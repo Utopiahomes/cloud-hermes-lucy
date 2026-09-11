@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 
 from lucy.archive import (
+    CaptureModeAndTurnInput,
     CaptureModeInput,
     CaptureModeResult,
     ConversationMessageArchiveInput,
@@ -27,6 +28,7 @@ from lucy.realm_archive_commit import (
     RealmArchiveCommitService,
     RealmArchiveOutcomeV1,
     RealmConversationArchiveService,
+    RealmTurnCommitResultV1,
     realm_archive_commit_from_environment,
 )
 
@@ -87,6 +89,7 @@ class FakeStore:
         self.fail_first_outcome = fail_first_outcome
         self.capture_enabled = True
         self.capture_calls = 0
+        self.turn_commit_calls: list[tuple[UUID, UUID]] = []
 
     def claim(
         self, request: RealmArchiveCommitInputV1, *, request_commitment: str
@@ -162,6 +165,22 @@ class FakeStore:
             source_conversation_id=request.source_conversation_id,
             capture_enabled=self.capture_enabled,
             version=2,
+        )
+
+    def commit_turn(
+        self, assistant_operation_id: UUID, current_input_evidence_id: UUID
+    ) -> RealmTurnCommitResultV1:
+        self.turn_commit_calls.append((assistant_operation_id, current_input_evidence_id))
+        return RealmTurnCommitResultV1(turn_committed=True, replayed=False)
+
+    def set_capture_mode_and_accept(
+        self, idempotency_key: str, request: CaptureModeAndTurnInput
+    ) -> TurnCaptureResult:
+        del idempotency_key
+        self.capture_calls += 1
+        self.capture_enabled = request.capture_enabled
+        return TurnCaptureResult(
+            capture_enabled=request.capture_enabled, version=3, replayed=False
         )
 
 
@@ -338,3 +357,60 @@ def test_compatibility_service_preserves_existing_hermes_contract() -> None:
     assert result.archived and result.capture_enabled
     assert result.evidence_id == store.evidence_id
     assert backend.generate_calls == 1
+
+
+def test_realm_assistant_requires_current_input_and_commits_complete_turn() -> None:
+    store, backend = FakeStore(), FakeBackend()
+    service = RealmConversationArchiveService(
+        store,
+        _service(store, backend),
+        capture_authorized=True,
+    )
+    with pytest.raises(ValueError, match="current retained input"):
+        service.preserve_message(
+            "hermes-transcript:telegram:conversation-1:turn-1:assistant",
+            ConversationMessageArchiveInput(
+                platform="telegram",
+                source_conversation_id="conversation-1",
+                source_turn_id="turn-1",
+                source_message_id="turn-1:assistant",
+                role="assistant",
+                content="synthetic assistant message",
+            ),
+        )
+    current_input = UUID(int=99)
+    result = service.preserve_message(
+        "hermes-transcript:telegram:conversation-1:turn-1:assistant",
+        ConversationMessageArchiveInput(
+            platform="telegram",
+            source_conversation_id="conversation-1",
+            source_turn_id="turn-1",
+            source_message_id="turn-1:assistant",
+            role="assistant",
+            content="synthetic assistant message",
+            source_evidence_ids={current_input},
+            current_input_evidence_id=current_input,
+        ),
+    )
+    assert result.turn_committed is True
+    assert store.turn_commit_calls == [(store.operation_id, current_input)]
+
+
+def test_stage2_capture_transition_and_control_receipt_use_one_store_call() -> None:
+    store, backend = FakeStore(), FakeBackend()
+    service = RealmConversationArchiveService(
+        store,
+        _service(store, backend),
+        capture_authorized=True,
+    )
+    result = service.set_capture_mode_and_accept(
+        "capture-transition-1",
+        CaptureModeAndTurnInput(
+            platform="telegram",
+            source_conversation_id="conversation-1",
+            source_turn_id="turn-control",
+            capture_enabled=False,
+        ),
+    )
+    assert result.capture_enabled is False and result.version == 3
+    assert store.capture_calls == 1

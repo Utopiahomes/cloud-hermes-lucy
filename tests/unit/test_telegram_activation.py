@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import cast
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from lucy.telegram_activation import TelegramStage1ActivationManifest
+from lucy.telegram_activation import (
+    TelegramStage1ActivationManifest,
+    TelegramStage2ActivationManifest,
+)
 
 
 def _manifest() -> dict[str, object]:
@@ -75,3 +79,58 @@ def test_manifest_rejects_scope_expansion(key: str, value: bool) -> None:
     candidate[key] = value
     with pytest.raises(ValidationError):
         TelegramStage1ActivationManifest.model_validate(candidate)
+
+
+def _stage2_manifest() -> dict[str, object]:
+    candidate = _manifest()
+    candidate.update(
+        {
+            "contract": "lucy.telegram.private.stage2.activation.v1",
+            "transcript_capture_enabled": True,
+            "encrypted_evidence_archive_enabled": True,
+            "authoritative_two_message_commit": True,
+            "off_record_history_rotation": True,
+            "sensitive_gateway_tools_enabled": False,
+        }
+    )
+    artifacts = cast(dict[str, object], candidate["artifacts"]).copy()
+    artifacts["schema_revision"] = "0054_stage2_scoped_turn_commit"
+    candidate["artifacts"] = artifacts
+    return candidate
+
+
+def test_stage2_manifest_requires_all_capture_safety_boundaries() -> None:
+    manifest = TelegramStage2ActivationManifest.model_validate(_stage2_manifest())
+    assert manifest.transcript_capture_enabled
+    assert manifest.authoritative_two_message_commit
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "encrypted_evidence_archive_enabled",
+        "authoritative_two_message_commit",
+        "off_record_history_rotation",
+        "one_active_gateway",
+    ],
+)
+def test_stage2_manifest_rejects_missing_required_boundary(key: str) -> None:
+    candidate = _stage2_manifest()
+    candidate[key] = False
+    with pytest.raises(ValidationError):
+        TelegramStage2ActivationManifest.model_validate(candidate)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "automatic_memory_writes_enabled",
+        "raw_evidence_retrieval_enabled",
+        "sensitive_gateway_tools_enabled",
+    ],
+)
+def test_stage2_manifest_rejects_gateway_authority_expansion(key: str) -> None:
+    candidate = _stage2_manifest()
+    candidate[key] = True
+    with pytest.raises(ValidationError):
+        TelegramStage2ActivationManifest.model_validate(candidate)

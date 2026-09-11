@@ -58,6 +58,7 @@ class ConversationMessageArchiveInput(DerivationSourcesV1):
     source_message_id: str = Field(min_length=1, max_length=512)
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=65_536)
+    current_input_evidence_id: UUID | None = None
 
     def canonical_bytes(self) -> bytes:
         return _canonical_json(self.model_dump(mode="json"))
@@ -93,6 +94,15 @@ class CaptureModeResult(BaseModel):
     capture_enabled: bool
     version: int = Field(ge=0)
     replayed: bool = False
+
+
+class CaptureModeAndTurnInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    platform: Literal["telegram"]
+    source_conversation_id: str = Field(min_length=1, max_length=512)
+    source_turn_id: str = Field(min_length=1, max_length=512)
+    capture_enabled: bool
 
 
 class LatestRetainedEvidenceResult(BaseModel):

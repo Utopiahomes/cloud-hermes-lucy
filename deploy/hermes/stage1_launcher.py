@@ -31,6 +31,18 @@ def _required(name: str) -> str:
     return value
 
 
+def _validate_stage_mode() -> str:
+    """Bind capture authority to one explicit Telegram release stage."""
+
+    stage = _required("LUCY_TELEGRAM_STAGE")
+    capture = os.environ.get("LUCY_TRANSCRIPT_CAPTURE_ENABLED")
+    if stage == "1" and capture == "false":
+        return stage
+    if stage == "2" and capture == "true":
+        return stage
+    raise RuntimeError("telegram_stage_capture_mismatch")
+
+
 def _companion_url() -> str:
     configured = os.environ.get("LUCY_COMPANION_URL", "").strip().rstrip("/")
     if configured:
@@ -105,10 +117,7 @@ def _preflight(environment: dict[str, str], scratch: Path) -> None:
 
 
 def main() -> int:
-    if _required("LUCY_TELEGRAM_STAGE") != "1":
-        raise RuntimeError("stage1_mode_required")
-    if os.environ.get("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true":
-        raise RuntimeError("capture_must_be_disabled")
+    _validate_stage_mode()
     token = _required("TELEGRAM_BOT_TOKEN")
     bot_prefix, separator, _secret = token.partition(":")
     if not separator or not bot_prefix.isdecimal() or int(bot_prefix) <= 0:

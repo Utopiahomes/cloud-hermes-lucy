@@ -37,6 +37,7 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ("GET", "/internal/v1/conversations/capture-mode"),
         ("GET", "/internal/v1/conversations/latest-retained-evidence"),
         ("POST", "/internal/v1/conversations/capture-mode"),
+        ("POST", "/internal/v1/conversations/capture-mode-and-accept"),
         ("POST", "/internal/v1/conversations/forget-last"),
         ("POST", "/internal/v1/conversations/messages"),
         ("POST", "/internal/v1/model-executions/begin"),

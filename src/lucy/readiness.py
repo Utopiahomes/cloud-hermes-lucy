@@ -14,6 +14,7 @@ from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
 R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
+STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",
@@ -109,8 +110,17 @@ class ServiceReadiness:
                     )
                 )
             )
-            expected_revision = R1_SCHEMA_REVISION if self._baseline == "v1.3" else SCHEMA_REVISION
-            if revisions != [expected_revision]:
+            expected_revisions = {SCHEMA_REVISION}
+            if self._baseline == "v1.3":
+                expected_revisions = (
+                    {STAGE2_SCHEMA_REVISION}
+                    if os.getenv("LUCY_TELEGRAM_STAGE") == "2"
+                    # The bridge release must remain healthy before and after
+                    # the quarantined 0053 -> 0054 migration. Stage 2 itself
+                    # admits only the new revision.
+                    else {R1_SCHEMA_REVISION, STAGE2_SCHEMA_REVISION}
+                )
+            if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
             admission = session.execute(
                 text(
@@ -371,6 +381,11 @@ class ServiceReadiness:
                 "lucy.reconcile_scoped_deletion_v2(uuid)",
             ),
         }
+        if self._mode == "routine" and os.getenv("LUCY_TELEGRAM_STAGE") == "2":
+            required_functions["routine"] += (
+                "lucy.set_and_accept_scoped_capture_turn_v1(text,text,boolean,text)",
+                "lucy.commit_capturable_scoped_turn_v1(uuid,uuid)",
+            )
         for function in required_functions.get(self._mode, ()):
             if not session.scalar(
                 text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),

@@ -17,6 +17,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.archive import (
+    CaptureModeAndTurnInput,
     CaptureModeInput,
     CaptureModeResult,
     ConversationMessageArchiveInput,
@@ -77,6 +78,12 @@ class RealmArchiveCommitResultV1(BaseModel):
     replayed: bool
 
 
+class RealmTurnCommitResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    turn_committed: Literal[True] = True
+    replayed: bool
+
+
 class RealmArchiveCommitStore(Protocol):
     def claim(
         self, request: RealmArchiveCommitInputV1, *, request_commitment: str
@@ -97,6 +104,14 @@ class RealmConversationArchiveStore(RealmArchiveCommitStore, Protocol):
     def set_capture_mode(
         self, idempotency_key: str, request: CaptureModeInput
     ) -> CaptureModeResult: ...
+
+    def commit_turn(
+        self, assistant_operation_id: UUID, current_input_evidence_id: UUID
+    ) -> RealmTurnCommitResultV1: ...
+
+    def set_capture_mode_and_accept(
+        self, idempotency_key: str, request: CaptureModeAndTurnInput
+    ) -> TurnCaptureResult: ...
 
 
 class PostgresRealmArchiveCommitStore:
@@ -222,6 +237,48 @@ class PostgresRealmArchiveCommitStore:
             }
         )
 
+    def commit_turn(
+        self, assistant_operation_id: UUID, current_input_evidence_id: UUID
+    ) -> RealmTurnCommitResultV1:
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.commit_capturable_scoped_turn_v1("
+                        ":assistant_operation,:current_input_evidence)"
+                    ),
+                    {
+                        "assistant_operation": assistant_operation_id,
+                        "current_input_evidence": current_input_evidence_id,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise RealmArchiveCommitUnavailable("realm turn commit is unavailable") from exc
+        return RealmTurnCommitResultV1.model_validate(value)
+
+    def set_capture_mode_and_accept(
+        self, idempotency_key: str, request: CaptureModeAndTurnInput
+    ) -> TurnCaptureResult:
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.set_and_accept_scoped_capture_turn_v1("
+                        ":conversation,:turn,:enabled,:key)"
+                    ),
+                    {
+                        "conversation": request.source_conversation_id,
+                        "turn": request.source_turn_id,
+                        "enabled": request.capture_enabled,
+                        "key": idempotency_key,
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise RealmArchiveCommitUnavailable(
+                "realm capture transition is unavailable"
+            ) from exc
+        return TurnCaptureResult.model_validate(value)
+
 
 class RealmArchiveCommitService:
     """Resume one archive operation from its last durable PostgreSQL/AWS stage."""
@@ -313,6 +370,13 @@ class RealmConversationArchiveService:
             raise PermissionError("live capture has not been authorized")
         return self._store.set_capture_mode(idempotency_key, request)
 
+    def set_capture_mode_and_accept(
+        self, idempotency_key: str, request: CaptureModeAndTurnInput
+    ) -> TurnCaptureResult:
+        if request.capture_enabled and not self._capture_authorized:
+            raise PermissionError("live capture has not been authorized")
+        return self._store.set_capture_mode_and_accept(idempotency_key, request)
+
     def preserve_message(
         self,
         idempotency_key: str,
@@ -320,8 +384,15 @@ class RealmConversationArchiveService:
     ) -> ConversationMessageArchiveResult:
         if not self._capture_authorized:
             raise PermissionError("live capture has not been authorized")
-        if request.role == "user" and request.source_evidence_ids:
+        if request.role == "user" and (
+            request.source_evidence_ids or request.current_input_evidence_id is not None
+        ):
             raise ValueError("inbound user evidence is an independent source")
+        if request.role == "assistant" and (
+            request.current_input_evidence_id is None
+            or request.current_input_evidence_id not in request.source_evidence_ids
+        ):
+            raise ValueError("assistant evidence requires its current retained input")
         lineage = tuple(str(value) for value in sorted(request.source_evidence_ids))
         authenticated_header = canonical_json_bytes(
             {
@@ -345,12 +416,22 @@ class RealmConversationArchiveService:
                 lineage_refs=lineage,
             )
         )
+        turn_committed = False
+        turn_replayed = False
+        if request.role == "assistant":
+            assert request.current_input_evidence_id is not None
+            turn = self._store.commit_turn(
+                result.operation_id, request.current_input_evidence_id
+            )
+            turn_committed = turn.turn_committed
+            turn_replayed = turn.replayed
         return ConversationMessageArchiveResult(
             operation_id=result.operation_id,
             evidence_id=result.evidence_id,
             archived=True,
             capture_enabled=True,
-            replayed=result.replayed,
+            turn_committed=turn_committed,
+            replayed=result.replayed or turn_replayed,
         )
 
 

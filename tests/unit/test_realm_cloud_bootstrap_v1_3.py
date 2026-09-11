@@ -283,7 +283,7 @@ def test_migrations_use_one_supplied_transaction_for_temporary_authority() -> No
     )
     environment = (ROOT / "migrations/env.py").read_text(encoding="utf-8")
     grant = source.index("GRANT USAGE, CREATE ON SCHEMA lucy")
-    upgrade = source.index('command.upgrade(alembic, "head")')
+    upgrade = source.index("command.upgrade(alembic, target_revision)")
     revoke = source.index("REVOKE CREATE ON SCHEMA lucy")
     assert grant < upgrade < revoke
     assert "lucy_security_function_owner,lucy_directory_function_owner" in source

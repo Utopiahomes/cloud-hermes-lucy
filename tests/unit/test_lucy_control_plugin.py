@@ -329,6 +329,82 @@ def test_stage1_registers_only_read_only_memory_and_budget_middleware(
     assert hooks == []
 
 
+def test_stage2_registers_capture_hooks_but_no_sensitive_tools_or_fallback_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    registrations: list[tuple[str, Any]] = []
+    hooks: list[tuple[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    ctx = SimpleNamespace(
+        register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_hook=lambda kind, callback: hooks.append((kind, callback)),
+        register_tool=lambda **kwargs: tools.append(kwargs),
+    )
+    plugin.register(ctx)
+    assert [tool["name"] for tool in tools] == ["lucy_memory_lookup"]
+    assert [kind for kind, _callback in registrations] == [
+        "llm_request",
+        "llm_execution",
+        "tool_execution",
+    ]
+    assert [kind for kind, _callback in hooks] == [
+        "pre_llm_call",
+        "transform_llm_output",
+        "on_session_end",
+    ]
+
+
+def test_stage2_forget_phrase_never_calls_sensitive_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def request(path: str, **_kwargs: Any) -> dict[str, Any]:
+        calls.append(path)
+        if path.endswith("/accept-turn"):
+            return {"capture_enabled": True, "version": 0}
+        raise AssertionError("sensitive boundary must not be called")
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Lucy, forget the last message.",
+        session_id="session-stage2",
+        turn_id="turn-stage2",
+        platform="telegram",
+    )
+    assert context is not None and "not confirmed" in context["context"]
+    assert calls == ["/internal/v1/conversations/accept-turn"]
+
+
+def test_stage2_off_record_transition_and_receipt_are_one_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        return {"capture_enabled": False, "version": 1, "replayed": False}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Lucy, off the record.",
+        session_id="stage2-conversation",
+        turn_id="stage2-control-turn",
+        platform="telegram",
+    )
+    assert context is not None and "not archiving" in context["context"]
+    assert [path for path, _kwargs in calls] == [
+        "/internal/v1/conversations/capture-mode-and-accept"
+    ]
+    assert calls[0][1]["payload"]["source_turn_id"] == "stage2-control-turn"
+
+
 def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,6 +456,7 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     ]
     assert message_calls[0][1]["extra_headers"] == message_calls[2][1]["extra_headers"]
     assert message_calls[1][1]["extra_headers"] == message_calls[3][1]["extra_headers"]
+    assert message_calls[1][1]["payload"]["current_input_evidence_id"] == "evidence-1"
 
 
 def test_off_record_is_visible_and_skips_archive(

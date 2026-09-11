@@ -54,8 +54,9 @@ complete record is `docs/private-telegram-stage1-acceptance-2026-09-11.md`.
 ## Exact next action
 
 Use private Lucy through the commissioned Telegram bot while preserving the Stage 1
-capture-off boundary. Stage 2 encrypted transcript retention requires a separate review
-and explicit activation approval.
+capture-off boundary. Stage 2 source implementation is recorded in
+[`private-telegram-stage2-implementation-2026-09-11.md`](private-telegram-stage2-implementation-2026-09-11.md);
+production commissioning and live encrypted capture remain pending.
 
 ## Stage 1 verification ledger
 

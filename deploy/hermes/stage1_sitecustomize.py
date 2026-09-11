@@ -8,8 +8,10 @@ Lucy's private companion API.  Message and response content never cross it.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
+import re
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -78,6 +80,28 @@ def _lease_payload() -> dict[str, Any]:
     }
 
 
+def _is_back_on_record(event: Any) -> bool:
+    text = getattr(event, "text", None)
+    if not isinstance(text, str):
+        return False
+    normalized = re.sub(r"[.!?]+$", "", text.strip().casefold())
+    normalized = re.sub(r"^lucy[, :]\s*", "", normalized)
+    return normalized == "back on the record"
+
+
+async def _reset_history_boundary(adapter: Any, event: Any) -> None:
+    """Rotate Hermes history before capture resumes after an off-record interval."""
+
+    handler = getattr(adapter, "_message_handler", None)
+    gateway = getattr(handler, "__self__", None)
+    reset = getattr(gateway, "_handle_reset_command", None)
+    if reset is None:
+        raise RuntimeError("stage2_history_boundary_unavailable")
+    reset_event = copy.copy(event)
+    reset_event.text = "/reset"
+    await reset(reset_event)
+
+
 def _transition(event_id: UUID, state: str, outbound_message_id: int | None = None) -> None:
     payload = {
         **_lease_payload(),
@@ -89,15 +113,18 @@ def _transition(event_id: UUID, state: str, outbound_message_id: int | None = No
 
 
 def _install() -> None:
-    if os.getenv("LUCY_TELEGRAM_STAGE") != "1":
+    stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    if stage not in {"1", "2"}:
         return
-    if os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true":
-        raise RuntimeError("stage1_capture_must_be_disabled")
+    capture = os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED")
+    if (stage, capture) not in {("1", "false"), ("2", "true")}:
+        raise RuntimeError("telegram_stage_capture_mismatch")
 
     from gateway.platforms.base import BasePlatformAdapter  # type: ignore[import-not-found]
 
     original_process = BasePlatformAdapter._process_message_background
     original_send = BasePlatformAdapter._send_with_retry
+    conversation_locks: dict[int, asyncio.Lock] = {}
 
     async def stage1_process(self: Any, event: Any, session_key: str) -> None:
         try:
@@ -109,35 +136,38 @@ def _install() -> None:
         chat_type = str(getattr(event.source, "chat_type", ""))
         if user_id != owner_id or chat_id != home_id or chat_type != "dm":
             return
-        bot_id = int(_required("LUCY_TELEGRAM_BOT_ID"))
-        event_id = uuid5(NAMESPACE_URL, f"lucy-stage1:{bot_id}:{update_id}")
-        claim = await asyncio.to_thread(
-            _post,
-            "/internal/v1/telegram-stage1/events/claim",
-            {
-                **_lease_payload(),
-                "event_id": str(event_id),
-                "update_id": update_id,
-                "chat_id": chat_id,
-                "message_id": message_id,
-            },
-        )
-        if claim.get("admitted") is not True:
-            return
-        context_token = _CURRENT.set(_Event(event_id))
-        try:
-            await asyncio.to_thread(_transition, event_id, "INFERENCE_STARTED")
-            await original_process(self, event, session_key)
-            current = _CURRENT.get()
-            if current is not None:
-                await asyncio.to_thread(_transition, event_id, "INFERENCE_SETTLED")
-                await asyncio.to_thread(_transition, event_id, "COMPLETED_NO_REPLY")
-        except BaseException:
-            with suppress(Exception):
-                await asyncio.to_thread(_transition, event_id, "INTERRUPTED")
-            raise
-        finally:
-            _CURRENT.reset(context_token)
+        async with conversation_locks.setdefault(chat_id, asyncio.Lock()):
+            bot_id = int(_required("LUCY_TELEGRAM_BOT_ID"))
+            event_id = uuid5(NAMESPACE_URL, f"lucy-stage1:{bot_id}:{update_id}")
+            claim = await asyncio.to_thread(
+                _post,
+                "/internal/v1/telegram-stage1/events/claim",
+                {
+                    **_lease_payload(),
+                    "event_id": str(event_id),
+                    "update_id": update_id,
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                },
+            )
+            if claim.get("admitted") is not True:
+                return
+            context_token = _CURRENT.set(_Event(event_id))
+            try:
+                if stage == "2" and _is_back_on_record(event):
+                    await _reset_history_boundary(self, event)
+                await asyncio.to_thread(_transition, event_id, "INFERENCE_STARTED")
+                await original_process(self, event, session_key)
+                current = _CURRENT.get()
+                if current is not None:
+                    await asyncio.to_thread(_transition, event_id, "INFERENCE_SETTLED")
+                    await asyncio.to_thread(_transition, event_id, "COMPLETED_NO_REPLY")
+            except BaseException:
+                with suppress(Exception):
+                    await asyncio.to_thread(_transition, event_id, "INTERRUPTED")
+                raise
+            finally:
+                _CURRENT.reset(context_token)
 
     async def stage1_send(self: Any, *args: Any, **kwargs: Any) -> Any:
         current = _CURRENT.get()

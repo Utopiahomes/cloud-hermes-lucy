@@ -5,6 +5,8 @@ import importlib.util
 import os
 import stat
 import sys
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -49,6 +51,27 @@ def test_managed_home_prepares_only_ephemeral_hermes_runtime_directories(
             assert stat.S_IMODE((tmp_path / name).stat().st_mode) == 0o700
 
 
+@pytest.mark.parametrize("stage,capture", [("1", "false"), ("2", "true")])
+def test_launcher_binds_capture_authority_to_release_stage(
+    monkeypatch: pytest.MonkeyPatch, stage: str, capture: str
+) -> None:
+    launcher = _load_launcher()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", stage)
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", capture)
+    assert launcher._validate_stage_mode() == stage
+
+
+@pytest.mark.parametrize("stage,capture", [("1", "true"), ("2", "false"), ("3", "false")])
+def test_launcher_rejects_stage_capture_mismatch(
+    monkeypatch: pytest.MonkeyPatch, stage: str, capture: str
+) -> None:
+    launcher = _load_launcher()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", stage)
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", capture)
+    with pytest.raises(RuntimeError, match="stage_capture_mismatch"):
+        launcher._validate_stage_mode()
+
+
 def test_stage1_binding_requires_four_exact_environment_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,6 +102,9 @@ def test_sent_transition_requires_only_a_numeric_outbound_id() -> None:
 
 def _load_overlay(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    stage: str = "1",
+    capture: str = "false",
 ) -> tuple[ModuleType, type[Any]]:
     class FakeBasePlatformAdapter:
         async def _process_message_background(self, event: Any, session_key: str) -> None:
@@ -95,8 +121,8 @@ def _load_overlay(
     monkeypatch.setitem(sys.modules, "gateway", gateway)
     monkeypatch.setitem(sys.modules, "gateway.platforms", platforms)
     monkeypatch.setitem(sys.modules, "gateway.platforms.base", base)
-    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
-    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "false")
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", stage)
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", capture)
     monkeypatch.setenv("LUCY_COMPANION_URL", "http://lucy.invalid")
     monkeypatch.setenv("LUCY_ADAPTER_TOKEN", "synthetic-token")
     monkeypatch.setenv("LUCY_TELEGRAM_GATEWAY_HOLDER_ID", str(uuid4()))
@@ -113,8 +139,27 @@ def _load_overlay(
     return module, FakeBasePlatformAdapter
 
 
-def _event(*, user_id: str = "123", chat_id: str = "123") -> Any:
+def test_stage2_overlay_preserves_owner_filter_and_delivery_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlay, adapter_type = _load_overlay(monkeypatch, stage="2", capture="true")
+    calls: list[str] = []
+
+    def post(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(path)
+        return {"admitted": True} if path.endswith("/claim") else {"replayed": False}
+
+    monkeypatch.setattr(overlay, "_post", post)
+    asyncio.run(adapter_type()._process_message_background(_event(), "session"))
+    assert calls[0].endswith("/claim")
+    assert calls[-1].endswith("/transition")
+
+
+def _event(
+    *, user_id: str = "123", chat_id: str = "123", update_id: int = 81
+) -> Any:
     return SimpleNamespace(
+        text="hello",
         source=SimpleNamespace(
             platform=SimpleNamespace(value="telegram"),
             user_id=user_id,
@@ -122,9 +167,71 @@ def _event(*, user_id: str = "123", chat_id: str = "123") -> Any:
             chat_type="dm",
         ),
         message_id="41",
-        platform_update_id=81,
+        platform_update_id=update_id,
         timestamp=datetime.now(UTC),
     )
+
+
+def test_stage2_rotates_hermes_history_before_capture_resumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlay, adapter_type = _load_overlay(monkeypatch, stage="2", capture="true")
+    sequence: list[str] = []
+
+    class Gateway:
+        async def handle(self, _event: Any) -> str:
+            sequence.append("inference")
+            return "ok"
+
+        async def _handle_reset_command(self, _event: Any) -> str:
+            sequence.append("reset")
+            return "reset"
+
+    gateway = Gateway()
+    adapter = adapter_type()
+    adapter._message_handler = gateway.handle
+
+    def post(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        return {"admitted": True} if path.endswith("/claim") else {"replayed": False}
+
+    monkeypatch.setattr(overlay, "_post", post)
+    event = _event()
+    event.text = "Lucy, back on the record."
+    asyncio.run(adapter._process_message_background(event, "session"))
+    assert sequence == ["reset"]
+
+
+def test_stage2_serializes_same_chat_claim_and_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlay, adapter_type = _load_overlay(monkeypatch, stage="2", capture="true")
+    guard = threading.Lock()
+    active_claims = 0
+    maximum_claims = 0
+
+    def post(path: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal active_claims, maximum_claims
+        if not path.endswith("/claim"):
+            return {"replayed": False}
+        with guard:
+            active_claims += 1
+            maximum_claims = max(maximum_claims, active_claims)
+        time.sleep(0.05)
+        with guard:
+            active_claims -= 1
+        return {"admitted": True}
+
+    monkeypatch.setattr(overlay, "_post", post)
+
+    async def run_both() -> None:
+        adapter = adapter_type()
+        await asyncio.gather(
+            adapter._process_message_background(_event(update_id=81), "session"),
+            adapter._process_message_background(_event(update_id=82), "session"),
+        )
+
+    asyncio.run(run_both())
+    assert maximum_claims == 1
 
 
 def test_overlay_claims_before_inference_and_records_one_delivery(
@@ -215,3 +322,18 @@ def test_gateway_image_is_exactly_pinned_and_has_no_persistent_volume_contract()
     assert '"lucy_plugin",' in launcher
     assert 'f"{label}_failed"' in launcher
     assert 'f"{label}_passed"' in launcher
+
+
+def test_stage2_gateway_uses_same_pin_with_capture_only_plugin_contract() -> None:
+    dockerfile = (ROOT / "Dockerfile.hermes-telegram-stage2").read_text(encoding="utf-8")
+    plugin = (ROOT / "deploy" / "hermes" / "stage2_plugin.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "v2026.8.19@sha256:3811ed13" in dockerfile
+    assert "stage2_plugin.yaml" in dockerfile
+    assert "lucy_memory_lookup" in plugin
+    assert "lucy_memory_propose" not in plugin
+    assert "lucy_evidence_retrieve" not in plugin
+    assert "pre_llm_call" in plugin
+    assert "transform_llm_output" in plugin
+    assert "post_llm_call" not in plugin

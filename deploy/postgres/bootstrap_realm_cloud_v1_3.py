@@ -376,7 +376,9 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
             raise BootstrapError("realm runtime LOGIN has inherited membership")
 
 
-def migrate_realm_database(migration_url: URL) -> None:
+def migrate_realm_database(
+    migration_url: URL, *, target_revision: str = EXPECTED_REVISION
+) -> None:
     """Advance a quarantined realm while containing temporary schema authority."""
     engine = create_engine(migration_url, poolclass=NullPool)
     try:
@@ -413,7 +415,7 @@ def migrate_realm_database(migration_url: URL) -> None:
             alembic = Config(str(ROOT / "alembic.ini"))
             alembic.set_main_option("script_location", str(ROOT / "migrations"))
             alembic.attributes["connection"] = connection
-            command.upgrade(alembic, "head")
+            command.upgrade(alembic, target_revision)
             connection.execute(
                 text(
                     "REVOKE CREATE ON SCHEMA lucy FROM "

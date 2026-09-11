@@ -57,6 +57,7 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
             "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
             "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
             "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
+            "lucy.commit_capturable_scoped_turn_v1(uuid,uuid)",
         ):
             assert connection.scalar(
                 text(
@@ -90,7 +91,9 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
     owner.dispose()
 
 
-def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login() -> None:
+def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert OWNER_URL
     parsed = make_url(OWNER_URL)
     if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
@@ -112,6 +115,7 @@ def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login() 
             {"epoch": epoch},
         )
         connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
     boundaries = (
         ("public", "lucy_utopia_public", "synthetic-utopia-public-only"),
         ("routine", "lucy_utopia_routine", "synthetic-utopia-only"),

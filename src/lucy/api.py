@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.archive import (
+    CaptureModeAndTurnInput,
     CaptureModeInput,
     CaptureModeResult,
     ConversationArchiveService,
@@ -594,7 +595,7 @@ def begin_model_execution(
     """Reserve once immediately before the Hermes provider call."""
     _require_mode("routine")
     _authorize(authorization)
-    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+    if os.getenv("LUCY_TELEGRAM_STAGE") in {"1", "2"}:
         try:
             return _telegram_stage1_service().begin_model_execution(request)
         except TelegramStage1Unavailable as exc:
@@ -614,7 +615,7 @@ def settle_model_execution(
     """Settle usage after the wrapped provider call completes."""
     _require_mode("routine")
     _authorize(authorization)
-    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+    if os.getenv("LUCY_TELEGRAM_STAGE") in {"1", "2"}:
         try:
             return _telegram_stage1_service().settle_model_execution(request)
         except TelegramStage1Unavailable as exc:
@@ -623,10 +624,12 @@ def settle_model_execution(
 
 
 def _telegram_stage1_service() -> TelegramStage1Service:
-    if os.getenv("LUCY_TELEGRAM_STAGE") != "1":
+    stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    if stage not in {"1", "2"}:
         raise HTTPException(status_code=404, detail="endpoint unavailable")
-    if os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true":
-        raise HTTPException(status_code=503, detail="Telegram Stage 1 capture invariant failed")
+    capture = os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED")
+    if (stage, capture) not in {("1", "false"), ("2", "true")}:
+        raise HTTPException(status_code=503, detail="Telegram stage/capture invariant failed")
     return TelegramStage1Service(_ready_sessions(), TelegramGatewayBinding.from_environment())
 
 
@@ -790,6 +793,35 @@ def set_capture_mode(
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
         return _archive_service().set_capture_mode(idempotency_key.strip(), request)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="live capture is not authorized") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="idempotency conflict") from exc
+
+
+@app.post(
+    "/internal/v1/conversations/capture-mode-and-accept",
+    tags=["internal"],
+    response_model=TurnCaptureResult,
+)
+def set_capture_mode_and_accept_turn(
+    request: CaptureModeAndTurnInput,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TurnCaptureResult:
+    """Atomically persist a Stage 2 capture transition and its control-turn receipt."""
+
+    _require_mode("routine")
+    _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") != "2":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    service = _archive_service()
+    if not isinstance(service, RealmConversationArchiveService):
+        raise HTTPException(status_code=503, detail="realm archive boundary unavailable")
+    try:
+        return service.set_capture_mode_and_accept(idempotency_key.strip(), request)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail="live capture is not authorized") from exc
     except ValueError as exc:

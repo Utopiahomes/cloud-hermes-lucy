@@ -13,7 +13,11 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from lucy.archive import ConversationMessageArchiveInput, TurnCaptureInput
+from lucy.archive import (
+    CaptureModeAndTurnInput,
+    ConversationMessageArchiveInput,
+    TurnCaptureInput,
+)
 from lucy.authorized_deletion_recovery import (
     AuthorizedDeletionRecoveryProofV2,
     build_authorized_deletion_recovery_contract_v2,
@@ -69,6 +73,7 @@ from lucy.realm_archive import (
 from lucy.realm_archive_commit import (
     PostgresRealmArchiveCommitStore,
     RealmArchiveCommitService,
+    RealmArchiveCommitUnavailable,
     RealmConversationArchiveService,
 )
 from lucy.telegram_stage1 import (
@@ -107,7 +112,8 @@ def clean_sensitive_tables() -> None:
         )
         connection.execute(
             text(
-                "TRUNCATE lucy.scoped_authorized_deletion_recovery_targets_v2, "
+                "TRUNCATE lucy.scoped_conversation_turn_commits_v1, "
+                "lucy.scoped_authorized_deletion_recovery_targets_v2, "
                 "lucy.scoped_archive_reconciliations_v1, "
                 "lucy.scoped_archive_aws_outcomes_v1, lucy.scoped_archive_intents_v1, "
                 "lucy.scoped_recovery_deletion_fences_v2, "
@@ -155,6 +161,9 @@ def clean_sensitive_tables() -> None:
                 "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb), "
                 "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text), "
                 "lucy.reconcile_capturable_scoped_archive_v1(uuid) "
+                "TO lucy_utopia_routine; "
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.commit_capturable_scoped_turn_v1(uuid,uuid) "
                 "TO lucy_utopia_routine; "
                 "GRANT EXECUTE ON FUNCTION lucy.freeze_claimed_evidence_package_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
@@ -1109,6 +1118,26 @@ def test_realm_runtime_preserves_existing_hermes_archive_contract(
         RealmArchiveCommitService(store, encryptor, request_commitment_key=b"r" * 32),
         capture_authorized=True,
     )
+    off_record = runtime.set_capture_mode_and_accept(
+        "runtime-off-record",
+        CaptureModeAndTurnInput(
+            platform="telegram",
+            source_conversation_id="runtime-conversation",
+            source_turn_id="runtime-control-off",
+            capture_enabled=False,
+        ),
+    )
+    assert not off_record.capture_enabled
+    on_record = runtime.set_capture_mode_and_accept(
+        "runtime-on-record",
+        CaptureModeAndTurnInput(
+            platform="telegram",
+            source_conversation_id="runtime-conversation",
+            source_turn_id="runtime-control-on",
+            capture_enabled=True,
+        ),
+    )
+    assert on_record.capture_enabled and on_record.version == off_record.version + 1
     assert runtime.accept_turn(
         TurnCaptureInput(
             platform="telegram",
@@ -1120,22 +1149,50 @@ def test_realm_runtime_preserves_existing_hermes_archive_contract(
         platform="telegram",
         source_conversation_id="runtime-conversation",
         source_turn_id="runtime-turn",
-        source_message_id="runtime-message",
+        source_message_id="runtime-turn:user",
         role="user",
         content="synthetic owner message",
     )
-    first = runtime.preserve_message("runtime-archive-1", request)
-    replay = runtime.preserve_message("runtime-archive-1", request)
+    first = runtime.preserve_message(
+        "hermes-transcript:telegram:runtime-conversation:runtime-turn:user", request
+    )
+    replay = runtime.preserve_message(
+        "hermes-transcript:telegram:runtime-conversation:runtime-turn:user", request
+    )
     assert first.archived and first.capture_enabled and not first.replayed
     assert replay.evidence_id == first.evidence_id and replay.replayed
     assert backend.generate_calls == 1
     assert len(backend.envelopes) == 1
+    assistant = runtime.preserve_message(
+        "hermes-transcript:telegram:runtime-conversation:runtime-turn:assistant",
+        ConversationMessageArchiveInput(
+            platform="telegram",
+            source_conversation_id="runtime-conversation",
+            source_turn_id="runtime-turn",
+            source_message_id="runtime-turn:assistant",
+            role="assistant",
+            content="synthetic assistant response",
+            source_evidence_ids={first.evidence_id},
+            current_input_evidence_id=first.evidence_id,
+        ),
+    )
+    assert assistant.turn_committed
+    assert assistant.operation_id is not None
+    with pytest.raises(RealmArchiveCommitUnavailable):
+        store.commit_turn(assistant.operation_id, uuid4())
 
     owner = create_engine(OWNER_URL)
     with owner.connect() as connection:
         assert connection.scalar(
             text("SELECT count(*) FROM lucy.scoped_evidence_records_v2 WHERE id=:id"),
             {"id": first.evidence_id},
+        ) == 1
+        assert connection.scalar(
+            text(
+                "SELECT count(*) FROM lucy.scoped_conversation_turn_commits_v1 "
+                "WHERE user_evidence_id=:user_id AND assistant_evidence_id=:assistant_id"
+            ),
+            {"user_id": first.evidence_id, "assistant_id": assistant.evidence_id},
         ) == 1
     owner.dispose()
 
