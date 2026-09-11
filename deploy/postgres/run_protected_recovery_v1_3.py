@@ -88,8 +88,8 @@ class ProtectedRecoveryConfig:
             _required(values, "LUCY_AUTHORITY_RECOVERY_DATABASE_URL")
         )
         cost_url = _database_url(_required(values, "LUCY_COST_RECOVERY_DATABASE_URL"))
-        if migration.username != "lucy_migration":
-            raise ProtectedRecoveryError("activation requires the offline migration login")
+        if not str(migration.username).endswith("_recovery_activation"):
+            raise ProtectedRecoveryError("activation requires its exact temporary login")
         if not str(authority_url.username).endswith("_authority_recovery"):
             raise ProtectedRecoveryError("authority replay requires its exact recovery login")
         if not str(cost_url.username).endswith("_cost_recovery"):
@@ -246,26 +246,47 @@ def _verify_database_identity(url: URL, expected_login: str) -> None:
 
 
 def _verify_migration_identity(url: URL) -> None:
-    """Attest the offline activation principal without broadening its authority."""
+    """Attest the temporary non-elevated activation principal and exact grants."""
 
     sessions = create_session_factory(url.render_as_string(hide_password=False))
     with sessions() as session:
         row = session.execute(
             text(
-                "SELECT current_user,r.rolcanlogin,r.rolsuper,r.rolcreaterole,"
+                "SELECT session_user,current_user,r.rolcanlogin,r.rolsuper,r.rolinherit,"
+                "r.rolcreaterole,"
                 "r.rolcreatedb,r.rolreplication,r.rolbypassrls,"
                 "(SELECT n.nspowner::regrole::text FROM pg_namespace n "
                 " WHERE n.nspname='lucy'),"
                 "(SELECT version_num FROM public.alembic_version),"
                 "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
                 "lucy.capture_boundary_safe_v1(),"
-                "(SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()) "
+                "(SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()),"
+                "pg_has_role(current_user,'lucy_migration','MEMBER'),"
+                "pg_has_role(current_user,'lucy_authority_function_owner','MEMBER'),"
+                "pg_has_role(current_user,'lucy_cost_function_owner','MEMBER'),"
+                "has_schema_privilege(current_user,'lucy','CREATE'),"
+                "has_table_privilege(current_user,'lucy.lifecycle','SELECT'),"
+                "has_table_privilege(current_user,'lucy.runtime_admission','SELECT'),"
+                "has_column_privilege(current_user,'lucy.runtime_admission','state','UPDATE'),"
+                "has_column_privilege(current_user,'lucy.runtime_admission','storage_epoch','UPDATE'),"
+                "has_column_privilege(current_user,'lucy.runtime_admission','updated_at','UPDATE'),"
+                "has_column_privilege(current_user,'lucy.runtime_admission','singleton','UPDATE'),"
+                "has_table_privilege(current_user,'lucy.restored_recovery_heads_v1','SELECT'),"
+                "has_column_privilege(current_user,'lucy.restored_recovery_heads_v1','updated_at','UPDATE'),"
+                "has_column_privilege(current_user,'lucy.restored_recovery_heads_v1','sequence','UPDATE'),"
+                "has_table_privilege(current_user,'lucy.restored_cost_admission_v1','SELECT'),"
+                "has_column_privilege(current_user,'lucy.restored_cost_admission_v1','updated_at','UPDATE'),"
+                "has_column_privilege(current_user,'lucy.restored_cost_admission_v1',"
+                "'state','UPDATE') "
                 "FROM pg_catalog.pg_roles r WHERE r.rolname=current_user"
             )
         ).one()
+    expected_login = str(url.username)
     if tuple(row) != (
-        "lucy_migration",
+        expected_login,
+        expected_login,
         True,
+        False,
         False,
         False,
         False,
@@ -276,8 +297,24 @@ def _verify_migration_identity(url: URL) -> None:
         "quarantined",
         True,
         True,
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        False,
+        True,
+        True,
+        False,
     ):
-        raise ProtectedRecoveryError("migration identity or activation boundary differs")
+        raise ProtectedRecoveryError("activation identity or boundary differs")
 
 
 def run(config: ProtectedRecoveryConfig) -> dict[str, Any]:

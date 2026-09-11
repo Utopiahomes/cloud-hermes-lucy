@@ -261,7 +261,8 @@ quarantined and capture is off. It rejects static AWS credentials and verifies t
 active assumed role through STS before reading either journal. Supply the two exact
 recovery database URLs, both immutable stream bindings, independently retained
 pre-restore witness heads, the two journal table names, a new target runtime epoch,
-the private migration URL, and:
+and the private URL for a fresh restore-only LOGIN whose name ends in
+`_recovery_activation`, and:
 
 ```text
 RENDER=true
@@ -274,10 +275,15 @@ LUCY_PROTECTED_RECOVERY_AUTHORIZATION=security-v1.3-protected-recovery-handoff
 The runner verifies each non-elevated recovery LOGIN and the TLS/capture/quarantine
 boundary, replays both journal suffixes, obtains the protected short writer pauses,
 finalizes cost recovery, rechecks the heads and pauses, and only then activates the
-new runtime epoch. The migration URL is required only for that final transaction and
-must be removed after the one-off job. A successful report does not enable transcript
-capture; paid admission remains subject to the recovered cost cooldown and other
-database-enforced limits.
+new runtime epoch. The restore-only activation LOGIN is `NOINHERIT`, owns no schema,
+has no role memberships, and receives only the exact metadata reads plus column-level
+updates required for the final handoff. It must be created after restore, supplied in
+the legacy-named `LUCY_MIGRATION_DATABASE_URL` variable for the one-off job, and
+destroyed before the isolated restore is disposed. Do not supply the restored
+`lucy_migration` schema owner: Render PITR may recreate that login with
+`CREATEROLE`/`CREATEDB`, and the runner rejects it. A successful report does not
+enable transcript capture; paid admission remains subject to the recovered cost
+cooldown and other database-enforced limits.
 
 The lower-level foundation and binding commands below remain available for a
 reviewed recovery or diagnostic run.

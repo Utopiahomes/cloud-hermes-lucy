@@ -62,7 +62,9 @@ def _environment() -> dict[str, str]:
         "LUCY_SECURITY_BASELINE": "v1.3",
         "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
         "LUCY_PROTECTED_RECOVERY_AUTHORIZATION": AUTHORIZATION,
-        "LUCY_MIGRATION_DATABASE_URL": f"postgresql://lucy_migration:x@{database}",
+        "LUCY_MIGRATION_DATABASE_URL": (
+            f"postgresql://lucy_utopia_recovery_activation:x@{database}"
+        ),
         "LUCY_AUTHORITY_RECOVERY_DATABASE_URL": (
             f"postgresql://lucy_utopia_authority_recovery:x@{database}"
         ),
@@ -90,6 +92,7 @@ def test_config_binds_two_streams_to_one_oidc_role_and_private_database() -> Non
     assert config.cost_binding.stream_kind is RecoveryStreamKind.COST
     assert config.role_arn == ROLE
     assert config.migration_url.host == "dpg-example-a"
+    assert config.migration_url.username == "lucy_utopia_recovery_activation"
 
 
 @pytest.mark.parametrize(
@@ -105,7 +108,7 @@ def test_config_binds_two_streams_to_one_oidc_role_and_private_database() -> Non
         ("LUCY_RECOVERY_BINDING_MANIFEST_DIGEST", "b" * 64),
         (
             "LUCY_MIGRATION_DATABASE_URL",
-            "postgresql://lucy_migration:x@public.example.com/lucy_6tns",
+            "postgresql://lucy_utopia_recovery_activation:x@public.example.com/lucy_6tns",
         ),
     ],
 )
@@ -169,8 +172,10 @@ class _Session:
 
 def _migration_row() -> tuple[object, ...]:
     return (
-        "lucy_migration",
+        "lucy_utopia_recovery_activation",
+        "lucy_utopia_recovery_activation",
         True,
+        False,
         False,
         False,
         False,
@@ -181,6 +186,22 @@ def _migration_row() -> tuple[object, ...]:
         "quarantined",
         True,
         True,
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        False,
+        True,
+        True,
+        False,
+        True,
+        True,
+        False,
     )
 
 
@@ -199,12 +220,17 @@ def test_migration_identity_requires_exact_offline_capture_safe_boundary(
     ("index", "value"),
     [
         (0, "wrong_login"),
-        (2, True),
-        (7, "wrong_owner"),
-        (8, "0049_r1_cost_recovery_finalize"),
-        (9, "ready"),
-        (10, False),
-        (11, False),
+        (1, "wrong_login"),
+        (3, True),
+        (9, "wrong_owner"),
+        (10, "0049_r1_cost_recovery_finalize"),
+        (11, "ready"),
+        (12, False),
+        (13, False),
+        (14, True),
+        (18, False),
+        (24, False),
+        (27, False),
     ],
 )
 def test_migration_identity_rejects_boundary_drift(
@@ -218,7 +244,17 @@ def test_migration_identity_rejects_boundary_drift(
         lambda _url: lambda: _Session(tuple(row)),
     )
 
-    with pytest.raises(ProtectedRecoveryError, match="migration identity"):
+    with pytest.raises(ProtectedRecoveryError, match="activation identity"):
         _verify_migration_identity(
             ProtectedRecoveryConfig.from_environment(_environment()).migration_url
         )
+
+
+def test_config_rejects_elevated_migration_login() -> None:
+    environment = _environment()
+    environment["LUCY_MIGRATION_DATABASE_URL"] = (
+        "postgresql://lucy_migration:x@dpg-example-a/lucy_6tns"
+    )
+
+    with pytest.raises(ProtectedRecoveryError, match="exact temporary login"):
+        ProtectedRecoveryConfig.from_environment(environment)
