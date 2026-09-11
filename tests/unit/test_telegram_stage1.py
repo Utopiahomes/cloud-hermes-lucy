@@ -182,4 +182,8 @@ def test_gateway_image_is_exactly_pinned_and_has_no_persistent_volume_contract()
         "lease_acquired",
         "gateway_started",
     ):
-        assert f'_event("{event}")' in launcher
+        assert event in launcher
+    assert '("hermes_config",' in launcher
+    assert '"lucy_plugin",' in launcher
+    assert 'f"{label}_failed"' in launcher
+    assert 'f"{label}_passed"' in launcher

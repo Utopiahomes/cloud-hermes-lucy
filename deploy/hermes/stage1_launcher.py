@@ -68,19 +68,26 @@ def _require_tmpfs(path: Path) -> None:
 
 
 def _preflight(environment: dict[str, str], scratch: Path) -> None:
-    for command in (
-        ["/opt/hermes/.venv/bin/hermes", "config", "check"],
-        ["/opt/hermes/.venv/bin/hermes", "plugins", "doctor", "--ci", "lucy_control"],
+    for label, command in (
+        ("hermes_config", ["/opt/hermes/.venv/bin/hermes", "config", "check"]),
+        (
+            "lucy_plugin",
+            ["/opt/hermes/.venv/bin/hermes", "plugins", "doctor", "--ci", "lucy_control"],
+        ),
     ):
-        subprocess.run(  # noqa: S603 - immutable commands in a pinned image
+        result = subprocess.run(  # noqa: S603 - immutable commands in a pinned image
             command,
             env=environment,
             cwd=scratch,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            check=True,
+            check=False,
         )
+        if result.returncode != 0:
+            _event(f"{label}_failed")
+            raise RuntimeError(f"{label}_failed")
+        _event(f"{label}_passed")
 
 
 def main() -> int:
