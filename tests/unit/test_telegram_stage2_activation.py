@@ -97,3 +97,9 @@ def test_activation_manifest_requires_distinct_services(monkeypatch: pytest.Monk
     )
     with pytest.raises(activation.Stage2ActivationError, match="reviewed realm"):
         activation.configuration_from_environment(environment)
+
+
+def test_production_image_contains_both_stage2_database_gates() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "deploy/postgres/migrate_telegram_stage2_v1.py" in dockerfile
+    assert "deploy/postgres/activate_telegram_stage2_v1.py" in dockerfile
