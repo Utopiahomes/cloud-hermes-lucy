@@ -170,9 +170,32 @@ def _request_json(
         method=method,
         headers=headers,
     )
-    with urlopen(request, timeout=5) as response:  # noqa: S310 - configured private URL
+    # Archive/KMS and policy operations may commit durably before a transient
+    # private-network response delay. Keep the deadline bounded, but long enough
+    # to reconcile an AWS-backed operation without creating a false failure.
+    with urlopen(request, timeout=20) as response:  # noqa: S310 - configured private URL
         result: dict[str, Any] = json.load(response)
         return result
+
+
+def _request_json_retry_safe(
+    path: str,
+    *,
+    method: str,
+    payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Recover one ambiguous private-network response with the exact request."""
+
+    for attempt in range(2):
+        try:
+            return _request_json(
+                path, method=method, payload=payload, extra_headers=extra_headers
+            )
+        except (OSError, TimeoutError):
+            if attempt:
+                raise
+    raise AssertionError("retry loop did not return or raise")
 
 
 def _request_boundary_json(
@@ -266,7 +289,7 @@ def _archive_conversation_message(
         else None
     )
     try:
-        result = _request_json(
+        result = _request_json_retry_safe(
             "/internal/v1/conversations/messages",
             method="POST",
             payload={
@@ -364,7 +387,7 @@ def _capture_mode(session_id: str) -> bool | None:
 
 def _accept_turn(session_id: str, turn_id: str) -> bool | None:
     try:
-        result = _request_json(
+        result = _request_json_retry_safe(
             "/internal/v1/conversations/accept-turn", method="POST",
             payload={"platform": "telegram", "source_conversation_id": session_id,
                      "source_turn_id": turn_id},
@@ -385,7 +408,7 @@ def _accept_turn(session_id: str, turn_id: str) -> bool | None:
 def _set_capture_mode(*, session_id: str, turn_id: str, capture_enabled: bool) -> bool:
     try:
         stage2 = os.getenv("LUCY_TELEGRAM_STAGE") == "2"
-        result = _request_json(
+        result = _request_json_retry_safe(
             "/internal/v1/conversations/capture-mode-and-accept"
             if stage2
             else "/internal/v1/conversations/capture-mode",

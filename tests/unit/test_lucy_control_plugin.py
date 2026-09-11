@@ -459,6 +459,58 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     assert message_calls[1][1]["payload"]["current_input_evidence_id"] == "evidence-1"
 
 
+def test_archive_recovers_one_ambiguous_private_response_with_exact_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if len(calls) == 1:
+            raise TimeoutError("synthetic lost response")
+        return {
+            "archived": True,
+            "evidence_id": "evidence-1",
+            "operation_id": "operation-1",
+            "turn_committed": False,
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = plugin._archive_conversation_message(
+        role="user",
+        content="Synthetic retry-safe message.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert result is not None and result["archived"] is True
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
+def test_capture_transition_recovers_one_ambiguous_response_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if len(calls) == 1:
+            raise TimeoutError("synthetic lost transition response")
+        return {"capture_enabled": False, "version": 1, "replayed": True}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    assert plugin._set_capture_mode(
+        session_id="session-2", turn_id="turn-2", capture_enabled=False
+    )
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
 def test_off_record_is_visible_and_skips_archive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
