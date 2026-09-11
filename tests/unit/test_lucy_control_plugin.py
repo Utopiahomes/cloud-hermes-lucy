@@ -138,7 +138,7 @@ def _request() -> dict[str, Any]:
     }
 
 
-def test_archive_commit_uses_longer_bounded_private_deadline(
+def test_archive_commit_uses_bounded_private_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = _load_plugin()
@@ -154,10 +154,10 @@ def test_archive_commit_uses_longer_bounded_private_deadline(
     plugin._request_json("/internal/v1/conversations/messages", method="POST", payload={})
     plugin._request_json("/internal/v1/conversations/accept-turn", method="POST", payload={})
     assert deadlines == [
-        plugin.ARCHIVE_COMMIT_TIMEOUT_SECONDS,
+        plugin.PRIVATE_API_TIMEOUT_SECONDS,
         plugin.PRIVATE_API_TIMEOUT_SECONDS,
     ]
-    assert deadlines == [180, 20]
+    assert deadlines == [20, 20]
 
 
 def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPatch) -> None:
