@@ -1,10 +1,16 @@
 # Utopia R1 activation checkpoint
 
-Status: Ray authorized Stage 1 private Telegram activation using the existing Lucy bot.
-The private gateway, execute-only Telegram ledger and budget path, and protected channel
-activation/recovery boundary are implemented locally through migration
-`0053_r1_telegram_authority`. Production commissioning and the one-gateway handoff remain.
-Transcript capture remains disabled.
+Status: Stage 1 database and authority commissioning passed. The production database is
+at `0053_r1_telegram_authority`; the Utopia Telegram channel is active at generation 2
+only after its independent authority-journal acknowledgement. The Render gateway exists
+as suspended service `srv-dai3hmu743jc73do9ebg`. Both services remain suspended,
+auto-deploy remains off, capture remains disabled, and no static AWS credentials are
+present. The routine and gateway now share the existing adapter credential, and the
+gateway has its exact approved bot/OpenRouter configuration. Admission remains
+quarantined after a safe failed opening attempt reported an unspecified database capture
+boundary. A content-free diagnostic refinement is implemented and focused tests pass;
+deployment of that exact refinement, capture-boundary reconciliation, the one-gateway
+handoff, and live acceptance remain.
 
 ## Completed preparation
 
@@ -65,9 +71,41 @@ content-free logs, and rollback without reverting authority or deletion history.
 - Complete unit suite: 677 passed; Ruff and mypy passed on 2026-09-11.
 - Realm/recovery role stamps and Telegram lease/dedup/budget boundary: 4 focused
   PostgreSQL checks passed on 2026-09-11.
+- Production migration to `0053_r1_telegram_authority`: passed on Render at commit
+  `805ee5f3a478ec46674d7ff2322812cc610c8a85`; admission remained quarantined,
+  capture-safe was true, and residual function-owner schema CREATE was false.
+- Compatible recovery services: authority writer, cost writer, and acknowledgement
+  coordinator deployed and private readiness probe completed on 2026-09-11.
+- Production Telegram binding: provisioned and independently journal-acknowledged on
+  2026-09-11; replay verification passed at commit
+  `01773c9200afe737b50e32ae5c02faf8bc4f74f8` with channel generation 2, admission
+  quarantined, and capture disabled.
+- Render gateway resource: created suspended and credential-free with auto-deploy off.
+- The ignored, identifier-bearing Stage 1 activation manifest was built and validated
+  at source commit `01773c9200afe737b50e32ae5c02faf8bc4f74f8`; it pins the reviewed
+  Hermes release/image/platform/source, rollback commit, schema, realm, gateway, budget,
+  one-consumer rule, capture-off rule, and memory-write/evidence-retrieval prohibitions.
+- Render configuration inspection after the interrupted secret installation confirmed
+  that both services remained suspended and capture-safe. After explicit authorization,
+  the existing local adapter token was installed on both services and the bot/OpenRouter
+  credentials were installed on the gateway. Exact key-shape and token-match inspection
+  passed without emitting values.
+- The first admission attempt built exact commit
+  `01773c9200afe737b50e32ae5c02faf8bc4f74f8` and failed closed because the database
+  reported a capture blocker. Admission stayed quarantined and temporary database
+  credentials were cleared. The commissioning command now emits specific content-free
+  blocker codes; its 15 focused tests, Ruff, and strict mypy pass locally.
 - Deployed owner, unauthorized-caller, restart, duplicate-delivery, budget settlement,
   log-content, and rollback checks: not yet executed. These require the exact production
   candidate and invalidate only if its source/configuration/environment changes.
+
+## Current blocker
+
+Deploy the content-free capture diagnostic at an exact pinned commit and rerun the
+capture-disabled admission command. Reconcile only the specific reported blocker through
+an audited capture-off transition or an exact approved synthetic receipt; do not erase
+historical receipts or weaken the admission rule. Then deploy routine, stop the local bot
+consumer, start the cloud gateway, and execute the remaining live acceptance checks.
 
 ## Follow-on, not an activation prerequisite
 

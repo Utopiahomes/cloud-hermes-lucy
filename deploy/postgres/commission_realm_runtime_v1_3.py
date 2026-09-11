@@ -194,7 +194,9 @@ def _verify_reviewed_revision(connection: psycopg.Connection[Any]) -> None:
         raise CommissionError("database is not at the reviewed V1.3 revision")
 
 
-def _capture_enabled(connection: psycopg.Connection[Any], config: CommissionConfig) -> bool:
+def _capture_blockers(
+    connection: psycopg.Connection[Any], config: CommissionConfig
+) -> tuple[str, ...]:
     stamp, _, declared_capture_enabled = _full_config(config)
     legacy_unsafe = _scalar(connection, "SELECT NOT lucy.capture_boundary_safe_v1()")
     scoped_enabled = _scalar(
@@ -212,19 +214,31 @@ def _capture_enabled(connection: psycopg.Connection[Any], config: CommissionConf
         ).fetchall()
     )
     unapproved_receipts = enabled_receipts - config.approved_synthetic_receipts
-    return bool(
-        declared_capture_enabled
-        or legacy_unsafe
-        or scoped_enabled
-        or unapproved_receipts
-    )
+    blockers: list[str] = []
+    if declared_capture_enabled:
+        blockers.append("declared_capture_enabled")
+    if legacy_unsafe:
+        blockers.append("legacy_capture_boundary_unsafe")
+    if scoped_enabled:
+        blockers.append("scoped_capture_mode_enabled")
+    if unapproved_receipts:
+        blockers.append("unapproved_capture_receipt")
+    return tuple(blockers)
+
+
+def _capture_enabled(connection: psycopg.Connection[Any], config: CommissionConfig) -> bool:
+    return bool(_capture_blockers(connection, config))
 
 
 def _verify_open_boundary(
-    connection: psycopg.Connection[Any], config: CommissionConfig, capture_enabled: bool
+    connection: psycopg.Connection[Any],
+    config: CommissionConfig,
+    capture_blockers: tuple[str, ...],
 ) -> None:
-    if capture_enabled:
-        raise CommissionError("database capture boundary is not safe")
+    if capture_blockers:
+        raise CommissionError(
+            "database capture boundary is not safe: " + ",".join(capture_blockers)
+        )
     if _scalar(connection, "SELECT state FROM lucy.lifecycle WHERE singleton") != "ready":
         raise CommissionError("control-plane recovery is not ready")
 
@@ -353,13 +367,14 @@ def run(config: CommissionConfig, action: Action, authorization: str) -> dict[st
             }
 
         _verify_reviewed_revision(connection)
-        capture_enabled = _capture_enabled(connection, config)
+        capture_blockers = _capture_blockers(connection, config)
+        capture_enabled = bool(capture_blockers)
         pending = _work_in_flight(connection, config)
         finality_pending = _finality_pending(connection, config)
         sessions = _runtime_sessions(connection, config)
         if action == "open":
             _, runtime_epoch, _ = _full_config(config)
-            _verify_open_boundary(connection, config, capture_enabled)
+            _verify_open_boundary(connection, config, capture_blockers)
             if pending:
                 raise CommissionError("realm has unresolved sensitive authority")
             if sessions:
@@ -382,6 +397,7 @@ def run(config: CommissionConfig, action: Action, authorization: str) -> dict[st
             "runtime_admission": state,
             "runtime_epoch_present": epoch is not None,
             "capture_enabled": capture_enabled,
+            "capture_blockers": list(capture_blockers),
             "unresolved_sensitive_authority": pending,
             "finality_pending": finality_pending,
             "runtime_sessions": sessions,

@@ -105,7 +105,7 @@ def _patched_connection(
     monkeypatch.setattr(commission, "_verify_reviewed_revision", lambda *_args: None)
     monkeypatch.setattr(commission, "_work_in_flight", lambda *_args: pending)
     monkeypatch.setattr(commission, "_finality_pending", lambda *_args: 0)
-    monkeypatch.setattr(commission, "_capture_enabled", lambda *_args: False)
+    monkeypatch.setattr(commission, "_capture_blockers", lambda *_args: ())
     monkeypatch.setattr(commission, "_verify_open_boundary", lambda *_args: None)
     monkeypatch.setattr(commission, "_runtime_sessions", lambda *_args: sessions)
     return config, connection
@@ -227,6 +227,31 @@ def test_scoped_capture_blocks_open_unless_every_enabled_receipt_is_exactly_appr
     )
     config = commission.CommissionConfig.from_environment("open", environment)
     assert commission._capture_enabled(_CaptureConnection([receipt]), config) is False  # type: ignore[arg-type]
+
+
+def test_capture_blockers_are_content_free_and_specific() -> None:
+    environment = _environment()
+    config = commission.CommissionConfig.from_environment("open", environment)
+    receipt = ("synthetic-commission-1", "synthetic-turn-1")
+    connection = _CaptureConnection([receipt])
+    connection.execute = lambda statement, _params=None: (  # type: ignore[method-assign]
+        _Rows([(True,)])
+        if "NOT lucy.capture_boundary_safe_v1" in statement
+        else _Rows([(True,)])
+        if "scoped_capture_states_v1" in statement
+        else _Rows([receipt])
+    )
+    assert commission._capture_blockers(connection, config) == (  # type: ignore[arg-type]
+        "legacy_capture_boundary_unsafe",
+        "scoped_capture_mode_enabled",
+        "unapproved_capture_receipt",
+    )
+    with pytest.raises(
+        commission.CommissionError,
+        match="legacy_capture_boundary_unsafe,scoped_capture_mode_enabled,unapproved_capture_receipt",
+    ):
+        blockers = commission._capture_blockers(connection, config)  # type: ignore[arg-type]
+        commission._verify_open_boundary(connection, config, blockers)  # type: ignore[arg-type]
 
 
 def test_main_never_echoes_unexpected_secret(
