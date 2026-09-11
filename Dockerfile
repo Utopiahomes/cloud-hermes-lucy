@@ -12,6 +12,7 @@ COPY pyproject.toml ./
 COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
 COPY deploy/postgres/bootstrap_cloud_v1_2.py ./deploy/postgres/bootstrap_cloud_v1_2.py
 COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_realm_cloud_v1_3.py
+COPY deploy/postgres/migrate_realm_cloud_v1_3.py ./deploy/postgres/migrate_realm_cloud_v1_3.py
 COPY deploy/postgres/commission_realm_runtime_v1_3.py ./deploy/postgres/commission_realm_runtime_v1_3.py
 COPY deploy/postgres/rebind_executors_cloud_v1_2.py ./deploy/postgres/rebind_executors_cloud_v1_2.py
 COPY deploy/postgres/inspect_unresolved_cloud_v1_2.py ./deploy/postgres/inspect_unresolved_cloud_v1_2.py
