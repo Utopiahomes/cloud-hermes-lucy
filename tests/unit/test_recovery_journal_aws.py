@@ -235,6 +235,24 @@ def test_event_metadata_substitution_is_rejected() -> None:
         journal.event(1)
 
 
+def test_append_scopes_expression_values_to_each_transaction_item() -> None:
+    bound, client, journal = _journal()
+    before = journal.head()
+    journal.append(_event(bound, before), before)
+
+    transaction = client.transactions[0]
+    head_update = transaction[2]["Update"]
+    pause_check = transaction[3]["ConditionCheck"]
+    assert isinstance(head_update, dict)
+    assert isinstance(pause_check, dict)
+    head_values = head_update["ExpressionAttributeValues"]
+    pause_values = pause_check["ExpressionAttributeValues"]
+    assert isinstance(head_values, dict)
+    assert isinstance(pause_values, dict)
+    assert ":now_ms" not in head_values
+    assert set(pause_values) == {":now_ms"}
+
+
 def test_stale_head_and_active_pause_fail_closed(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -188,9 +188,9 @@ class AwsDynamoRecoveryJournal:
             {
                 ":next_sequence": {"N": str(resulting.sequence)},
                 ":next_digest": {"S": resulting.event_digest},
-                ":now_ms": {"N": str(_epoch_ms(acknowledged_at))},
             }
         )
+        now_ms = {"N": str(_epoch_ms(acknowledged_at))}
         transaction: list[dict[str, object]] = [
             {
                 "Put": {
@@ -241,7 +241,7 @@ class AwsDynamoRecoveryJournal:
                     "ConditionExpression": (
                         "attribute_not_exists(pk) OR expires_epoch_ms<=:now_ms"
                     ),
-                    "ExpressionAttributeValues": {":now_ms": values[":now_ms"]},
+                    "ExpressionAttributeValues": {":now_ms": now_ms},
                 }
             },
         ]
