@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -268,11 +269,23 @@ def _provision_and_stage(config: Configuration) -> UUID:
 
 def commission(config: Configuration) -> dict[str, Any]:
     event_id = _provision_and_stage(config)
-    writer = _post(
-        f"{config.authority_writer_url}/v1/recovery/events/{event_id}",
-        config.authority_writer_token,
-    )
-    if str(writer.get("event_id")) != str(event_id) or writer.get("stream_kind") != "authority":
+    writer: dict[str, Any] | None
+    try:
+        writer = _post(
+            f"{config.authority_writer_url}/v1/recovery/events/{event_id}",
+            config.authority_writer_token,
+        )
+    except HTTPError as exc:
+        if exc.code != 503:
+            raise
+        # A crash after the independent append but before acknowledgement can
+        # make a strict conditional re-append fail. Continue only to the
+        # independent receiver; it proves the exact journal event exists.
+        writer = None
+    if writer is not None and (
+        str(writer.get("event_id")) != str(event_id)
+        or writer.get("stream_kind") != "authority"
+    ):
         raise BootstrapError("authority journal receipt differs")
     acknowledgement = _post(
         f"{config.authority_ack_url}/v1/recovery/authority/acknowledgements/{event_id}",
