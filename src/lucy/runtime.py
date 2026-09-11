@@ -1,10 +1,11 @@
 """Fail-closed Lucy container startup."""
 
 import os
+import time
 from pathlib import Path
 
 import uvicorn
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from lucy.db import create_session_factory
 from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_environment
@@ -37,6 +38,36 @@ def _listener_port() -> int:
     return port
 
 
+def _retryable_connection_failure(error: OperationalError) -> bool:
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None)
+    if isinstance(sqlstate, str):
+        return sqlstate.startswith("08")
+    return (
+        type(original).__module__.startswith("psycopg")
+        and type(original).__name__ == "OperationalError"
+    )
+
+
+def _check_with_connection_retries(readiness: ServiceReadiness) -> None:
+    """Keep the listener closed while Render's private DNS/network becomes ready."""
+
+    delays = (1, 2, 4, 8, 8)
+    for attempt, delay in enumerate(delays, start=1):
+        try:
+            readiness.check()
+            return
+        except OperationalError as exc:
+            if not _retryable_connection_failure(exc):
+                raise
+            print(
+                f"Lucy startup storage connection unavailable; retrying ({attempt}/{len(delays)})",
+                flush=True,
+            )
+            time.sleep(delay)
+    readiness.check()
+
+
 def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
@@ -54,17 +85,28 @@ def main() -> None:
             if baseline == "v1.2" and mode == "routine"
             else None
         )
-        ServiceReadiness(
+        readiness = ServiceReadiness(
             sessions,
             mode=mode,
             storage_epoch=expected_storage_epoch(mode),
             journal=journal,
             baseline=baseline,
             expected_database_login=expected_database_login_from_environment(baseline),
-        ).check()
+        )
+        _check_with_connection_retries(readiness)
     except (ReadinessError, DeletionJournalError) as exc:
         raise SystemExit(f"Lucy startup gate failed: {exc}") from exc
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        original = getattr(exc, "orig", None)
+        sqlstate = getattr(original, "sqlstate", None)
+        category = (
+            "connection"
+            if isinstance(sqlstate, str) and sqlstate.startswith("08")
+            else "authentication"
+            if isinstance(sqlstate, str) and sqlstate.startswith("28")
+            else "database"
+        )
+        print(f"Lucy startup storage failure category: {category}", flush=True)
         raise SystemExit(
             "Lucy startup gate failed: storage or permission check unavailable"
         ) from None

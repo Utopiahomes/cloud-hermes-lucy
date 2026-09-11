@@ -3,7 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
+import psycopg
 import pytest
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 import lucy.runtime as runtime
 from lucy.readiness import (
@@ -158,3 +160,78 @@ def test_failed_startup_check_never_starts_listener(monkeypatch: pytest.MonkeyPa
     )
     with pytest.raises(SystemExit, match="quarantined"):
         runtime.main()
+
+
+def test_startup_retries_only_transient_connection_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise OperationalError(
+                "connect", {}, psycopg.OperationalError("private DNS pending")
+            )
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 3
+    assert delays == [1, 2]
+
+
+def test_startup_does_not_retry_permission_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise ProgrammingError("select", {}, RuntimeError("permission denied"))
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(ProgrammingError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 1
+    assert delays == []
+
+
+def test_startup_does_not_retry_invalid_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        invalid_password = psycopg.errors.InvalidPassword("authentication failed")
+        raise OperationalError("connect", {}, invalid_password)
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 1
+    assert delays == []
+
+
+def test_startup_exhausts_bounded_connection_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise OperationalError("connect", {}, psycopg.OperationalError("network pending"))
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 6
+    assert delays == [1, 2, 4, 8, 8]
