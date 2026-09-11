@@ -13,6 +13,7 @@ from contextlib import suppress
 from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
@@ -185,6 +186,7 @@ def _request_json_retry_safe(
     method: str,
     payload: dict[str, Any] | None = None,
     extra_headers: dict[str, str] | None = None,
+    retention_role: str | None = None,
 ) -> dict[str, Any]:
     """Recover one ambiguous private-network response with the exact request."""
 
@@ -193,6 +195,16 @@ def _request_json_retry_safe(
             return _request_json(
                 path, method=method, payload=payload, extra_headers=extra_headers
             )
+        except HTTPError as exc:
+            # A completed HTTP response is not transport ambiguity. In particular,
+            # retrying a 409 can hide the first definitive application failure.
+            _retention_event(
+                "archive_http_error",
+                role=retention_role,
+                status=exc.code,
+                attempt=attempt + 1,
+            )
+            raise
         except (OSError, TimeoutError, json.JSONDecodeError, http.client.HTTPException):
             if attempt:
                 raise
@@ -200,7 +212,14 @@ def _request_json_retry_safe(
     raise AssertionError("retry loop did not return or raise")
 
 
-def _retention_event(code: str, *, role: str | None = None, error: str | None = None) -> None:
+def _retention_event(
+    code: str,
+    *,
+    role: str | None = None,
+    error: str | None = None,
+    status: int | None = None,
+    attempt: int | None = None,
+) -> None:
     """Emit only content-free archive lifecycle metadata."""
 
     payload: dict[str, Any] = {"component": "lucy-retention", "code": code}
@@ -208,6 +227,10 @@ def _retention_event(code: str, *, role: str | None = None, error: str | None = 
         payload["role"] = role
     if error:
         payload["error_type"] = error
+    if isinstance(status, int) and 400 <= status <= 599:
+        payload["http_status"] = status
+    if attempt in {1, 2}:
+        payload["attempt"] = attempt
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
 
 
@@ -320,6 +343,7 @@ def _archive_conversation_message(
                     f"hermes-transcript:{platform}:{session_id}:{source_message_id}"
                 )
             },
+            retention_role=role,
         )
     except Exception as exc:
         _retention_event(

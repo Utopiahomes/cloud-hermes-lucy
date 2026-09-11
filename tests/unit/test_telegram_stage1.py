@@ -332,6 +332,8 @@ def test_launcher_forwards_only_allowlisted_content_free_retention_events(
     stream = io.BytesIO(
         b'{"component":"lucy-retention","code":"archive_request_failed",'
         b'"role":"assistant","error_type":"TimeoutError"}\n'
+        b'{"component":"lucy-retention","code":"archive_http_error",'
+        b'"role":"assistant","http_status":409,"attempt":1,"content":"secret"}\n'
         b'{"component":"lucy-retention","code":"unexpected","content":"secret"}\n'
         b'{"component":"other","code":"archive_request_failed","content":"secret"}\n'
         b'ordinary child output containing private conversation text\n'
@@ -340,6 +342,9 @@ def test_launcher_forwards_only_allowlisted_content_free_retention_events(
     output = capsys.readouterr().out
     assert "archive_request_failed" in output
     assert "TimeoutError" in output
+    assert "archive_http_error" in output
+    assert '"http_status":409' in output
+    assert '"attempt":1' in output
     assert "secret" not in output
     assert "private conversation" not in output
 

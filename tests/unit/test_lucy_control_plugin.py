@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Barrier
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
@@ -511,6 +512,35 @@ def test_archive_recovers_one_ambiguous_private_response_with_exact_retry(
     assert result is not None and result["archived"] is True
     assert len(calls) == 2
     assert calls[0] == calls[1]
+
+
+def test_archive_does_not_retry_definitive_http_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plugin = _load_plugin()
+    calls = 0
+
+    def request(_path: str, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise HTTPError("http://lucy-routine", 409, "Conflict", {}, None)
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = plugin._archive_conversation_message(
+        role="assistant",
+        content="Synthetic definitive failure.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert result is None
+    assert calls == 1
+    output = capsys.readouterr().out
+    assert '"code":"archive_http_error"' in output
+    assert '"http_status":409' in output
+    assert '"attempt":1' in output
+    assert "Synthetic definitive failure" not in output
 
 
 def test_capture_transition_recovers_one_ambiguous_response_exactly(

@@ -22,6 +22,7 @@ _RETENTION_CODES = {
     "archive_request_failed",
     "archive_request_completed",
     "archive_request_rejected",
+    "archive_http_error",
     "assistant_delivery_blocked",
     "post_hook_skipped_blocked_delivery",
 }
@@ -47,7 +48,7 @@ def _forward_content_free_child_events(stream: Any) -> None:
             or payload.get("code") not in _RETENTION_CODES
         ):
             continue
-        safe: dict[str, str] = {
+        safe: dict[str, Any] = {
             "component": "lucy-retention",
             "code": payload["code"],
         }
@@ -56,6 +57,12 @@ def _forward_content_free_child_events(stream: Any) -> None:
         error_type = payload.get("error_type")
         if isinstance(error_type, str) and _SAFE_ERROR_TYPE.fullmatch(error_type):
             safe["error_type"] = error_type
+        http_status = payload.get("http_status")
+        if isinstance(http_status, int) and 400 <= http_status <= 599:
+            safe["http_status"] = http_status
+        attempt = payload.get("attempt")
+        if attempt in {1, 2}:
+            safe["attempt"] = attempt
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")), flush=True)
 
 
