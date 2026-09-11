@@ -6,11 +6,13 @@ from uuid import UUID
 
 import pytest
 
+import deploy.postgres.run_protected_recovery_v1_3 as protected_recovery
 from deploy.postgres.run_protected_recovery_v1_3 import (
     AUTHORIZATION,
     ProtectedRecoveryConfig,
     ProtectedRecoveryError,
     _verify_actual_role,
+    _verify_migration_identity,
 )
 from lucy.recovery_journal import RecoveryStreamKind
 
@@ -140,4 +142,83 @@ def test_actual_aws_role_must_match_the_bound_oidc_role() -> None:
                 "Account": ACCOUNT,
                 "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/wrong/render-session",
             },
+        )
+
+
+class _Result:
+    def __init__(self, row: tuple[object, ...]) -> None:
+        self._row = row
+
+    def one(self) -> tuple[object, ...]:
+        return self._row
+
+
+class _Session:
+    def __init__(self, row: tuple[object, ...]) -> None:
+        self._row = row
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def execute(self, _statement: object) -> _Result:
+        return _Result(self._row)
+
+
+def _migration_row() -> tuple[object, ...]:
+    return (
+        "lucy_migration",
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        "lucy_migration",
+        "0050_r1_recovery_ack_receiver",
+        "quarantined",
+        True,
+        True,
+    )
+
+
+def test_migration_identity_requires_exact_offline_capture_safe_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        protected_recovery,
+        "create_session_factory",
+        lambda _url: lambda: _Session(_migration_row()),
+    )
+    _verify_migration_identity(ProtectedRecoveryConfig.from_environment(_environment()).migration_url)
+
+
+@pytest.mark.parametrize(
+    ("index", "value"),
+    [
+        (0, "wrong_login"),
+        (2, True),
+        (7, "wrong_owner"),
+        (8, "0049_r1_cost_recovery_finalize"),
+        (9, "ready"),
+        (10, False),
+        (11, False),
+    ],
+)
+def test_migration_identity_rejects_boundary_drift(
+    monkeypatch: pytest.MonkeyPatch, index: int, value: object
+) -> None:
+    row = list(_migration_row())
+    row[index] = value
+    monkeypatch.setattr(
+        protected_recovery,
+        "create_session_factory",
+        lambda _url: lambda: _Session(tuple(row)),
+    )
+
+    with pytest.raises(ProtectedRecoveryError, match="migration identity"):
+        _verify_migration_identity(
+            ProtectedRecoveryConfig.from_environment(_environment()).migration_url
         )

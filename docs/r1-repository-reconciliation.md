@@ -1,8 +1,9 @@
 # R1 repository reconciliation
 
 Status: R1-0, the R1-1 synthetic local slice, and R1-2 cloud acceptance are complete.
-The Utopia realm is commissioned at migration `0042`; its four private services are
-pinned to commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
+The Utopia realm database is commissioned at migration `0050`; its four ordinary
+private services remain suspended and pinned to commit
+`9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
 archive, retrieval, and deletion path passed exact-replay and negative-permission
 checks. The metadata-only finality observer found no exceptional copies and correctly
 recorded `EXTENDED` while the fixed 30-day recovery window remains open. Admission is
@@ -16,17 +17,20 @@ crash-safe authority and cost journal preparation now pass clean local PostgreSQ
 Restrictive authority and cost events now replay exactly once into a quarantined
 restore at migration `0050`. Cost recovery now fences old executable attempts and
 retains a 90-second paid-admission cooldown; reopening general admission remains a
-separate protected handoff. The additive, not-yet-deployed AWS journal boundary now
-defines separate protected authority and cost tables, three exact Render OIDC roles,
-and a create-only operator genesis initializer.
+separate protected handoff. The AWS journal boundary defines separate protected
+authority and cost tables, three exact Render OIDC roles, and a create-only operator
+genesis initializer. Those AWS resources and the three private recovery workloads are
+deployed and identity-attested. The remaining R1-4 exit item is the synthetic protected
+handoff against an isolated quarantined restore; it requires at least one authority
+event and one cost event after the restore point.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
 - Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  head: `0050_r1_recovery_ack_receiver`. The quarantined Utopia production realm
-  remains at reviewed head `0042_r1_permit_authority` until R1-3 commissioning.
+  and quarantined Utopia production head: `0050_r1_recovery_ack_receiver`.
+  Paid R1-3 commissioning remains disabled.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -712,9 +716,11 @@ able to replace a head or event. Authority and cost will use separate per-realm 
 The remaining accepted Phase 1 residual is that compromise of either journal-writer
 credential can corrupt its own stream; it cannot cross into the other stream or realm.
 
-The remaining R1-4 work is cost-projection finalization and old-runtime fencing,
-infrastructure/IAM provisioning for the two journal streams, the independently deployed
-acknowledgement receiver, and protected activation integration.
+At this earlier implementation checkpoint, the remaining R1-4 work was
+cost-projection finalization and old-runtime fencing, infrastructure/IAM provisioning
+for the two journal streams, the independently deployed acknowledgement receiver, and
+protected activation integration. Those implementation and commissioning items are now
+complete; the isolated restored-database drill remains outstanding.
 
 Migration `0045_r1_authority_recovery` implements the first half
 of domain authority durability. A membership revocation or public withdrawal takes
@@ -769,11 +775,11 @@ engine `29.7.2`. The recoverable runtime backups are
 `C:\Users\Forti\AppData\Local\Docker\run.stale-codex-20260910-125545`. These contain
 only failed runtime sockets, not images, volumes, or project data.
 
-The two-stream AWS/IAM boundary and create-only genesis path are now implemented
-locally but not deployed. Remaining R1-4 work is wiring the independently deployed
-acknowledgement receiver, deployed negative-permission checks, then commissioning the
-two journal bindings, applying the prepared CloudTrail selector update, and exercising
-the protected recovery handoff with synthetic state.
+The two-stream AWS/IAM boundary and create-only genesis path were first completed
+locally at this checkpoint. They have since been deployed with negative-permission
+checks, journal bindings, the CloudTrail selector, and independently deployed
+acknowledgement receiver. Exercising the protected recovery handoff against an isolated
+restore with synthetic state is the remaining R1-4 exit item.
 
 The receiver core and its exact-record PostgreSQL grants are implemented at `0050`;
 the private path-only ASGI surface and fail-closed runtime are also implemented, while
@@ -833,13 +839,14 @@ The operator-only protected recovery runner is now implemented locally. Its prod
 configuration binds two distinct journals, two independently retained witness heads,
 the exact authority/cost recovery LOGINs, the private migration login, and a fresh
 runtime epoch. It rejects static AWS keys, verifies the actual Render OIDC assumed role
-through STS, requires TLS plus quarantined/capture-safe PostgreSQL, replays both streams,
-obtains the coordinated writer pauses, finalizes recovered cost state, rechecks the
-handoff, and activates only through the offline migration identity. Twenty-five focused
-runner, coordinator, and DynamoDB adapter tests passed with Ruff and strict mypy on
-2026-09-10. The utility has not yet been run against Utopia production; its migration
-URL and operator authorization must never remain on the continuous acknowledgement
-service after the one-off recovery job.
+through STS, and attests that the migration session is the non-superuser Lucy schema
+owner at exact revision `0050` over TLS while admission is quarantined and capture is
+safe. It then replays both streams, obtains the coordinated writer pauses, finalizes
+recovered cost state, rechecks the handoff, and activates only through that offline
+migration identity. Thirty-three focused runner, coordinator, and DynamoDB adapter
+tests passed with Ruff and strict mypy on 2026-09-10. The utility has not yet been run
+against an isolated Utopia restore; its migration URL and operator authorization must
+never remain on the continuous acknowledgement service after the one-off recovery job.
 
 All three commissioned recovery services were rolled forward without environment or
 command changes to exact commit `9cb8f28ccbc8d4c49e61e5a916351895706a041f`.

@@ -245,9 +245,45 @@ def _verify_database_identity(url: URL, expected_login: str) -> None:
         raise ProtectedRecoveryError("recovery database identity or boundary differs")
 
 
+def _verify_migration_identity(url: URL) -> None:
+    """Attest the offline activation principal without broadening its authority."""
+
+    sessions = create_session_factory(url.render_as_string(hide_password=False))
+    with sessions() as session:
+        row = session.execute(
+            text(
+                "SELECT current_user,r.rolcanlogin,r.rolsuper,r.rolcreaterole,"
+                "r.rolcreatedb,r.rolreplication,r.rolbypassrls,"
+                "(SELECT n.nspowner::regrole::text FROM pg_namespace n "
+                " WHERE n.nspname='lucy'),"
+                "(SELECT version_num FROM public.alembic_version),"
+                "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
+                "lucy.capture_boundary_safe_v1(),"
+                "(SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()) "
+                "FROM pg_catalog.pg_roles r WHERE r.rolname=current_user"
+            )
+        ).one()
+    if tuple(row) != (
+        "lucy_migration",
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        "lucy_migration",
+        R1_SCHEMA_REVISION,
+        "quarantined",
+        True,
+        True,
+    ):
+        raise ProtectedRecoveryError("migration identity or activation boundary differs")
+
+
 def run(config: ProtectedRecoveryConfig) -> dict[str, Any]:
     sts: Any = boto3.client("sts", region_name=config.region)
     _verify_actual_role(config, sts.get_caller_identity())
+    _verify_migration_identity(config.migration_url)
     _verify_database_identity(
         config.authority_recovery_url, str(config.authority_recovery_url.username)
     )
