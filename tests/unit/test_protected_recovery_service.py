@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 import deploy.render.protected_recovery_service as service
 from deploy.postgres.run_protected_recovery_v1_3 import ProtectedRecoveryError
@@ -51,5 +52,42 @@ def test_service_fails_closed_before_listening(
     assert served == []
     assert json.loads(capsys.readouterr().out) == {
         "error": "boundary differs",
+        "status": "failed",
+    }
+
+
+def test_service_reports_only_structural_programming_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Diagnostic:
+        message_primary = "permission denied for function exact_replay"
+        schema_name = "lucy"
+        table_name = None
+        column_name = None
+        constraint_name = None
+        function_name = "exact_replay"
+
+    class OriginalError(Exception):
+        sqlstate = "42501"
+        diag = Diagnostic()
+
+    failure = ProgrammingError(
+        "SELECT :secret", {"secret": "must-not-appear"}, OriginalError("hidden")
+    )
+    monkeypatch.setattr(service.ProtectedRecoveryConfig, "from_environment", lambda: object())
+    monkeypatch.setattr(service, "run", lambda _config: (_ for _ in ()).throw(failure))
+
+    with pytest.raises(SystemExit):
+        service.main()
+
+    output = capsys.readouterr().out
+    assert "must-not-appear" not in output
+    assert "SELECT" not in output
+    assert json.loads(output) == {
+        "error_type": "ProgrammingError",
+        "function_name": "exact_replay",
+        "message_primary": "permission denied for function exact_replay",
+        "schema_name": "lucy",
+        "sqlstate": "42501",
         "status": "failed",
     }

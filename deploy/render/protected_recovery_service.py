@@ -7,6 +7,8 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NoReturn
 
+from sqlalchemy.exc import ProgrammingError
+
 from deploy.postgres.run_protected_recovery_v1_3 import (
     ProtectedRecoveryConfig,
     ProtectedRecoveryError,
@@ -37,11 +39,36 @@ def _serve() -> NoReturn:
     raise AssertionError("HTTP server returned")
 
 
+def _safe_programming_error(exc: ProgrammingError) -> dict[str, str]:
+    """Return structural PostgreSQL diagnostics without SQL or parameter values."""
+
+    original = exc.orig
+    state = str(getattr(original, "sqlstate", "unknown"))
+    result = {"status": "failed", "error_type": "ProgrammingError", "sqlstate": state}
+    diagnostic = getattr(original, "diag", None)
+    if state.startswith("42") and diagnostic is not None:
+        for field in (
+            "message_primary",
+            "schema_name",
+            "table_name",
+            "column_name",
+            "constraint_name",
+            "function_name",
+        ):
+            value = getattr(diagnostic, field, None)
+            if isinstance(value, str) and value:
+                result[field] = value
+    return result
+
+
 def main() -> None:
     try:
         report = run(ProtectedRecoveryConfig.from_environment())
     except (ProtectedRecoveryError, RecoveryJournalError) as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True), flush=True)
+        raise SystemExit(1) from exc
+    except ProgrammingError as exc:
+        print(json.dumps(_safe_programming_error(exc), sort_keys=True), flush=True)
         raise SystemExit(1) from exc
     except Exception as exc:
         print(
