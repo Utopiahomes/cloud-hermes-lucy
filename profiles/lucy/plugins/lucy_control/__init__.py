@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
@@ -192,10 +193,22 @@ def _request_json_retry_safe(
             return _request_json(
                 path, method=method, payload=payload, extra_headers=extra_headers
             )
-        except (OSError, TimeoutError):
+        except (OSError, TimeoutError, json.JSONDecodeError, http.client.HTTPException):
             if attempt:
                 raise
+            time.sleep(0.25)
     raise AssertionError("retry loop did not return or raise")
+
+
+def _retention_event(code: str, *, role: str | None = None, error: str | None = None) -> None:
+    """Emit only content-free archive lifecycle metadata."""
+
+    payload: dict[str, Any] = {"component": "lucy-retention", "code": code}
+    if role in {"user", "assistant"}:
+        payload["role"] = role
+    if error:
+        payload["error_type"] = error
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
 
 
 def _request_boundary_json(
@@ -308,8 +321,17 @@ def _archive_conversation_message(
                 )
             },
         )
-    except Exception:
+    except Exception as exc:
+        _retention_event(
+            "archive_request_failed", role=role, error=type(exc).__name__
+        )
         return None
+    _retention_event(
+        "archive_request_completed"
+        if result.get("archived") is True
+        else "archive_request_rejected",
+        role=role,
+    )
     if result.get("archived") is not True:
         return result if result.get("capture_enabled") is False else None
     # Legacy archive responses include the keyed commitment; the realm archive
@@ -585,6 +607,12 @@ def _transform_llm_output(
         platform=platform,
     )
     if result is None or result.get("turn_committed") is not True:
+        turn["delivery_blocked"] = True
+        _retention_event(
+            "assistant_delivery_blocked",
+            role="assistant",
+            error="missing_result" if result is None else "turn_not_committed",
+        )
         return (
             "Lucy could not durably retain this reply, so its substantive content "
             "was not delivered. Please retry after the archive is healthy."
@@ -605,6 +633,9 @@ def _post_llm_call(
         return
     turn = _SESSION_TURN.get(session_id)
     if turn is None or turn.get("turn_id") != turn_id or turn.get("capture_enabled") is False:
+        return
+    if turn.get("delivery_blocked") is True:
+        _retention_event("post_hook_skipped_blocked_delivery", role="assistant")
         return
     # Retry the inbound write before preserving the reply. The companion's
     # stable idempotency key makes this safe and heals a transient pre-call

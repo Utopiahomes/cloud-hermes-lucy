@@ -511,6 +511,40 @@ def test_capture_transition_recovers_one_ambiguous_response_exactly(
     assert calls[0] == calls[1]
 
 
+def test_blocked_delivery_notice_is_not_archived_as_the_assistant_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def archive(**kwargs: Any) -> dict[str, Any] | None:
+        calls.append(kwargs["content"])
+        return None
+
+    monkeypatch.setattr(plugin, "_archive_conversation_message", archive)
+    plugin._SESSION_TURN["session-1"] = {
+        "turn_id": "turn-1",
+        "capture_enabled": True,
+        "active": True,
+        "proposal_keys": {},
+    }
+    notice = plugin._transform_llm_output(
+        response_text="Synthetic substantive response.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+    assert notice is not None and "could not durably retain" in notice
+    plugin._post_llm_call(
+        user_message="Synthetic owner message.",
+        assistant_response=notice,
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+    assert calls == ["Synthetic substantive response."]
+
+
 def test_off_record_is_visible_and_skips_archive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
