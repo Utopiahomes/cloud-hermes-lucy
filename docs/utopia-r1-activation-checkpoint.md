@@ -8,9 +8,12 @@ auto-deploy remains off, capture remains disabled, and no static AWS credentials
 present. The routine and gateway now share the existing adapter credential, and the
 gateway has its exact approved bot/OpenRouter configuration. Admission remains
 quarantined after a safe failed opening attempt reported an unspecified database capture
-boundary. A content-free diagnostic refinement is implemented and focused tests pass;
-deployment of that exact refinement, capture-boundary reconciliation, the one-gateway
-handoff, and live acceptance remain.
+boundary. Exact diagnostics then proved that only the approved R1-2 synthetic receipt
+needed an exception; with that exact exception, the capture boundary passed. Admission
+then identified two expired, unclaimed permits that the old inventory incorrectly counted
+as live authority. The deadline-aware correction is implemented and focused tests pass;
+deployment of that exact correction, admission opening, the one-gateway handoff, and live
+acceptance remain.
 
 ## Completed preparation
 
@@ -95,17 +98,24 @@ content-free logs, and rollback without reverting authority or deletion history.
   reported a capture blocker. Admission stayed quarantined and temporary database
   credentials were cleared. The commissioning command now emits specific content-free
   blocker codes; its 15 focused tests, Ruff, and strict mypy pass locally.
+- Exact receipt reconciliation named only the preserved R1-2 synthetic cloud-acceptance
+  receipt; after adding that exact conversation/turn pair to the ignored commissioning
+  exception list, all capture blocker codes cleared. No receipt was mutated or erased.
+- Read-only status then reported two unresolved items and one expected 30-day deletion
+  finality item. The unresolved query was counting expired, never-claimed permits as live
+  indefinitely. It now blocks only still-claimable issued permits while continuing to
+  block every claimed/ambiguous operation; expired unclaimed permits remain separately
+  counted for audit. Sixteen focused tests, Ruff, and strict mypy pass locally.
 - Deployed owner, unauthorized-caller, restart, duplicate-delivery, budget settlement,
   log-content, and rollback checks: not yet executed. These require the exact production
   candidate and invalidate only if its source/configuration/environment changes.
 
 ## Current blocker
 
-Deploy the content-free capture diagnostic at an exact pinned commit and rerun the
-capture-disabled admission command. Reconcile only the specific reported blocker through
-an audited capture-off transition or an exact approved synthetic receipt; do not erase
-historical receipts or weaken the admission rule. Then deploy routine, stop the local bot
-consumer, start the cloud gateway, and execute the remaining live acceptance checks.
+Commit and deploy the deadline-aware admission correction, regenerate the exact activation
+manifest, and rerun capture-disabled admission. If no claimed/ambiguous operation remains,
+deploy routine, stop the local bot consumer, start the cloud gateway, and execute the
+remaining live acceptance checks. Do not alter the expected 30-day deletion finality item.
 
 ## Follow-on, not an activation prerequisite
 

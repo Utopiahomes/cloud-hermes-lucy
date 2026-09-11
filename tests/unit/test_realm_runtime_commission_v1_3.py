@@ -104,6 +104,7 @@ def _patched_connection(
     )
     monkeypatch.setattr(commission, "_verify_reviewed_revision", lambda *_args: None)
     monkeypatch.setattr(commission, "_work_in_flight", lambda *_args: pending)
+    monkeypatch.setattr(commission, "_expired_unclaimed_permits", lambda *_args: 2)
     monkeypatch.setattr(commission, "_finality_pending", lambda *_args: 0)
     monkeypatch.setattr(commission, "_capture_blockers", lambda *_args: ())
     monkeypatch.setattr(commission, "_verify_open_boundary", lambda *_args: None)
@@ -133,6 +134,7 @@ def test_open_sets_only_the_independent_runtime_epoch(monkeypatch: pytest.Monkey
     ]
     assert report["runtime_admission"] == "ready"
     assert report["capture_enabled"] is False
+    assert report["expired_unclaimed_permits"] == 2
 
 
 def test_quarantine_does_not_rotate_the_runtime_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,6 +191,23 @@ def test_wrong_authorization_never_opens_a_database_session(
     )
     with pytest.raises(commission.CommissionError, match="exact commissioning"):
         commission.run(config, "open", "wrong")
+
+
+def test_only_still_claimable_issued_permits_block_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = commission.CommissionConfig.from_environment("open", _environment())
+    queries: list[str] = []
+
+    def scalar(_connection: object, query: str, _params: object) -> int:
+        queries.append(query)
+        return 0
+
+    monkeypatch.setattr(commission, "_scalar", scalar)
+    assert commission._work_in_flight(object(), config) == 0  # type: ignore[arg-type]
+    assert "p.permit_claim_deadline>=clock_timestamp()" in queries[0]
+    assert commission._expired_unclaimed_permits(object(), config) == 0  # type: ignore[arg-type]
+    assert "p.permit_claim_deadline<clock_timestamp()" in queries[1]
 
 
 class _Rows:

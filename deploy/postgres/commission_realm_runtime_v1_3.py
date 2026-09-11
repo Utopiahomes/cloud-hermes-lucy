@@ -300,8 +300,25 @@ def _work_in_flight(connection: psycopg.Connection[Any], config: CommissionConfi
             connection,
             "SELECT count(*) FROM lucy.sensitive_action_permits_v3 p "
             "LEFT JOIN lucy.sensitive_operations_v2 o ON o.permit_id=p.id "
-            "WHERE p.content_scope_id=%s AND ((p.state='ISSUED' AND o.id IS NULL) "
+            "WHERE p.content_scope_id=%s AND ((p.state='ISSUED' AND o.id IS NULL "
+            "AND p.permit_claim_deadline>=clock_timestamp()) "
             "OR (p.state='CLAIMED' AND (o.id IS NULL OR o.state='CLAIMED')))",
+            (stamp.content_scope_id,),
+        )
+    )
+
+
+def _expired_unclaimed_permits(
+    connection: psycopg.Connection[Any], config: CommissionConfig
+) -> int:
+    stamp, _, _ = _full_config(config)
+    return int(
+        _scalar(
+            connection,
+            "SELECT count(*) FROM lucy.sensitive_action_permits_v3 p "
+            "LEFT JOIN lucy.sensitive_operations_v2 o ON o.permit_id=p.id "
+            "WHERE p.content_scope_id=%s AND p.state='ISSUED' AND o.id IS NULL "
+            "AND p.permit_claim_deadline<clock_timestamp()",
             (stamp.content_scope_id,),
         )
     )
@@ -370,6 +387,7 @@ def run(config: CommissionConfig, action: Action, authorization: str) -> dict[st
         capture_blockers = _capture_blockers(connection, config)
         capture_enabled = bool(capture_blockers)
         pending = _work_in_flight(connection, config)
+        expired_unclaimed = _expired_unclaimed_permits(connection, config)
         finality_pending = _finality_pending(connection, config)
         sessions = _runtime_sessions(connection, config)
         if action == "open":
@@ -399,6 +417,7 @@ def run(config: CommissionConfig, action: Action, authorization: str) -> dict[st
             "capture_enabled": capture_enabled,
             "capture_blockers": list(capture_blockers),
             "unresolved_sensitive_authority": pending,
+            "expired_unclaimed_permits": expired_unclaimed,
             "finality_pending": finality_pending,
             "runtime_sessions": sessions,
             "replayed": replayed,
