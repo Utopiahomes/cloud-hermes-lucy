@@ -212,6 +212,24 @@ Render, the private migration URL, quarantine, capture off, and the exact marker
 a provider. Retain its `restore_anchor_at`; do not proceed until Render can restore a
 point after that anchor and before the later events.
 
+Build the fixture manifest before provisioning it. After the PITR target is safely
+available, use the same builder's `events` subcommand immediately before staging; its
+request timestamp is intentionally short-lived. Both output files are content-free,
+refuse overwrite, and belong in the ignored operator evidence directory:
+
+```powershell
+python -m deploy.postgres.build_recovery_drill_manifests_v1_3 fixture `
+  --realm-stamp secrets\generated\utopia-realm-security-stamp-v1.3.json `
+  --output secrets\generated\utopia-recovery-drill-fixture-v1.3.json
+
+python -m deploy.postgres.build_recovery_drill_manifests_v1_3 events `
+  --realm-stamp secrets\generated\utopia-realm-security-stamp-v1.3.json `
+  --fixture secrets\generated\utopia-recovery-drill-fixture-v1.3.json `
+  --authority-binding secrets\generated\authority-recovery-binding-v1.3.json `
+  --binding-manifest-digest <reviewed-64-character-digest> `
+  --output secrets\generated\utopia-recovery-drill-events-v1.3.json
+```
+
 `stage_recovery_drill_events_v1_3.py` then stages exactly one membership revocation
 and one one-micro-USD reservation. Its reviewed event manifest pins the fixture
 digest, idempotency keys, attempt ID, commitments, and request time. The command uses
