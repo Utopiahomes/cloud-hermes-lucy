@@ -276,8 +276,9 @@ The runner verifies each non-elevated recovery LOGIN and the TLS/capture/quarant
 boundary, replays both journal suffixes, obtains the protected short writer pauses,
 finalizes cost recovery, rechecks the heads and pauses, and only then activates the
 new runtime epoch. The restore-only activation LOGIN is `NOINHERIT`, owns no schema,
-has no role memberships, and receives only the exact metadata reads plus column-level
-updates required for the final handoff. It must be created after restore, supplied in
+has no role memberships, and receives only the exact metadata reads (including the
+single schema-revision row) plus column-level updates required for the final handoff.
+It must be created after restore, supplied in
 the legacy-named `LUCY_MIGRATION_DATABASE_URL` variable for the one-off job, and
 destroyed before the isolated restore is disposed. Do not supply the restored
 `lucy_migration` schema owner: Render PITR may recreate that login with

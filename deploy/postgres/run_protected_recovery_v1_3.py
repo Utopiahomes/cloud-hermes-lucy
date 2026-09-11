@@ -277,7 +277,8 @@ def _verify_migration_identity(url: URL) -> None:
                 "has_table_privilege(current_user,'lucy.restored_cost_admission_v1','SELECT'),"
                 "has_column_privilege(current_user,'lucy.restored_cost_admission_v1','updated_at','UPDATE'),"
                 "has_column_privilege(current_user,'lucy.restored_cost_admission_v1',"
-                "'state','UPDATE') "
+                "'state','UPDATE'),"
+                "has_table_privilege(current_user,'public.alembic_version','SELECT') "
                 "FROM pg_catalog.pg_roles r WHERE r.rolname=current_user"
             )
         ).one()
@@ -313,6 +314,7 @@ def _verify_migration_identity(url: URL) -> None:
         True,
         True,
         False,
+        True,
     ):
         raise ProtectedRecoveryError("activation identity or boundary differs")
 

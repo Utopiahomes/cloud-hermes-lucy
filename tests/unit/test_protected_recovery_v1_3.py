@@ -202,6 +202,7 @@ def _migration_row() -> tuple[object, ...]:
         True,
         True,
         False,
+        True,
     )
 
 
@@ -231,6 +232,7 @@ def test_migration_identity_requires_exact_offline_capture_safe_boundary(
         (18, False),
         (24, False),
         (27, False),
+        (30, False),
     ],
 )
 def test_migration_identity_rejects_boundary_drift(
