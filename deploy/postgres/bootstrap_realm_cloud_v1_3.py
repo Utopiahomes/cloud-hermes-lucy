@@ -376,8 +376,9 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
             raise BootstrapError("realm runtime LOGIN has inherited membership")
 
 
-def _run_migrations(config: BootstrapConfig) -> None:
-    engine = create_engine(config.migration_url, poolclass=NullPool)
+def migrate_realm_database(migration_url: URL) -> None:
+    """Advance a quarantined realm while containing temporary schema authority."""
+    engine = create_engine(migration_url, poolclass=NullPool)
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -440,6 +441,10 @@ def _run_migrations(config: BootstrapConfig) -> None:
                 raise BootstrapError("temporary function-owner schema CREATE was not removed")
     finally:
         engine.dispose()
+
+
+def _run_migrations(config: BootstrapConfig) -> None:
+    migrate_realm_database(config.migration_url)
 
 
 def _apply_grants_and_provision(config: BootstrapConfig) -> tuple[str, bool, bool]:
