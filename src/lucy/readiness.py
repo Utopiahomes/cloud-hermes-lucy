@@ -13,8 +13,9 @@ from lucy.db.session import _psycopg_url
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
-R1_SCHEMA_REVISION = "0050_r1_recovery_ack_receiver"
+R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
 SERVICE_ROLES = {
+    "public": "lucy_public_runtime",
     "routine": "lucy_routine",
     "policy": "lucy_policy",
     "evidence": "lucy_evidence_reader",
@@ -79,6 +80,8 @@ class ServiceReadiness:
     ) -> None:
         if mode not in SERVICE_MODES or (mode != "all-local" and storage_epoch is None):
             raise ReadinessError("service admission configuration is incomplete")
+        if mode == "public" and baseline != "v1.3":
+            raise ReadinessError("public service requires security baseline v1.3")
         self._sessions = sessions
         self._mode = mode
         self._epoch = storage_epoch
@@ -337,6 +340,7 @@ class ServiceReadiness:
             ):
                 raise ReadinessError("realm service login lacks readiness permissions")
         required_functions = {
+            "public": ("lucy.public_projection_answer_v2(text,text,uuid)",),
             "routine": (
                 "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint)",
                 "lucy.search_scoped_memory_v1(text,integer)",

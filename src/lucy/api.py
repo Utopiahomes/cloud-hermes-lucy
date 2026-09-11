@@ -125,6 +125,17 @@ from lucy.security_workflows import (
     SqlSecurityWorkflowStore,
     WorkflowRejected,
 )
+from lucy.telegram_stage1 import (
+    GatewayLeaseRequest,
+    GatewayLeaseResult,
+    TelegramEventClaimRequest,
+    TelegramEventClaimResult,
+    TelegramEventTransitionRequest,
+    TelegramEventTransitionResult,
+    TelegramGatewayBinding,
+    TelegramStage1Service,
+    TelegramStage1Unavailable,
+)
 
 app = FastAPI(title="Lucy Companion API", version="0.1.0")
 
@@ -133,6 +144,13 @@ app = FastAPI(title="Lucy Companion API", version="0.1.0")
 @app.exception_handler(DeletionJournalError)
 def admission_closed(_request: Request, _error: ReadinessError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "Lucy storage is not admitted"})
+
+
+@app.exception_handler(TelegramStage1Unavailable)
+def telegram_stage1_closed(
+    _request: Request, _error: TelegramStage1Unavailable
+) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Telegram Stage 1 is unavailable"})
 
 
 @app.get("/health", tags=["operations"])
@@ -576,6 +594,11 @@ def begin_model_execution(
     """Reserve once immediately before the Hermes provider call."""
     _require_mode("routine")
     _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+        try:
+            return _telegram_stage1_service().begin_model_execution(request)
+        except TelegramStage1Unavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ModelExecutionService(_ready_sessions()).begin(request)
 
 
@@ -591,7 +614,90 @@ def settle_model_execution(
     """Settle usage after the wrapped provider call completes."""
     _require_mode("routine")
     _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+        try:
+            return _telegram_stage1_service().settle_model_execution(request)
+        except TelegramStage1Unavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ModelExecutionService(_ready_sessions()).settle(request)
+
+
+def _telegram_stage1_service() -> TelegramStage1Service:
+    if os.getenv("LUCY_TELEGRAM_STAGE") != "1":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    if os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED") == "true":
+        raise HTTPException(status_code=503, detail="Telegram Stage 1 capture invariant failed")
+    return TelegramStage1Service(_ready_sessions(), TelegramGatewayBinding.from_environment())
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/acquire",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def acquire_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().acquire(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/heartbeat",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def heartbeat_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().heartbeat(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/release",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def release_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().release(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/events/claim",
+    tags=["internal"],
+    response_model=TelegramEventClaimResult,
+)
+def claim_telegram_stage1_event(
+    request: TelegramEventClaimRequest,
+    authorization: str | None = Header(default=None),
+) -> TelegramEventClaimResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().claim(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/events/transition",
+    tags=["internal"],
+    response_model=TelegramEventTransitionResult,
+)
+def transition_telegram_stage1_event(
+    request: TelegramEventTransitionRequest,
+    authorization: str | None = Header(default=None),
+) -> TelegramEventTransitionResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().transition(request)
 
 
 @app.post(

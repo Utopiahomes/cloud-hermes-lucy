@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import Context
 from pathlib import Path
@@ -168,6 +169,46 @@ def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPa
     }
 
 
+def test_stage1_budget_identity_is_bound_to_the_claimed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    bridge = ModuleType("sitecustomize")
+    bridge.next_model_operation = lambda: (  # type: ignore[attr-defined]
+        "11111111-1111-4111-8111-111111111111",
+        1,
+    )
+    monkeypatch.setitem(sys.modules, "sitecustomize", bridge)
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    monkeypatch.setenv("LUCY_TELEGRAM_GATEWAY_HOLDER_ID", "22222222-2222-4222-8222-222222222222")
+    monkeypatch.setenv("LUCY_TELEGRAM_GATEWAY_FENCE", "7")
+    posts: list[tuple[str, dict[str, Any]]] = []
+
+    def post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        posts.append((path, payload))
+        if path.endswith("/begin"):
+            return {"action_id": "action-1", "status": "executing", "execute": True}
+        return {"action_id": "action-1", "status": "succeeded", "replayed": False}
+
+    monkeypatch.setattr(plugin, "_post_json", post)
+    response = plugin._execution_middleware(
+        _request(),
+        lambda _request: _response(),
+        **_middleware_kwargs(),
+        platform="telegram",
+        turn_id="transient-turn",
+    )
+    assert response is not None
+    assert posts[0][1]["idempotency_key"] == (
+        "hermes-model:telegram-event:11111111-1111-4111-8111-111111111111:model-step:1"
+    )
+    assert posts[0][1]["session_id"].startswith("telegram-event:")
+    assert posts[0][1]["api_request_id"] == "model-step:1"
+    assert posts[0][1]["telegram_event_id"] == "11111111-1111-4111-8111-111111111111"
+    assert posts[0][1]["telegram_model_step"] == 1
+    assert posts[1][1]["telegram_lease_fence"] == 7
+
+
 def test_middleware_fails_closed_without_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _load_plugin()
 
@@ -263,6 +304,29 @@ def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
         ("post_llm_call", plugin._post_llm_call),
         ("on_session_end", plugin._on_session_end),
     ]
+
+
+def test_stage1_registers_only_read_only_memory_and_budget_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    plugin = _load_plugin()
+    registrations: list[tuple[str, Any]] = []
+    hooks: list[tuple[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    ctx = SimpleNamespace(
+        register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_hook=lambda kind, callback: hooks.append((kind, callback)),
+        register_tool=lambda **kwargs: tools.append(kwargs),
+    )
+    plugin.register(ctx)
+    assert [tool["name"] for tool in tools] == ["lucy_memory_lookup"]
+    assert [kind for kind, _callback in registrations] == [
+        "llm_request",
+        "llm_execution",
+        "tool_execution",
+    ]
+    assert hooks == []
 
 
 def test_telegram_transcript_hooks_archive_both_roles_idempotently(

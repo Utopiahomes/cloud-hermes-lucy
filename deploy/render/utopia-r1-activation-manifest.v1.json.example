@@ -2,27 +2,22 @@
   "contract": "lucy.utopia.r1.activation-manifest.v1",
   "environment": "production",
   "realm_slug": "utopia",
+  "activation_scope": "public_only",
   "activation_decision_id": "replace-with-reviewed-decision-id",
   "artifacts": {
     "source_commit": "replace-with-40-lowercase-hex-characters",
     "rollback_commit": "replace-with-40-lowercase-hex-characters",
     "image_digest": "replace-with-64-lowercase-hex-characters",
     "base_image_digest": "replace-with-64-lowercase-hex-characters",
-    "schema_revision": "0050_r1_recovery_ack_receiver",
+    "schema_revision": "0053_r1_telegram_authority",
     "aws_realm_template_sha256": "replace-with-64-lowercase-hex-characters",
     "aws_recovery_template_sha256": "replace-with-64-lowercase-hex-characters"
   },
-  "customer_identity": {
-    "issuer": "https://replace-with-customer-idp.example/",
-    "audience": "replace-with-exact-audience",
-    "owner_subjects": ["replace-with-stable-owner-subject"],
-    "strong_auth_claim": "replace-with-strong-auth-claim",
-    "strong_auth_values": ["replace-with-accepted-strong-auth-value"]
-  },
+  "customer_identity": null,
   "ingress": {
-    "public_hostnames": ["replace-public.utopiahomes.com"],
-    "private_hostnames": ["replace-private.utopiahomes.com"],
-    "allowed_origins": ["https://replace-public.utopiahomes.com"],
+    "public_hostnames": ["www.utopiahomes.com"],
+    "private_hostnames": [],
+    "allowed_origins": ["https://www.utopiahomes.com"],
     "trust_forwarded_host": false,
     "max_request_bytes": 65536,
     "requests_per_ip_per_minute": 20,
@@ -33,8 +28,8 @@
   "paid_inference": null,
   "transcript_capture_enabled": false,
   "public_seed": {
-    "snapshot_sha256": "replace-with-64-lowercase-hex-characters",
-    "source_lineage": ["replace-with-reviewed-source-version"]
+    "snapshot_sha256": "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e",
+    "source_lineage": ["utopia-homes-web:lucy-public-snapshot.v0"]
   },
   "permitted_data_classes": ["approved-public-faq"],
   "permitted_actions": ["public-read-only-answer"],

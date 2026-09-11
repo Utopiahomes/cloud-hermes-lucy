@@ -9,10 +9,11 @@ DECLARE
   v_login text;
   v_logins text[] := ARRAY[
     '__LUCY_REALM_ROUTINE_LOGIN__','__LUCY_REALM_POLICY_LOGIN__',
-    '__LUCY_REALM_WORKFLOW_LOGIN__','__LUCY_REALM_FINALITY_LOGIN__'
+    '__LUCY_REALM_WORKFLOW_LOGIN__','__LUCY_REALM_FINALITY_LOGIN__',
+    '__LUCY_REALM_PUBLIC_LOGIN__'
   ];
 BEGIN
-  IF (SELECT count(DISTINCT value) FROM unnest(v_logins) AS value) <> 4 THEN
+  IF (SELECT count(DISTINCT value) FROM unnest(v_logins) AS value) <> 5 THEN
     RAISE EXCEPTION 'v1.3 realm LOGIN identifiers must be distinct';
   END IF;
   FOREACH v_login IN ARRAY v_logins LOOP
@@ -38,13 +39,15 @@ BEGIN
   EXECUTE format(
     'REVOKE CONNECT, TEMP ON DATABASE %I FROM '
     '"__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__", '
-    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__"',
+    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__", '
+    '"__LUCY_REALM_PUBLIC_LOGIN__"',
     current_database()
   );
   EXECUTE format(
     'GRANT CONNECT ON DATABASE %I TO '
     '"__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__", '
-    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__"',
+    '"__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__", '
+    '"__LUCY_REALM_PUBLIC_LOGIN__"',
     current_database()
   );
 END
@@ -52,28 +55,42 @@ $database_grants$;
 
 REVOKE ALL ON SCHEMA lucy, public FROM
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA lucy FROM
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA lucy FROM
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA lucy FROM
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 
 GRANT USAGE ON SCHEMA lucy TO
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 GRANT SELECT ON public.alembic_version TO
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
+
+-- Public Lucy is a separate execute-only runtime. The database function binds
+-- session_user to one public channel and rechecks admission, lifecycle, and the
+-- storage epoch before returning an approved answer.
+GRANT EXECUTE ON FUNCTION
+  lucy.public_projection_answer_v2(text,text,uuid)
+TO "__LUCY_REALM_PUBLIC_LOGIN__";
 -- Content-free startup/transaction admission is readable by every realm
 -- process. No customer content or authority-directory rows are exposed.
 GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission TO
   "__LUCY_REALM_ROUTINE_LOGIN__", "__LUCY_REALM_POLICY_LOGIN__",
-  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__";
+  "__LUCY_REALM_WORKFLOW_LOGIN__", "__LUCY_REALM_FINALITY_LOGIN__",
+  "__LUCY_REALM_PUBLIC_LOGIN__";
 
 -- Normal/private Lucy plus archive ingestion. Every operation derives its one
 -- content scope from session_user; there is no request-selected realm.
@@ -86,7 +103,16 @@ GRANT EXECUTE ON FUNCTION
   lucy.accept_scoped_capture_turn_v1(text,text),
   lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb),
   lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text),
-  lucy.reconcile_capturable_scoped_archive_v1(uuid)
+  lucy.reconcile_capturable_scoped_archive_v1(uuid),
+  lucy.acquire_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid,integer),
+  lucy.heartbeat_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid,integer),
+  lucy.release_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid),
+  lucy.claim_telegram_event_v1(uuid,uuid,uuid,bigint,uuid,bigint,uuid,bigint,bigint,bigint),
+  lucy.transition_telegram_event_v1(uuid,uuid,uuid,bigint,uuid,bigint,uuid,text,bigint),
+  lucy.begin_telegram_model_operation_v1(
+    uuid,uuid,uuid,bigint,uuid,bigint,uuid,integer,uuid,text,text,bigint),
+  lucy.settle_telegram_model_operation_v1(
+    uuid,uuid,uuid,bigint,uuid,bigint,uuid,integer,uuid,bigint,boolean)
 TO "__LUCY_REALM_ROUTINE_LOGIN__";
 
 -- Content-free policy notary. It signs/adopts exact contracts, grants and

@@ -3,6 +3,8 @@ CREATE ROLE lucy_app LOGIN PASSWORD 'synthetic-app-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE;
 CREATE ROLE lucy_public_runtime LOGIN PASSWORD 'synthetic-public-runtime-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+CREATE ROLE lucy_utopia_public LOGIN PASSWORD 'synthetic-utopia-public-only'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_raymond_routine LOGIN PASSWORD 'synthetic-raymond-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 CREATE ROLE lucy_utopia_routine LOGIN PASSWORD 'synthetic-utopia-only'
@@ -54,6 +56,7 @@ GRANT lucy_authority_function_owner TO lucy_owner;
 GRANT lucy_migration TO lucy_owner;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_app;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_public_runtime;
+GRANT CONNECT ON DATABASE lucy_test TO lucy_utopia_public;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_directory_admission;
 GRANT CONNECT ON DATABASE lucy_test TO lucy_cost_admission, lucy_cost_recovery_writer;
 GRANT CONNECT ON DATABASE lucy_test TO
@@ -68,6 +71,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA lucy AUTHORIZATION lucy_owner;
 GRANT USAGE ON SCHEMA lucy TO lucy_app;
 GRANT USAGE ON SCHEMA lucy TO lucy_public_runtime;
+GRANT USAGE ON SCHEMA lucy TO lucy_utopia_public;
 GRANT USAGE ON SCHEMA lucy TO lucy_directory_admission;
 GRANT USAGE ON SCHEMA lucy TO lucy_cost_admission, lucy_cost_recovery_writer;
 GRANT USAGE ON SCHEMA lucy TO

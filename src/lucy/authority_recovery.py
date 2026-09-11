@@ -1,4 +1,4 @@
-"""Execute-only PostgreSQL boundary for restrictive R1 authority changes.
+"""Execute-only PostgreSQL boundary for durable R1 authority changes.
 
 Membership revocation and publication withdrawal take effect in the same
 transaction that stages their content-free recovery event.  Only the separate
@@ -63,7 +63,12 @@ class AuthorityTransitionResultV1(BaseModel):
     state: Literal["PERSISTENCE_PENDING", "DURABLY_RECORDED"]
     stream_id: UUID
     authority_epoch: int = Field(ge=1)
-    event_type: Literal["membership_revoked", "publication_withdrawn"]
+    event_type: Literal[
+        "membership_revoked",
+        "publication_withdrawn",
+        "channel_activated",
+        "channel_withdrawn",
+    ]
     security_realm_id: UUID
     workspace_id: UUID
     subject_id: UUID
@@ -119,7 +124,12 @@ class PendingAuthorityEventV1(BaseModel):
     idempotency_key: str
     stream_id: UUID
     authority_epoch: int = Field(ge=1)
-    event_type: Literal["membership_revoked", "publication_withdrawn"]
+    event_type: Literal[
+        "membership_revoked",
+        "publication_withdrawn",
+        "channel_activated",
+        "channel_withdrawn",
+    ]
     security_realm_id: UUID
     workspace_id: UUID
     subject_id: UUID
@@ -180,6 +190,16 @@ class AuthorityTransitionService:
         self, request: AuthorityTransitionRequestV1
     ) -> AuthorityTransitionResultV1:
         return self._stage("stage_publication_withdrawal_v1", "channel_binding_id", request)
+
+    def activate_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._stage("stage_channel_activation_v1", "channel_binding_id", request)
+
+    def withdraw_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._stage("stage_channel_withdrawal_v1", "channel_binding_id", request)
 
     def pending(self, event_id: UUID) -> PendingAuthorityEventV1:
         with self._sessions() as session:
@@ -297,6 +317,14 @@ class AuthorityTransitionGateway(Protocol):
         self, request: AuthorityTransitionRequestV1
     ) -> AuthorityTransitionResultV1: ...
 
+    def activate_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1: ...
+
+    def withdraw_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1: ...
+
 
 class AuthorityWriterResult(Protocol):
     event_id: UUID
@@ -341,16 +369,34 @@ class AuthorityTransitionCoordinator:
     ) -> AuthorityTransitionResultV1:
         return self._execute("withdraw_publication", request)
 
+    def activate_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._execute("activate_channel", request)
+
+    def withdraw_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._execute("withdraw_channel", request)
+
     def _execute(
         self,
-        operation: Literal["revoke_membership", "withdraw_publication"],
+        operation: Literal[
+            "revoke_membership",
+            "withdraw_publication",
+            "activate_channel",
+            "withdraw_channel",
+        ],
         request: AuthorityTransitionRequestV1,
     ) -> AuthorityTransitionResultV1:
-        transition = (
-            self._transitions.revoke_membership
-            if operation == "revoke_membership"
-            else self._transitions.withdraw_publication
-        )
+        if operation == "revoke_membership":
+            transition = self._transitions.revoke_membership
+        elif operation == "withdraw_publication":
+            transition = self._transitions.withdraw_publication
+        elif operation == "activate_channel":
+            transition = self._transitions.activate_channel
+        else:
+            transition = self._transitions.withdraw_channel
         staged = transition(request)
         if staged.state == "DURABLY_RECORDED":
             return staged
@@ -426,12 +472,13 @@ class AuthorityJournalWriter:
     ) -> RecoveryJournalEventV1:
         if sequence is None or previous_digest is None:
             raise RecoveryJournalError("authority event has not been prepared")
-        previous_state: AuthorityState = (
-            "active" if pending.event_type == "membership_revoked" else "published"
-        )
-        new_state: AuthorityState = (
-            "revoked" if pending.event_type == "membership_revoked" else "withdrawn"
-        )
+        states: dict[str, tuple[AuthorityState, AuthorityState]] = {
+            "membership_revoked": ("active", "revoked"),
+            "publication_withdrawn": ("published", "withdrawn"),
+            "channel_activated": ("inactive", "active"),
+            "channel_withdrawn": ("active", "inactive"),
+        }
+        previous_state, new_state = states[pending.event_type]
         effect = AuthorityJournalEffectV1(
             transition=pending.event_type,
             security_realm_id=pending.security_realm_id,

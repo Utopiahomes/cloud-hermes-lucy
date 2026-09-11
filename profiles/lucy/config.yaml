@@ -37,8 +37,9 @@ model_overrides:
 agent:
   max_turns: 4
   run_budget_seconds: 120
-  api_max_retries: 1
+  api_max_retries: 0
   reasoning_effort: low
+  gateway_notify_interval: 0
 
 openrouter:
   response_cache: false
@@ -56,6 +57,7 @@ auxiliary:
   transient_retries: 0
   free_only: true
   compression:
+    enabled: false
     provider: openrouter
     model: openai/gpt-oss-20b
     timeout: 120
@@ -67,16 +69,50 @@ auxiliary:
   background_review:
     enabled: false
 
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  write_approval: true
+  nudge_interval: 0
+
+curator:
+  enabled: false
+  backup:
+    enabled: false
+
+sessions:
+  write_json_snapshots: false
+
+gateway:
+  write_sessions_json: false
+  delivery_ledger: false
+
+streaming:
+  enabled: false
+
+display:
+  tool_progress: "off"
+  interim_assistant_messages: false
+  show_commentary: false
+  runtime_footer:
+    enabled: false
+  platforms:
+    telegram:
+      streaming: false
+      tool_progress: "off"
+      long_running_notifications: "off"
+
+telegram:
+  typing_indicator: false
+  gateway_restart_notification: false
+
 toolsets:
-  - clarify
   - lucy_memory
 
 platform_toolsets:
   cli:
-    - clarify
     - lucy_memory
   telegram:
-    - clarify
     - lucy_memory
 
 known_plugin_toolsets:
@@ -121,7 +157,7 @@ known_builtin_toolsets:
   telegram: *known_builtin_toolsets
 
 terminal:
-  cwd: /opt/data
+  cwd: /dev/shm
 
 approvals:
   mode: manual

@@ -178,7 +178,7 @@ def test_recovery_identity_attests_execute_only_boundary(
 ) -> None:
     login = "lucy_utopia_authority_recovery"
     row = (login, True, False, False, False, False, False, False,
-           "0050_r1_recovery_ack_receiver", True, True)
+           "0053_r1_telegram_authority", True, True)
     monkeypatch.setattr(
         protected_recovery,
         "create_session_factory",
@@ -201,7 +201,7 @@ def _migration_row() -> tuple[object, ...]:
         False,
         False,
         "lucy_migration",
-        "0050_r1_recovery_ack_receiver",
+        "0053_r1_telegram_authority",
         "quarantined",
         True,
         True,

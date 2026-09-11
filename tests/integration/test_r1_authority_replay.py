@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -256,3 +257,138 @@ def test_replay_login_is_execute_only_and_fail_closed() -> None:
                 "event": json.dumps({"contract_version": "1", "stream_kind": "authority"}),
             },
         )
+
+
+def test_quarantined_restore_replays_private_channel_activation_then_withdrawal() -> None:
+    assert APP_URL is not None and OWNER_URL is not None
+    assert TRANSITION_URL is not None and RECOVERY_URL is not None
+    tenancy = TenancyService(create_session_factory(APP_URL))
+    foundation = tenancy.create_node_foundation(
+        account_slug="telegram-replay",
+        account_name="Telegram Replay",
+        node_slug=f"telegram-replay-{uuid4()}",
+        node_name="Telegram Replay",
+        node_kind="organization",
+        realm_slug=f"telegram-replay-realm-{uuid4()}",
+        workspace_slug="private-lucy",
+        hostname=f"telegram-replay-{uuid4()}.invalid",
+        workspace_kind="private_lucy",
+        channel_kind="internal",
+    )
+    owner_id = tenancy.create_principal(
+        issuer="synthetic",
+        subject=f"telegram-replay-owner-{uuid4()}",
+        kind="human",
+        display_name="Telegram Replay Owner",
+    )
+    tenancy.grant_workspace_membership(
+        principal_id=owner_id, workspace_id=foundation.workspace_id, role="owner"
+    )
+    binding_digest = "9" * 64
+    with create_engine(OWNER_URL).begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.channel_bindings SET active=false,generation=generation+1 "
+                "WHERE id=:channel"
+            ),
+            {"channel": foundation.channel_binding_id},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO lucy.telegram_channel_bindings_v1("
+                "channel_binding_id,bot_id,owner_user_id,binding_digest,created_at) "
+                "VALUES (:channel,910000001,910000002,:digest,:created_at)"
+            ),
+            {
+                "channel": foundation.channel_binding_id,
+                "digest": binding_digest,
+                "created_at": datetime.now(UTC),
+            },
+        )
+
+    stream = _binding()
+    transition = AuthorityTransitionService(create_session_factory(TRANSITION_URL))
+    acknowledgement = AuthorityTransitionService(create_session_factory(RECOVERY_URL))
+    journal = InMemoryRecoveryJournal(stream)
+    writer = AuthorityJournalWriter(transition, journal)
+    base_request = AuthorityTransitionRequestV1(
+        subject_id=foundation.channel_binding_id,
+        actor_id=owner_id,
+        stream_id=stream.stream_id,
+        authority_epoch=stream.authority_epoch,
+        idempotency_key="authority:restore:telegram-activate-1",
+        source_authority_ref="owner-interaction:synthetic",
+        source_authority_digest=binding_digest,
+    )
+    activation = transition.activate_channel(base_request)
+    activation_append = writer.append_pending(activation.event_id)
+    acknowledgement.acknowledge(
+        event_id=activation.event_id,
+        journal_sequence=activation_append.resulting_head.sequence,
+        journal_event_digest=activation_append.event_digest,
+        journal_head_digest=activation_append.event_digest,
+    )
+    withdrawal = transition.withdraw_channel(
+        base_request.model_copy(
+            update={"idempotency_key": "authority:restore:telegram-withdraw-1"}
+        )
+    )
+    withdrawal_append = writer.append_pending(withdrawal.event_id)
+    acknowledgement.acknowledge(
+        event_id=withdrawal.event_id,
+        journal_sequence=withdrawal_append.resulting_head.sequence,
+        journal_event_digest=withdrawal_append.event_digest,
+        journal_head_digest=withdrawal_append.event_digest,
+    )
+
+    # Model a backup from before either transition; recovery must end withdrawn.
+    with create_engine(OWNER_URL).begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE lucy.channel_bindings DISABLE TRIGGER "
+                "channel_authority_monotonic"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE lucy.channel_bindings DISABLE TRIGGER "
+                "channel_binding_authority_guard_v1"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE lucy.channel_bindings SET active=false,generation=:generation "
+                "WHERE id=:channel"
+            ),
+            {
+                "channel": foundation.channel_binding_id,
+                "generation": activation.previous_generation,
+            },
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE lucy.channel_bindings ENABLE TRIGGER "
+                "channel_authority_monotonic"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE lucy.channel_bindings ENABLE TRIGGER "
+                "channel_binding_authority_guard_v1"
+            )
+        )
+    restored = PostgresAuthorityReplayStore(
+        create_session_factory(RECOVERY_URL), stream
+    )
+    activation_head = restored.apply(journal.event(1), restored.head())
+    assert activation_head == activation_append.resulting_head
+    final_head = restored.apply(journal.event(2), activation_head)
+    assert final_head == withdrawal_append.resulting_head
+    with create_engine(OWNER_URL).connect() as connection:
+        state = connection.execute(
+            text(
+                "SELECT active,generation FROM lucy.channel_bindings WHERE id=:channel"
+            ),
+            {"channel": foundation.channel_binding_id},
+        ).one()
+        assert state == (False, withdrawal.new_generation)

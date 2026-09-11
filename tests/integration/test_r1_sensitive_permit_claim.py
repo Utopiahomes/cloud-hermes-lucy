@@ -53,6 +53,13 @@ from lucy.db.models import (
     RealmSensitiveActorBindingRow,
     RealmServiceBindingRow,
 )
+from lucy.model_execution import (
+    MODEL,
+    RESERVATION_MICROUSD,
+    ModelExecutionBegin,
+    ModelExecutionSettlement,
+    ModelUsage,
+)
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
     RealmArchiveEncryptor,
@@ -63,6 +70,14 @@ from lucy.realm_archive_commit import (
     PostgresRealmArchiveCommitStore,
     RealmArchiveCommitService,
     RealmConversationArchiveService,
+)
+from lucy.telegram_stage1 import (
+    GatewayLeaseRequest,
+    TelegramEventClaimRequest,
+    TelegramEventTransitionRequest,
+    TelegramGatewayBinding,
+    TelegramStage1Service,
+    TelegramStage1Unavailable,
 )
 from lucy.tenancy import TenancyService
 
@@ -163,7 +178,20 @@ def clean_sensitive_tables() -> None:
                 "GRANT EXECUTE ON FUNCTION lucy.reconcile_scoped_deletion_v2(uuid) "
                 "TO lucy_utopia_sensitive_workflow, lucy_raymond_sensitive_workflow; "
                 "GRANT EXECUTE ON FUNCTION lucy.record_scoped_finality_inventory_v2(uuid,jsonb) "
-                "TO lucy_utopia_finality"
+                "TO lucy_utopia_finality; "
+                "GRANT EXECUTE ON FUNCTION "
+                "lucy.acquire_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid,integer), "
+                "lucy.heartbeat_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid,integer), "
+                "lucy.release_telegram_gateway_lease_v1(uuid,uuid,uuid,bigint,uuid), "
+                "lucy.claim_telegram_event_v1("
+                "uuid,uuid,uuid,bigint,uuid,bigint,uuid,bigint,bigint,bigint), "
+                "lucy.transition_telegram_event_v1("
+                "uuid,uuid,uuid,bigint,uuid,bigint,uuid,text,bigint), "
+                "lucy.begin_telegram_model_operation_v1("
+                "uuid,uuid,uuid,bigint,uuid,bigint,uuid,integer,uuid,text,text,bigint), "
+                "lucy.settle_telegram_model_operation_v1("
+                "uuid,uuid,uuid,bigint,uuid,bigint,uuid,integer,uuid,bigint,boolean) "
+                "TO lucy_utopia_routine"
             )
         )
     engine.dispose()
@@ -406,6 +434,164 @@ def _scope(realm: dict[str, UUID]) -> OriginScopeV1:
         security_realm_id=realm["realm"],
         storage_epoch=1,
     )
+
+
+def test_stage1_telegram_lease_dedup_delivery_and_restart_fence(
+    realm: dict[str, UUID],
+) -> None:
+    assert ARCHIVE_URL and OWNER_URL
+    owner = create_engine(OWNER_URL)
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO lucy.telegram_channel_bindings_v1 VALUES "
+                "(:channel,555,123,:digest,now())"
+            ),
+            {"channel": realm["channel"], "digest": "a" * 64},
+        )
+    service = TelegramStage1Service(
+        create_session_factory(ARCHIVE_URL),
+        TelegramGatewayBinding(
+            node_id=realm["node"],
+            realm_id=realm["realm"],
+            channel_binding_id=realm["channel"],
+            bot_id=555,
+        ),
+    )
+    holder, competing = uuid4(), uuid4()
+    lease = service.acquire(GatewayLeaseRequest(holder_id=holder))
+    assert lease.acquired and lease.fence == 1
+    with pytest.raises(TelegramStage1Unavailable):
+        service.acquire(GatewayLeaseRequest(holder_id=competing))
+
+    event_id = uuid4()
+    claim = TelegramEventClaimRequest(
+        holder_id=holder,
+        fence=lease.fence,
+        event_id=event_id,
+        update_id=10,
+        chat_id=123,
+        message_id=9,
+    )
+    assert service.claim(claim).admitted is True
+    duplicate = service.claim(claim)
+    assert duplicate.admitted is False and duplicate.replayed is True
+    service.transition(
+        TelegramEventTransitionRequest(
+            holder_id=holder, fence=lease.fence, event_id=event_id,
+            state="INFERENCE_STARTED",
+        )
+    )
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO lucy.telegram_budget_accounts_v1 VALUES "
+                "(:realm,100000,current_date,0,0,now())"
+            ),
+            {"realm": realm["realm"]},
+        )
+    begin = ModelExecutionBegin(
+        idempotency_key=f"hermes-model:telegram-event:{event_id}:model-step:1",
+        model=MODEL,
+        reservation_microusd=RESERVATION_MICROUSD,
+        session_id=f"telegram-event:{event_id}",
+        api_request_id="model-step:1",
+        telegram_event_id=event_id,
+        telegram_model_step=1,
+        telegram_holder_id=holder,
+        telegram_lease_fence=lease.fence,
+    )
+    begun = service.begin_model_execution(begin)
+    assert begun.execute is True and begun.replayed is False
+    replay = service.begin_model_execution(begin)
+    assert replay.execute is False and replay.replayed is True
+    settlement = ModelExecutionSettlement(
+        action_id=begun.action_id,
+        actual_microusd=17,
+        succeeded=True,
+        usage=ModelUsage(provider_cost_microusd=17),
+        telegram_event_id=event_id,
+        telegram_model_step=1,
+        telegram_holder_id=holder,
+        telegram_lease_fence=lease.fence,
+    )
+    assert service.settle_model_execution(settlement).replayed is False
+    assert service.settle_model_execution(settlement).replayed is True
+    for state in ("INFERENCE_SETTLED", "SEND_STARTED"):
+        service.transition(
+            TelegramEventTransitionRequest(
+                holder_id=holder, fence=lease.fence, event_id=event_id, state=state
+            )
+        )
+    crash_event = uuid4()
+    service.claim(
+        TelegramEventClaimRequest(
+            holder_id=holder,
+            fence=lease.fence,
+            event_id=crash_event,
+            update_id=11,
+            chat_id=123,
+            message_id=10,
+        )
+    )
+    service.transition(
+        TelegramEventTransitionRequest(
+            holder_id=holder,
+            fence=lease.fence,
+            event_id=crash_event,
+            state="INFERENCE_STARTED",
+        )
+    )
+    unresolved = service.begin_model_execution(
+        ModelExecutionBegin(
+            idempotency_key=f"hermes-model:telegram-event:{crash_event}:model-step:1",
+            model=MODEL,
+            reservation_microusd=RESERVATION_MICROUSD,
+            session_id=f"telegram-event:{crash_event}",
+            api_request_id="model-step:1",
+            telegram_event_id=crash_event,
+            telegram_model_step=1,
+            telegram_holder_id=holder,
+            telegram_lease_fence=lease.fence,
+        )
+    )
+    assert unresolved.execute is True
+    service.release(GatewayLeaseRequest(holder_id=holder))
+    replacement = service.acquire(GatewayLeaseRequest(holder_id=competing))
+    assert replacement.fence == 2
+
+    with owner.connect() as connection:
+        assert connection.scalar(
+            text("SELECT state FROM lucy.telegram_events_v1 WHERE event_id=:event"),
+            {"event": event_id},
+        ) == "DELIVERY_UNCERTAIN"
+        assert connection.scalar(
+            text("SELECT state FROM lucy.telegram_events_v1 WHERE event_id=:event"),
+            {"event": crash_event},
+        ) == "INTERRUPTED"
+        assert connection.scalar(
+            text(
+                "SELECT state FROM lucy.telegram_model_operations_v1 "
+                "WHERE action_id=:action"
+            ),
+            {"action": unresolved.action_id},
+        ) == "AMBIGUOUS"
+        budget = connection.execute(
+            text(
+                "SELECT reserved_microusd,spent_microusd FROM "
+                "lucy.telegram_budget_accounts_v1 WHERE security_realm_id=:realm"
+            ),
+            {"realm": realm["realm"]},
+        ).one()
+        assert budget == (0, 5017)
+    owner.dispose()
+
+    routine = create_engine(ARCHIVE_URL)
+    with pytest.raises(DBAPIError, match="permission denied"), routine.connect() as connection:
+        connection.execute(text("SELECT * FROM lucy.telegram_events_v1"))
+    with pytest.raises(DBAPIError, match="permission denied"), routine.connect() as connection:
+        connection.execute(text("SELECT * FROM lucy.telegram_model_operations_v1"))
+    routine.dispose()
 
 
 def _permit(

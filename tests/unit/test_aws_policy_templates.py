@@ -549,7 +549,9 @@ def test_v12_render_callers_can_invoke_only_their_qualified_alias() -> None:
 def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch() -> None:
     services = _v13_render_services()
     assert set(services) == {
+        "lucy-public",
         "lucy-routine",
+        "lucy-telegram-private",
         "lucy-policy",
         "lucy-evidence",
         "lucy-deletion",
@@ -573,9 +575,49 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
         environment = {item["key"]: item for item in service["envVars"]}
         assert environment["LUCY_SECURITY_BASELINE"]["value"] == "v1.3"
     routine = {item["key"]: item for item in services["lucy-routine"]["envVars"]}
+    public = {item["key"]: item for item in services["lucy-public"]["envVars"]}
+    assert services["lucy-public"]["type"] == "web"
+    assert services["lucy-public"]["dockerCommand"] == "python -m lucy.public_runtime"
+    assert services["lucy-public"]["healthCheckPath"] == "/health"
+    assert public["LUCY_SERVICE_MODE"]["value"] == "public"
+    assert public["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert public["LUCY_PUBLIC_ALLOWED_ORIGIN"]["value"] == (
+        "https://www.utopiahomes.com"
+    )
+    assert public["LUCY_PUBLIC_SITE_HOSTNAME"]["value"] == "www.utopiahomes.com"
+    assert public["LUCY_PUBLIC_SNAPSHOT_DIGEST"]["value"] == (
+        "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e"
+    )
+    assert not any(
+        key.startswith("AWS_")
+        or key.startswith("LUCY_AWS_")
+        or "OPENROUTER" in key
+        or key in {"LUCY_OWNER_TOKEN", "LUCY_POLICY_GATEWAY_TOKEN"}
+        for key in public
+    )
     assert routine["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
     assert "LUCY_ARCHIVE_COMMITMENT_KEY_B64" in routine
     assert "LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64" in routine
+    gateway = {
+        item["key"]: item for item in services["lucy-telegram-private"]["envVars"]
+    }
+    assert services["lucy-telegram-private"]["type"] == "worker"
+    assert services["lucy-telegram-private"]["dockerfilePath"] == (
+        "./Dockerfile.hermes-telegram-stage1"
+    )
+    assert gateway["LUCY_TELEGRAM_STAGE"]["value"] == "1"
+    assert gateway["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert gateway["LUCY_COMPANION_HOSTPORT"]["fromService"] == {
+        "type": "pserv",
+        "name": "lucy-routine",
+        "property": "hostport",
+    }
+    assert not any(
+        key == "LUCY_DATABASE_URL"
+        or key == "AWS_ROLE_ARN"
+        or key.startswith("LUCY_AWS_")
+        for key in gateway
+    )
     assert services["lucy-finality-utility"]["schedule"] == "0 0 1 1 *"
     assert services["lucy-finality-utility"]["dockerCommand"].endswith(
         "--scheduled-sentinel"
@@ -606,6 +648,7 @@ def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
         for name, service in services.items()
     }
     expected_logins = {
+        "lucy-public": "lucy_utopia_public",
         "lucy-routine": "lucy_utopia_routine",
         "lucy-policy": "lucy_utopia_policy",
         "lucy-evidence": "lucy_utopia_sensitive_workflow",

@@ -17,7 +17,7 @@ def valid_manifest() -> dict[str, object]:
             "rollback_commit": "b" * 40,
             "image_digest": "c" * 64,
             "base_image_digest": "d" * 64,
-            "schema_revision": "0050_r1_recovery_ack_receiver",
+            "schema_revision": "0053_r1_telegram_authority",
             "aws_realm_template_sha256": "e" * 64,
             "aws_recovery_template_sha256": "f" * 64,
         },
@@ -53,6 +53,28 @@ def test_capture_off_activation_manifest_is_accepted() -> None:
     manifest = UtopiaActivationManifestV1.model_validate(valid_manifest())
     assert manifest.transcript_capture_enabled is False
     assert manifest.paid_inference is None
+
+
+def test_public_only_manifest_requires_no_private_identity_or_ingress() -> None:
+    candidate = valid_manifest()
+    candidate["activation_scope"] = "public_only"
+    candidate["customer_identity"] = None
+    candidate["ingress"]["private_hostnames"] = []  # type: ignore[index]
+    manifest = UtopiaActivationManifestV1.model_validate(candidate)
+    assert manifest.activation_scope == "public_only"
+    assert manifest.customer_identity is None
+
+
+@pytest.mark.parametrize("private_value", [["private.example"], []])
+def test_public_only_manifest_rejects_private_surface(private_value: list[str]) -> None:
+    candidate = valid_manifest()
+    candidate["activation_scope"] = "public_only"
+    candidate["customer_identity"] = None
+    candidate["ingress"]["private_hostnames"] = private_value  # type: ignore[index]
+    if not private_value:
+        candidate["customer_identity"] = valid_manifest()["customer_identity"]
+    with pytest.raises(ValidationError):
+        UtopiaActivationManifestV1.model_validate(candidate)
 
 
 @pytest.mark.parametrize(

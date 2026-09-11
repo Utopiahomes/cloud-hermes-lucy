@@ -40,6 +40,7 @@ def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
         policy_login="lucy_utopia_policy",
         workflow_login="lucy_utopia_sensitive_workflow",
         finality_login="lucy_utopia_finality",
+        public_login="lucy_utopia_public",
     )
     owner = create_engine(OWNER_URL)
     with owner.begin() as connection:
@@ -100,6 +101,7 @@ def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login() 
         policy_login="lucy_utopia_policy",
         workflow_login="lucy_utopia_sensitive_workflow",
         finality_login="lucy_utopia_finality",
+        public_login="lucy_utopia_public",
     )
     owner = create_engine(OWNER_URL)
     epoch = uuid4()
@@ -111,6 +113,7 @@ def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login() 
         )
         connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
     boundaries = (
+        ("public", "lucy_utopia_public", "synthetic-utopia-public-only"),
         ("routine", "lucy_utopia_routine", "synthetic-utopia-only"),
         ("policy", "lucy_utopia_policy", "synthetic-utopia-policy-only"),
         (

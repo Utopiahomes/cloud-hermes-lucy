@@ -1,6 +1,6 @@
 name: lucy_control
-version: 2.0.0
-description: Governed encrypted transcripts, budgets, and provenance tools.
+version: 2.1.0
+description: Stage-aware budgets and governed Lucy memory tools.
 author: Lucy
 kind: standalone
 provides_tools:

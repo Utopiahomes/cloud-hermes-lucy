@@ -105,6 +105,7 @@ def _environment() -> dict[str, str]:
         "policy": stamp.policy_login,
         "workflow": stamp.workflow_login,
         "finality": stamp.finality_login,
+        "public": "lucy_utopia_public",
     }.items():
         result[f"LUCY_{mode.upper()}_DATABASE_URL"] = (
             f"postgresql://{login}:{mode}-secret@{HOST}:5432/{DATABASE}"
@@ -124,7 +125,13 @@ def _environment() -> dict[str, str]:
 def test_config_requires_private_capture_off_exact_realm_urls() -> None:
     config = bootstrap.BootstrapConfig.from_environment(_environment())
     assert config.stamp.realm_slug == "utopia"
-    assert set(config.runtime_urls) == {"routine", "policy", "workflow", "finality"}
+    assert set(config.runtime_urls) == {
+        "routine",
+        "policy",
+        "workflow",
+        "finality",
+        "public",
+    }
     assert set(config.recovery_urls) == {
         "authority_writer",
         "cost_writer",

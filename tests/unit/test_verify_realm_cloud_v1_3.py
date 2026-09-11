@@ -15,7 +15,7 @@ def test_report_is_content_free_and_counts_verified_logins(
         verifier,
         "_verify",
         lambda _config: {
-            "migration_revision": "0050_r1_recovery_ack_receiver",
+            "migration_revision": "0053_r1_telegram_authority",
             "runtime_admission": "quarantined",
             "capture_enabled": False,
             "content_scope_count": 1,
@@ -24,13 +24,13 @@ def test_report_is_content_free_and_counts_verified_logins(
             "directory_admission_acl_isolated": True,
             "offline_migration_schema_owner": True,
             "function_owner_schema_create_removed": True,
-            "verified_runtime_logins": ["a", "b", "c", "d"],
+            "verified_runtime_logins": ["a", "b", "c", "d", "public"],
             "verified_recovery_logins": ["e", "f", "g", "h"],
         },
     )
     report = verifier.run(object())  # type: ignore[arg-type]
     assert report["status"] == "passed"
-    assert report["runtime_login_count"] == 4
+    assert report["runtime_login_count"] == 5
     assert report["recovery_login_count"] == 4
     assert "verified_runtime_logins" not in report
 

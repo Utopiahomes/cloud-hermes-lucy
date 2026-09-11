@@ -29,6 +29,16 @@ class FakeTransitions:
     ) -> AuthorityTransitionResultV1:
         return self._result(request, "publication_withdrawn")
 
+    def activate_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._result(request, "channel_activated")
+
+    def withdraw_channel(
+        self, request: AuthorityTransitionRequestV1
+    ) -> AuthorityTransitionResultV1:
+        return self._result(request, "channel_withdrawn")
+
     def _result(
         self, request: AuthorityTransitionRequestV1, event_type: str
     ) -> AuthorityTransitionResultV1:
@@ -96,7 +106,10 @@ def request() -> AuthorityTransitionRequestV1:
     )
 
 
-@pytest.mark.parametrize("operation", ["revoke_membership", "withdraw_publication"])
+@pytest.mark.parametrize(
+    "operation",
+    ["revoke_membership", "withdraw_publication", "activate_channel", "withdraw_channel"],
+)
 def test_restriction_returns_only_after_both_durable_barriers(operation: str) -> None:
     transitions = FakeTransitions()
     writer = FakeWriter(transitions)

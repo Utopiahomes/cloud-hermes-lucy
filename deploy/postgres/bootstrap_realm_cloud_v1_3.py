@@ -49,8 +49,11 @@ EXPECTED_SOURCE_REVISIONS = {
     "0048_r1_cost_replay",
     "0049_r1_cost_recovery_finalize",
     "0050_r1_recovery_ack_receiver",
+    "0051_stage1_private_telegram",
+    "0052_r1_public_answer_gate",
+    "0053_r1_telegram_authority",
 }
-EXPECTED_REVISION = "0050_r1_recovery_ack_receiver"
+EXPECTED_REVISION = "0053_r1_telegram_authority"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
@@ -133,6 +136,7 @@ class BootstrapConfig:
             "policy": stamp.policy_login,
             "workflow": stamp.workflow_login,
             "finality": stamp.finality_login,
+            "public": f"lucy_{stamp.realm_slug}_public",
         }
         runtime_urls: dict[str, URL] = {}
         for mode, login in expected_logins.items():
@@ -302,7 +306,7 @@ def _bootstrap_roles(config: BootstrapConfig) -> None:
         url.username
         for url in (*config.runtime_urls.values(), *config.recovery_urls.values())
     }
-    if None in expected or len(expected) != 8:
+    if None in expected or len(expected) != 9:
         raise BootstrapError("realm runtime and recovery LOGIN set is invalid")
     names = {str(name) for name in expected}
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
@@ -445,6 +449,7 @@ def _apply_grants_and_provision(config: BootstrapConfig) -> tuple[str, bool, boo
         policy_login=config.stamp.policy_login,
         workflow_login=config.stamp.workflow_login,
         finality_login=config.stamp.finality_login,
+        public_login=str(config.runtime_urls["public"].username),
     )
     recovery_roles_sql = render_recovery_roles(
         realm_slug=config.stamp.realm_slug,

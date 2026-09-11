@@ -25,6 +25,7 @@ def _render(module: ModuleType, **changes: str) -> str:
         "policy_login": "lucy_utopia_policy",
         "workflow_login": "lucy_utopia_sensitive_workflow",
         "finality_login": "lucy_utopia_finality",
+        "public_login": "lucy_utopia_public",
     }
     values.update(changes)
     return module.render_realm_roles(**values)
@@ -51,6 +52,8 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
     assert "read_sensitive_action_permit_v3" in rendered
     assert 'TO "lucy_utopia_sensitive_workflow"' in rendered
     assert 'TO "lucy_utopia_finality"' in rendered
+    assert 'TO "lucy_utopia_public"' in rendered
+    assert "public_projection_answer_v2(text,text,uuid)" in rendered
     assert "GRANT SELECT ON lucy.scoped_" not in rendered
 
 
@@ -61,6 +64,7 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
         ("routine_login", "lucy;drop", "invalid PostgreSQL LOGIN"),
         ("policy_login", "lucy_raymond_policy", "does not match"),
         ("workflow_login", "lucy_utopia_policy", "must be distinct"),
+        ("public_login", "lucy_other_public", "does not match"),
     ],
 )
 def test_realm_renderer_rejects_unsafe_or_cross_realm_names(

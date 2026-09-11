@@ -21,12 +21,31 @@ class ModelExecutionBegin(BaseModel):
     reservation_microusd: Literal[5000]
     session_id: str = Field(max_length=500)
     api_request_id: str = Field(min_length=1, max_length=500)
+    telegram_event_id: UUID | None = None
+    telegram_model_step: int | None = Field(default=None, ge=1)
+    telegram_holder_id: UUID | None = None
+    telegram_lease_fence: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def idempotency_key_matches_request(self) -> "ModelExecutionBegin":
         expected = f"hermes-model:{self.session_id}:{self.api_request_id}"
         if self.idempotency_key != expected:
             raise ValueError("idempotency key does not match request identity")
+        telegram_fields = (
+            self.telegram_event_id,
+            self.telegram_model_step,
+            self.telegram_holder_id,
+            self.telegram_lease_fence,
+        )
+        if any(value is not None for value in telegram_fields) and not all(
+            value is not None for value in telegram_fields
+        ):
+            raise ValueError("Telegram execution identity must be complete")
+        if self.telegram_event_id is not None and (
+            self.session_id != f"telegram-event:{self.telegram_event_id}"
+            or self.api_request_id != f"model-step:{self.telegram_model_step}"
+        ):
+            raise ValueError("Telegram execution identity does not match the event")
         return self
 
 
@@ -52,6 +71,24 @@ class ModelExecutionSettlement(BaseModel):
     actual_microusd: int = Field(ge=0, le=RESERVATION_MICROUSD)
     succeeded: bool
     usage: ModelUsage
+    telegram_event_id: UUID | None = None
+    telegram_model_step: int | None = Field(default=None, ge=1)
+    telegram_holder_id: UUID | None = None
+    telegram_lease_fence: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def telegram_identity_is_complete(self) -> "ModelExecutionSettlement":
+        fields = (
+            self.telegram_event_id,
+            self.telegram_model_step,
+            self.telegram_holder_id,
+            self.telegram_lease_fence,
+        )
+        if any(value is not None for value in fields) and not all(
+            value is not None for value in fields
+        ):
+            raise ValueError("Telegram execution identity must be complete")
+        return self
 
 
 class ModelExecutionSettlementResult(BaseModel):

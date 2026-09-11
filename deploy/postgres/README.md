@@ -2,8 +2,9 @@
 
 ## R1 V1.3 realm role stamp (not yet deployed)
 
-The additive R1 schema uses four distinct PostgreSQL LOGINs per private security
-realm: routine/archive, policy notary, sensitive workflow, and one-off finality.
+The additive R1 schema uses five distinct PostgreSQL LOGINs per security realm:
+routine/archive, policy notary, sensitive workflow, one-off finality, and an
+execute-only approved-public-projection reader.
 Render the reviewed execute-only grants without passwords or other secrets:
 
 ```powershell
@@ -13,12 +14,13 @@ Render the reviewed execute-only grants without passwords or other secrets:
   --policy-login lucy_utopia_policy `
   --workflow-login lucy_utopia_sensitive_workflow `
   --finality-login lucy_utopia_finality `
+  --public-login lucy_utopia_public `
   --output secrets\generated\production_realm_roles_v1.3.sql
 ```
 
 The renderer requires every LOGIN to use the selected realm namespace and refuses
 duplicates, unsafe identifiers, unresolved markers, missing output directories, and
-overwrites. The rendered SQL verifies that all four LOGINs already exist without
+overwrites. The rendered SQL verifies that all five LOGINs already exist without
 elevated attributes or inherited memberships, removes all prior schema privileges,
 and grants only the exact R1 security-definer functions for that role. In particular,
 the routine identity receives the capture-receipt-enforcing archive function, never
@@ -161,8 +163,9 @@ commissioning command:
 python -m deploy.postgres.bootstrap_realm_cloud_v1_3
 ```
 
-The temporary migration-only job requires the private `lucy_migration` URL, four
-password-bearing realm runtime URLs (`ROUTINE`, `POLICY`, `WORKFLOW`, and `FINALITY`),
+The temporary migration-only job requires the private `lucy_migration` URL, five
+password-bearing realm runtime URLs (`ROUTINE`, `POLICY`, `WORKFLOW`, `FINALITY`,
+and `PUBLIC`),
 the reviewed security stamp and foundation seed with their canonical digests, and:
 
 ```text
@@ -178,14 +181,15 @@ It accepts only migration source revisions `0021_recovery_capture_safety`,
 `0043_r1_provider_cost_admission`, `0044_r1_cost_outcome_recovery`, or
 `0045_r1_authority_recovery`, `0046_r1_cost_journal`, or
 `0047_r1_authority_replay`, `0048_r1_cost_replay`, or
-`0050_r1_recovery_ack_receiver`. Before any
+`0050_r1_recovery_ack_receiver`, `0051_stage1_private_telegram`, or
+`0052_r1_public_answer_gate`. Before any
 schema or role mutation it takes the
 maintenance and admission locks, verifies TLS and the database-owned capture
-boundary, and closes runtime admission. It then creates or rotates the four ordinary
-realm LOGINs plus four isolated recovery LOGINs, migrates to `0050`, applies both
+boundary, and closes runtime admission. It then creates or rotates the five ordinary
+realm LOGINs plus four isolated recovery LOGINs, migrates to `0052`, applies both
 reviewed execute-only grant stamps, and
-transactionally provisions the foundation and immutable bindings at `0050`. Its final
-content-free verification reconnects through all eight LOGINs and proves that
+transactionally provisions the foundation and immutable bindings at `0052`. Its final
+content-free verification reconnects through all nine LOGINs and proves that
 the database remains quarantined. Exact replay is supported. The operation never
 opens admission and never enables transcript capture.
 

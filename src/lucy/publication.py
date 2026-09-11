@@ -252,3 +252,22 @@ class PublicProjectionReader:
             version=result["version"],
             snapshot_digest=result["snapshot_digest"],
         )
+
+    def answer_admitted(
+        self, *, hostname: str, question: str, storage_epoch: UUID
+    ) -> PublicAnswer:
+        """Read only through the epoch- and quarantine-gated public function."""
+
+        with self._sessions() as session:
+            result = session.execute(
+                text("SELECT lucy.public_projection_answer_v2(:hostname,:question,:epoch)"),
+                {"hostname": hostname, "question": question, "epoch": storage_epoch},
+            ).scalar_one()
+        if result is None:
+            raise ScopeNotFound("public answer is unavailable")
+        return PublicAnswer(
+            answer=result["answer"],
+            source=result["source"],
+            version=result["version"],
+            snapshot_digest=result["snapshot_digest"],
+        )

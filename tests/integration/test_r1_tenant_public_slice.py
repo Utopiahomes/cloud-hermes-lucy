@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from deploy.postgres.render_security_v1_3_sql import render_realm_roles
 from lucy.db import create_session_factory
 from lucy.db.models import (
     PublicProjectionCandidateRow,
@@ -21,6 +22,7 @@ from lucy.publication import (
     PublicProjectionPublisher,
     PublicProjectionReader,
 )
+from lucy.readiness import ReadinessError, admitted_session_factory
 from lucy.tenancy import ScopeNotFound, TenancyService
 
 DATABASE_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -165,6 +167,106 @@ def test_synthetic_utopia_public_slice_is_scoped_immutable_and_withdrawable() ->
     # The transaction above is intentionally expected to fail.
     with pytest.raises(PublicationRejected, match="authority transition service"):
         publisher.withdraw(channel_binding_id=utopia.channel_binding_id, actor_id=actor)
+
+
+def test_realm_public_login_requires_ready_exact_epoch_and_its_own_channel() -> None:
+    assert DATABASE_URL and OWNER_DATABASE_URL
+    owner_url = make_url(OWNER_DATABASE_URL)
+    public_url = owner_url.set(
+        username="lucy_utopia_public", password="synthetic-utopia-public-only"
+    ).render_as_string(hide_password=False)
+    sessions = create_session_factory(DATABASE_URL)
+    tenancy = TenancyService(sessions)
+    publisher = PublicProjectionPublisher(sessions)
+    actor = tenancy.create_principal(
+        issuer="https://synthetic-idp.invalid",
+        subject="public-gate-owner",
+        kind="human",
+        display_name="Public Gate Owner",
+    )
+    utopia = _foundation(tenancy, "utopia", "utopiahomes.test")
+    tenancy.grant_workspace_membership(
+        principal_id=actor, workspace_id=utopia.workspace_id, role="owner"
+    )
+    candidate, digest = publisher.stage(
+        channel_binding_id=utopia.channel_binding_id,
+        actor_id=actor,
+        entries=[
+            {
+                "question": "What is Utopia?",
+                "answer": "Approved public answer.",
+                "source": "synthetic://utopia/public-gate",
+            }
+        ],
+    )
+    publisher.approve(candidate_id=candidate, expected_digest=digest, actor_id=actor)
+    publisher.publish(candidate_id=candidate, actor_id=actor)
+
+    epoch = uuid4()
+    owner = create_engine(OWNER_DATABASE_URL)
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                render_realm_roles(
+                    realm_slug="utopia",
+                    routine_login="lucy_utopia_routine",
+                    policy_login="lucy_utopia_policy",
+                    workflow_login="lucy_utopia_sensitive_workflow",
+                    finality_login="lucy_utopia_finality",
+                    public_login="lucy_utopia_public",
+                )
+            )
+        )
+        connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
+        connection.execute(
+            text("UPDATE lucy.runtime_admission SET state='quarantined',storage_epoch=:epoch"),
+            {"epoch": epoch},
+        )
+
+    quarantined = PublicProjectionReader(
+        admitted_session_factory(public_url, epoch, journal_required=False)
+    )
+    with pytest.raises(ReadinessError, match="quarantined"):
+        quarantined.answer_admitted(
+            hostname="utopiahomes.test",
+            question="What is Utopia?",
+            storage_epoch=epoch,
+        )
+
+    with owner.begin() as connection:
+        connection.execute(text("UPDATE lucy.runtime_admission SET state='ready'"))
+    wrong_epoch = uuid4()
+    wrong = PublicProjectionReader(
+        admitted_session_factory(public_url, wrong_epoch, journal_required=False)
+    )
+    with pytest.raises(ReadinessError, match="epoch"):
+        wrong.answer_admitted(
+            hostname="utopiahomes.test",
+            question="What is Utopia?",
+            storage_epoch=wrong_epoch,
+        )
+
+    answer = quarantined.answer_admitted(
+        hostname="utopiahomes.test",
+        question=" What is  Utopia? ",
+        storage_epoch=epoch,
+    )
+    assert answer.answer == "Approved public answer."
+    assert answer.snapshot_digest == digest
+    with pytest.raises(ScopeNotFound, match="unavailable"):
+        quarantined.answer_admitted(
+            hostname="foreign.test",
+            question="What is Utopia?",
+            storage_epoch=epoch,
+        )
+    public_engine = create_engine(public_url)
+    with (
+        pytest.raises(DBAPIError, match="permission denied"),
+        public_engine.connect() as connection,
+    ):
+        connection.execute(text("SELECT * FROM lucy.public_projection_versions"))
+    public_engine.dispose()
+    owner.dispose()
 
 
 def test_database_enforces_one_wallet_per_node_and_immutable_tenure() -> None:

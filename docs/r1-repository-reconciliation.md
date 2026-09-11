@@ -2,7 +2,7 @@
 
 Status: R1-0 through R1-5 technical acceptance is complete for the commissioned Utopia
 realm. Customer-facing activation remains a separate fail-closed change.
-The Utopia realm database is commissioned at migration `0050`; its four ordinary
+The Utopia production realm database is commissioned at migration `0050`; its four ordinary
 private services remain suspended and pinned to commit
 `9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
 archive, retrieval, and deletion path passed exact-replay and negative-permission
@@ -26,14 +26,18 @@ cost reservation are independently durable in both DynamoDB streams and acknowle
 in PostgreSQL. Their protected replay and final handoff passed against an isolated
 pre-event point-in-time restore on 2026-09-11. The restore was returned to quarantine,
 its one-use activation login was destroyed, and the database was deleted. Live capture
-remains disabled.
+remains disabled. The reviewed local activation line now reaches
+`0053_r1_telegram_authority`, including the unactivated Stage 1 Telegram gateway,
+budget ledger, and journal-acknowledged channel authority boundary. Migrations
+`0051` through `0053` have not been applied to production.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
-- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; additive R1 local
-  and quarantined Utopia production head: `0050_r1_recovery_ack_receiver`.
+- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; quarantined Utopia
+  production head: `0050_r1_recovery_ack_receiver`; local activation head:
+  `0053_r1_telegram_authority`.
   Paid R1-3 commissioning remains disabled.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
@@ -61,6 +65,45 @@ archive, deletion, recovery, or deployment templates.
 | Local PostgreSQL | digest-pinned pgvector/PostgreSQL 16 in `compose.test.yaml` | R1 migrations proven here |
 | Render PostgreSQL | PostgreSQL 18 in the reviewed Blueprint | Version/extensions and price must be verified before provisioning |
 | Tenant/public directory | None before R1 | Added by migration `0022_r1_tenant_public` |
+
+## Utopia public-first activation checkpoint
+
+Ray authorized the local, version-controlled public-first boundary on 2026-09-11.
+This authorization covers implementation and disposable verification only; it does
+not authorize a production migration, Render provisioning, snapshot publication,
+website activation, DNS changes, or opening database admission.
+
+- The website owns the browser-facing same-origin `/api/lucy` boundary and pins the
+  approved V0 snapshot digest
+  `6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e`.
+- The exact canonical eight-answer Cloud payload is retained at
+  `deploy/render/utopia-public-projection.v0.json`; it is a non-executing review
+  artifact and has not been staged or published.
+- `lucy.public_runtime` starts a separate ASGI surface with only `/health` and
+  `POST /v1/public/answer`. It requires capture off, the reviewed Hermes commit,
+  V1.3 readiness, the exact `lucy_utopia_public` database identity, storage epoch,
+  origin, hostname, bearer credential, bounded body, and opaque rate limits.
+- Migration `0052_r1_public_answer_gate` exposes only one security-definer answer
+  function to that login. The function rechecks the login-derived realm, active
+  public channel, lifecycle, runtime admission, and exact storage epoch. It has no
+  private-memory fallback and callers have no direct projection-table access.
+- The activation manifest now represents `public_only` explicitly: no customer
+  identity provider, no private hostname, paid inference off, and capture off.
+- The Render blueprint change is a reviewed example only. All production services
+  remain suspended and the production database remains at `0050` in quarantine.
+- Local verification at the `0052` workspace state: mypy passed for all 78 Lucy
+  source files; the affected Ruff slice and 82 focused security/unit checks passed;
+  and 6 focused PostgreSQL tests passed after a clean 0001-to-0052
+  migration on the disposable loopback PostgreSQL 16 stack. The website proxy's
+  matching authenticated hostname header passed TypeScript, focused ESLint, and
+  8 focused Vitest checks plus a 27-route production build. The repository-wide
+  suites are not claimed at this moving checkpoint because the concurrent Stage 1
+  task is still changing the profile and exact Render service inventory.
+
+Next protected action: after the concurrent Stage 1 work is reconciled and the local
+verification ledger is complete, prepare a digest-pinned public snapshot provisioning
+artifact for review. Do not execute it against production without a new explicit
+authorization.
 
 ## R1-1 change record
 
@@ -158,7 +201,7 @@ durability claim.
 | Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
 | Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
 | An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
-| Realm role renderer requires four distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the routine role receives the staged capture protocol but cannot call the legacy direct registration function | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`; rendered SQL applied to disposable PostgreSQL 16 | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
+| Realm role renderer requires five distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the public role receives only the admitted projection reader, while the routine role receives the staged capture protocol but cannot call the legacy direct registration function | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`; rendered SQL applied to disposable PostgreSQL 16 | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
 | A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
 | Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
 | The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
@@ -482,9 +525,10 @@ rewrite the supporting tables. This is the local R1 path; live Telegram capture 
 still disabled.
 
 `render_security_v1_3_sql.py` and `production_realm_roles_v1.3.sql.example`
-provide the first production parameterized stamp. They bind four distinct LOGINs to
+provide the first production parameterized stamp. They bind five distinct LOGINs to
 one explicit realm namespace and remove all table/function authority before granting
-the exact routine/archive, policy, workflow, and finality entry points. The rendered
+the exact routine/archive, policy, workflow, finality, and public-projection entry
+points. The rendered
 stamp was applied to the disposable PostgreSQL environment and its effective grants
 were queried. It does not create realm directory rows, AWS identities, Render
 services, or an activation decision.

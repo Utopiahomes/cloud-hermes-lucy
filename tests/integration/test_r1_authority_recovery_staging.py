@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -95,6 +96,133 @@ def _published_foundation():
     publisher.approve(candidate_id=candidate, expected_digest=digest, actor_id=owner)
     publisher.publish(candidate_id=candidate, actor_id=publisher_actor)
     return foundation, owner, owner_membership, publisher_actor, publisher_membership, publisher
+
+
+def _inactive_private_channel():
+    assert APP_URL is not None and OWNER_URL is not None
+    sessions = create_session_factory(APP_URL)
+    tenancy = TenancyService(sessions)
+    foundation = tenancy.create_node_foundation(
+        account_slug="telegram-utopia",
+        account_name="Telegram Utopia",
+        node_slug=f"telegram-utopia-{uuid4()}",
+        node_name="Telegram Utopia",
+        node_kind="organization",
+        realm_slug=f"telegram-utopia-realm-{uuid4()}",
+        workspace_slug="private-lucy",
+        hostname=f"private-{uuid4()}.invalid",
+        workspace_kind="private_lucy",
+        channel_kind="internal",
+    )
+    owner = tenancy.create_principal(
+        issuer="synthetic", subject=f"telegram-owner-{uuid4()}", kind="human",
+        display_name="Telegram Owner",
+    )
+    tenancy.grant_workspace_membership(
+        principal_id=owner, workspace_id=foundation.workspace_id, role="owner"
+    )
+    binding_digest = "9" * 64
+    with create_engine(OWNER_URL).begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE lucy.channel_bindings SET active=false,generation=generation+1 "
+                "WHERE id=:channel"
+            ),
+            {"channel": foundation.channel_binding_id},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO lucy.telegram_channel_bindings_v1("
+                "channel_binding_id,bot_id,owner_user_id,binding_digest,created_at) "
+                "VALUES (:channel,900000001,900000002,:digest,:created_at)"
+            ),
+            {
+                "channel": foundation.channel_binding_id,
+                "digest": binding_digest,
+                "created_at": datetime.now(UTC),
+            },
+        )
+    return foundation, owner, binding_digest
+
+
+def test_channel_activation_waits_for_exact_durable_ack_and_withdrawal_is_immediate() -> None:
+    assert TRANSITION_URL is not None and RECOVERY_URL is not None and OWNER_URL is not None
+    foundation, owner, binding_digest = _inactive_private_channel()
+    transition = AuthorityTransitionService(create_session_factory(TRANSITION_URL))
+    recovery = AuthorityTransitionService(create_session_factory(RECOVERY_URL))
+    binding = _request(
+        foundation.channel_binding_id, owner, key="authority:telegram:activate-1"
+    ).model_copy(update={"source_authority_digest": binding_digest})
+
+    staged = transition.activate_channel(binding)
+    assert staged.state == "PERSISTENCE_PENDING"
+    with create_engine(OWNER_URL).connect() as connection:
+        assert not connection.scalar(
+            text("SELECT active FROM lucy.channel_bindings WHERE id=:channel"),
+            {"channel": foundation.channel_binding_id},
+        )
+    with pytest.raises(DBAPIError, match="acknowledgement unavailable"):
+        recovery.acknowledge(
+            event_id=staged.event_id,
+            journal_sequence=1,
+            journal_event_digest="b" * 64,
+            journal_head_digest="b" * 64,
+        )
+    prepared = transition.prepare(
+        event_id=staged.event_id,
+        journal_sequence=1,
+        journal_previous_digest="0" * 64,
+        journal_event_digest="b" * 64,
+    )
+    assert prepared.journal_sequence == 1
+    acknowledged = recovery.acknowledge(
+        event_id=staged.event_id,
+        journal_sequence=1,
+        journal_event_digest="b" * 64,
+        journal_head_digest="b" * 64,
+    )
+    assert acknowledged.state == "DURABLY_RECORDED"
+    assert recovery.acknowledge(
+        event_id=staged.event_id,
+        journal_sequence=1,
+        journal_event_digest="b" * 64,
+        journal_head_digest="b" * 64,
+    ).replayed
+    with create_engine(OWNER_URL).connect() as connection:
+        assert connection.scalar(
+            text("SELECT active FROM lucy.channel_bindings WHERE id=:channel"),
+            {"channel": foundation.channel_binding_id},
+        )
+
+    withdrawal_request = binding.model_copy(
+        update={"idempotency_key": "authority:telegram:withdraw-1"}
+    )
+    withdrawn = transition.withdraw_channel(withdrawal_request)
+    assert withdrawn.state == "PERSISTENCE_PENDING"
+    with create_engine(OWNER_URL).connect() as connection:
+        assert not connection.scalar(
+            text("SELECT active FROM lucy.channel_bindings WHERE id=:channel"),
+            {"channel": foundation.channel_binding_id},
+        )
+
+
+def test_ordinary_and_recovery_roles_cannot_activate_or_stage_channels() -> None:
+    assert APP_URL is not None and RECOVERY_URL is not None
+    foundation, owner, binding_digest = _inactive_private_channel()
+    request = _request(
+        foundation.channel_binding_id, owner, key="authority:telegram:denied"
+    ).model_copy(update={"source_authority_digest": binding_digest})
+    with create_engine(APP_URL).begin() as connection, pytest.raises(
+        DBAPIError, match="authority transition"
+    ):
+        connection.execute(
+            text("UPDATE lucy.channel_bindings SET active=true WHERE id=:channel"),
+            {"channel": foundation.channel_binding_id},
+        )
+    with pytest.raises(DBAPIError, match="permission denied"):
+        AuthorityTransitionService(create_session_factory(APP_URL)).activate_channel(request)
+    with pytest.raises(DBAPIError, match="permission denied"):
+        AuthorityTransitionService(create_session_factory(RECOVERY_URL)).activate_channel(request)
 
 
 def test_restrictions_apply_locally_before_separate_durable_acknowledgement() -> None:

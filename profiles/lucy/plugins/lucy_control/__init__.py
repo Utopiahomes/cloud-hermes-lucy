@@ -598,7 +598,7 @@ def _memory_lookup(
         return _tool_failure("invalid_companion_response")
     if turn is not None and turn.get("capture_enabled") is True:
         try:
-            sources = set()
+            sources: set[str] = set()
             for claim in claims:
                 ids = claim["source_evidence_ids"]
                 if not isinstance(ids, list) or not ids:
@@ -878,7 +878,13 @@ def _request_middleware(request: dict[str, Any], **_: Any) -> dict[str, Any]:
     }
 
 
-def _settle(action_id: str, response: Any, *, succeeded: bool) -> None:
+def _settle(
+    action_id: str,
+    response: Any,
+    *,
+    succeeded: bool,
+    telegram_identity: dict[str, Any] | None = None,
+) -> None:
     usage = _usage_payload(response)
     provider_cost = usage["provider_cost_microusd"]
     actual = (
@@ -893,6 +899,7 @@ def _settle(action_id: str, response: Any, *, succeeded: bool) -> None:
             "actual_microusd": actual,
             "succeeded": succeeded,
             "usage": usage,
+            **(telegram_identity or {}),
         },
     )
 
@@ -910,12 +917,34 @@ def _execution_middleware(
     base_url: str = "",
     **_: Any,
 ) -> Any:
-    if platform == "telegram" and (session_id, turn_id) not in _TURN_ARCHIVE_READY:
+    stage1 = os.getenv("LUCY_TELEGRAM_STAGE") == "1"
+    if platform == "telegram" and not stage1 and (
+        session_id,
+        turn_id,
+    ) not in _TURN_ARCHIVE_READY:
         return _blocked_response(
             model,
             "Lucy did not process this message because its retention state could "
             "not be established safely.",
         )
+    telegram_identity: dict[str, Any] | None = None
+    if platform == "telegram" and stage1:
+        try:
+            from sitecustomize import next_model_operation  # type: ignore[import-not-found]
+
+            event_id, model_step = next_model_operation()
+            session_id = f"telegram-event:{event_id}"
+            api_request_id = f"model-step:{model_step}"
+            telegram_identity = {
+                "telegram_event_id": event_id,
+                "telegram_model_step": model_step,
+                "telegram_holder_id": os.environ["LUCY_TELEGRAM_GATEWAY_HOLDER_ID"],
+                "telegram_lease_fence": int(
+                    os.environ["LUCY_TELEGRAM_GATEWAY_FENCE"]
+                ),
+            }
+        except Exception:
+            return _blocked_response(model)
     route_invalid = (
         model != MODEL
         or provider != "custom"
@@ -935,6 +964,7 @@ def _execution_middleware(
                 "reservation_microusd": RESERVATION_MICROUSD,
                 "session_id": session_id,
                 "api_request_id": api_request_id,
+                **(telegram_identity or {}),
             },
         )
     except Exception:
@@ -948,12 +978,22 @@ def _execution_middleware(
         response = next_call(request)
     except Exception:
         with suppress(Exception):
-            _settle(action_id, SimpleNamespace(usage=None), succeeded=False)
+            _settle(
+                action_id,
+                SimpleNamespace(usage=None),
+                succeeded=False,
+                telegram_identity=telegram_identity,
+            )
         raise
     # If settlement fails, the executing reservation remains durable. Rejoining
     # will mark the outcome ambiguous and conservatively charge it in full.
     with suppress(Exception):
-        _settle(action_id, response, succeeded=True)
+        _settle(
+            action_id,
+            response,
+            succeeded=True,
+            telegram_identity=telegram_identity,
+        )
     return response
 
 
@@ -967,6 +1007,13 @@ def register(ctx: Any) -> None:
         description=MEMORY_LOOKUP_SCHEMA["description"],
         emoji="🔎",
     )
+    if os.getenv("LUCY_TELEGRAM_STAGE") == "1":
+        # Stage 1 is deliberately read-only: no transcript capture, raw evidence
+        # retrieval, memory proposal, or session-end persistence hook is exposed.
+        ctx.register_middleware("llm_request", _request_middleware)
+        ctx.register_middleware("llm_execution", _execution_middleware)
+        ctx.register_middleware("tool_execution", _tool_execution_middleware)
+        return
     ctx.register_tool(
         name="lucy_memory_propose",
         toolset="lucy_memory",

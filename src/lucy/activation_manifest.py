@@ -24,7 +24,7 @@ class ArtifactPins(StrictModel):
     rollback_commit: str
     image_digest: str
     base_image_digest: str
-    schema_revision: Literal["0050_r1_recovery_ack_receiver"]
+    schema_revision: Literal["0053_r1_telegram_authority"]
     aws_realm_template_sha256: str
     aws_recovery_template_sha256: str
 
@@ -55,7 +55,7 @@ class CustomerIdentity(StrictModel):
 
 class IngressBoundary(StrictModel):
     public_hostnames: tuple[str, ...] = Field(min_length=1, max_length=10)
-    private_hostnames: tuple[str, ...] = Field(min_length=1, max_length=10)
+    private_hostnames: tuple[str, ...] = Field(max_length=10)
     allowed_origins: tuple[HttpUrl, ...] = Field(min_length=1, max_length=10)
     trust_forwarded_host: Literal[False]
     max_request_bytes: int = Field(ge=1024, le=1_048_576)
@@ -123,9 +123,10 @@ class UtopiaActivationManifestV1(StrictModel):
     contract: Literal["lucy.utopia.r1.activation-manifest.v1"]
     environment: Literal["production"]
     realm_slug: Literal["utopia"]
+    activation_scope: Literal["public_only", "public_and_private"] = "public_and_private"
     activation_decision_id: str = Field(min_length=1, max_length=256)
     artifacts: ArtifactPins
-    customer_identity: CustomerIdentity
+    customer_identity: CustomerIdentity | None
     ingress: IngressBoundary
     paid_inference_enabled: bool
     paid_inference: PaidInferenceLimits | None
@@ -140,4 +141,11 @@ class UtopiaActivationManifestV1(StrictModel):
     def validate_paid_inference(self) -> UtopiaActivationManifestV1:
         if self.paid_inference_enabled != (self.paid_inference is not None):
             raise ValueError("paid inference configuration must exactly match its enable flag")
+        if self.activation_scope == "public_only":
+            if self.customer_identity is not None or self.ingress.private_hostnames:
+                raise ValueError("public-only activation cannot expose private identity or ingress")
+            if self.paid_inference_enabled:
+                raise ValueError("public-only activation must keep paid inference disabled")
+        elif self.customer_identity is None or not self.ingress.private_hostnames:
+            raise ValueError("private activation requires customer identity and private ingress")
         return self

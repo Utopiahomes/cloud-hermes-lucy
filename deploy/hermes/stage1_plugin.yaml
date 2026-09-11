@@ -1,0 +1,7 @@
+name: lucy_control
+version: 2.1.0
+description: Read-only Lucy memory lookup with fail-closed model budget enforcement.
+author: Lucy
+kind: standalone
+provides_tools:
+  - lucy_memory_lookup

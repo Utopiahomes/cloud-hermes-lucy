@@ -21,8 +21,9 @@ def render_realm_roles(
     policy_login: str,
     workflow_login: str,
     finality_login: str,
+    public_login: str,
 ) -> str:
-    """Render four distinct realm-bound LOGIN grants without accepting secrets."""
+    """Render five distinct realm-bound LOGIN grants without accepting secrets."""
 
     if _SLUG.fullmatch(realm_slug) is None:
         raise ValueError(f"invalid realm slug: {realm_slug!r}")
@@ -31,6 +32,7 @@ def render_realm_roles(
         "__LUCY_REALM_POLICY_LOGIN__": policy_login,
         "__LUCY_REALM_WORKFLOW_LOGIN__": workflow_login,
         "__LUCY_REALM_FINALITY_LOGIN__": finality_login,
+        "__LUCY_REALM_PUBLIC_LOGIN__": public_login,
     }
     if len(set(logins.values())) != len(logins):
         raise ValueError("realm service LOGIN identifiers must be distinct")
@@ -74,7 +76,7 @@ def _write(output: Path, content: str, *, overwrite: bool) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--realm-slug", required=True)
-    for name in ("routine", "policy", "workflow", "finality"):
+    for name in ("routine", "policy", "workflow", "finality", "public"):
         parser.add_argument(f"--{name}-login", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--overwrite", action="store_true")
@@ -89,6 +91,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy_login=args.policy_login,
         workflow_login=args.workflow_login,
         finality_login=args.finality_login,
+        public_login=args.public_login,
     )
     _write(args.output, content, overwrite=args.overwrite)
     return 0
