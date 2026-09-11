@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import io
 import os
 import stat
 import sys
@@ -307,7 +308,7 @@ def test_gateway_image_is_exactly_pinned_and_has_no_persistent_volume_contract()
         encoding="utf-8"
     )
     assert 'parts[2] == "tmpfs"' in launcher
-    assert "stdout=subprocess.DEVNULL" in launcher
+    assert "stdout=subprocess.PIPE" in launcher
     assert "stderr=subprocess.DEVNULL" in launcher
     for event in (
         "configuration_validated",
@@ -322,6 +323,25 @@ def test_gateway_image_is_exactly_pinned_and_has_no_persistent_volume_contract()
     assert '"lucy_plugin",' in launcher
     assert 'f"{label}_failed"' in launcher
     assert 'f"{label}_passed"' in launcher
+
+
+def test_launcher_forwards_only_allowlisted_content_free_retention_events(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    launcher = _load_launcher()
+    stream = io.BytesIO(
+        b'{"component":"lucy-retention","code":"archive_request_failed",'
+        b'"role":"assistant","error_type":"TimeoutError"}\n'
+        b'{"component":"lucy-retention","code":"unexpected","content":"secret"}\n'
+        b'{"component":"other","code":"archive_request_failed","content":"secret"}\n'
+        b'ordinary child output containing private conversation text\n'
+    )
+    launcher._forward_content_free_child_events(stream)
+    output = capsys.readouterr().out
+    assert "archive_request_failed" in output
+    assert "TimeoutError" in output
+    assert "secret" not in output
+    assert "private conversation" not in output
 
 
 def test_stage2_gateway_uses_same_pin_with_capture_only_plugin_contract() -> None:

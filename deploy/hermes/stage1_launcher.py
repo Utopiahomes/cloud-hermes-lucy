@@ -18,10 +18,45 @@ from uuid import uuid4
 LEASE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
 _PRIVATE_HOSTPORT = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?:[0-9]{2,5}\Z")
+_RETENTION_CODES = {
+    "archive_request_failed",
+    "archive_request_completed",
+    "archive_request_rejected",
+    "assistant_delivery_blocked",
+    "post_hook_skipped_blocked_delivery",
+}
+_SAFE_ERROR_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,80}\Z")
 
 
 def _event(code: str) -> None:
     print(json.dumps({"component": "lucy-telegram-stage1", "code": code}), flush=True)
+
+
+def _forward_content_free_child_events(stream: Any) -> None:
+    """Drain child stdout while forwarding only an explicit safe event schema."""
+
+    for raw_line in stream:
+        try:
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            payload = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+            continue
+        if (
+            not isinstance(payload, dict)
+            or payload.get("component") != "lucy-retention"
+            or payload.get("code") not in _RETENTION_CODES
+        ):
+            continue
+        safe: dict[str, str] = {
+            "component": "lucy-retention",
+            "code": payload["code"],
+        }
+        if payload.get("role") in {"user", "assistant"}:
+            safe["role"] = payload["role"]
+        error_type = payload.get("error_type")
+        if isinstance(error_type, str) and _SAFE_ERROR_TYPE.fullmatch(error_type):
+            safe["error_type"] = error_type
+        print(json.dumps(safe, sort_keys=True, separators=(",", ":")), flush=True)
 
 
 def _required(name: str) -> str:
@@ -188,9 +223,17 @@ def main() -> int:
             env=child_env,
             cwd=scratch,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+        assert child.stdout is not None
+        child_output = threading.Thread(
+            target=_forward_content_free_child_events,
+            args=(child.stdout,),
+            name="stage2-safe-child-events",
+            daemon=True,
+        )
+        child_output.start()
 
         def terminate(_signum: int, _frame: object) -> None:
             stop.set()

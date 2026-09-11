@@ -25,6 +25,8 @@ MAX_OUTPUT_TOKENS = 1_024
 MAX_PROMPT_USD_PER_MILLION = 0.10
 MAX_COMPLETION_USD_PER_MILLION = 0.50
 MAX_LINEAGE_SOURCES = 32
+PRIVATE_API_TIMEOUT_SECONDS = 20
+ARCHIVE_COMMIT_TIMEOUT_SECONDS = 180
 OFF_RECORD_NOTICE = (
     "🔒 Off the record — Lucy is not archiving this exchange. Telegram, Hermes, "
     "and the configured model provider still process it under their own policies."
@@ -171,10 +173,15 @@ def _request_json(
         method=method,
         headers=headers,
     )
-    # Archive/KMS and policy operations may commit durably before a transient
-    # private-network response delay. Keep the deadline bounded, but long enough
-    # to reconcile an AWS-backed operation without creating a false failure.
-    with urlopen(request, timeout=20) as response:  # noqa: S310 - configured private URL
+    # A fresh envelope commit can cross PostgreSQL, KMS, and DynamoDB. Production
+    # evidence has exceeded 90 seconds while still completing successfully, so
+    # its deadline must differ from ordinary private control requests.
+    timeout = (
+        ARCHIVE_COMMIT_TIMEOUT_SECONDS
+        if path == "/internal/v1/conversations/messages"
+        else PRIVATE_API_TIMEOUT_SECONDS
+    )
+    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - private URL
         result: dict[str, Any] = json.load(response)
         return result
 

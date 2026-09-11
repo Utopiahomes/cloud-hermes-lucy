@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -135,6 +136,28 @@ def _request() -> dict[str, Any]:
             }
         },
     }
+
+
+def test_archive_commit_uses_longer_bounded_private_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_COMPANION_URL", "http://lucy.invalid")
+    monkeypatch.setenv("LUCY_ADAPTER_TOKEN", "synthetic-token")
+    deadlines: list[int] = []
+
+    def open_request(_request: Any, *, timeout: int) -> io.BytesIO:
+        deadlines.append(timeout)
+        return io.BytesIO(b'{"ok":true}')
+
+    monkeypatch.setattr(plugin, "urlopen", open_request)
+    plugin._request_json("/internal/v1/conversations/messages", method="POST", payload={})
+    plugin._request_json("/internal/v1/conversations/accept-turn", method="POST", payload={})
+    assert deadlines == [
+        plugin.ARCHIVE_COMMIT_TIMEOUT_SECONDS,
+        plugin.PRIVATE_API_TIMEOUT_SECONDS,
+    ]
+    assert deadlines == [180, 20]
 
 
 def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPatch) -> None:
