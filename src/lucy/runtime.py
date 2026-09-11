@@ -49,6 +49,25 @@ def _retryable_connection_failure(error: OperationalError) -> bool:
     )
 
 
+def _database_failure_category(error: SQLAlchemyError) -> str:
+    original = getattr(error, "orig", None)
+    sqlstate = getattr(original, "sqlstate", None)
+    if isinstance(sqlstate, str) and sqlstate.startswith("08"):
+        return "connection"
+    if isinstance(sqlstate, str) and sqlstate.startswith("28"):
+        return "authentication"
+    message = str(original).casefold()
+    if "resolve host" in message or "translate host name" in message:
+        return "dns"
+    if "password authentication failed" in message or "no password supplied" in message:
+        return "authentication"
+    if "ssl" in message or "certificate" in message:
+        return "tls"
+    if any(term in message for term in ("timed out", "timeout", "connection refused")):
+        return "connection"
+    return "database"
+
+
 def _check_with_connection_retries(readiness: ServiceReadiness) -> None:
     """Keep the listener closed while Render's private DNS/network becomes ready."""
 
@@ -97,15 +116,7 @@ def main() -> None:
     except (ReadinessError, DeletionJournalError) as exc:
         raise SystemExit(f"Lucy startup gate failed: {exc}") from exc
     except SQLAlchemyError as exc:
-        original = getattr(exc, "orig", None)
-        sqlstate = getattr(original, "sqlstate", None)
-        category = (
-            "connection"
-            if isinstance(sqlstate, str) and sqlstate.startswith("08")
-            else "authentication"
-            if isinstance(sqlstate, str) and sqlstate.startswith("28")
-            else "database"
-        )
+        category = _database_failure_category(exc)
         print(f"Lucy startup storage failure category: {category}", flush=True)
         raise SystemExit(
             "Lucy startup gate failed: storage or permission check unavailable"

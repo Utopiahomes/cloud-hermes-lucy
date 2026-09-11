@@ -235,3 +235,21 @@ def test_startup_exhausts_bounded_connection_retries(
         runtime._check_with_connection_retries(SimpleNamespace(check=check))
     assert attempts == 6
     assert delays == [1, 2, 4, 8, 8]
+
+
+@pytest.mark.parametrize(
+    ("detail", "category"),
+    [
+        ("failed to resolve host 'private-host'", "dns"),
+        ("password authentication failed for user", "authentication"),
+        ("SSL certificate verify failed", "tls"),
+        ("connection refused", "connection"),
+        ("unexpected driver failure", "database"),
+    ],
+)
+def test_startup_database_failure_categories_are_content_free(
+    detail: str,
+    category: str,
+) -> None:
+    error = OperationalError("connect", {}, psycopg.OperationalError(detail))
+    assert runtime._database_failure_category(error) == category
