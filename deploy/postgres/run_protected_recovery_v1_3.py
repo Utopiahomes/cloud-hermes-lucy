@@ -223,7 +223,6 @@ def _verify_database_identity(url: URL, expected_login: str) -> None:
                 "SELECT current_user,r.rolcanlogin,r.rolsuper,r.rolinherit,"
                 "r.rolcreaterole,r.rolcreatedb,r.rolreplication,r.rolbypassrls,"
                 "(SELECT version_num FROM public.alembic_version),"
-                "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
                 "lucy.capture_boundary_safe_v1(),"
                 "(SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()) "
                 "FROM pg_catalog.pg_roles r WHERE r.rolname=current_user"
@@ -239,7 +238,6 @@ def _verify_database_identity(url: URL, expected_login: str) -> None:
         False,
         False,
         R1_SCHEMA_REVISION,
-        "quarantined",
         True,
         True,
     ):

@@ -14,6 +14,7 @@ from deploy.postgres.run_protected_recovery_v1_3 import (
     ProtectedRecoveryError,
     _database_stage,
     _verify_actual_role,
+    _verify_database_identity,
     _verify_migration_identity,
 )
 from lucy.recovery_journal import RecoveryStreamKind
@@ -170,6 +171,22 @@ class _Session:
 
     def execute(self, _statement: object) -> _Result:
         return _Result(self._row)
+
+
+def test_recovery_identity_attests_execute_only_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    login = "lucy_utopia_authority_recovery"
+    row = (login, True, False, False, False, False, False, False,
+           "0050_r1_recovery_ack_receiver", True, True)
+    monkeypatch.setattr(
+        protected_recovery,
+        "create_session_factory",
+        lambda _url: lambda: _Session(row),
+    )
+
+    config = ProtectedRecoveryConfig.from_environment(_environment())
+    _verify_database_identity(config.authority_recovery_url, login)
 
 
 def _migration_row() -> tuple[object, ...]:
