@@ -39,10 +39,10 @@ def _serve() -> NoReturn:
     raise AssertionError("HTTP server returned")
 
 
-def _safe_programming_error(exc: ProgrammingError) -> dict[str, str]:
+def _safe_programming_error(exc: Exception) -> dict[str, str]:
     """Return structural PostgreSQL diagnostics without SQL or parameter values."""
 
-    original = exc.orig
+    original = getattr(exc, "orig", exc)
     state = str(getattr(original, "sqlstate", "unknown"))
     result = {"status": "failed", "error_type": "ProgrammingError", "sqlstate": state}
     diagnostic = getattr(original, "diag", None)
@@ -71,6 +71,9 @@ def main() -> None:
         print(json.dumps(_safe_programming_error(exc), sort_keys=True), flush=True)
         raise SystemExit(1) from exc
     except Exception as exc:
+        if type(exc).__name__ == "ProgrammingError":
+            print(json.dumps(_safe_programming_error(exc), sort_keys=True), flush=True)
+            raise SystemExit(1) from exc
         print(
             json.dumps({"status": "failed", "error_type": type(exc).__name__}, sort_keys=True),
             flush=True,

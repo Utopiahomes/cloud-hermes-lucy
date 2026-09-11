@@ -91,3 +91,38 @@ def test_service_reports_only_structural_programming_error(
         "sqlstate": "42501",
         "status": "failed",
     }
+
+
+def test_service_handles_driver_programming_error_without_query(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Diagnostic:
+        message_primary = "permission denied for table exact_head"
+        schema_name = "lucy"
+        table_name = "exact_head"
+        column_name = None
+        constraint_name = None
+        function_name = None
+
+    DriverProgrammingError = type(
+        "ProgrammingError",
+        (Exception,),
+        {"sqlstate": "42501", "diag": Diagnostic()},
+    )
+    failure = DriverProgrammingError("hidden statement and parameters")
+    monkeypatch.setattr(service.ProtectedRecoveryConfig, "from_environment", lambda: object())
+    monkeypatch.setattr(service, "run", lambda _config: (_ for _ in ()).throw(failure))
+
+    with pytest.raises(SystemExit):
+        service.main()
+
+    output = capsys.readouterr().out
+    assert "hidden statement" not in output
+    assert json.loads(output) == {
+        "error_type": "ProgrammingError",
+        "message_primary": "permission denied for table exact_head",
+        "schema_name": "lucy",
+        "sqlstate": "42501",
+        "status": "failed",
+        "table_name": "exact_head",
+    }
