@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -20,6 +20,7 @@ import boto3  # type: ignore[import-untyped]
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ProgrammingError
 
 from lucy.authority_recovery import PostgresAuthorityReplayStore
 from lucy.cost_recovery import PostgresCostReplayStore
@@ -319,14 +320,34 @@ def _verify_migration_identity(url: URL) -> None:
         raise ProtectedRecoveryError("activation identity or boundary differs")
 
 
+def _database_stage[T](stage: str, operation: Callable[[], T]) -> T:
+    """Label a database boundary without exposing SQL or parameter values."""
+
+    try:
+        return operation()
+    except ProgrammingError as exc:
+        raise ProtectedRecoveryError(f"{stage} failed at database boundary") from exc
+
+
 def run(config: ProtectedRecoveryConfig) -> dict[str, Any]:
     sts: Any = boto3.client("sts", region_name=config.region)
     _verify_actual_role(config, sts.get_caller_identity())
-    _verify_migration_identity(config.migration_url)
-    _verify_database_identity(
-        config.authority_recovery_url, str(config.authority_recovery_url.username)
+    _database_stage(
+        "activation identity attestation",
+        lambda: _verify_migration_identity(config.migration_url),
     )
-    _verify_database_identity(config.cost_recovery_url, str(config.cost_recovery_url.username))
+    _database_stage(
+        "authority identity attestation",
+        lambda: _verify_database_identity(
+            config.authority_recovery_url, str(config.authority_recovery_url.username)
+        ),
+    )
+    _database_stage(
+        "cost identity attestation",
+        lambda: _verify_database_identity(
+            config.cost_recovery_url, str(config.cost_recovery_url.username)
+        ),
+    )
 
     dynamo: Any = boto3.client("dynamodb", region_name=config.region)
     authority_journal = AwsDynamoRecoveryJournal.from_configuration(
@@ -366,8 +387,11 @@ def run(config: ProtectedRecoveryConfig) -> dict[str, Any]:
         cost_finalizer=cost_store,
         binding_manifest_digest=config.binding_manifest_digest,
     )
-    handoff = coordinator.recover_and_activate(
-        target_runtime_epoch=config.target_runtime_epoch
+    handoff = _database_stage(
+        "coordinated replay",
+        lambda: coordinator.recover_and_activate(
+            target_runtime_epoch=config.target_runtime_epoch
+        ),
     )
     return {
         "contract": "lucy.protected-recovery-handoff.v1.3",

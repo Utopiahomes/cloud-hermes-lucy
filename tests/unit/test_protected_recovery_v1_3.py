@@ -5,12 +5,14 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 
 import deploy.postgres.run_protected_recovery_v1_3 as protected_recovery
 from deploy.postgres.run_protected_recovery_v1_3 import (
     AUTHORIZATION,
     ProtectedRecoveryConfig,
     ProtectedRecoveryError,
+    _database_stage,
     _verify_actual_role,
     _verify_migration_identity,
 )
@@ -260,3 +262,17 @@ def test_config_rejects_elevated_migration_login() -> None:
 
     with pytest.raises(ProtectedRecoveryError, match="exact temporary login"):
         ProtectedRecoveryConfig.from_environment(environment)
+
+
+def test_database_stage_hides_statement_and_parameters() -> None:
+    failure = ProgrammingError(
+        "SELECT :secret", {"secret": "must-not-appear"}, RuntimeError("hidden")
+    )
+
+    with pytest.raises(
+        ProtectedRecoveryError, match="coordinated replay failed at database boundary"
+    ) as raised:
+        _database_stage("coordinated replay", lambda: (_ for _ in ()).throw(failure))
+
+    assert "must-not-appear" not in str(raised.value)
+    assert "SELECT" not in str(raised.value)
