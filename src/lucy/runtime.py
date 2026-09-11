@@ -39,6 +39,9 @@ def _listener_port() -> int:
 
 
 def _retryable_connection_failure(error: OperationalError) -> bool:
+    category = _database_failure_category(error)
+    if category in {"authentication", "tls"}:
+        return False
     original = error.orig
     sqlstate = getattr(original, "sqlstate", None)
     if isinstance(sqlstate, str):

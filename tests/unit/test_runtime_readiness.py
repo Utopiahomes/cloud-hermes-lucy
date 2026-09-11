@@ -219,6 +219,25 @@ def test_startup_does_not_retry_invalid_credentials(
     assert delays == []
 
 
+def test_startup_does_not_retry_unclassified_driver_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[int] = []
+    error = OperationalError(
+        "connect",
+        {},
+        psycopg.OperationalError("password authentication failed for user"),
+    )
+
+    def check() -> None:
+        raise error
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert delays == []
+
+
 def test_startup_exhausts_bounded_connection_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
