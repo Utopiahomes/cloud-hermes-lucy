@@ -67,6 +67,20 @@ def _require_tmpfs(path: Path) -> None:
     path.mkdir(mode=0o700, parents=True)
 
 
+def _prepare_managed_home(path: Path) -> None:
+    """Create only the ephemeral directories required by pinned managed Hermes."""
+
+    # copytree preserves the immutable image profile's read-only root mode.
+    # Restore writability only on this per-start tmpfs copy.
+    if os.name != "nt":
+        path.chmod(0o700)
+    for relative in ("cron", "sessions", "logs", "memories"):
+        directory = path / relative
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name != "nt":
+            directory.chmod(0o700)
+
+
 def _preflight(environment: dict[str, str], scratch: Path) -> None:
     for label, command in (
         ("hermes_config", ["/opt/hermes/.venv/bin/hermes", "config", "check"]),
@@ -117,6 +131,7 @@ def main() -> int:
 
     try:
         shutil.copytree("/opt/lucy-profile", scratch, dirs_exist_ok=True)
+        _prepare_managed_home(scratch)
         _event("profile_staged")
         child_env = dict(os.environ)
         child_env.update(

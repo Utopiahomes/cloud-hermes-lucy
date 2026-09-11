@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
+import stat
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +21,32 @@ from lucy.telegram_stage1 import (
 )
 
 ROOT = Path(__file__).parents[2]
+
+
+def _load_launcher() -> ModuleType:
+    path = ROOT / "deploy" / "hermes" / "stage1_launcher.py"
+    spec = importlib.util.spec_from_file_location("test_stage1_launcher", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_managed_home_prepares_only_ephemeral_hermes_runtime_directories(
+    tmp_path: Path,
+) -> None:
+    launcher = _load_launcher()
+    launcher._prepare_managed_home(tmp_path)
+    assert {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")} == {
+        "cron",
+        "logs",
+        "memories",
+        "sessions",
+    }
+    if os.name != "nt":
+        assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
+        for name in ("cron", "sessions", "logs", "memories"):
+            assert stat.S_IMODE((tmp_path / name).stat().st_mode) == 0o700
 
 
 def test_stage1_binding_requires_four_exact_environment_values(
