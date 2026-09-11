@@ -144,7 +144,7 @@ def _post(url: str, token: str) -> dict[str, Any]:
     return value
 
 
-def _provision_and_stage(config: Configuration) -> UUID:
+def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
     now = datetime.now(UTC)
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         connection.execute("SET LOCAL lock_timeout='10s'")
@@ -264,38 +264,40 @@ def _provision_and_stage(config: Configuration) -> UUID:
         if result is None or not isinstance(result[0], dict):
             raise BootstrapError("Telegram activation staging returned no event")
         event_id = UUID(str(result[0]["event_id"]))
-    return event_id
+        already_durable = result[0].get("state") == "DURABLY_RECORDED"
+    return event_id, already_durable
 
 
 def commission(config: Configuration) -> dict[str, Any]:
-    event_id = _provision_and_stage(config)
-    writer: dict[str, Any] | None
-    try:
-        writer = _post(
-            f"{config.authority_writer_url}/v1/recovery/events/{event_id}",
-            config.authority_writer_token,
+    event_id, already_durable = _provision_and_stage(config)
+    if not already_durable:
+        writer: dict[str, Any] | None
+        try:
+            writer = _post(
+                f"{config.authority_writer_url}/v1/recovery/events/{event_id}",
+                config.authority_writer_token,
+            )
+        except HTTPError as exc:
+            if exc.code != 503:
+                raise
+            # A crash after the independent append but before acknowledgement can
+            # make a strict conditional re-append fail. Continue only to the
+            # independent receiver; it proves the exact journal event exists.
+            writer = None
+        if writer is not None and (
+            str(writer.get("event_id")) != str(event_id)
+            or writer.get("stream_kind") != "authority"
+        ):
+            raise BootstrapError("authority journal receipt differs")
+        acknowledgement = _post(
+            f"{config.authority_ack_url}/v1/recovery/authority/acknowledgements/{event_id}",
+            config.authority_ack_token,
         )
-    except HTTPError as exc:
-        if exc.code != 503:
-            raise
-        # A crash after the independent append but before acknowledgement can
-        # make a strict conditional re-append fail. Continue only to the
-        # independent receiver; it proves the exact journal event exists.
-        writer = None
-    if writer is not None and (
-        str(writer.get("event_id")) != str(event_id)
-        or writer.get("stream_kind") != "authority"
-    ):
-        raise BootstrapError("authority journal receipt differs")
-    acknowledgement = _post(
-        f"{config.authority_ack_url}/v1/recovery/authority/acknowledgements/{event_id}",
-        config.authority_ack_token,
-    )
-    if (
-        str(acknowledgement.get("event_id")) != str(event_id)
-        or acknowledgement.get("state") != "DURABLY_RECORDED"
-    ):
-        raise BootstrapError("authority acknowledgement differs")
+        if (
+            str(acknowledgement.get("event_id")) != str(event_id)
+            or acknowledgement.get("state") != "DURABLY_RECORDED"
+        ):
+            raise BootstrapError("authority acknowledgement differs")
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         verified = connection.execute(
             "SELECT c.active,c.generation,o.acknowledged_at IS NOT NULL,"
