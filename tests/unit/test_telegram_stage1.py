@@ -174,3 +174,12 @@ def test_gateway_image_is_exactly_pinned_and_has_no_persistent_volume_contract()
     assert 'parts[2] == "tmpfs"' in launcher
     assert "stdout=subprocess.DEVNULL" in launcher
     assert "stderr=subprocess.DEVNULL" in launcher
+    for event in (
+        "configuration_validated",
+        "ram_boundary_validated",
+        "profile_staged",
+        "preflight_passed",
+        "lease_acquired",
+        "gateway_started",
+    ):
+        assert f'_event("{event}")' in launcher

@@ -96,9 +96,11 @@ def main() -> int:
     home = _required("TELEGRAM_HOME_CHANNEL")
     if not owner.isdecimal() or owner != home:
         raise RuntimeError("owner_binding_invalid")
+    _event("configuration_validated")
 
     scratch = Path(f"/dev/shm/lucy-hermes-{uuid4().hex}")
     _require_tmpfs(scratch)
+    _event("ram_boundary_validated")
     holder_id = str(uuid4())
     stop = threading.Event()
     heartbeat_failed = threading.Event()
@@ -108,6 +110,7 @@ def main() -> int:
 
     try:
         shutil.copytree("/opt/lucy-profile", scratch, dirs_exist_ok=True)
+        _event("profile_staged")
         child_env = dict(os.environ)
         child_env.update(
             {
@@ -123,6 +126,7 @@ def main() -> int:
         )
         child_env["LUCY_COMPANION_URL"] = _companion_url()
         _preflight(child_env, scratch)
+        _event("preflight_passed")
         lease = _post(
             "/internal/v1/telegram-stage1/lease/acquire",
             {"holder_id": holder_id, "lease_seconds": LEASE_SECONDS},
@@ -130,6 +134,7 @@ def main() -> int:
         if lease.get("acquired") is not True or int(lease.get("fence", 0)) < 1:
             raise RuntimeError("gateway_lease_denied")
         lease_acquired = True
+        _event("lease_acquired")
         child_env["LUCY_TELEGRAM_GATEWAY_FENCE"] = str(lease["fence"])
 
         def heartbeat() -> None:
