@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import UTC, datetime, timedelta
@@ -27,6 +28,15 @@ from lucy.recovery_journal import (
 
 _TABLE_NAME = re.compile(r"[A-Za-z0-9_.-]{3,255}\Z")
 _GENESIS = "0" * 64
+_LOGGER = logging.getLogger(__name__)
+
+
+def _aws_failure_code(error: BotoCoreError | ClientError) -> str:
+    if isinstance(error, ClientError):
+        value = error.response.get("Error", {}).get("Code")
+        if isinstance(value, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,127}", value):
+            return value
+    return type(error).__name__
 
 
 class DynamoRecoveryClient(Protocol):
@@ -241,7 +251,10 @@ class AwsDynamoRecoveryJournal:
                 ClientRequestToken=str(event.event_id),
             )
             return ack
-        except (BotoCoreError, ClientError):
+        except (BotoCoreError, ClientError) as exc:
+            _LOGGER.warning(
+                "recovery journal append AWS failure code=%s", _aws_failure_code(exc)
+            )
             replay = self._read_ack(event.event_id)
             if replay is not None:
                 return self._validate_replay(replay, event)

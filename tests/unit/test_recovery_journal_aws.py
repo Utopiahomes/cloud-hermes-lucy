@@ -235,12 +235,16 @@ def test_event_metadata_substitution_is_rejected() -> None:
         journal.event(1)
 
 
-def test_stale_head_and_active_pause_fail_closed() -> None:
+def test_stale_head_and_active_pause_fail_closed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     bound, client, journal = _journal()
     before = journal.head()
     journal.append(_event(bound, before), before)
     with pytest.raises(RecoveryJournalError, match="unconfirmed"):
         journal.append(_event(bound, before), before)
+    assert "code=TransactionCanceledException" in caplog.text
+    assert "conditional" not in caplog.text
 
     current = journal.head()
     pause_id = uuid4()
