@@ -1,0 +1,13 @@
+FROM python:3.12.11-slim@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN groupadd --system --gid 10001 lucy \
+    && useradd --system --uid 10001 --gid lucy --home-dir /nonexistent lucy
+
+WORKDIR /app
+COPY deploy/render/recovery_cron_runner.py ./deploy/render/recovery_cron_runner.py
+
+USER 10001:10001
+ENTRYPOINT ["python", "/app/deploy/render/recovery_cron_runner.py"]
