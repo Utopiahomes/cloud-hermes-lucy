@@ -523,7 +523,13 @@ def test_archive_does_not_retry_definitive_http_error(
     def request(_path: str, **_kwargs: Any) -> dict[str, Any]:
         nonlocal calls
         calls += 1
-        raise HTTPError("http://lucy-routine", 409, "Conflict", {}, None)
+        raise HTTPError(
+            "http://lucy-routine",
+            409,
+            "Conflict",
+            {},
+            io.BytesIO(b'{"detail":"realm archive boundary unavailable"}'),
+        )
 
     monkeypatch.setattr(plugin, "_request_json", request)
     result = plugin._archive_conversation_message(
@@ -540,6 +546,7 @@ def test_archive_does_not_retry_definitive_http_error(
     assert '"code":"archive_http_error"' in output
     assert '"http_status":409' in output
     assert '"attempt":1' in output
+    assert '"reason":"archive_boundary_unavailable"' in output
     assert "Synthetic definitive failure" not in output
 
 
@@ -596,6 +603,37 @@ def test_blocked_delivery_notice_is_not_archived_as_the_assistant_reply(
         platform="telegram",
     )
     assert calls == ["Synthetic substantive response."]
+
+
+def test_failed_inbound_retention_does_not_attempt_outbound_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def archive(**kwargs: Any) -> dict[str, Any] | None:
+        calls.append(kwargs["role"])
+        return None
+
+    monkeypatch.setattr(plugin, "_archive_conversation_message", archive)
+    plugin._SESSION_TURN["session-1"] = {
+        "turn_id": "turn-1",
+        "capture_enabled": True,
+        "active": False,
+        "proposal_keys": {},
+        "source_evidence_ids": set(),
+        "current_input_evidence_id": None,
+    }
+
+    transformed = plugin._transform_llm_output(
+        response_text="Lucy blocked this model call because retention was unavailable.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert transformed is None
+    assert calls == []
 
 
 def test_off_record_is_visible_and_skips_archive(

@@ -27,6 +27,14 @@ _RETENTION_CODES = {
     "post_hook_skipped_blocked_delivery",
 }
 _SAFE_ERROR_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,80}\Z")
+_SAFE_RETENTION_REASONS = {
+    "storage_not_admitted",
+    "archive_boundary_unavailable",
+    "telegram_unavailable",
+    "service_mode_invalid",
+    "memory_store_unavailable",
+    "unclassified",
+}
 
 
 def _event(code: str) -> None:
@@ -63,6 +71,9 @@ def _forward_content_free_child_events(stream: Any) -> None:
         attempt = payload.get("attempt")
         if attempt in {1, 2}:
             safe["attempt"] = attempt
+        reason = payload.get("reason")
+        if reason in _SAFE_RETENTION_REASONS:
+            safe["reason"] = reason
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")), flush=True)
 
 

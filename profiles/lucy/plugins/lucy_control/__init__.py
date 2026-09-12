@@ -38,6 +38,13 @@ _SESSION_TURN: dict[str, dict[str, Any]] = {}
 # Carry only trusted lifecycle/middleware metadata, isolated per execution.
 _TURN_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar("lucy_turn", default=None)
 _TOOL_CONTEXT: ContextVar[tuple[str, str] | None] = ContextVar("lucy_tool", default=None)
+_SAFE_HTTP_DETAILS = {
+    "Lucy storage is not admitted": "storage_not_admitted",
+    "realm archive boundary unavailable": "archive_boundary_unavailable",
+    "Telegram Stage 1 is unavailable": "telegram_unavailable",
+    "invalid Lucy service mode": "service_mode_invalid",
+    "memory store unavailable": "memory_store_unavailable",
+}
 
 MEMORY_LOOKUP_SCHEMA = {
     "name": "lucy_memory_lookup",
@@ -203,6 +210,7 @@ def _request_json_retry_safe(
                 role=retention_role,
                 status=exc.code,
                 attempt=attempt + 1,
+                reason=_safe_http_reason(exc),
             )
             raise
         except (OSError, TimeoutError, json.JSONDecodeError, http.client.HTTPException):
@@ -219,6 +227,7 @@ def _retention_event(
     error: str | None = None,
     status: int | None = None,
     attempt: int | None = None,
+    reason: str | None = None,
 ) -> None:
     """Emit only content-free archive lifecycle metadata."""
 
@@ -231,7 +240,22 @@ def _retention_event(
         payload["http_status"] = status
     if attempt in {1, 2}:
         payload["attempt"] = attempt
+    if reason in {*_SAFE_HTTP_DETAILS.values(), "unclassified"}:
+        payload["reason"] = reason
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
+
+
+def _safe_http_reason(error: HTTPError) -> str:
+    """Classify an allowlisted API detail without ever forwarding its body."""
+
+    try:
+        payload = json.loads(error.read(2048))
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        detail = None
+    return _SAFE_HTTP_DETAILS.get(detail, "unclassified") if isinstance(
+        detail, str
+    ) else "unclassified"
 
 
 def _request_boundary_json(
@@ -617,6 +641,11 @@ def _transform_llm_output(
     turn = _SESSION_TURN.get(session_id)
     if turn is None or turn.get("turn_id") != turn_id:
         return "Lucy could not verify this reply's conversation turn; no reply was archived."
+    if turn.get("active") is not True:
+        # The execution middleware already produced a safe blocked response.
+        # Never turn a failed inbound capture receipt into a second outbound
+        # archive attempt without retained current-input provenance.
+        return None
     turn["active"] = False
     turn.get("proposal_keys", {}).clear()
     if not isinstance(response_text, str) or not response_text.strip():

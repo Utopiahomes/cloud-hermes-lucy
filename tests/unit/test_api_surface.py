@@ -104,7 +104,13 @@ def test_archive_service_selects_v13_realm_runtime_only_for_exact_backend(
     marker = object()
     monkeypatch.setenv("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb-v13")
     monkeypatch.setattr(api, "realm_conversation_archive_from_environment", lambda: marker)
-    assert api._archive_service() is marker
+    api._archive_service.cache_clear()
+    try:
+        assert api._archive_service() is marker
+        assert api._archive_service() is marker
+        assert api._archive_service.cache_info().misses == 1
+    finally:
+        api._archive_service.cache_clear()
 
 
 def test_memory_proposal_maps_missing_evidence_to_controlled_not_found(

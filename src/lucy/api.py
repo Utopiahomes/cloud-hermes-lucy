@@ -470,7 +470,10 @@ def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
         raise HTTPException(status_code=503, detail="archive encryption unavailable") from exc
 
 
+@lru_cache(maxsize=1)
 def _archive_service() -> ConversationArchiveService | RealmConversationArchiveService:
+    """Build immutable archive clients once so SDK credential refresh stays stateful."""
+
     if os.getenv("LUCY_ARCHIVE_BACKEND") == "aws-kms-dynamodb-v13":
         try:
             return realm_conversation_archive_from_environment()
