@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -29,13 +29,16 @@ DATABASE_URL = os.getenv("LUCY_TEST_DATABASE_URL")
 OWNER_DATABASE_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 PUBLIC_DATABASE_URL = os.getenv("LUCY_TEST_PUBLIC_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires PostgreSQL integration database")
+SYNTHETIC_PORTS = {54329, 54339}
 
 
 @pytest.fixture(autouse=True)
 def clean_r1_tables() -> None:
     assert OWNER_DATABASE_URL is not None
     parsed = make_url(OWNER_DATABASE_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
+    if (parsed.database, parsed.host) != ("lucy_test", "127.0.0.1") or (
+        parsed.port not in SYNTHETIC_PORTS
+    ):
         raise RuntimeError("refusing to clear a non-synthetic database")
     engine = create_engine(OWNER_DATABASE_URL)
     with engine.begin() as connection:
@@ -184,19 +187,55 @@ def test_realm_public_login_requires_ready_exact_epoch_and_its_own_channel() -> 
         kind="human",
         display_name="Public Gate Owner",
     )
-    utopia = _foundation(tenancy, "utopia", "utopiahomes.test")
+    utopia = _foundation(tenancy, "utopia", "www.utopiahomes.com")
     tenancy.grant_workspace_membership(
         principal_id=actor, workspace_id=utopia.workspace_id, role="owner"
     )
-    candidate, digest = publisher.stage(
+    now = datetime.now(UTC)
+    source = {
+        "id": "utopia-source",
+        "label": "Utopia Homes",
+        "href": "https://www.utopiahomes.com/about",
+    }
+    candidate, digest = publisher.stage_knowledge(
         channel_binding_id=utopia.channel_binding_id,
         actor_id=actor,
         entries=[
             {
-                "question": "What is Utopia?",
-                "answer": "Approved public answer.",
-                "source": "synthetic://utopia/public-gate",
-            }
+                "id": "utopia-current",
+                "service_line": "general",
+                "kind": "description",
+                "title": "Utopia Homes",
+                "approved_text": "Utopia Homes creates distinctive group stays.",
+                "topics": ["about"],
+                "route": "about",
+                "source": source,
+                "effective_from": (now - timedelta(days=1)).isoformat(),
+                "direct_answer": True,
+            },
+            {
+                "id": "utopia-expired",
+                "service_line": "general",
+                "kind": "fact",
+                "title": "Withdrawn detail",
+                "approved_text": "This withdrawn detail must not be returned.",
+                "topics": ["about"],
+                "route": "about",
+                "source": source,
+                "effective_from": (now - timedelta(days=2)).isoformat(),
+                "effective_until": (now - timedelta(days=1)).isoformat(),
+            },
+            {
+                "id": "utopia-future",
+                "service_line": "general",
+                "kind": "fact",
+                "title": "Future detail",
+                "approved_text": "This future detail must not be returned yet.",
+                "topics": ["about"],
+                "route": "about",
+                "source": source,
+                "effective_from": (now + timedelta(days=1)).isoformat(),
+            },
         ],
     )
     publisher.approve(candidate_id=candidate, expected_digest=digest, actor_id=actor)
@@ -227,9 +266,8 @@ def test_realm_public_login_requires_ready_exact_epoch_and_its_own_channel() -> 
         admitted_session_factory(public_url, epoch, journal_required=False)
     )
     with pytest.raises(ReadinessError, match="quarantined"):
-        quarantined.answer_admitted(
-            hostname="utopiahomes.test",
-            question="What is Utopia?",
+        quarantined.knowledge_admitted(
+            hostname="www.utopiahomes.com",
             storage_epoch=epoch,
         )
 
@@ -240,23 +278,20 @@ def test_realm_public_login_requires_ready_exact_epoch_and_its_own_channel() -> 
         admitted_session_factory(public_url, wrong_epoch, journal_required=False)
     )
     with pytest.raises(ReadinessError, match="epoch"):
-        wrong.answer_admitted(
-            hostname="utopiahomes.test",
-            question="What is Utopia?",
+        wrong.knowledge_admitted(
+            hostname="www.utopiahomes.com",
             storage_epoch=wrong_epoch,
         )
 
-    answer = quarantined.answer_admitted(
-        hostname="utopiahomes.test",
-        question=" What is  Utopia? ",
+    projection = quarantined.knowledge_admitted(
+        hostname="www.utopiahomes.com",
         storage_epoch=epoch,
     )
-    assert answer.answer == "Approved public answer."
-    assert answer.snapshot_digest == digest
+    assert [entry.id for entry in projection.entries] == ["utopia-current"]
+    assert projection.snapshot_digest == digest
     with pytest.raises(ScopeNotFound, match="unavailable"):
-        quarantined.answer_admitted(
+        quarantined.knowledge_admitted(
             hostname="foreign.test",
-            question="What is Utopia?",
             storage_epoch=epoch,
         )
     public_engine = create_engine(public_url)

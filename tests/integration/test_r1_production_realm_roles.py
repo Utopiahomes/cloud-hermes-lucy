@@ -18,6 +18,15 @@ ROOT = Path(__file__).parents[2]
 OWNER_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 ROUTINE_URL = os.getenv("LUCY_TEST_UTOPIA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not OWNER_URL, reason="requires PostgreSQL integration database")
+SYNTHETIC_PORTS = {54329, 54339}
+
+
+def _require_synthetic_database(url: str) -> None:
+    parsed = make_url(url)
+    if (parsed.database, parsed.host) != ("lucy_test", "127.0.0.1") or (
+        parsed.port not in SYNTHETIC_PORTS
+    ):
+        raise RuntimeError("refusing to alter a non-synthetic database")
 
 
 def _renderer() -> ModuleType:
@@ -31,9 +40,7 @@ def _renderer() -> ModuleType:
 
 def test_rendered_realm_stamp_applies_execute_only_permissions() -> None:
     assert OWNER_URL and ROUTINE_URL
-    parsed = make_url(OWNER_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
-        raise RuntimeError("refusing to alter grants outside the disposable test database")
+    _require_synthetic_database(OWNER_URL)
     sql = _renderer().render_realm_roles(
         realm_slug="utopia",
         routine_login="lucy_utopia_routine",
@@ -95,9 +102,8 @@ def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert OWNER_URL
+    _require_synthetic_database(OWNER_URL)
     parsed = make_url(OWNER_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
-        raise RuntimeError("refusing to alter admission outside the disposable test database")
     sql = _renderer().render_realm_roles(
         realm_slug="utopia",
         routine_login="lucy_utopia_routine",
@@ -116,6 +122,7 @@ def test_each_v13_http_boundary_passes_read_only_startup_with_its_exact_login(
         )
         connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
     monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "true")
     boundaries = (
         ("public", "lucy_utopia_public", "synthetic-utopia-public-only"),
         ("routine", "lucy_utopia_routine", "synthetic-utopia-only"),

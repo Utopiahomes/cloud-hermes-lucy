@@ -1,0 +1,124 @@
+# Public Lucy R1 implementation plan
+
+Status: local implementation in progress on `codex/public-conversation-r1`. Nothing in
+this plan authorizes production mutation, paid inference, a provider selection, or
+publication of a new knowledge snapshot.
+
+Integration note: concurrent private-memory work currently occupies uncommitted
+migrations `0055` and `0056` in the source checkout. This branch reserves Public Lucy as
+`0057`; its migration parent remains the branch-local `0054` only for isolated testing.
+After the private work is committed, rebase this branch and change the `0057` parent to
+the accepted `0056` revision before merge or deployment.
+
+## Finish line and exclusions
+
+R1 accepts ordinary public questions, retrieves only currently effective approved
+Utopia knowledge, returns a fully supported answer or an honest partial/fallback,
+understands an allowlisted page context, and supports a short conversation that exists
+only in browser memory. Customer identity, reservation access, historical-message
+ingestion, private knowledge, PMS access, and business actions remain later releases.
+
+The PMS adapter remains provider-neutral. No Lodgify or Guesty decision is encoded in
+this release.
+
+## Request path
+
+1. The website establishes its same-origin request and opaque public session.
+2. The Cloud public runtime authenticates bearer, origin, hostname, session, request
+   size, and rate limits before parsing or interpreting the question.
+3. The execute-only public database identity reads the active, digest-pinned public
+   projection through one security-definer function. The function rechecks tenant,
+   lifecycle, storage epoch, snapshot schema, and effective dates.
+4. Structured property/page context narrows retrieval. Bounded history may resolve a
+   conversational subject, but cannot provide evidence or expand authorization.
+5. Deterministic lexical retrieval selects approved records and measures requested-topic
+   coverage. R1's active safe composer returns only exact approved text. Valid source IDs
+   do not authorize paraphrases, altered numbers, negation, or policy exceptions.
+6. The browser receives only the answer, clarification, descriptive sources, and useful
+   links. Snapshot version, digest, evidence IDs, missing-topic diagnostics, and trace
+   data remain internal.
+
+## Implementation map
+
+| Boundary | Existing foundation | R1 extension |
+| --- | --- | --- |
+| Website session | Same-origin `/api/lucy`, opaque cookie, request limits | Six-turn/4,000-character history in React memory, 30-minute expiry, explicit Start over, page context |
+| Public HTTP | Exact bearer/origin/host/session checks | Strict R1 request/response contracts and full/partial/fallback results |
+| Knowledge | Immutable approved FAQ projection | Typed property knowledge, aliases/topics, source/links, effective and withdrawal dates |
+| Database | Tenant-bound projection route and epoch gate | `public_projection_knowledge_v1(text,uuid)` and execute-only realm grant |
+| Retrieval | Exact normalized FAQ match | Structured narrowing plus tested lexical retrieval for vocabulary changes, comparisons, and multiple requirements |
+| Grounding | Owner-approved immutable bytes | Extractive answer gate plus unsupported-number, wrong-property, negation, and exception tests |
+| Inference | Durable cost admission and separate provider coordinator | Remains disconnected until model/provider, retention behavior, and numeric caps are approved |
+| PMS | No public capability | Provider-neutral future boundary only; no PMS reads in R1 |
+
+## Coverage contract
+
+- `answered`: every requested recognized topic has approved supporting knowledge.
+- `partial`: at least one requested topic is supported and at least one is missing. Return
+  only the supported portion and name the missing detail plainly.
+- `fallback`: no approved support is available, or the question asks for live stay
+  pricing, live availability, or an individual reservation.
+
+Published explanations of Utopia Design estimates and general booking-process questions
+are not live-data requests and remain answerable.
+
+## Privacy and retention
+
+- Browser history is never written to local storage, session storage, a database, or an
+  analytics payload. It is cleared by refresh, Start over, or 30 minutes of inactivity.
+- The server receives at most six turns and 4,000 history characters.
+- Application responses are `no-store`; no request or answer body is logged by the code.
+- Analytics contains only fixed outcome events, never content, session IDs, IPs, or page
+  paths.
+- Production activation requires verification of host/platform request logs, error
+  reporting, tracing, and the selected inference provider's retention controls. Those
+  external controls are not proven by local tests.
+
+## Publication, activation, and rollback order
+
+1. Build and review a candidate `lucy-public-knowledge-v1` corpus.
+2. Stage and approve its exact digest without changing the active route.
+3. Install compatible Cloud and website readers with conversation disabled.
+4. Apply the additive database migration and exact realm-role grant under quarantine.
+5. Verify negative controls and the approved digest in the deployed environment.
+6. Atomically activate the new projection, then enable the conversational reader.
+
+A rollback digest is not eligible merely because it was once approved. The rollback
+candidate must be separately reviewed, remain within its effective dates, exclude
+withdrawn or sensitive facts, and be explicitly pinned in both Cloud and website
+configuration before its route is activated.
+
+## Acceptance conversations
+
+Automated tests cover:
+
+1. “Tell me about Buttercup.” then “How many cars fit?”
+2. “Which homes have swimming options, and how do they differ?”
+3. “We have 20 people, four cars, and want a pool at Buttercup.”
+4. “Is the Buttercup pool open in November?” when seasonality is absent.
+5. “How does your design estimate work?” without treating it as live stay pricing.
+
+They also cover wrong-property isolation, effective/expired/future knowledge, restricted
+topic distinctions, unsupported claims attached to valid citations, browser navigation
+continuity, strict source URLs, outage versus knowledge-miss behavior, and database
+tenant/quarantine/epoch enforcement.
+
+## Explicit release decisions
+
+The following remain owner release gates and do not block local contract/retrieval work:
+
+- final approved public corpus and digest;
+- final inference provider/model and verified provider retention settings;
+- rate, token, concurrency, timeout, and spend caps;
+- production migration, role reprovisioning, snapshot activation, and website enablement.
+
+## Verification ledger
+
+| Check | Result on 2026-09-12 | Invalidated by |
+| --- | --- | --- |
+| Ruff and strict mypy | Passed: all files; 81 typed source files | Source/dependency/config changes |
+| Unit and contract tests | Passed: 771; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Public retrieval acceptance | Passed: required conversations, partial coverage, topic distinctions, freshness, wrong-property isolation, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
+| PostgreSQL boundary | Passed: clean migration plus 6 focused live-SQL tests on isolated loopback/tmpfs databases | Migration, roles, publication, readiness, or database-image changes |
+| Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
+| Production activation | Not executed | Requires explicit production authorization and completed release gates |

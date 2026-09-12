@@ -24,11 +24,28 @@ def test_public_answer_migration_binds_identity_lifecycle_and_storage_epoch() ->
     assert "FROM PUBLIC,lucy_app,lucy_public_runtime" in migration
 
 
+def test_public_knowledge_migration_binds_identity_lifecycle_epoch_and_freshness() -> None:
+    migration = (
+        ROOT / "migrations" / "versions" / "0057_public_conversation_retrieval.py"
+    ).read_text(encoding="utf-8")
+    assert 'revision: str = "0057_public_conversation"' in migration
+    assert 'down_revision: str | None = "0054_stage2_scoped_turn_commit"' in migration
+    assert "session_user='lucy_' || replace(n.slug,'-','_') || '_public'" in migration
+    assert "a.state='ready'" in migration
+    assert "a.storage_epoch=p_storage_epoch" in migration
+    assert "l.state='ready'" in migration
+    assert "c.channel_kind='website_public'" in migration
+    assert "v.snapshot->>'schema'='lucy-public-knowledge-v1'" in migration
+    assert "effective_from" in migration
+    assert "effective_until" in migration
+    assert "FROM PUBLIC,lucy_app,lucy_public_runtime" in migration
+
+
 def test_reviewed_role_contract_grants_only_exact_public_function() -> None:
     roles = (
         ROOT / "deploy" / "postgres" / "production_realm_roles_v1.3.sql.example"
     ).read_text(encoding="utf-8")
-    assert "public_projection_answer_v2(text,text,uuid)" in roles
+    assert "public_projection_knowledge_v1(text,uuid)" in roles
     assert 'TO "__LUCY_REALM_PUBLIC_LOGIN__"' in roles
     assert 'GRANT SELECT ON lucy.public_projection_' not in roles
     assert 'GRANT INSERT ON lucy.' not in roles
