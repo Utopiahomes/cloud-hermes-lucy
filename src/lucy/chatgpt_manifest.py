@@ -142,7 +142,8 @@ def build_exact_pilot_manifests(
     for selected in selection.selected_conversations:
         parsed = _parse_conversation(raw_by_id[selected.conversation_id])
         records = tuple(
-            _manifest_record(message, fingerprint_key) for message in parsed.messages
+            manifest_record_for_local_message(message, fingerprint_key)
+            for message in parsed.messages
         )
         included = tuple(record for record in records if record.included)
         if not included:
@@ -210,7 +211,10 @@ def build_exact_archive_requests(
         if not record.included:
             continue
         message = local_by_id.get(record.source_record_id)
-        if message is None or _manifest_record(message, fingerprint_key) != record:
+        if (
+            message is None
+            or manifest_record_for_local_message(message, fingerprint_key) != record
+        ):
             raise ValueError("local message content differs from the exact pilot manifest")
         if message.content is None:
             raise ValueError("included local message content is unavailable")
@@ -300,7 +304,7 @@ def _parse_conversation(value: dict[str, Any]) -> LocalChatGPTConversationV1:
     )
 
 
-def _manifest_record(
+def manifest_record_for_local_message(
     message: LocalChatGPTMessageV1, fingerprint_key: bytes
 ) -> ImportManifestRecordV1:
     content = (message.content or "").encode("utf-8")
