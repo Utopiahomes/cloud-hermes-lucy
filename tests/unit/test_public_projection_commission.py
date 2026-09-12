@@ -115,3 +115,7 @@ def test_manifest_rejects_ambiguous_authority_and_source_is_append_only() -> Non
     assert "lucy_utopia_public" in source
     assert "DELETE FROM" not in source
     assert "DROP " not in source
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "deploy/postgres/commission_public_projection_v1.py" in dockerfile
+    assert "deploy/render/utopia-public-projection.v0.json" in dockerfile
