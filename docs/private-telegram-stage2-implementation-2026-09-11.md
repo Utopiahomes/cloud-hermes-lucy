@@ -1,7 +1,7 @@
 # Private Telegram Stage 2 implementation checkpoint
 
-Date: 2026-09-11. Status: **local implementation complete; production capture remains
-disabled and uncommissioned**.
+Date: 2026-09-11. Status: **production corrective release commissioned and gateway active;
+one live Telegram retention canary remains before final acceptance**.
 
 ## Deliverable and boundary
 
@@ -54,11 +54,17 @@ remaining in model history and influencing a later retained answer.
 | Same-chat concurrency serialization | Passed | Focused async test | Gateway overlay change |
 | Pinned Stage 2 Docker build | Passed | Docker Desktop; local manifest list `42c44f9f...` | Dockerfile/context/base-image change |
 | Hermes config and plugin doctor | Passed | Isolated tmpfs container, synthetic credentials, no Telegram/companion connection | Profile/plugin/base-image change |
+| Corrective release static/focused checks | Passed, 89 focused tests plus Ruff and strict mypy | Commit `3f18ed8d52763be61d90843891d963b3c9212dbe` | Relevant source/dependency change |
+| Exact corrective gateway and routine Docker builds | Passed | Local Docker, commit `3f18ed8d52763be61d90843891d963b3c9212dbe` | Dockerfile/context/base-image change |
+| Corrective Render deployment and private readiness | Passed | Routine deploy `dep-dai9qqlg1s2s738lnce0`; gateway deploy `dep-dai9s88ae00c73dq9a9g`; readiness job `job-dai9s75g1s2s738lshpg` | Render service/environment/deploy change |
+| Exact deployed hook, replay, and registration paths | Passed | Synthetic Render jobs on corrective gateway; pre/direct/transform/ambiguous/registration all true | Gateway image/profile/plugin/config change |
+| Concurrent archive admission | Passed, 24/24 | Render job `job-dai9t3h5efls73chf1rg` | Routine/gateway/archive/database/network change |
+| Single-gateway startup and lease | Passed | Corrective gateway resumed; configuration, profile, Hermes, Lucy plugin, RAM boundary, preflight, lease, and startup events present; old gateway suspended | Gateway service/environment/deploy/lease change |
 
 The `.pytest_cache` directory is not writable in the current workspace; pytest emitted a cache
 warning only. Test execution and results were unaffected.
 
-## Production finish line (not yet executed)
+## Production finish line
 
 1. Commit and push the reviewed Stage 2 implementation while Stage 1 remains live and capture
    remains false.
@@ -76,7 +82,16 @@ warning only. Test execution and results were unaffected.
    passes; rollback may return the application to Stage 1 but must not undo archive, deletion,
    revocation, or authority history.
 
-## Current blocker
+## Corrective incident and current blocker
 
-None for source implementation. Production commissioning and live encrypted capture have not
-been performed in this checkpoint.
+Initial live Stage 2 canaries failed closed because the companion returned HTTP 503 before the
+inbound retention receipt was admitted. Safe gateway telemetry established the status without
+logging message content. The corrective release caches the archive service boundary for the
+process lifetime, classifies only allowlisted content-free 503 causes, and prevents a failed
+inbound retention attempt from triggering a misleading outbound archive attempt. Lost-response
+replay remains exactly-once.
+
+The corrective release is deployed and the one approved gateway is active. The remaining
+blocker is one successful live owner Telegram round trip proving that the production bot path
+now durably retains and then delivers the substantive response. No acceptance claim is made
+until that canary passes.
