@@ -205,6 +205,32 @@ def test_published_design_estimate_explanation_is_not_blocked_as_live_stay_prici
     assert result.evidence_ids == ("design-estimate",)
 
 
+def test_owner_service_paraphrase_prefers_the_direct_management_record() -> None:
+    management = entry(
+        "owners-management",
+        "Utopia manages vacation rentals for Wildwood homeowners.",
+        ("owners",),
+        aliases=("property management", "manage my rental"),
+    )
+    result = PublicKnowledgeRetriever().retrieve(
+        question="Can Utopia manage my vacation rental?",
+        entries=ENTRIES + (management,),
+        observed_at=NOW,
+    )
+    assert result.outcome == "answered"
+    assert result.evidence_ids == ("owners-management",)
+
+
+def test_generic_brand_words_do_not_turn_an_unknown_amenity_into_an_answer() -> None:
+    result = PublicKnowledgeRetriever().retrieve(
+        question="Do the homes provide cribs?",
+        entries=ENTRIES,
+        observed_at=NOW,
+    )
+    assert result.outcome == "fallback"
+    assert result.evidence_ids == ()
+
+
 def test_live_stay_data_and_individual_reservations_are_distinguished_from_general_booking() -> (
     None
 ):

@@ -108,10 +108,16 @@ tenant/quarantine/epoch enforcement.
 
 The website repository now owns a 25-entry review candidate derived from its committed
 public content. Its canonical digest is
-`5bfe35150606ad39e91eb82a9f73eabb41e8a4333257a0a76192834c3088c668`.
+`95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422`.
 `deploy/render/validate_public_knowledge.py` validates an arbitrary candidate path and
 prints only its schema, entry count, and canonical digest; it does not connect to a database
 or stage content. Cloud and website validators independently reproduce this digest.
+
+`deploy/render/evaluate_public_knowledge.py` runs the evidence-exact suite in
+`deploy/render/public_knowledge_acceptance.v1.json`. Its ten cases include the five required
+conversations plus booking-process, pet-policy, owner-service, restricted-reservation, and
+unknown-amenity checks. A case fails when the outcome, evidence IDs, or missing-topic set
+differs; plausible text backed by the wrong record does not pass.
 
 The candidate deliberately excludes live rates/availability, reservations, provider names,
 email addresses, pending biographies, private knowledge, and inference-provider details.
@@ -131,8 +137,8 @@ The following remain owner release gates and do not block local contract/retriev
 | Check | Result on 2026-09-12 | Invalidated by |
 | --- | --- | --- |
 | Ruff and strict mypy | Passed: all files; 81 typed source files | Source/dependency/config changes |
-| Unit and contract tests | Passed: 773; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
-| Public retrieval acceptance | Passed: required conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
+| Unit and contract tests | Passed: 777; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Public retrieval acceptance | Passed: 10 evidence-exact conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
 | PostgreSQL boundary | Passed: clean migration plus 6 focused live-SQL tests on isolated loopback/tmpfs databases | Migration, roles, publication, readiness, or database-image changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
 | Production activation | Not executed | Requires explicit production authorization and completed release gates |
