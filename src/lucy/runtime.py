@@ -90,6 +90,29 @@ def _check_with_connection_retries(readiness: ServiceReadiness) -> None:
     readiness.check()
 
 
+def _initialize_stage2_archive_boundary(*, mode: str, baseline: str) -> None:
+    """Refuse the listener unless this process can build its Stage 2 archive boundary."""
+
+    stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    capture = os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED")
+    if baseline != "v1.3" or mode != "routine" or (stage != "2" and capture != "true"):
+        return
+    if stage != "2" or capture != "true":
+        raise SystemExit("Lucy startup gate failed: Stage 2 configuration mismatch")
+    try:
+        from lucy.api import _archive_service
+        from lucy.realm_archive_commit import RealmConversationArchiveService
+
+        service = _archive_service()
+        if not isinstance(service, RealmConversationArchiveService):
+            raise RuntimeError("unexpected archive service")
+    except Exception:
+        raise SystemExit(
+            "Lucy startup gate failed: Stage 2 archive boundary unavailable"
+        ) from None
+    print("Lucy startup Stage 2 archive boundary passed", flush=True)
+
+
 def main() -> None:
     database_url = os.environ["LUCY_DATABASE_URL"]
     observed = os.environ["LUCY_OBSERVED_HERMES_COMMIT"]
@@ -125,6 +148,7 @@ def main() -> None:
             "Lucy startup gate failed: storage or permission check unavailable"
         ) from None
     print("Lucy startup admission check passed")
+    _initialize_stage2_archive_boundary(mode=mode, baseline=baseline)
     # No lifecycle writes, pending-operation scans, KMS calls, registry scans,
     # migrations, or recovery occur when any HTTP service starts/restarts.
     # Import the application only after admission and pass the object directly.

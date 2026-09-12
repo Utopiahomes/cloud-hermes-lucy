@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+import lucy.api as api
 import lucy.runtime as runtime
 from lucy.readiness import (
     ReadinessError,
@@ -16,6 +17,43 @@ from lucy.readiness import (
     service_mode_from_environment,
 )
 from lucy.rejoining import RejoiningService
+
+
+def test_stage2_routine_initializes_archive_before_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true")
+    marker = object()
+    monkeypatch.setattr(api, "_archive_service", lambda: marker)
+    monkeypatch.setattr(
+        "lucy.realm_archive_commit.RealmConversationArchiveService", type(marker)
+    )
+
+    runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
+
+
+def test_stage2_routine_refuses_listener_when_archive_configuration_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true")
+    monkeypatch.setattr(api, "_archive_service", lambda: (_ for _ in ()).throw(ValueError()))
+
+    with pytest.raises(SystemExit, match="Stage 2 archive boundary unavailable"):
+        runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
+
+
+def test_stage1_does_not_initialize_stage2_archive_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "false")
+    monkeypatch.setattr(
+        api, "_archive_service", lambda: pytest.fail("Stage 1 must not initialize capture")
+    )
+
+    runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
 
 
 @pytest.mark.parametrize("mode", ["routine", "policy", "evidence", "deletion", "all-local"])
