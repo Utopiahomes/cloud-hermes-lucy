@@ -35,7 +35,10 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
    mismatched source-record/evidence pairing.
 5. Extraction may stage candidates but cannot approve or promote them. The policy identity
    approves exact candidate bytes, promotes accepted candidates, and owns audited protected
-   recall. Ordinary runtime identities cannot directly mutate claims or protected tables.
+   recall. Owner review is two-step: a non-authorizing proposal first shows every final exact
+   candidate/digest, then an owner authorization binds that proposal digest. Changing protection
+   or uncertainty creates the next candidate version rather than reusing an old approval.
+   Ordinary runtime identities cannot directly mutate claims or protected tables.
 6. Promotion locks the same evidence-derivation fence used by governed deletion, rechecks
    source activity/version, and refuses a source removed after review.
 7. Ordinary recall excludes protected material. Protected recall requires a current owner
@@ -51,10 +54,11 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
 | Synthetic memory-import integration | Passed, 5 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 792 tests | Full `tests/unit` run after candidate materialization, 2026-09-12 | Relevant Python or dependency change |
+| Python unit suite | Passed, 799 tests | Full `tests/unit` run after exact review contracts, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
-| Mypy strict | Passed, 87 source files | `mypy --strict src` after candidate materialization | Python source or type-config change |
+| Mypy strict | Passed, 88 source files | `mypy --strict src` after exact review contracts | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
+| Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Local ChatGPT inventory, review console, and exact-manifest builder | Passed, 16 tests | Safe paths, branches, keyed commitments, attachments, compression, sync-root, token, host/origin, stale-input, idempotency, exact-record/exclusion and changed-input checks | Parser, console, manifest, or limits change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
@@ -71,8 +75,8 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Add exact candidate review/approval to the local console. Keep the fingerprint key and raw
-   ZIP local.
+1. Connect the exact two-step candidate review/approval contracts to the local console. Keep the
+   fingerprint key and raw ZIP local. The contract layer is implemented; the UI/API wiring is not.
 2. Connect the new bounded extraction coordinator to the existing OpenRouter policy/cost bridge.
    The coordinator now enforces exact inputs, campaign reservations, secret quarantine, and
    admission/pre-dispatch/post-dispatch source checks; the adapter must return the exact provider
