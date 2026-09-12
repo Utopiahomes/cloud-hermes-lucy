@@ -67,8 +67,10 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 1. Add exact candidate review/approval to the local console. Keep the fingerprint key and raw
    ZIP local.
-2. Add bounded model extraction through the existing OpenRouter policy/budget bridge, while
-   keeping deterministic parsing and pre-dispatch deletion/expiry checks outside the model.
+2. Connect the new bounded extraction coordinator to the existing OpenRouter policy/cost bridge.
+   The coordinator now enforces exact inputs, campaign reservations, secret quarantine, and
+   admission/pre-dispatch/post-dispatch source checks; the adapter must return the exact provider
+   policy, model route, and billed cost before a real call can be enabled.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
