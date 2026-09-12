@@ -34,6 +34,7 @@ def _manifest() -> PublicProjectionCommissionManifestV1:
         security_realm_id=uuid4(),
         realm_binding_id=uuid4(),
         storage_epoch=uuid4(),
+        expected_runtime_admission="ready",
         workspace_id=uuid4(),
         workspace_slug="utopia-public-website",
         channel_binding_id=uuid4(),
@@ -111,7 +112,7 @@ def test_manifest_rejects_ambiguous_authority_and_source_is_append_only() -> Non
     source = (
         ROOT / "deploy/postgres/commission_public_projection_v1.py"
     ).read_text(encoding="utf-8")
-    assert "runtime_admission" in source and '"quarantined"' in source
+    assert "expected_runtime_admission" in source
     assert "lucy_utopia_public" in source
     assert "DELETE FROM" not in source
     assert "DROP " not in source

@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -49,6 +49,7 @@ class PublicProjectionCommissionManifestV1(BaseModel):
     security_realm_id: UUID
     realm_binding_id: UUID
     storage_epoch: UUID
+    expected_runtime_admission: Literal["quarantined", "ready"]
     workspace_id: UUID
     workspace_slug: str
     channel_binding_id: UUID
@@ -266,7 +267,7 @@ def _verify_boundary(
     if row != (
         "lucy_migration",
         manifest.schema_revision,
-        "quarantined",
+        manifest.expected_runtime_admission,
         manifest.storage_epoch,
         "ready",
         True,
@@ -481,7 +482,7 @@ def run(config: PublicProjectionCommissionConfig) -> dict[str, object]:
         "faq_count": 8,
         "version": 1,
         "publisher_approver_separated": True,
-        "runtime_admission": "quarantined",
+        "runtime_admission": config.manifest.expected_runtime_admission,
         "replayed": replayed,
     }
 
