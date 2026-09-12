@@ -17,7 +17,7 @@ def valid_manifest() -> dict[str, object]:
             "rollback_commit": "b" * 40,
             "image_digest": "c" * 64,
             "base_image_digest": "d" * 64,
-            "schema_revision": "0053_r1_telegram_authority",
+            "schema_revision": "0054_stage2_scoped_turn_commit",
             "aws_realm_template_sha256": "e" * 64,
             "aws_recovery_template_sha256": "f" * 64,
         },
@@ -94,6 +94,13 @@ def test_unsafe_or_moving_activation_inputs_fail(
     for key in path[:-1]:
         target = target[key]  # type: ignore[assignment]
     target[path[-1]] = value
+    with pytest.raises(ValidationError):
+        UtopiaActivationManifestV1.model_validate(candidate)
+
+
+def test_activation_manifest_rejects_superseded_schema_revision() -> None:
+    candidate = valid_manifest()
+    candidate["artifacts"]["schema_revision"] = "0053_r1_telegram_authority"  # type: ignore[index]
     with pytest.raises(ValidationError):
         UtopiaActivationManifestV1.model_validate(candidate)
 

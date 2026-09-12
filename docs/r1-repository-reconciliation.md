@@ -1,45 +1,23 @@
 # R1 repository reconciliation
 
 Status: R1-0 through R1-5 technical acceptance is complete for the commissioned Utopia
-realm. Customer-facing activation remains a separate fail-closed change.
-The Utopia production realm database is commissioned at migration `0050`; its four ordinary
-private services remain suspended and pinned to commit
-`9fb64891fa1703ba5ac526940d8a415e9e468a34`. A deployed synthetic
-archive, retrieval, and deletion path passed exact-replay and negative-permission
-checks. The metadata-only finality observer found no exceptional copies and correctly
-recorded `EXTENDED` while the fixed 30-day recovery window remains open. Admission is
-quarantined, all four continuous services are suspended, and live transcript capture
-remains disabled. R1-3 spending controls now pass local contract, coordinator,
-clean-migration, PostgreSQL concurrency/retry/rollover, and service-boundary checks.
-R1-5 commissioned acceptance passed on 2026-09-11. R1-4 durable authority recovery
-now has its content-free journal/head/handoff contracts, DynamoDB conditional provider,
-and independently acknowledged cost-outcome lifecycle. Authority restriction staging and
-crash-safe authority and cost journal preparation now pass clean local PostgreSQL execution.
-Restrictive authority and cost events now replay exactly once into a quarantined
-restore at migration `0050`. Cost recovery now fences old executable attempts and
-retains a 90-second paid-admission cooldown; reopening general admission remains a
-separate protected handoff. The AWS journal boundary defines separate protected
-authority and cost tables, three exact Render OIDC roles, and a create-only operator
-genesis initializer. Those AWS resources and the three private recovery workloads are
-deployed and identity-attested. One synthetic authority restriction and one one-micro-USD
-cost reservation are independently durable in both DynamoDB streams and acknowledged
-in PostgreSQL. Their protected replay and final handoff passed against an isolated
-pre-event point-in-time restore on 2026-09-11. The restore was returned to quarantine,
-its one-use activation login was destroyed, and the database was deleted. Live capture
-remains disabled. Production now reaches `0053_r1_telegram_authority`. Stage 1 private
-Telegram is active at exact application commit
-`3563a9b2a1d847e043594a78948675130c760017`; the owner-only gateway, budget ledger,
-journal-acknowledged channel authority, restart/deduplication, and capture-off boundary
-passed commissioning. Stage 2 transcript capture remains disabled and unauthorized.
+realm. Private Telegram Stage 2 production acceptance passed on 2026-09-12 at schema
+`0054_stage2_scoped_turn_commit`; its exact accepted application release is
+`e6f66d3c2aa1b2b17bedcae1b67a4cd613346067`. Encrypted private-Telegram evidence capture
+is active, while automatic memory writes and raw-evidence retrieval remain disabled.
+The complete Stage 2 record is
+`docs/private-telegram-stage2-implementation-2026-09-11.md`. Public Lucy remains a
+separate fail-closed activation: its local website, runtime, database-role, projection,
+and manifest boundaries are implemented, but no public service, snapshot publication,
+website enablement, DNS change, or production release is authorized by this checkpoint.
 
 ## Frozen baseline
 
 - Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
   successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
-- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; quarantined Utopia
-  production head: `0050_r1_recovery_ack_receiver`; local activation head:
-  `0053_r1_telegram_authority`.
-  Paid R1-3 commissioning remains disabled.
+- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; current Utopia production
+  and local migration head: `0054_stage2_scoped_turn_commit`. Public paid inference remains
+  disabled.
 - Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
 - Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
   `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
@@ -47,7 +25,8 @@ passed commissioning. Stage 2 transcript capture remains disabled and unauthoriz
 - The deployed executor sequence remains PostgreSQL claim, policy-signed grant,
   Lambda AWS effect, policy-attested receipt, PostgreSQL reconciliation. Lambdas do
   not connect to PostgreSQL.
-- Live Telegram capture remains disabled. R1 work does not alter this gate.
+- Private Telegram capture is active only through the separately accepted Stage 2 boundary.
+  Public transcript capture remains disabled.
 
 The complete v1.2 acceptance evidence and cloud identities are recorded in
 `docs/security-baseline-v1.2-final-acceptance-2026-09-08.md`. Evidence remains valid
@@ -90,21 +69,20 @@ website activation, DNS changes, or opening database admission.
   private-memory fallback and callers have no direct projection-table access.
 - The activation manifest now represents `public_only` explicitly: no customer
   identity provider, no private hostname, paid inference off, and capture off.
-- The Render blueprint change is a reviewed example only. All production services
-  remain suspended and the production database remains at `0050` in quarantine.
-- Local verification at the `0052` workspace state: mypy passed for all 78 Lucy
-  source files; the affected Ruff slice and 82 focused security/unit checks passed;
-  and 6 focused PostgreSQL tests passed after a clean 0001-to-0052
-  migration on the disposable loopback PostgreSQL 16 stack. The website proxy's
-  matching authenticated hostname header passed TypeScript, focused ESLint, and
-  8 focused Vitest checks plus a 27-route production build. The repository-wide
-  suites are not claimed at this moving checkpoint because the concurrent Stage 1
-  task is still changing the profile and exact Render service inventory.
+- The `lucy-public` Render blueprint entry remains a reviewed example only. Private
+  production operation does not itself enable or provision the public service.
+- Reconciliation at repository commit `a3a624211c389804ad707e87df866161f3afb6ad`
+  confirmed one Alembic head at `0054`, Ruff, strict mypy across 79 source files, and
+  the complete 748-test unit suite. After pinning the public activation manifest to
+  `0054`, 61 focused public/manifest/Render tests passed. The website passed TypeScript,
+  repository-wide ESLint, all 84 Vitest checks, and a 27-route production build. The
+  targeted Docker socket recovery restored the local engine; a fresh PostgreSQL
+  `0001`-to-`0054` migration and six focused public/realm-role integration checks then
+  passed on the loopback-only tmpfs test stack.
 
-Stage 1 reconciliation is complete; its acceptance is recorded in
-`docs/private-telegram-stage1-acceptance-2026-09-11.md`. The next protected public
-action remains a digest-pinned public snapshot provisioning artifact for review. Do not
-execute it against production without a new explicit authorization.
+Private Stage 2 reconciliation is complete. The next protected public action remains a
+digest-pinned public snapshot provisioning artifact for review. Do not execute it against
+production without a new explicit authorization.
 
 ## R1-1 change record
 

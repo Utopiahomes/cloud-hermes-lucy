@@ -24,7 +24,7 @@ class ArtifactPins(StrictModel):
     rollback_commit: str
     image_digest: str
     base_image_digest: str
-    schema_revision: Literal["0053_r1_telegram_authority"]
+    schema_revision: Literal["0054_stage2_scoped_turn_commit"]
     aws_realm_template_sha256: str
     aws_recovery_template_sha256: str
 

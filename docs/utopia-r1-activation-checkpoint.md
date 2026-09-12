@@ -1,14 +1,12 @@
 # Utopia R1 activation checkpoint
 
-Status: Stage 1 private Telegram activation passed on 2026-09-11 at application commit
-`3563a9b2a1d847e043594a78948675130c760017` and PostgreSQL revision
-`0053_r1_telegram_authority`. The routine service and corrected cloud gateway are live;
-the local gateway is stopped and the replaced cloud gateway is suspended. Admission is
-ready, auto-deploy is off, transcript capture and automatic memory writes remain disabled,
-and no static AWS credentials or gateway persistent disk are present. Owner transport,
-realm scope, restart recovery, duplicate replay, one-operation/one-settlement accounting,
-content-free persistence, sampled logs, and the compatible rollback route passed. The
-complete record is `docs/private-telegram-stage1-acceptance-2026-09-11.md`.
+Status: Private Telegram Stage 2 production acceptance passed on 2026-09-12 at exact
+application release `e6f66d3c2aa1b2b17bedcae1b67a4cd613346067` and PostgreSQL revision
+`0054_stage2_scoped_turn_commit`. Encrypted private-Telegram evidence capture is active;
+automatic memory writes and raw-evidence retrieval remain disabled. Public Lucy remains
+disabled and unprovisioned. Its local implementation is ready for a separately authorized,
+fail-closed public activation. The complete private record is
+`docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
 ## Completed preparation
 
@@ -41,8 +39,9 @@ complete record is `docs/private-telegram-stage1-acceptance-2026-09-11.md`.
 
 ## Owner decisions recorded
 
-1. First live scope: Public Lucy only. Private Lucy remains closed until a customer
-   identity provider and strong-auth contract are separately selected and approved.
+1. First customer-facing website scope: Public Lucy only. The already commissioned private
+   Telegram surface remains operationally and cryptographically separate; it is not a
+   customer identity provider or a browser fallback.
 2. Browser boundary: `https://www.utopiahomes.com/api/lucy`, using a same-origin website
    proxy and a separate authenticated Cloud Lucy upstream.
 3. Public knowledge: only the exact approved V0 website snapshot and lineage above.
@@ -53,10 +52,27 @@ complete record is `docs/private-telegram-stage1-acceptance-2026-09-11.md`.
 
 ## Exact next action
 
-Use private Lucy through the commissioned Telegram bot while preserving the Stage 1
-capture-off boundary. Stage 2 source implementation is recorded in
-[`private-telegram-stage2-implementation-2026-09-11.md`](private-telegram-stage2-implementation-2026-09-11.md);
-production commissioning and live encrypted capture remain pending.
+Prepare the digest-pinned Public Lucy provisioning and activation artifact against schema
+`0054_stage2_scoped_turn_commit`, then review it before any production mutation. Production
+migration, Render provisioning, projection publication, website enablement, DNS changes, and
+live endpoint checks still require explicit authorization.
+
+## Current Public Lucy reconciliation ledger
+
+- Repository drift review: passed at
+  `a3a624211c389804ad707e87df866161f3afb6ad`; Private Stage 2 changes do not merge the
+  public runtime with the private archive or gateway processes.
+- Public activation manifest: advanced from superseded schema `0053` to exact current head
+  `0054`; a regression check rejects the former revision.
+- Cloud static/unit checks: Ruff passed; strict mypy passed across 79 source files; the
+  complete 748-test unit suite passed before the manifest correction, followed by 61 focused
+  public/manifest/Render tests after it.
+- Website checks: TypeScript, repository-wide ESLint, all 84 Vitest tests, and the 27-route
+  Next.js production build passed.
+- PostgreSQL integration rerun: passed after recoverably moving two corrupt Docker AF_UNIX
+  runtime directories aside. A fresh `0001`-to-`0054` migration and six focused public and
+  realm-role checks passed on the loopback-only tmpfs PostgreSQL stack. Any migration, role,
+  or readiness change invalidates this evidence.
 
 ## Stage 1 verification ledger
 

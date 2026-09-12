@@ -9,7 +9,7 @@
     "rollback_commit": "replace-with-40-lowercase-hex-characters",
     "image_digest": "replace-with-64-lowercase-hex-characters",
     "base_image_digest": "replace-with-64-lowercase-hex-characters",
-    "schema_revision": "0053_r1_telegram_authority",
+    "schema_revision": "0054_stage2_scoped_turn_commit",
     "aws_realm_template_sha256": "replace-with-64-lowercase-hex-characters",
     "aws_recovery_template_sha256": "replace-with-64-lowercase-hex-characters"
   },
