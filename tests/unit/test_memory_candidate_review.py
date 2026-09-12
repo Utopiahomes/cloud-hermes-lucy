@@ -9,6 +9,8 @@ from lucy.memory_candidate_review import (
     CandidateDisposition,
     CandidateReviewBundleV1,
     CandidateReviewChoiceV1,
+    CandidateReviewItemV1,
+    CandidateReviewSourceExcerptV1,
     authorize_candidate_review,
     propose_candidate_review,
 )
@@ -64,10 +66,28 @@ def _candidate(*, candidate_id: UUID = CANDIDATE) -> MemoryCandidatePayloadV1:
 
 
 def _bundle(*candidates: MemoryCandidatePayloadV1) -> CandidateReviewBundleV1:
+    selected = candidates or (_candidate(),)
     return CandidateReviewBundleV1(
         campaign_id=CAMPAIGN,
         destination_content_scope_id=SCOPE,
-        candidates=candidates or (_candidate(),),
+        items=tuple(
+            CandidateReviewItemV1(
+                candidate=candidate,
+                candidate_digest=candidate.digest,
+                source_excerpts=tuple(
+                    CandidateReviewSourceExcerptV1(
+                        source_record_id=source.source_record_id,
+                        evidence_id=source.evidence_id,
+                        record_version=source.record_version,
+                        byte_start=source.byte_start,
+                        byte_end=source.byte_end,
+                        exact_quote="café",
+                    )
+                    for source in candidate.sources
+                ),
+            )
+            for candidate in selected
+        ),
     )
 
 

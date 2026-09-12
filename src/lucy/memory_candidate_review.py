@@ -27,21 +27,75 @@ class CandidateDisposition(StrEnum):
     DEFER = "defer"
 
 
+class CandidateReviewSourceExcerptV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    source_record_id: str = Field(min_length=1, max_length=512)
+    evidence_id: UUID
+    record_version: int = Field(ge=1)
+    byte_start: int = Field(ge=0)
+    byte_end: int = Field(gt=0)
+    exact_quote: str = Field(min_length=1, max_length=16_384)
+
+    @model_validator(mode="after")
+    def exact_utf8_length(self) -> CandidateReviewSourceExcerptV1:
+        if self.byte_end <= self.byte_start:
+            raise ValueError("review source excerpt span is invalid")
+        if len(self.exact_quote.encode("utf-8")) != self.byte_end - self.byte_start:
+            raise ValueError("review source excerpt does not match its UTF-8 span")
+        return self
+
+
+class CandidateReviewItemV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    candidate: MemoryCandidatePayloadV1
+    candidate_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_excerpts: tuple[CandidateReviewSourceExcerptV1, ...] = Field(
+        min_length=1, max_length=32
+    )
+
+    @model_validator(mode="after")
+    def exact_candidate_and_sources(self) -> CandidateReviewItemV1:
+        if self.candidate_digest != self.candidate.digest:
+            raise ValueError("review item digest does not match exact candidate bytes")
+        expected = {
+            (
+                source.source_record_id,
+                source.evidence_id,
+                source.record_version,
+                source.byte_start,
+                source.byte_end,
+            )
+            for source in self.candidate.sources
+        }
+        actual = {
+            (
+                excerpt.source_record_id,
+                excerpt.evidence_id,
+                excerpt.record_version,
+                excerpt.byte_start,
+                excerpt.byte_end,
+            )
+            for excerpt in self.source_excerpts
+        }
+        if len(actual) != len(self.source_excerpts) or actual != expected:
+            raise ValueError("review excerpts do not match exact candidate sources")
+        return self
+
+
 class CandidateReviewBundleV1(BaseModel):
-    """Finite exact candidate set shown by the local review console."""
+    """Finite exact candidate and excerpt set shown by the local review console."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     contract_version: str = Field(default="1", pattern=r"^1$")
     campaign_id: UUID
     destination_content_scope_id: UUID
-    candidates: tuple[MemoryCandidatePayloadV1, ...] = Field(
-        min_length=1, max_length=200
-    )
+    items: tuple[CandidateReviewItemV1, ...] = Field(min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def coherent_candidate_set(self) -> CandidateReviewBundleV1:
         identities: set[tuple[UUID, int]] = set()
-        for candidate in self.candidates:
+        for item in self.items:
+            candidate = item.candidate
             if (
                 candidate.campaign_id != self.campaign_id
                 or candidate.destination_content_scope_id
@@ -57,6 +111,20 @@ class CandidateReviewBundleV1(BaseModel):
     @property
     def digest(self) -> str:
         return canonical_sha256(self, prefix=_BUNDLE_PREFIX)
+
+
+class CandidateReviewBundleArtifactV1(BaseModel):
+    """Portable local artifact with an independently checked bundle digest."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    bundle: CandidateReviewBundleV1
+    bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def exact_bundle(self) -> CandidateReviewBundleArtifactV1:
+        if self.bundle_digest != self.bundle.digest:
+            raise ValueError("candidate review bundle digest does not match exact bytes")
+        return self
 
 
 class CandidateReviewChoiceV1(BaseModel):
@@ -185,11 +253,11 @@ def propose_candidate_review(
 ) -> CandidateReviewProposalV1:
     """Produce final exact candidate bytes without authorizing them."""
 
-    if len(choices) != len(bundle.candidates):
+    if len(choices) != len(bundle.items):
         raise ValueError("review must decide every candidate in the exact bundle")
     by_identity = {
-        (candidate.candidate_id, candidate.candidate_version): candidate
-        for candidate in bundle.candidates
+        (item.candidate.candidate_id, item.candidate.candidate_version): item.candidate
+        for item in bundle.items
     }
     seen: set[tuple[UUID, int]] = set()
     decisions: list[CandidateReviewDecisionV1] = []

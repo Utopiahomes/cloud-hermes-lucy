@@ -15,6 +15,7 @@ from lucy.chatgpt_manifest import (
 )
 from lucy.memory_candidate_extraction import (
     MemoryExtractionOutputV1,
+    build_candidate_review_artifact,
     materialize_pending_candidates,
     parse_memory_extraction_output,
 )
@@ -184,3 +185,24 @@ def test_candidate_secrets_are_quarantined_before_staging() -> None:
             },
             extraction_job_id=JOB,
         )
+
+
+def test_review_artifact_exposes_exact_digest_and_provenance_quote() -> None:
+    output = parse_memory_extraction_output(_output())
+    candidates = materialize_pending_candidates(
+        output,
+        build=_build(),
+        fingerprint_key=b"f" * 32,
+        evidence_by_source_record_id={
+            "conversation-1:node-1:message-1": EVIDENCE
+        },
+        extraction_job_id=JOB,
+    )
+
+    artifact = build_candidate_review_artifact(output, candidates)
+
+    assert artifact.bundle_digest == artifact.bundle.digest
+    item = artifact.bundle.items[0]
+    assert item.candidate_digest == candidates[0].digest
+    assert item.source_excerpts[0].exact_quote == "café"
+    assert item.source_excerpts[0].byte_start == candidates[0].sources[0].byte_start

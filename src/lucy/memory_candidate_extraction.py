@@ -9,6 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lucy.chatgpt_manifest import LocalPilotBuildV1, build_exact_archive_requests
 from lucy.contracts.canonical import canonical_sha256
+from lucy.memory_candidate_review import (
+    CandidateReviewBundleArtifactV1,
+    CandidateReviewBundleV1,
+    CandidateReviewItemV1,
+    CandidateReviewSourceExcerptV1,
+)
 from lucy.memory_import import (
     AssertionStatus,
     EpistemicStatus,
@@ -145,3 +151,44 @@ def materialize_pending_candidates(
             )
         )
     return tuple(candidates)
+
+
+def build_candidate_review_artifact(
+    output: MemoryExtractionOutputV1,
+    candidates: tuple[MemoryCandidatePayloadV1, ...],
+) -> CandidateReviewBundleArtifactV1:
+    """Bind verified model quotes to the exact candidates displayed for review."""
+
+    if not candidates or len(output.candidates) != len(candidates):
+        raise ValueError("review candidates do not match the extraction output")
+    items: list[CandidateReviewItemV1] = []
+    for draft, candidate in zip(output.candidates, candidates, strict=True):
+        if len(draft.sources) != len(candidate.sources):
+            raise ValueError("review excerpts do not match candidate provenance")
+        excerpts: list[CandidateReviewSourceExcerptV1] = []
+        for extracted, source in zip(draft.sources, candidate.sources, strict=True):
+            if extracted.source_record_id != source.source_record_id:
+                raise ValueError("review excerpt source does not match candidate provenance")
+            excerpts.append(
+                CandidateReviewSourceExcerptV1(
+                    source_record_id=source.source_record_id,
+                    evidence_id=source.evidence_id,
+                    record_version=source.record_version,
+                    byte_start=source.byte_start,
+                    byte_end=source.byte_end,
+                    exact_quote=extracted.exact_quote,
+                )
+            )
+        items.append(
+            CandidateReviewItemV1(
+                candidate=candidate,
+                candidate_digest=candidate.digest,
+                source_excerpts=tuple(excerpts),
+            )
+        )
+    bundle = CandidateReviewBundleV1(
+        campaign_id=candidates[0].campaign_id,
+        destination_content_scope_id=candidates[0].destination_content_scope_id,
+        items=tuple(items),
+    )
+    return CandidateReviewBundleArtifactV1(bundle=bundle, bundle_digest=bundle.digest)
