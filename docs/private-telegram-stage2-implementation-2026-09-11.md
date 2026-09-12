@@ -1,7 +1,7 @@
 # Private Telegram Stage 2 implementation checkpoint
 
-Date: 2026-09-11. Status: **production corrective release commissioned and gateway active;
-one live Telegram retention canary remains before final acceptance**.
+Date: 2026-09-11; accepted 2026-09-12. Status: **Stage 2 production acceptance
+passed; encrypted private-Telegram evidence capture is active**.
 
 ## Deliverable and boundary
 
@@ -60,38 +60,43 @@ remaining in model history and influencing a later retained answer.
 | Exact deployed hook, replay, and registration paths | Passed | Synthetic Render jobs on corrective gateway; pre/direct/transform/ambiguous/registration all true | Gateway image/profile/plugin/config change |
 | Concurrent archive admission | Passed, 24/24 | Render job `job-dai9t3h5efls73chf1rg` | Routine/gateway/archive/database/network change |
 | Single-gateway startup and lease | Passed | Corrective gateway resumed; configuration, profile, Hermes, Lucy plugin, RAM boundary, preflight, lease, and startup events present; old gateway suspended | Gateway service/environment/deploy/lease change |
+| Startup archive-boundary validation | Passed | Commit `e6f66d3c2aa1b2b17bedcae1b67a4cd613346067`; 52 focused tests, Ruff, and strict mypy; routine readiness job `job-daia8pu743jc73ebpjp0` | Runtime/archive configuration or source change |
+| Corrected production deployment | Passed | Routine deploy `dep-daia8b61egvs739fige0`; gateway deploy `dep-daia8s3l550s73flh4l0`; both live at `e6f66d3c2aa1b2b17bedcae1b67a4cd613346067` | Render environment or deployment change |
+| Serving-worker archive boundary | Passed | Existing-gateway authenticated private-network probe `job-daia9u2d0e5s73fu4fog` | Routine/gateway credential, network, or deployment change |
+| Exact archive hooks and replay | Passed | Jobs `job-daiaasjl550s73flodj0`, `job-daiaasqd0e5s73fu7g1g`, `job-daiaasqd0e5s73fu7g6g`, `job-daiaasrl550s73floe10`, and `job-daiaat6743jc73ec16kg` | Hook/profile/archive source or configuration change |
+| Live owner retained round trip | Passed | 2026-09-12 10:11-10:12 ET; substantive response delivered only after the fail-closed retention path completed | Gateway/routine/archive/database/model bridge change |
+| Live durable turn and budget predicates | Passed | Content-free in-Render verifier `job-dailtuoae00c73f2bc80`: terminal delivery, exactly one successful model settlement, enabled receipt, user and assistant archive success/reconciliation, linked turn commit, two encrypted evidence records, and zero scoped/legacy memory writes | Database rows, schema, gateway/routine/archive/model bridge change |
+| Recent production log privacy | Passed | One-hour routine/gateway scan at `2026-09-12T14:19:54Z`: no configured secrets or conversation payload fields emitted | Logging or deployment change |
+| One production bot consumer | Passed | Active `srv-dai4k467bikc73bhs6r0`; prior gateway `srv-dai3hmu743jc73do9ebg` suspended; both enumerated through Render | Gateway service state or bot-token assignment change |
 
 The `.pytest_cache` directory is not writable in the current workspace; pytest emitted a cache
-warning only. Test execution and results were unaffected.
+warning only. Test execution and results were unaffected. A final local Docker rebuild was not
+repeated because Docker Desktop's engine was unavailable. The exact source was built and
+started by Render, and the serving worker plus deployed hook paths were checked there instead.
 
-## Production finish line
+## Production finish line — completed
 
-1. Commit and push the reviewed Stage 2 implementation while Stage 1 remains live and capture
-   remains false.
-2. Deploy the bridge-compatible routine service with Stage 1 settings; confirm the current
-   Stage 1 acceptance checks remain valid.
-3. Quarantine admission, run the exact `0053 -> 0054` migration/grant job, and retain its
-   content-free receipt. Do not enable capture.
-4. Build the exact production Stage 2 gateway artifact and populate/validate the ignored
-   activation manifest with source, rollback, image, profile, realm, and service identities.
-5. Commission the routine and gateway Stage 2 settings with exactly one bot consumer. Reopen
-   only after readiness succeeds at `0054`.
-6. Exercise one synthetic retained turn, retry/restart replay, budget settlement, owner denial,
-   off/on-record history rotation, archive recovery, and content/secret-free logs in the cloud.
-7. Produce the deployed acceptance report. Live capture is accepted only after that evidence
-   passes; rollback may return the application to Stage 1 but must not undo archive, deletion,
-   revocation, or authority history.
+All seven commissioning steps passed. The accepted deployed source is
+`e6f66d3c2aa1b2b17bedcae1b67a4cd613346067`, running as routine service
+`srv-daca8gafngtc73clva90` and Telegram gateway `srv-dai4k467bikc73bhs6r0`.
+The gateway has no static AWS credential, policy, evidence-reader, or deletion authority.
+Automatic memory writes and raw-evidence retrieval remain disabled. The active interface is the
+existing allowlisted UtopiaLucy private Telegram bot; ordinary owner messages are retained as
+encrypted evidence by default, while the documented off-record control disables Lucy archive
+capture until the owner returns on record.
 
-## Corrective incident and current blocker
+## Corrective incident and resolution
 
-Initial live Stage 2 canaries failed closed because the companion returned HTTP 503 before the
-inbound retention receipt was admitted. Safe gateway telemetry established the status without
-logging message content. The corrective release caches the archive service boundary for the
-process lifetime, classifies only allowlisted content-free 503 causes, and prevents a failed
-inbound retention attempt from triggering a misleading outbound archive attempt. Lost-response
-replay remains exactly-once.
+Initial live Stage 2 canaries failed closed because the long-lived routine had an invalid
+effective `AWS_REGION`, so construction of the realm archive boundary was rejected before the
+inbound receipt could be admitted. Earlier job probes exercised short-lived paths and did not
+prove the effective configuration of the serving worker. The final correction sets the reviewed
+`us-east-1` region and makes a Stage 2 routine construct and type-check its archive boundary
+before opening Uvicorn. A deployment with future configuration drift therefore fails readiness
+instead of accepting traffic and returning a late archive error.
 
-The corrective release is deployed and the one approved gateway is active. The remaining
-blocker is one successful live owner Telegram round trip proving that the production bot path
-now durably retains and then delivers the substantive response. No acceptance claim is made
-until that canary passes.
+The live canary, authoritative database predicates, budget settlement, encrypted evidence
+counts, log-privacy scan, and single-gateway enumeration all passed after that correction. No
+acceptance blocker remains. Rollback may disable capture or return application behavior to the
+reviewed Stage 1 release, but it must not undo archive, deletion, revocation, or authority
+history already committed under Stage 2.
