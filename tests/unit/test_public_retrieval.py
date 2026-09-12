@@ -37,6 +37,7 @@ def entry(
     aliases: tuple[str, ...] = (),
     effective_from: datetime = datetime(2026, 1, 1, tzinfo=UTC),
     effective_until: datetime | None = None,
+    property_facts: dict[str, object] | None = None,
 ) -> PublicKnowledgeEntry:
     route = "property" if slug else "design"
     path = f"/stays/{slug}" if slug else "/design"
@@ -51,6 +52,20 @@ def entry(
             "topics": topics,
             "route": route,
             "property_slug": slug,
+            "property_facts": property_facts
+            or (
+                {
+                    "max_guests": 20,
+                    "parking_spaces": 4,
+                    "has_pool": True,
+                    "has_hot_tub": False,
+                    "bedrooms": 7,
+                    "bathrooms": 3.5,
+                    "pets_allowed": True,
+                }
+                if slug
+                else None
+            ),
             "source": reference(f"{identifier}-source", "Utopia Homes", path),
             "links": (reference(f"{identifier}-link", "Explore", path),),
             "effective_from": effective_from,
@@ -86,12 +101,30 @@ ENTRIES = (
         "Central Ave Socialization has a private pool and hot tub.",
         ("pool",),
         slug="central-ave-socialization",
+        property_facts={
+            "max_guests": 22,
+            "parking_spaces": 3,
+            "has_pool": True,
+            "has_hot_tub": True,
+            "bedrooms": 7,
+            "bathrooms": 3.5,
+            "pets_allowed": True,
+        },
     ),
     entry(
         "shamrock-summary",
         "The Shamrock is designed for especially large groups and does not publish a pool.",
         ("capacity", "pool"),
         slug="the-shamrock",
+        property_facts={
+            "max_guests": 32,
+            "parking_spaces": 6,
+            "has_pool": False,
+            "has_hot_tub": False,
+            "bedrooms": 10,
+            "bathrooms": 5,
+            "pets_allowed": True,
+        },
     ),
     entry(
         "design-estimate",
@@ -122,7 +155,7 @@ def test_follow_up_uses_history_only_to_resolve_subject_and_retrieves_facts_agai
 
 def test_comparison_with_different_vocabulary_retrieves_multiple_properties() -> None:
     result = PublicKnowledgeRetriever().retrieve(
-        question="Which homes have swimming options, and how do they differ?",
+        question="Which homes have pools, and how do they differ?",
         entries=ENTRIES,
         observed_at=NOW,
     )
@@ -133,13 +166,17 @@ def test_comparison_with_different_vocabulary_retrieves_multiple_properties() ->
 
 def test_multiple_requirements_are_covered_individually() -> None:
     result = PublicKnowledgeRetriever().retrieve(
-        question="We have 20 people, four cars, and want a pool at Buttercup.",
+        question="We have 20 people, four cars, and want a pool.",
         entries=ENTRIES,
         observed_at=NOW,
     )
     assert result.outcome == "answered"
     assert {"buttercup-capacity", "buttercup-parking", "buttercup-summary"}.issubset(
         set(result.evidence_ids)
+    )
+    assert all(
+        "central" not in evidence_id and "shamrock" not in evidence_id
+        for evidence_id in result.evidence_ids
     )
 
 
@@ -165,6 +202,7 @@ def test_published_design_estimate_explanation_is_not_blocked_as_live_stay_prici
     )
     assert result.outcome == "answered"
     assert "nonbinding preliminary estimate" in result.answer
+    assert result.evidence_ids == ("design-estimate",)
 
 
 def test_live_stay_data_and_individual_reservations_are_distinguished_from_general_booking() -> (

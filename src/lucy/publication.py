@@ -78,6 +78,14 @@ def knowledge_snapshot(entries: list[dict[str, Any]]) -> dict[str, Any]:
     ids = [entry.id for entry in validated.entries]
     if len(ids) != len(set(ids)):
         raise ValueError("public knowledge entry ids must be unique")
+    property_facts: dict[str, object] = {}
+    for entry in validated.entries:
+        if entry.property_slug is None:
+            continue
+        facts = entry.property_facts
+        existing = property_facts.setdefault(entry.property_slug, facts)
+        if existing != facts:
+            raise ValueError("public knowledge property facts must be consistent per property")
     ordered = validated.model_copy(
         update={"entries": tuple(sorted(validated.entries, key=lambda entry: entry.id))}
     )

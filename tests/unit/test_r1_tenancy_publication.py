@@ -39,6 +39,15 @@ def test_public_knowledge_snapshot_is_validated_sorted_and_unique() -> None:
         "topics": ["parking"],
         "route": "property",
         "property_slug": "buttercup-beauty",
+        "property_facts": {
+            "max_guests": 22,
+            "parking_spaces": 4,
+            "has_pool": True,
+            "has_hot_tub": True,
+            "bedrooms": 7,
+            "bathrooms": 3.5,
+            "pets_allowed": True,
+        },
         "source": {
             "id": "buttercup",
             "label": "Buttercup Beauty",

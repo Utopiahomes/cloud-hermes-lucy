@@ -60,6 +60,16 @@ class PublicReference(StrictPublicModel):
         return self
 
 
+class PublicPropertyFacts(StrictPublicModel):
+    max_guests: int = Field(gt=0, le=100)
+    parking_spaces: int = Field(ge=0, le=50)
+    has_pool: bool
+    has_hot_tub: bool
+    bedrooms: int = Field(ge=0, le=100)
+    bathrooms: int | float = Field(ge=0, le=100)
+    pets_allowed: bool
+
+
 class PublicKnowledgeEntry(StrictPublicModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,127}$")
     service_line: Literal["homes", "design", "general"]
@@ -70,6 +80,7 @@ class PublicKnowledgeEntry(StrictPublicModel):
     topics: tuple[str, ...] = Field(min_length=1, max_length=24)
     route: PublicRoute
     property_slug: PropertySlug | None = None
+    property_facts: PublicPropertyFacts | None = None
     source: PublicReference
     links: tuple[PublicReference, ...] = Field(default=(), max_length=8)
     effective_from: datetime
@@ -82,6 +93,8 @@ class PublicKnowledgeEntry(StrictPublicModel):
             raise ValueError("property knowledge requires an approved property slug")
         if self.route != "property" and self.property_slug is not None:
             raise ValueError("property slug is only valid for property knowledge")
+        if (self.route == "property") != (self.property_facts is not None):
+            raise ValueError("structured property facts are required on property knowledge only")
         if self.effective_until is not None and self.effective_until <= self.effective_from:
             raise ValueError("knowledge expiration must follow its effective time")
         return self

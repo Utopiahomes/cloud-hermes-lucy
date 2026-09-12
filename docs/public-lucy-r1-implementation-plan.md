@@ -29,9 +29,10 @@ this release.
 3. The execute-only public database identity reads the active, digest-pinned public
    projection through one security-definer function. The function rechecks tenant,
    lifecycle, storage epoch, snapshot schema, and effective dates.
-4. Structured property/page context narrows retrieval. Bounded history may resolve a
-   conversational subject, but cannot provide evidence or expand authorization.
-5. Deterministic lexical retrieval selects approved records and measures requested-topic
+4. Structured property/page context narrows retrieval. Typed property facets evaluate
+   explicit capacity, parking, pool, hot-tub, and pet requirements. Bounded history may
+   resolve a conversational subject, but cannot provide evidence or expand authorization.
+5. Deterministic lexical retrieval ranks the eligible approved records and measures requested-topic
    coverage. R1's active safe composer returns only exact approved text. Valid source IDs
    do not authorize paraphrases, altered numbers, negation, or policy exceptions.
 6. The browser receives only the answer, clarification, descriptive sources, and useful
@@ -44,7 +45,7 @@ this release.
 | --- | --- | --- |
 | Website session | Same-origin `/api/lucy`, opaque cookie, request limits | Six-turn/4,000-character history in React memory, 30-minute expiry, explicit Start over, page context |
 | Public HTTP | Exact bearer/origin/host/session checks | Strict R1 request/response contracts and full/partial/fallback results |
-| Knowledge | Immutable approved FAQ projection | Typed property knowledge, aliases/topics, source/links, effective and withdrawal dates |
+| Knowledge | Immutable approved FAQ projection | Typed property knowledge and facets, aliases/topics, source/links, effective and withdrawal dates |
 | Database | Tenant-bound projection route and epoch gate | `public_projection_knowledge_v1(text,uuid)` and execute-only realm grant |
 | Retrieval | Exact normalized FAQ match | Structured narrowing plus tested lexical retrieval for vocabulary changes, comparisons, and multiple requirements |
 | Grounding | Owner-approved immutable bytes | Extractive answer gate plus unsupported-number, wrong-property, negation, and exception tests |
@@ -93,8 +94,8 @@ configuration before its route is activated.
 Automated tests cover:
 
 1. “Tell me about Buttercup.” then “How many cars fit?”
-2. “Which homes have swimming options, and how do they differ?”
-3. “We have 20 people, four cars, and want a pool at Buttercup.”
+2. “Which homes have pools, and how do they differ?”
+3. “We have 20 people, four cars, and want a pool.”
 4. “Is the Buttercup pool open in November?” when seasonality is absent.
 5. “How does your design estimate work?” without treating it as live stay pricing.
 
@@ -102,6 +103,19 @@ They also cover wrong-property isolation, effective/expired/future knowledge, re
 topic distinctions, unsupported claims attached to valid citations, browser navigation
 continuity, strict source URLs, outage versus knowledge-miss behavior, and database
 tenant/quarantine/epoch enforcement.
+
+## Candidate corpus checkpoint
+
+The website repository now owns a 25-entry review candidate derived from its committed
+public content. Its canonical digest is
+`5bfe35150606ad39e91eb82a9f73eabb41e8a4333257a0a76192834c3088c668`.
+`deploy/render/validate_public_knowledge.py` validates an arbitrary candidate path and
+prints only its schema, entry count, and canonical digest; it does not connect to a database
+or stage content. Cloud and website validators independently reproduce this digest.
+
+The candidate deliberately excludes live rates/availability, reservations, provider names,
+email addresses, pending biographies, private knowledge, and inference-provider details.
+It remains unapproved and inactive pending Ray/Lucy corpus review.
 
 ## Explicit release decisions
 
@@ -117,8 +131,8 @@ The following remain owner release gates and do not block local contract/retriev
 | Check | Result on 2026-09-12 | Invalidated by |
 | --- | --- | --- |
 | Ruff and strict mypy | Passed: all files; 81 typed source files | Source/dependency/config changes |
-| Unit and contract tests | Passed: 771; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
-| Public retrieval acceptance | Passed: required conversations, partial coverage, topic distinctions, freshness, wrong-property isolation, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
+| Unit and contract tests | Passed: 773; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Public retrieval acceptance | Passed: required conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
 | PostgreSQL boundary | Passed: clean migration plus 6 focused live-SQL tests on isolated loopback/tmpfs databases | Migration, roles, publication, readiness, or database-image changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
 | Production activation | Not executed | Requires explicit production authorization and completed release gates |

@@ -59,6 +59,7 @@ _SYNONYMS = {
     "people": "capacity",
     "price": "pricing",
     "prices": "pricing",
+    "pools": "pool",
     "quote": "estimate",
     "rates": "pricing",
     "sleep": "capacity",
@@ -88,6 +89,18 @@ _MONTHS = {
     "spring",
     "summer",
     "fall",
+}
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
 }
 
 
@@ -140,6 +153,50 @@ def _property_scope(
         if remembered is not None:
             return remembered
     return None
+
+
+def _minimum_requirement(question: str, nouns: tuple[str, ...]) -> int | None:
+    alternatives = "|".join(nouns)
+    match = re.search(
+        rf"\b(\d{{1,3}}|{'|'.join(_NUMBER_WORDS)})\s+(?:{alternatives})\b",
+        question.casefold(),
+    )
+    if match is None:
+        return None
+    value = match.group(1)
+    return int(value) if value.isdigit() else _NUMBER_WORDS[value]
+
+
+def _matching_property_slugs(
+    question: str, entries: list[PublicKnowledgeEntry]
+) -> set[str] | None:
+    """Return homes satisfying explicit structured requirements, if any were supplied."""
+
+    tokens = _normalize(question)
+    min_guests = _minimum_requirement(question, ("people", "guests"))
+    min_parking = _minimum_requirement(question, ("cars", "vehicles"))
+    wants_pool = "pool" in tokens or "swim" in tokens
+    wants_hot_tub = "hot tub" in question.casefold()
+    wants_pets = bool({"pet", "pets", "dog", "dogs"} & set(_TOKENS.findall(question.casefold())))
+    requirements = (min_guests, min_parking, wants_pool, wants_hot_tub, wants_pets)
+    if all(value is None or value is False for value in requirements):
+        return None
+
+    facts_by_slug = {
+        entry.property_slug: entry.property_facts
+        for entry in entries
+        if entry.property_slug is not None and entry.property_facts is not None
+    }
+    return {
+        slug
+        for slug, facts in facts_by_slug.items()
+        if facts is not None
+        and (min_guests is None or facts.max_guests >= min_guests)
+        and (min_parking is None or facts.parking_spaces >= min_parking)
+        and (not wants_pool or facts.has_pool)
+        and (not wants_hot_tub or facts.has_hot_tub)
+        and (not wants_pets or facts.pets_allowed)
+    }
 
 
 def requested_topics(question: str) -> set[str]:
@@ -234,6 +291,19 @@ class PublicKnowledgeRetriever:
             bool({"compare", "versus", "vs"} & question_tokens)
             or "which homes" in question.casefold()
         )
+        matching_property_slugs = _matching_property_slugs(question, eligible)
+        if property_slug is None and matching_property_slugs is not None:
+            eligible = [
+                entry
+                for entry in eligible
+                if entry.property_slug is None or entry.property_slug in matching_property_slugs
+            ]
+        if property_slug is not None and not comparison:
+            eligible = [
+                entry
+                for entry in eligible
+                if entry.property_slug is None or entry.property_slug == property_slug
+            ]
         scored: list[tuple[int, PublicKnowledgeEntry]] = []
         for entry in eligible:
             entry_topics = set(entry.topics)
@@ -260,6 +330,15 @@ class PublicKnowledgeRetriever:
                 scored.append((score, entry))
         scored.sort(key=lambda item: (-item[0], item[1].id))
         selected = [entry for _, entry in scored[:8]]
+
+        if topics and not comparison:
+            complete_direct = [
+                entry
+                for _, entry in scored
+                if entry.direct_answer and topics <= set(entry.topics)
+            ]
+            if complete_direct:
+                selected = complete_direct[:1]
 
         if not selected:
             return PublicRetrievalResult(
