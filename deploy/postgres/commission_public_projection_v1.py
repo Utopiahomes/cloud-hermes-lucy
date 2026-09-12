@@ -299,12 +299,13 @@ def _verify_boundary(
         "'lucy.public_projection_answer_v2(text,text,uuid)','EXECUTE')",
     ) is not True:
         raise PublicProjectionCommissionError("public answer grant is unavailable")
-    if _one(
-        connection,
-        "SELECT EXISTS(SELECT 1 FROM information_schema.role_table_grants "
-        "WHERE grantee='lucy_utopia_public' AND table_schema='lucy')",
-    ) is not False:
-        raise PublicProjectionCommissionError("public login has direct table authority")
+    direct_grants = connection.execute(
+        "SELECT table_name,privilege_type FROM information_schema.role_table_grants "
+        "WHERE grantee='lucy_utopia_public' AND table_schema='lucy' "
+        "ORDER BY table_name,privilege_type"
+    ).fetchall()
+    if direct_grants != [("lifecycle", "SELECT"), ("runtime_admission", "SELECT")]:
+        raise PublicProjectionCommissionError("public login table authority differs")
 
 
 def _apply(

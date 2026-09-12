@@ -114,6 +114,8 @@ def test_manifest_rejects_ambiguous_authority_and_source_is_append_only() -> Non
     ).read_text(encoding="utf-8")
     assert "expected_runtime_admission" in source
     assert "lucy_utopia_public" in source
+    assert '("lifecycle", "SELECT")' in source
+    assert '("runtime_admission", "SELECT")' in source
     assert "DELETE FROM" not in source
     assert "DROP " not in source
 
