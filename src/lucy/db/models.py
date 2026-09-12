@@ -1155,7 +1155,143 @@ class ScopedMemoryClaimRow(Base):
     confidence_millionths: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(20))
     origin_class: Mapped[str] = mapped_column(String(30), default="direct_input")
+    candidate_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    candidate_version: Mapped[int | None] = mapped_column(BigInteger)
+    protection_class: Mapped[str | None] = mapped_column(String(30))
+    memory_kind: Mapped[str | None] = mapped_column(String(30))
+    assertion_status: Mapped[str | None] = mapped_column(String(40))
+    epistemic_status: Mapped[str | None] = mapped_column(String(30))
+    domain_tags: Mapped[list[str] | None] = mapped_column(JSONB)
+    event_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryCandidateVersionV1Row(Base):
+    __tablename__ = "scoped_memory_candidate_versions_v1"
+    __table_args__ = {"schema": "lucy"}
+    candidate_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    candidate_version: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    extractor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_service_bindings_v1.id")
+    )
+    candidate_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    protection_class: Mapped[str] = mapped_column(String(30))
+    memory_kind: Mapped[str] = mapped_column(String(30))
+    assertion_status: Mapped[str] = mapped_column(String(40))
+    epistemic_status: Mapped[str] = mapped_column(String(30))
+    serialized_candidate: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryCandidateSourceV1Row(Base):
+    __tablename__ = "scoped_memory_candidate_sources_v1"
+    __table_args__ = {"schema": "lucy"}
+    candidate_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    candidate_version: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    evidence_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_evidence_records_v2.id"), primary_key=True
+    )
+    record_version: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    byte_start: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    byte_end: Mapped[int] = mapped_column(BigInteger)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+
+
+class ScopedMemoryCandidateApprovalV1Row(Base):
+    __tablename__ = "scoped_memory_candidate_approvals_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    candidate_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    candidate_version: Mapped[int] = mapped_column(BigInteger)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    candidate_digest: Mapped[str] = mapped_column(String(64))
+    owner_approval_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True)
+    owner_actor_id: Mapped[str] = mapped_column(String(512))
+    policy_version: Mapped[int] = mapped_column(BigInteger)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedMemoryPromotionV1Row(Base):
+    __tablename__ = "scoped_memory_promotions_v1"
+    __table_args__ = {"schema": "lucy"}
+    approval_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_memory_candidate_approvals_v1.id"), primary_key=True
+    )
+    candidate_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    candidate_version: Mapped[int] = mapped_column(BigInteger)
+    claim_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.scoped_memory_claims_v1.id"), unique=True
+    )
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    promoted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedProtectedMemoryAccessV1Row(Base):
+    __tablename__ = "scoped_protected_memory_accesses_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    owner_interaction_ref: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    query_commitment: Mapped[str] = mapped_column(String(64))
+    returned_claim_ids: Mapped[list[str]] = mapped_column(JSONB)
+    reason_code: Mapped[str] = mapped_column(String(60))
+    accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryImportCampaignV1Row(Base):
+    __tablename__ = "memory_import_campaigns_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    policy_actor_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_sensitive_actor_bindings_v1.id")
+    )
+    manifest_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    serialized_manifest: Mapped[dict[str, object]] = mapped_column(JSONB)
+    extractor_version: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    model_route: Mapped[str] = mapped_column(String(200))
+    max_model_spend_microusd: Mapped[int] = mapped_column(BigInteger)
+    max_attempts: Mapped[int] = mapped_column(BigInteger)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryImportAttemptReservationV1Row(Base):
+    __tablename__ = "memory_import_attempt_reservations_v1"
+    __table_args__ = {"schema": "lucy"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    campaign_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_import_campaigns_v1.id"))
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    service_binding_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.realm_service_bindings_v1.id")
+    )
+    attempt_key: Mapped[str] = mapped_column(String(512))
+    reserved_microusd: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryImportAttemptSettlementV1Row(Base):
+    __tablename__ = "memory_import_attempt_settlements_v1"
+    __table_args__ = {"schema": "lucy"}
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lucy.memory_import_attempt_reservations_v1.id"), primary_key=True
+    )
+    campaign_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.memory_import_campaigns_v1.id"))
+    content_scope_id: Mapped[UUID] = mapped_column(ForeignKey("lucy.realm_content_scopes_v1.id"))
+    billed_microusd: Mapped[int] = mapped_column(BigInteger)
+    result: Mapped[str] = mapped_column(String(30))
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ScopedMemoryClaimSourceV2Row(Base):

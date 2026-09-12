@@ -231,7 +231,7 @@ def apply_manifest(
                     "evidence.retrieve",
                     "evidence.delete",
                     "memory.read",
-                    "memory.write",
+                    "memory.propose",
                 ],
                 "binding_generation": manifest.binding_generation,
                 "node_authz_epoch": manifest.node_authz_epoch,
@@ -259,6 +259,9 @@ def apply_manifest(
                 "sensitive.grant.issue",
                 "sensitive.receipt.attest",
                 "sensitive.deletion_manifest.issue",
+                "memory.candidate.approve",
+                "memory.candidate.promote",
+                "memory.protected.read",
             ],
         ),
         (

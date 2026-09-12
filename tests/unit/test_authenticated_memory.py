@@ -8,11 +8,7 @@ from pydantic import SecretStr
 
 from lucy.authenticated_memory import AuthenticatedScopedMemoryGateway
 from lucy.internal_admission import InternalAdmissionDenied
-from lucy.scoped_memory import (
-    ScopedMemoryClaim,
-    ScopedMemoryWrite,
-    ScopedMemoryWriteResult,
-)
+from lucy.scoped_memory import ScopedMemoryClaim
 
 ZERO = UUID("00000000-0000-4000-8000-000000000000")
 ONE = UUID("00000000-0000-4000-8000-000000000001")
@@ -39,10 +35,6 @@ class AdmissionSpy:
 class MemorySpy:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
-
-    def write(self, candidate: ScopedMemoryWrite) -> ScopedMemoryWriteResult:
-        self.calls.append(("write", candidate))
-        return ScopedMemoryWriteResult(claim_id=ONE, replayed=False)
 
     def search(self, query: str, *, limit: int = 10) -> tuple[ScopedMemoryClaim, ...]:
         self.calls.append(("search", (query, limit)))
@@ -82,16 +74,10 @@ def test_denied_admission_never_reaches_memory_effect() -> None:
     gateway = _gateway(admission)
 
     with pytest.raises(InternalAdmissionDenied, match="not authorized"):
-        gateway.write(
+        gateway.search(
             credential=SecretStr("identity-proof"),
             request_id=ZERO,
-            candidate=ScopedMemoryWrite(
-                idempotency_key="one",
-                subject="Lucy",
-                predicate="boundary",
-                object="Utopia only",
-                confidence_millionths=1_000_000,
-            ),
+            query="boundary",
             checked_at=NOW,
         )
 

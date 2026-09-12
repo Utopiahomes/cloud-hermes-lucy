@@ -9,11 +9,7 @@ from pydantic import SecretStr
 
 from lucy.contracts.security_v1_3 import ExactObjectSelectorV1
 from lucy.internal_admission import RealmInternalAdmissionService
-from lucy.scoped_memory import (
-    ScopedMemoryClaim,
-    ScopedMemoryWrite,
-    ScopedMemoryWriteResult,
-)
+from lucy.scoped_memory import ScopedMemoryClaim
 
 
 class AuthenticatedScopedMemoryGateway:
@@ -35,22 +31,6 @@ class AuthenticatedScopedMemoryGateway:
             object_id=workspace_id,
             object_version=workspace_version,
         )
-
-    def write(
-        self,
-        *,
-        credential: SecretStr,
-        request_id: UUID,
-        candidate: ScopedMemoryWrite,
-        checked_at: datetime,
-    ) -> ScopedMemoryWriteResult:
-        self._admit(
-            credential=credential,
-            request_id=request_id,
-            action="memory.write",
-            checked_at=checked_at,
-        )
-        return self._admission._scoped_memory_for_effect(action="memory.write").write(candidate)
 
     def search(
         self,

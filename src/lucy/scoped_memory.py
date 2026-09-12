@@ -43,6 +43,14 @@ class ScopedMemoryClaim(BaseModel):
     object: str
     confidence_millionths: int
     status: str
+    candidate_id: UUID | None = None
+    candidate_version: int | None = None
+    protection_class: str = "ordinary_private"
+    memory_kind: str | None = None
+    assertion_status: str | None = None
+    epistemic_status: str | None = None
+    domain_tags: tuple[str, ...] = ()
+    source_evidence_ids: tuple[UUID, ...] = ()
 
 
 class ScopedMemoryService:
@@ -106,7 +114,7 @@ class ScopedMemoryService:
         try:
             with self._sessions() as session:
                 result = session.execute(
-                    text("SELECT lucy.search_scoped_memory_v1(:query,:limit)"),
+                    text("SELECT lucy.search_governed_scoped_memory_v1(:query,:limit)"),
                     {"query": query, "limit": limit},
                 ).scalar_one()
         except DBAPIError as exc:

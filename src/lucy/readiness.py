@@ -15,6 +15,7 @@ from lucy.deletion_journal import DeletionJournal, check_journal_admission
 SCHEMA_REVISION = "0021_recovery_capture_safety"
 R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
 STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
+MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",
@@ -113,7 +114,7 @@ class ServiceReadiness:
             expected_revisions = {SCHEMA_REVISION}
             if self._baseline == "v1.3":
                 expected_revisions = (
-                    {STAGE2_SCHEMA_REVISION}
+                    {STAGE2_SCHEMA_REVISION, MEMORY_IMPORT_SCHEMA_REVISION}
                     if os.getenv("LUCY_TELEGRAM_STAGE") == "2"
                     # The bridge release must remain healthy before and after
                     # the quarantined 0053 -> 0054 migration. Stage 2 itself
@@ -352,13 +353,21 @@ class ServiceReadiness:
         required_functions = {
             "public": ("lucy.public_projection_answer_v2(text,text,uuid)",),
             "routine": (
-                "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint)",
-                "lucy.search_scoped_memory_v1(text,integer)",
+                "lucy.stage_memory_import_candidate_v1(jsonb)",
+                "lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb)",
+                "lucy.search_governed_scoped_memory_v1(text,integer)",
+                "lucy.reserve_memory_import_attempt_v1(uuid,text,bigint)",
+                "lucy.settle_memory_import_attempt_v1(uuid,bigint,text)",
                 "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
                 "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
                 "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
             ),
             "policy": (
+                "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text)",
+                "lucy.promote_scoped_memory_candidate_v1(uuid,text)",
+                "lucy.search_protected_scoped_memory_v1(text,integer,uuid,text)",
+                "lucy.authorize_memory_import_campaign_v1("
+                "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text)",
                 "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
                 "lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint)",
                 "lucy.read_claimed_sensitive_authority_v1(uuid)",

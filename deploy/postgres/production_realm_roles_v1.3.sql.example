@@ -95,9 +95,11 @@ GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission TO
 -- Normal/private Lucy plus archive ingestion. Every operation derives its one
 -- content scope from session_user; there is no request-selected realm.
 GRANT EXECUTE ON FUNCTION
-  lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint),
-  lucy.search_scoped_memory_v1(text,integer),
-  lucy.write_evidence_derived_memory_claim_v2(text,text,text,text,bigint,uuid[]),
+  lucy.stage_memory_import_candidate_v1(jsonb),
+  lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb),
+  lucy.search_governed_scoped_memory_v1(text,integer),
+  lucy.reserve_memory_import_attempt_v1(uuid,text,bigint),
+  lucy.settle_memory_import_attempt_v1(uuid,bigint,text),
   lucy.set_scoped_capture_mode_v1(text,boolean,text),
   lucy.get_scoped_capture_mode_v1(text),
   lucy.accept_scoped_capture_turn_v1(text,text),
@@ -120,6 +122,11 @@ TO "__LUCY_REALM_ROUTINE_LOGIN__";
 -- Content-free policy notary. It signs/adopts exact contracts, grants and
 -- receipts but receives no direct archive or memory table authority.
 GRANT EXECUTE ON FUNCTION
+  lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text),
+  lucy.promote_scoped_memory_candidate_v1(uuid,text),
+  lucy.search_protected_scoped_memory_v1(text,integer,uuid,text),
+  lucy.authorize_memory_import_campaign_v1(
+    uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text),
   lucy.issue_sensitive_action_permit_v3(jsonb,text),
   lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint),
   lucy.read_claimed_sensitive_authority_v1(uuid),

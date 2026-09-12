@@ -34,7 +34,7 @@ from lucy.internal_admission import (
     VerifiedCustomerIdentityV1,
 )
 from lucy.realm_sessions import RealmRuntimeBindingV1, RealmSessionRegistry
-from lucy.scoped_memory import ScopedMemoryWrite
+from lucy.scoped_memory import ScopedMemoryService, ScopedMemoryWrite
 from lucy.tenancy import NodeFoundation, TenancyService
 
 APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
@@ -322,7 +322,7 @@ def test_authenticated_gateway_rechecks_authority_before_each_memory_effect(
             text(
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint), "
-                "lucy.search_scoped_memory_v1(text,integer) TO "
+                "lucy.search_governed_scoped_memory_v1(text,integer) TO "
                 "lucy_utopia_routine,lucy_raymond_routine"
             )
         )
@@ -336,12 +336,8 @@ def test_authenticated_gateway_rechecks_authority_before_each_memory_effect(
         confidence_millionths=1_000_000,
     )
 
-    assert utopia_gateway.write(
-        credential=SecretStr("utopia-token"),
-        request_id=uuid4(),
-        candidate=candidate,
-        checked_at=datetime.now(UTC),
-    ).replayed is False
+    seeded = ScopedMemoryService(create_session_factory(UTOPIA_URL)).write(candidate)
+    assert seeded.replayed is False
     assert utopia_gateway.search(
         credential=SecretStr("utopia-token"),
         request_id=uuid4(),

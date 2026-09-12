@@ -135,7 +135,7 @@ def test_raymond_utopia_alpha_logins_are_fixed_to_their_private_memory() -> None
             text(
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint), "
-                "lucy.search_scoped_memory_v1(text,integer) TO "
+                "lucy.search_governed_scoped_memory_v1(text,integer) TO "
                 "lucy_raymond_routine,lucy_utopia_routine,lucy_alpha_routine"
             )
         )
