@@ -13,7 +13,11 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from lucy.contracts.security_v1_3 import OriginScopeV1
+from lucy.contracts.security_v1_3 import (
+    DeletionArtifactClassV3,
+    DeletionTargetReferenceV3,
+    OriginScopeV1,
+)
 from lucy.db import create_session_factory
 from lucy.db.models import (
     MemoryImportCampaignV1Row,
@@ -223,6 +227,7 @@ def _provision() -> tuple[object, object]:
                         "memory.candidate.approve",
                         "memory.candidate.promote",
                         "memory.protected.read",
+                        "sensitive.deletion_manifest.issue",
                     ],
                     binding_generation=1,
                     node_authz_epoch=1,
@@ -316,6 +321,7 @@ def _provision() -> tuple[object, object]:
                 "lucy.search_protected_scoped_memory_v1(text,integer,uuid,text) "
                 ",lucy.authorize_memory_import_campaign_v1("
                 "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text) "
+                ",lucy.build_scoped_deletion_targets_v3(uuid) "
                 "TO lucy_raymond_policy"
             )
         )
@@ -375,6 +381,93 @@ def _make_source_unavailable(evidence_id: object) -> None:
                 "ENABLE TRIGGER scoped_evidence_payloads_v2_immutable"
             )
         )
+
+
+def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
+    assert OWNER_URL is not None
+    operation_id = uuid4()
+    permit_id = uuid4()
+    representation_id = uuid4()
+    wrapped_key_ref = uuid4()
+    now = datetime.now(UTC)
+    owner = create_session_factory(OWNER_URL)
+    with owner.begin() as session:
+        payload_digest = session.execute(
+            text(
+                "SELECT payload_ciphertext_digest "
+                "FROM lucy.scoped_evidence_payloads_v2 WHERE evidence_id=:evidence"
+            ),
+            {"evidence": evidence_id},
+        ).scalar_one()
+        session.execute(
+            text(
+                "INSERT INTO lucy.scoped_evidence_wrappers_v2("
+                "representation_id,evidence_id,content_scope_id,wrapped_key_ref,"
+                "payload_ciphertext_digest,serialized_wrapper,current,created_at) "
+                "VALUES (:representation,:evidence,:scope,:key,:digest,'{}',true,:now)"
+            ),
+            {
+                "representation": representation_id,
+                "evidence": evidence_id,
+                "scope": scope_id,
+                "key": wrapped_key_ref,
+                "digest": payload_digest,
+                "now": now,
+            },
+        )
+        session.execute(
+            text(
+                "INSERT INTO lucy.sensitive_action_permits_v3("
+                "id,operation_id,content_scope_id,policy_actor_binding_id,"
+                "target_service_binding_id,principal_id,channel_binding_id,action,"
+                "resource_object_id,resource_object_version,permit_digest,"
+                "serialized_permit,nonce,issuance_idempotency_key,issued_at,"
+                "permit_claim_deadline,execution_completion_deadline,state,"
+                "claim_idempotency_key,claimed_at,created_at) "
+                "SELECT :permit,:operation,p.content_scope_id,p.id,"
+                "p.target_service_binding_id,p.actor_principal_id,c.id,'evidence.delete',"
+                ":evidence,1,:digest,'{}',:nonce,:issue_key,:now,:claim_deadline,"
+                ":completion_deadline,'CLAIMED',:claim_key,:now,:now "
+                "FROM lucy.realm_sensitive_actor_bindings_v1 p "
+                "CROSS JOIN LATERAL (SELECT id FROM lucy.channel_bindings LIMIT 1) c "
+                "WHERE p.content_scope_id=:scope AND p.actor_role='policy_notary'"
+            ),
+            {
+                "permit": permit_id,
+                "operation": operation_id,
+                "evidence": evidence_id,
+                "digest": hashlib.sha256(permit_id.bytes).hexdigest(),
+                "nonce": f"synthetic-{permit_id.hex}",
+                "issue_key": f"synthetic-issue-{permit_id}",
+                "claim_key": f"synthetic-claim-{permit_id}",
+                "now": now,
+                "claim_deadline": now + timedelta(seconds=60),
+                "completion_deadline": now + timedelta(seconds=120),
+                "scope": scope_id,
+            },
+        )
+        session.execute(
+            text(
+                "INSERT INTO lucy.sensitive_operations_v2("
+                "id,permit_id,content_scope_id,workflow_actor_binding_id,"
+                "target_service_binding_id,action,resource_object_id,"
+                "resource_object_version,claim_idempotency_key,state,claimed_at) "
+                "SELECT :operation,:permit,p.content_scope_id,p.id,"
+                "p.target_service_binding_id,'evidence.delete',:evidence,1,"
+                ":claim_key,'CLAIMED',:now "
+                "FROM lucy.realm_sensitive_actor_bindings_v1 p "
+                "WHERE p.content_scope_id=:scope AND p.actor_role='policy_notary'"
+            ),
+            {
+                "operation": operation_id,
+                "permit": permit_id,
+                "evidence": evidence_id,
+                "claim_key": f"synthetic-operation-{operation_id}",
+                "now": now,
+                "scope": scope_id,
+            },
+        )
+    return operation_id
 
 
 def test_fixture_drives_exact_manifest_candidates_and_governed_recall() -> None:
@@ -916,6 +1009,123 @@ def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
     _make_source_unavailable(evidence_ids[0])
     with pytest.raises(MemoryOutcomeUnavailable, match="lookup unavailable"):
         outcome_store.load(job_id)
+
+
+def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> None:
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    scope_id, evidence_ids = _provision()
+    raymond_sessions = create_session_factory(RAYMOND_URL)
+    policy_sessions = create_session_factory(POLICY_URL)
+    extractor = GovernedMemoryExtractor(raymond_sessions)
+    policy = GovernedMemoryPolicy(policy_sessions)
+    candidate = _candidate(
+        scope_id,
+        evidence_ids,
+        protection=ProtectionClass.PROTECTED,
+    )
+    extractor.stage(candidate)
+    candidate_v2 = candidate.model_copy(
+        update={
+            "candidate_version": 2,
+            "object": "Use plan B after review",
+            "supersedes_candidate_id": candidate.candidate_id,
+        }
+    )
+    extractor.stage(candidate_v2)
+    approval = policy.approve(
+        candidate,
+        owner_approval_ref=uuid4(),
+        owner_actor_id="raymond-owner",
+    )
+    policy.promote(approval.approval_id, expected_digest=candidate.digest)
+
+    reservation = extractor.reserve_attempt(
+        TEST_CAMPAIGN_ID,
+        attempt_key="v3-deletion-outcome",
+        reserved_microusd=0,
+    )
+    request_commitment = "7" * 64
+    job_id = memory_extraction_job_id(
+        TEST_CAMPAIGN_ID,
+        attempt_key="v3-deletion-outcome",
+        request_commitment=request_commitment,
+    )
+    job = {
+        "contract_version": "1",
+        "extraction_job_id": str(job_id),
+        "reservation_id": str(reservation.reservation_id),
+        "campaign_id": str(TEST_CAMPAIGN_ID),
+        "manifest_digest": TEST_MANIFEST_DIGEST,
+        "attempt_key": "v3-deletion-outcome",
+        "source_record_ids": ["synthetic-record-0"],
+        "request_commitment": request_commitment,
+        "request_bytes": 50,
+        "input_token_upper_bound": 50,
+        "maximum_output_tokens": 50,
+        "token_accounting_version": "canonical-json-byte-upper-bound-v1",
+        "provider_policy_id": "synthetic-private-zdr-v1",
+        "model_route": "none",
+        "maximum_microusd": 0,
+    }
+    with raymond_sessions.begin() as session:
+        session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(job, separators=(",", ":"))},
+        ).scalar_one()
+    encryption_id = uuid4()
+    registry_id = uuid4()
+    envelope = MemoryOutcomeEnvelopeV1(
+        binding=MemoryOutcomeBindingV1(
+            extraction_job_id=job_id,
+            reservation_id=reservation.reservation_id,
+            campaign_id=TEST_CAMPAIGN_ID,
+            destination_content_scope_id=scope_id,
+            manifest_digest=TEST_MANIFEST_DIGEST,
+            attempt_key="v3-deletion-outcome",
+            source_record_ids=("synthetic-record-0",),
+            request_commitment=request_commitment,
+            provider_policy_id="synthetic-private-zdr-v1",
+            model_route="none",
+            maximum_microusd=0,
+        ),
+        encryption_id=encryption_id,
+        registry_id=registry_id,
+        algorithm="AES-256-GCM+AES-KW-GCM",
+        encryption_context_version=1,
+        record_version=1,
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        ciphertext_b64=base64.b64encode(b"encrypted outcome").decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"n" * 12).decode("ascii"),
+        keyed_commitment="8" * 64,
+        billed_microusd=0,
+        provider_reference_commitment="9" * 64,
+    )
+    PostgresMemoryOutcomeStore(raymond_sessions).put(envelope)
+
+    operation_id = _prepare_deletion_operation(scope_id, evidence_ids[0])
+    with policy_sessions.begin() as session:
+        raw_targets = session.execute(
+            text("SELECT lucy.build_scoped_deletion_targets_v3(:operation)"),
+            {"operation": operation_id},
+        ).scalar_one()
+    targets = tuple(DeletionTargetReferenceV3.model_validate(item) for item in raw_targets)
+
+    assert [target.artifact_class for target in targets] == [
+        DeletionArtifactClassV3.ENCRYPTED_ARCHIVE,
+        DeletionArtifactClassV3.MEMORY_CANDIDATE,
+        DeletionArtifactClassV3.MEMORY_CANDIDATE,
+        DeletionArtifactClassV3.MEMORY_CLAIM,
+        DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME,
+    ]
+    assert targets[1].artifact_id == candidate.candidate_id
+    assert targets[2].artifact_id == candidate.candidate_id
+    assert (targets[1].artifact_version, targets[2].artifact_version) == (1, 2)
+    assert targets[-1].artifact_id == job_id
+    assert targets[-1].representation_id == encryption_id
+    assert targets[-1].wrapped_key_ref == encryption_id
+    assert targets[-1].key_registry_id == registry_id
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:
