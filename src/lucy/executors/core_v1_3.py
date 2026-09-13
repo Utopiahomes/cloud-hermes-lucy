@@ -20,6 +20,7 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
@@ -29,11 +30,13 @@ from lucy.contracts.security_v1_3 import (
 from lucy.executors.admission_v1_3 import (
     RealmExecutorIdentityV1,
     verify_deletion_invocation_v2,
+    verify_deletion_invocation_v3,
     verify_retrieval_invocation_v2,
 )
 from lucy.executors.core import ExecutorRejected
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
+    DeletionExecutorInvocationV3,
     ExecutorInvocationResultV2,
     RetrievalExecutorInvocationV2,
     WrappedKeyMaterial,
@@ -61,6 +64,18 @@ class RealmExecutorBackend(Protocol):
         permit: SensitiveActionPermitV3,
         grant: SensitiveExecutionGrantV2,
         manifest: DeletionTargetManifestV2,
+        receipt: ExecutorReceiptV2,
+        transaction_token: str,
+        now: datetime,
+        quota: ExecutorQuotaV1,
+    ) -> bool: ...
+
+    def commit_deletion_v3(
+        self,
+        *,
+        permit: SensitiveActionPermitV3,
+        grant: SensitiveExecutionGrantV2,
+        manifest: DeletionTargetManifestV3,
         receipt: ExecutorReceiptV2,
         transaction_token: str,
         now: datetime,
@@ -101,7 +116,7 @@ class _RealmExecutorBase:
         lambda_request_id: str,
         completed_at: datetime,
         kms_request_id: str | None,
-        manifest: DeletionTargetManifestV2 | None,
+        manifest: DeletionTargetManifestV2 | DeletionTargetManifestV3 | None,
         transaction_token: str | None,
     ) -> ExecutorReceiptV2:
         retrieval = self._identity.action == SensitiveActionV2.EVIDENCE_RETRIEVE
@@ -161,7 +176,7 @@ class _RealmExecutorBase:
         *,
         permit: SensitiveActionPermitV3,
         grant: SensitiveExecutionGrantV2,
-        manifest: DeletionTargetManifestV2 | None,
+        manifest: DeletionTargetManifestV2 | DeletionTargetManifestV3 | None,
     ) -> ExecutorInvocationResultV2:
         successful = (
             ExecutorResult.RETRIEVAL_SUCCEEDED
@@ -349,6 +364,74 @@ class RealmDeletionExecutor(_RealmExecutorBase):
         self._require_exact_signed_receipt(unsigned, signed)
         try:
             committed = self._backend.commit_deletion_v2(
+                permit=permit,
+                grant=grant,
+                manifest=manifest,
+                receipt=signed,
+                transaction_token=transaction_token,
+                now=now,
+                quota=quota,
+            )
+        except Exception as exc:
+            raise ExecutorRejected("deletion_transaction_failed") from exc
+        if not committed:
+            winner = self._backend.load_receipt_v2(grant.operation_id)
+            if winner is None:
+                raise ExecutorRejected("deletion_state_ambiguous")
+            return self._receipt_replay(
+                winner, permit=permit, grant=grant, manifest=manifest
+            )
+        return ExecutorInvocationResultV2(
+            action=self._identity.action,
+            receipt=signed,
+            receipt_digest=signed.unsigned_digest_hex(),
+            replayed=False,
+        )
+
+    def execute_v3(
+        self, invocation: DeletionExecutorInvocationV3, *, lambda_request_id: str
+    ) -> ExecutorInvocationResultV2:
+        """Execute the additive V3 imported-memory deletion closure."""
+
+        now = self._now()
+        verify_deletion_invocation_v3(
+            invocation,
+            verifier=self._verifier,
+            identity=self._identity,
+            checked_at=now,
+        )
+        permit, grant, manifest = (
+            invocation.permit,
+            invocation.execution_grant,
+            invocation.manifest,
+        )
+        existing = self._backend.load_receipt_v2(grant.operation_id)
+        if existing is not None:
+            return self._receipt_replay(
+                existing, permit=permit, grant=grant, manifest=manifest
+            )
+        quota = ExecutorQuotaV1.phase1(SensitiveActionV2.EVIDENCE_DELETE)
+        if manifest.target_count > quota.max_targets:
+            raise ExecutorRejected("deletion_target_limit_exceeded")
+        transaction_token = str(grant.operation_id)
+        completed_at = self._now()
+        unsigned = self._unsigned_receipt(
+            permit=permit,
+            grant=grant,
+            result=ExecutorResult.DELETION_SUCCEEDED,
+            lambda_request_id=lambda_request_id,
+            completed_at=completed_at,
+            kms_request_id=None,
+            manifest=manifest,
+            transaction_token=transaction_token,
+        )
+        try:
+            signed = self._backend.sign_receipt_v2(unsigned)
+        except Exception as exc:
+            raise ExecutorRejected("receipt_signing_failed") from exc
+        self._require_exact_signed_receipt(unsigned, signed)
+        try:
+            committed = self._backend.commit_deletion_v3(
                 permit=permit,
                 grant=grant,
                 manifest=manifest,

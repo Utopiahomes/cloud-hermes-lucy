@@ -625,7 +625,7 @@ Resources:
             Action: dynamodb:GetItem
             Resource: !GetAtt DeletionReceiptLedger.Arn
           - Effect: Allow
-            Action: dynamodb:DeleteItem
+            Action: dynamodb:UpdateItem
             Resource: !GetAtt WrappedKeyRegistry.Arn
             Condition: {"ForAnyValue:StringEquals": {"dynamodb:EnclosingOperation": TransactWriteItems}}
           - Effect: Allow
@@ -713,6 +713,7 @@ Resources:
           LUCY_AWS_EXECUTOR_RECEIPT_TABLE: !Ref DeletionReceiptLedger
           LUCY_AWS_EXECUTOR_QUOTA_TABLE: !Ref DeletionQuotaLedger
           LUCY_AWS_DELETION_INTENT_TABLE: !Ref DeletionExecutionIntents
+          LUCY_ARCHIVE_REGISTRY_ID: !Ref ArchiveRegistryId
           LUCY_EXECUTOR_MINUTE_LIMIT: !Ref DeletionMinuteLimit
           LUCY_EXECUTOR_DAY_LIMIT: !Ref DeletionDayLimit
           LUCY_POLICY_TRUST_STORE_JSON: !Ref PolicyTrustStoreJson

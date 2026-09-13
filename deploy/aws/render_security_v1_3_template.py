@@ -295,6 +295,21 @@ def derive_v1_3(source: bytes) -> str:
         )
     )
     text = _replace(text, old_deletion_environment, new_deletion_environment, count=1)
+    text = _replace(
+        text,
+        "            Action: dynamodb:DeleteItem\n"
+        "            Resource: !GetAtt WrappedKeyRegistry.Arn",
+        "            Action: dynamodb:UpdateItem\n"
+        "            Resource: !GetAtt WrappedKeyRegistry.Arn",
+        count=1,
+    )
+    text = _replace(
+        text,
+        "          LUCY_AWS_DELETION_INTENT_TABLE: !Ref DeletionExecutionIntents\n",
+        "          LUCY_AWS_DELETION_INTENT_TABLE: !Ref DeletionExecutionIntents\n"
+        "          LUCY_ARCHIVE_REGISTRY_ID: !Ref ArchiveRegistryId\n",
+        count=1,
+    )
 
     text = _replace(text, "      Name: production", "      Name: realm-v13", count=2)
     text = _replace(text, "CloudLucy/SecurityV1_2", "CloudLucy/SecurityV1_3", count=16)

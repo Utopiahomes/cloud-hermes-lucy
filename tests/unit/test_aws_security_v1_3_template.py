@@ -133,6 +133,7 @@ def test_v13_executors_are_environment_pinned_to_the_realm() -> None:
     assert deletion_env["LUCY_V13_CALLER_IDENTITY"] == {
         "Fn::GetAtt": "DeletionRole.Arn"
     }
+    assert deletion_env["LUCY_ARCHIVE_REGISTRY_ID"] == {"Ref": "ArchiveRegistryId"}
     assert "SecurityV1_2" not in text
     assert "handlers.retrieval_lambda_handler" not in text
     assert "handlers.deletion_lambda_handler" not in text
@@ -211,6 +212,25 @@ def test_v13_archive_role_can_reconcile_only_exact_wrapped_key_records() -> None
     assert "Query" not in serialized
     assert "BatchGetItem" not in serialized
     assert "DeleteItem" not in serialized
+
+
+def test_v13_deletion_executor_tombstones_keys_without_delete_authority() -> None:
+    _, template = _template()
+    statements = template["Resources"]["DeletionRuntimePolicy"]["Properties"][
+        "PolicyDocument"
+    ]["Statement"]
+    registry = next(
+        statement
+        for statement in statements
+        if statement.get("Resource") == {"Fn::GetAtt": "WrappedKeyRegistry.Arn"}
+    )
+    assert registry["Action"] == "dynamodb:UpdateItem"
+    assert registry["Condition"] == {
+        "ForAnyValue:StringEquals": {
+            "dynamodb:EnclosingOperation": "TransactWriteItems"
+        }
+    }
+    assert "DeleteItem" not in str(template["Resources"]["DeletionRuntimePolicy"])
 
 
 def test_r1_recovery_journals_have_separate_tables_and_pause_only_recovery() -> None:

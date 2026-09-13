@@ -29,9 +29,12 @@ from lucy.contracts.security_v1_2 import (
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
     DeletionArtifactClass,
+    DeletionArtifactClassV3,
     DeletionDisposition,
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     DeletionTargetReferenceV2,
+    DeletionTargetReferenceV3,
     Ed25519V13Signer,
     EncryptedEvidencePackageV2,
     EvidencePayloadBindingV2,
@@ -48,19 +51,26 @@ from lucy.contracts.security_v1_3 import (
     V13VerificationKeyStatus,
     V13VerificationKeyV1,
     deletion_targets_digest_v2,
+    deletion_targets_digest_v3,
     security_v1_3_json_schemas,
 )
 from lucy.executors import handlers_v1_3
 from lucy.executors.admission_v1_3 import (
     RealmExecutorIdentityV1,
     verify_deletion_invocation_v2,
+    verify_deletion_invocation_v3,
     verify_retrieval_invocation_v2,
 )
-from lucy.executors.aws import AwsExecutorBackend, AwsExecutorTables
+from lucy.executors.aws import (
+    AwsExecutorBackend,
+    AwsExecutorTables,
+    _wrapped_key_tombstone_digest_v3,
+)
 from lucy.executors.core import ExecutorRejected
 from lucy.executors.core_v1_3 import RealmDeletionExecutor, RealmRetrievalExecutor
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
+    DeletionExecutorInvocationV3,
     ExecutorInvocationResultV2,
     RetrievalExecutorInvocationV2,
     WrappedKeyMaterial,
@@ -351,6 +361,43 @@ def _deletion_manifest(**changes: object) -> DeletionTargetManifestV2:
     return DeletionTargetManifestV2.model_validate(values)
 
 
+def _deletion_manifest_v3(**changes: object) -> DeletionTargetManifestV3:
+    targets = (
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.ENCRYPTED_ARCHIVE,
+            artifact_id=ZERO,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=ONE,
+            wrapped_key_ref=TWO,
+        ),
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME,
+            artifact_id=THREE,
+            artifact_version=1,
+            root_evidence_id=ZERO,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=FOUR,
+            wrapped_key_ref=FOUR,
+            key_registry_id=THREE,
+        ),
+    )
+    values: dict[str, object] = {
+        **_deletion_manifest().model_dump(mode="python"),
+        "contract_version": "3",
+        "object_type": "lucy.deletion-target-manifest.v3",
+        "closure_version": 3,
+        "targets": targets,
+        "target_count": len(targets),
+        "targets_digest": deletion_targets_digest_v3(targets),
+        "tombstone_policy_version": 3,
+        "finality_policy_version": 3,
+    }
+    values.update(changes)
+    return DeletionTargetManifestV3.model_validate(values)
+
+
 def test_v13_executor_wire_types_are_additive_and_action_locked() -> None:
     retrieval = RetrievalExecutorInvocationV2(
         permit=_permit(),
@@ -547,6 +594,60 @@ def test_v13_deletion_admission_binds_signed_exact_closure() -> None:
         )
 
 
+def test_v13_deletion_admission_accepts_only_exact_v3_identity_and_policy() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    permit = signer.sign(
+        _permit(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            reason="owner_request",
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    manifest = signer.sign(
+        _deletion_manifest_v3(
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=permit.operation_id,
+        )
+    )
+    grant = signer.sign(
+        _grant(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_digest=permit.unsigned_digest_hex(),
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(manifest)),
+            idempotency_key=manifest.idempotency_key,
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    invocation = DeletionExecutorInvocationV3(
+        permit=permit,
+        execution_grant=grant,
+        manifest=manifest,
+    )
+    admitted = verify_deletion_invocation_v3(
+        invocation,
+        verifier=verifier,
+        identity=_executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
+        checked_at=NOW + timedelta(seconds=70),
+    )
+    assert admitted.record_version == 1
+
+    wrong_version = _executor_identity(SensitiveActionV2.EVIDENCE_DELETE)
+    wrong_version = RealmExecutorIdentityV1(**(wrong_version.__dict__ | {"record_version": 2}))
+    with pytest.raises(ExecutorRejected, match="manifest_binding_mismatch"):
+        verify_deletion_invocation_v3(
+            invocation,
+            verifier=verifier,
+            identity=wrong_version,
+            checked_at=NOW + timedelta(seconds=70),
+        )
+
+
 class _V13Dynamo:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
@@ -600,6 +701,7 @@ def _v13_aws_adapter(
         receipt_key_arn=RECEIPT_KEY_ARN,
         minute_limit=3,
         day_limit=10,
+        archive_registry_id=THREE if deletion else None,
     )
 
 
@@ -699,6 +801,109 @@ def test_v13_aws_deletion_commits_only_archive_key_targets_atomically() -> None:
     assert DeletionTargetManifestV2.model_validate_json(intent["manifest_json"]["S"]) == manifest
 
 
+def test_v13_aws_v3_tombstones_exact_keys_and_rejects_foreign_registry() -> None:
+    dynamo, kms = _V13Dynamo(), _V13Kms()
+    adapter = _v13_aws_adapter(dynamo, kms, deletion=True)
+    permit = _permit(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        reason="owner_request",
+        max_records=10,
+        max_bytes=131_072,
+    )
+    manifest = _deletion_manifest_v3(
+        permit_id=permit.permit_id,
+        permit_digest=permit.unsigned_digest_hex(),
+        operation_id=permit.operation_id,
+    )
+    grant = _grant(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        permit_digest=permit.unsigned_digest_hex(),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        encrypted_package_digest=manifest.unsigned_digest_hex(),
+        package_size_bytes=len(canonical_json_bytes(manifest)),
+        idempotency_key=manifest.idempotency_key,
+        max_records=10,
+        max_bytes=131_072,
+    )
+    receipt = _receipt(
+        action=SensitiveActionV2.EVIDENCE_DELETE,
+        signing_key_purpose=V13SigningKeyPurpose.DELETION_RECEIPT,
+        key_id=RECEIPT_KEY_ARN,
+        result=ExecutorResult.DELETION_SUCCEEDED,
+        kms_request_id=None,
+        transaction_client_token=str(FOUR),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+        finality_state="operationally_deleted",
+    )
+    assert adapter.commit_deletion_v3(
+        permit=permit,
+        grant=grant,
+        manifest=manifest,
+        receipt=receipt,
+        transaction_token=str(FOUR),
+        now=NOW + timedelta(seconds=30),
+        quota=ExecutorQuotaV1.phase1(SensitiveActionV2.EVIDENCE_DELETE),
+    )
+    actions = dynamo.calls[-1][1]["TransactItems"]
+    assert isinstance(actions, list)
+    updates = [item["Update"] for item in actions if "Update" in item]
+    key_updates = [item for item in updates if item["TableName"].endswith("wrapped-keys-v13")]
+    assert len(key_updates) == 2
+    assert all(
+        "REMOVE ciphertext, nonce, kek_version" in item["UpdateExpression"]
+        for item in key_updates
+    )
+    assert all(
+        "tombstone_digest=:digest" in item["ConditionExpression"]
+        for item in key_updates
+    )
+
+    foreign = _deletion_manifest_v3(
+        targets=tuple(
+            target.model_copy(update={"key_registry_id": FOUR})
+            if target.artifact_class
+            == DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME
+            else target
+            for target in manifest.targets
+        ),
+        targets_digest=deletion_targets_digest_v3(
+            tuple(
+                target.model_copy(update={"key_registry_id": FOUR})
+                if target.artifact_class
+                == DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME
+                else target
+                for target in manifest.targets
+            )
+        ),
+    )
+    with pytest.raises(ValueError, match="another key registry"):
+        adapter.commit_deletion_v3(
+            permit=permit,
+            grant=grant,
+            manifest=foreign,
+            receipt=receipt,
+            transaction_token=str(FOUR),
+            now=NOW + timedelta(seconds=30),
+            quota=ExecutorQuotaV1.phase1(SensitiveActionV2.EVIDENCE_DELETE),
+        )
+
+
+def test_v13_shared_outcome_tombstone_identity_excludes_deletion_root() -> None:
+    outcome = next(
+        target
+        for target in _deletion_manifest_v3().targets
+        if target.artifact_class
+        == DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME
+    )
+    first = _wrapped_key_tombstone_digest_v3(outcome, registry_id=THREE)
+    second = _wrapped_key_tombstone_digest_v3(
+        outcome.model_copy(update={"root_evidence_id": ONE}), registry_id=THREE
+    )
+    assert first == second
+
+
 class _V13CoreBackend:
     def __init__(self, dek: bytes) -> None:
         self.dek = dek
@@ -761,6 +966,26 @@ class _V13CoreBackend:
     ) -> bool:
         assert permit.operation_id == grant.operation_id == receipt.operation_id
         assert manifest.manifest_id == receipt.deletion_manifest_id
+        assert transaction_token == str(grant.operation_id)
+        assert now == NOW + timedelta(seconds=70)
+        assert quota.action == SensitiveActionV2.EVIDENCE_DELETE
+        self.deletion_commits += 1
+        self.receipts[receipt.operation_id] = receipt
+        return True
+
+    def commit_deletion_v3(
+        self,
+        *,
+        permit: SensitiveActionPermitV3,
+        grant: SensitiveExecutionGrantV2,
+        manifest: DeletionTargetManifestV3,
+        receipt: ExecutorReceiptV2,
+        transaction_token: str,
+        now: datetime,
+        quota: ExecutorQuotaV1,
+    ) -> bool:
+        assert manifest.contract_version == "3"
+        assert permit.operation_id == grant.operation_id == receipt.operation_id
         assert transaction_token == str(grant.operation_id)
         assert now == NOW + timedelta(seconds=70)
         assert quota.action == SensitiveActionV2.EVIDENCE_DELETE
@@ -852,6 +1077,52 @@ def test_v13_deletion_core_commits_once_and_never_decrypts() -> None:
     assert first.receipt.finality_state == "operationally_deleted"
     replay = executor.execute(invocation, lambda_request_id="lambda-v13-delete-replay")
     assert replay.replayed is True
+    assert backend.deletion_commits == 1 and backend.decrypt_calls == 0
+
+
+def test_v13_deletion_core_executes_v3_once_and_replays() -> None:
+    signer, verifier = _policy_signer_and_verifier()
+    permit = signer.sign(
+        _permit(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            reason="owner_request",
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    manifest = signer.sign(
+        _deletion_manifest_v3(
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=permit.operation_id,
+        )
+    )
+    grant = signer.sign(
+        _grant(
+            action=SensitiveActionV2.EVIDENCE_DELETE,
+            permit_digest=permit.unsigned_digest_hex(),
+            deletion_manifest_id=manifest.manifest_id,
+            deletion_manifest_digest=manifest.unsigned_digest_hex(),
+            encrypted_package_digest=manifest.unsigned_digest_hex(),
+            package_size_bytes=len(canonical_json_bytes(manifest)),
+            idempotency_key=manifest.idempotency_key,
+            max_records=10,
+            max_bytes=131_072,
+        )
+    )
+    invocation = DeletionExecutorInvocationV3(
+        permit=permit, execution_grant=grant, manifest=manifest
+    )
+    backend = _V13CoreBackend(b"unused")
+    executor = RealmDeletionExecutor(
+        backend,
+        verifier,
+        _executor_identity(SensitiveActionV2.EVIDENCE_DELETE),
+        receipt_key_id=RECEIPT_KEY_ARN,
+        clock=lambda: NOW + timedelta(seconds=70),
+    )
+    assert executor.execute_v3(invocation, lambda_request_id="lambda-v3-delete").replayed is False
+    assert executor.execute_v3(invocation, lambda_request_id="lambda-v3-replay").replayed is True
     assert backend.deletion_commits == 1 and backend.decrypt_calls == 0
 
 

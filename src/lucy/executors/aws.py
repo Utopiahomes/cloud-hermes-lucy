@@ -7,6 +7,7 @@ an exact GetItem, PutItem, Update, Delete, or bounded TransactWriteItems call.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -26,7 +27,10 @@ from lucy.contracts.security_v1_2 import (
     SensitiveExecutionGrantV1,
 )
 from lucy.contracts.security_v1_3 import (
+    DeletionArtifactClassV3,
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
+    DeletionTargetReferenceV3,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
@@ -74,6 +78,7 @@ class AwsExecutorBackend:
         receipt_key_arn: str,
         minute_limit: int,
         day_limit: int,
+        archive_registry_id: UUID | None = None,
     ) -> None:
         if minute_limit < 1 or day_limit < minute_limit:
             raise ValueError("executor quota limits are invalid")
@@ -86,6 +91,7 @@ class AwsExecutorBackend:
         self._receipt_key_arn = receipt_key_arn
         self._minute_limit = minute_limit
         self._day_limit = day_limit
+        self._archive_registry_id = archive_registry_id
 
     def load_receipt(self, operation_id: UUID) -> ExecutorReceiptV1 | None:
         response = self._dynamodb.get_item(
@@ -385,6 +391,127 @@ class AwsExecutorBackend:
                 return False
             raise
 
+    def commit_deletion_v3(
+        self,
+        *,
+        permit: SensitiveActionPermitV3,
+        grant: SensitiveExecutionGrantV2,
+        manifest: DeletionTargetManifestV3,
+        receipt: ExecutorReceiptV2,
+        transaction_token: str,
+        now: datetime,
+        quota: ExecutorQuotaV1,
+    ) -> bool:
+        """Atomically tombstone each exact key while retaining authenticated identity."""
+
+        if self._tables.intents is None:
+            raise RuntimeError("deletion executor has no immutable intent table")
+        if self._archive_registry_id is None:
+            raise RuntimeError("deletion executor has no archive registry identity")
+        if len(transaction_token) > 36:
+            raise ValueError("DynamoDB client request token exceeds its hard limit")
+        actions: list[dict[str, Any]] = [
+            {
+                "Put": {
+                    "TableName": self._tables.intents,
+                    "Item": {
+                        "operation_id": {"S": str(receipt.operation_id)},
+                        "permit_id": {"S": str(receipt.permit_id)},
+                        "security_realm_id": {
+                            "S": str(receipt.target_scope.security_realm_id)
+                        },
+                        "manifest_id": {"S": str(manifest.manifest_id)},
+                        "manifest_version": {"N": "3"},
+                        "manifest_digest": {"S": manifest.unsigned_digest_hex()},
+                        "manifest_json": {
+                            "S": canonical_json_bytes(manifest).decode("utf-8")
+                        },
+                        "permit_digest": {"S": permit.unsigned_digest_hex()},
+                        "permit_json": {"S": canonical_json_bytes(permit).decode("utf-8")},
+                        "grant_digest": {"S": grant.unsigned_digest_hex()},
+                        "grant_json": {"S": canonical_json_bytes(grant).decode("utf-8")},
+                        "accepted_at": {"S": _utc_text(now)},
+                    },
+                    "ConditionExpression": "attribute_not_exists(operation_id)",
+                }
+            },
+            {
+                "Put": {
+                    "TableName": self._tables.receipts,
+                    "Item": self._receipt_item_v2(receipt),
+                    "ConditionExpression": "attribute_not_exists(operation_id)",
+                }
+            },
+            *self._quota_updates(now, quota),
+        ]
+        key_targets: dict[UUID, tuple[DeletionTargetReferenceV3, str]] = {}
+        for target in manifest.targets:
+            if target.wrapped_key_ref is None:
+                continue
+            if (
+                target.artifact_class
+                == DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME
+                and target.key_registry_id != self._archive_registry_id
+            ):
+                raise ValueError("provider outcome belongs to another key registry")
+            digest = _wrapped_key_tombstone_digest_v3(
+                target, registry_id=self._archive_registry_id
+            )
+            prior = key_targets.get(target.wrapped_key_ref)
+            if prior is not None and prior[1] != digest:
+                raise ValueError("one wrapped key has conflicting V3 target identities")
+            key_targets[target.wrapped_key_ref] = (target, digest)
+        for target, digest in key_targets.values():
+            actions.append(
+                {
+                    "Update": {
+                        "TableName": self._tables.wrapped_keys,
+                        "Key": {"key_ref": {"S": str(target.wrapped_key_ref)}},
+                        "UpdateExpression": (
+                            "REMOVE ciphertext, nonce, kek_version "
+                            "SET tombstone_digest=:digest, tombstone_artifact_class=:class, "
+                            "tombstone_artifact_id=:artifact, tombstone_artifact_version=:version, "
+                            "tombstone_representation_id=:representation, "
+                            "tombstone_registry_id=:registry"
+                        ),
+                        "ConditionExpression": (
+                            "(attribute_exists(key_ref) AND attribute_exists(ciphertext) "
+                            "AND attribute_exists(nonce) AND attribute_exists(kek_version) "
+                            "AND attribute_not_exists(tombstone_digest)) OR "
+                            "(attribute_exists(key_ref) AND tombstone_digest=:digest "
+                            "AND tombstone_artifact_class=:class "
+                            "AND tombstone_artifact_id=:artifact "
+                            "AND tombstone_artifact_version=:version "
+                            "AND tombstone_representation_id=:representation "
+                            "AND tombstone_registry_id=:registry)"
+                        ),
+                        "ExpressionAttributeValues": {
+                            ":digest": {"S": digest},
+                            ":class": {"S": target.artifact_class.value},
+                            ":artifact": {"S": str(target.artifact_id)},
+                            ":version": {"N": str(target.artifact_version)},
+                            ":representation": {"S": str(target.representation_id)},
+                            ":registry": {"S": str(self._archive_registry_id)},
+                        },
+                    }
+                }
+            )
+        if len(actions) > AWS_DYNAMODB_TRANSACTION_ACTION_LIMIT:
+            raise ValueError("deletion transaction exceeds the AWS action limit")
+        serialized = json.dumps(actions, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        if len(serialized) > AWS_DYNAMODB_TRANSACTION_BYTES_LIMIT:
+            raise ValueError("deletion transaction exceeds the AWS byte limit")
+        try:
+            self._dynamodb.transact_write_items(
+                TransactItems=actions,
+                ClientRequestToken=transaction_token,
+            )
+            return True
+        except ClientError as exc:
+            if _aws_error_code(exc) == "TransactionCanceledException":
+                return False
+            raise
+
     def _receipt_item(self, receipt: ExecutorReceiptV1) -> dict[str, dict[str, str]]:
         return {
             "operation_id": {"S": str(receipt.operation_id)},
@@ -456,6 +583,25 @@ class AwsExecutorBackend:
 def _aws_error_code(exc: ClientError) -> str:
     value = exc.response.get("Error", {}).get("Code", "")
     return value if isinstance(value, str) else ""
+
+
+def _wrapped_key_tombstone_digest_v3(
+    target: DeletionTargetReferenceV3, *, registry_id: UUID
+) -> str:
+    """Commit the stable key identity; root evidence is deliberately excluded."""
+
+    stable = {
+        "artifact_class": target.artifact_class.value,
+        "artifact_id": str(target.artifact_id),
+        "artifact_version": target.artifact_version,
+        "disposition": target.disposition.value,
+        "representation_id": str(target.representation_id),
+        "wrapped_key_ref": str(target.wrapped_key_ref),
+        "key_registry_id": str(registry_id),
+    }
+    return hashlib.sha256(
+        b"lucy:wrapped-key-tombstone:v3\0" + canonical_json_bytes(stable)
+    ).hexdigest()
 
 
 def _utc_text(value: datetime) -> str:

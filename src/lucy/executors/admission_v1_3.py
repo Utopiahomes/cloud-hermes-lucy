@@ -10,6 +10,7 @@ from uuid import UUID
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.contracts.security_v1_2 import DeploymentEnvironment, SensitiveActionV2
 from lucy.contracts.security_v1_3 import (
+    DeletionTargetManifestV3,
     ExecutionBindingV1,
     OriginScopeV1,
     SensitiveActionPermitV3,
@@ -20,6 +21,7 @@ from lucy.contracts.security_v1_3 import (
 from lucy.executors.core import ExecutorRejected
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
+    DeletionExecutorInvocationV3,
     RetrievalExecutorInvocationV2,
 )
 
@@ -168,6 +170,80 @@ def verify_deletion_invocation_v2(
         record_version=permit.resource_selector.object_version,
         deletion_manifest_id=manifest.manifest_id,
     )
+
+
+def verify_deletion_invocation_v3(
+    invocation: DeletionExecutorInvocationV3,
+    *,
+    verifier: V13ContractVerifier,
+    identity: RealmExecutorIdentityV1,
+    checked_at: datetime,
+) -> VerifiedRealmInvocationV1:
+    """Admit an exact V3 closure without changing historical V2 semantics."""
+
+    permit, grant, manifest = (
+        invocation.permit,
+        invocation.execution_grant,
+        invocation.manifest,
+    )
+    _verify_common(permit, grant, verifier=verifier, identity=identity, checked_at=checked_at)
+    if identity.action != SensitiveActionV2.EVIDENCE_DELETE:
+        raise ExecutorRejected("executor_action_misconfigured")
+    try:
+        verifier.verify(
+            manifest,
+            expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+            checked_at=checked_at,
+        )
+    except PermissionError as exc:
+        raise ExecutorRejected("manifest_signature_invalid") from exc
+    digest = manifest.unsigned_digest_hex()
+    if (
+        permit.resource_selector.object_version != identity.record_version
+        or manifest.permit_id != permit.permit_id
+        or not hmac.compare_digest(manifest.permit_digest, permit.unsigned_digest_hex())
+        or manifest.operation_id != permit.operation_id
+        or manifest.target_scope != identity.target_scope
+        or manifest.workspace_id != identity.workspace_id
+        or manifest.root_evidence_id != permit.resource_selector.object_id
+        or manifest.owner_assertion_id != permit.owner_assertion_id
+        or manifest.owner_assertion_digest != permit.owner_assertion_digest
+        or manifest.idempotency_key != grant.idempotency_key
+        or manifest.permit_claim_deadline != permit.permit_claim_deadline
+        or manifest.execution_completion_deadline != permit.execution_completion_deadline
+        or manifest.closure_version != 3
+        or manifest.tombstone_policy_version != 3
+        or manifest.finality_policy_version != 3
+    ):
+        raise ExecutorRejected("manifest_binding_mismatch")
+    _verify_deletion_grant(grant, manifest, digest)
+    return VerifiedRealmInvocationV1(
+        action=identity.action,
+        operation_id=grant.operation_id,
+        permit_id=permit.permit_id,
+        grant_id=grant.grant_id,
+        package_digest=digest,
+        record_version=identity.record_version,
+        deletion_manifest_id=manifest.manifest_id,
+    )
+
+
+def _verify_deletion_grant(
+    grant: SensitiveExecutionGrantV2,
+    manifest: DeletionTargetManifestV3,
+    digest: str,
+) -> None:
+    if (
+        grant.deletion_manifest_id != manifest.manifest_id
+        or grant.deletion_manifest_digest is None
+        or not hmac.compare_digest(grant.deletion_manifest_digest, digest)
+        or not hmac.compare_digest(grant.encrypted_package_digest, digest)
+    ):
+        raise ExecutorRejected("manifest_digest_mismatch")
+    if len(manifest.targets) > grant.max_records:
+        raise ExecutorRejected("deletion_target_limit_exceeded")
+    if len(canonical_json_bytes(manifest)) != grant.package_size_bytes:
+        raise ExecutorRejected("manifest_size_mismatch")
 
 
 def _verify_common(

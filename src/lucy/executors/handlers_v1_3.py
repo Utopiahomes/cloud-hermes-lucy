@@ -35,7 +35,11 @@ from lucy.executors.aws import (
 )
 from lucy.executors.core import ExecutorRejected
 from lucy.executors.core_v1_3 import RealmDeletionExecutor, RealmRetrievalExecutor
-from lucy.executors.models import DeletionExecutorInvocationV2, RetrievalExecutorInvocationV2
+from lucy.executors.models import (
+    DeletionExecutorInvocationV2,
+    DeletionExecutorInvocationV3,
+    RetrievalExecutorInvocationV2,
+)
 
 _LOGGER = logging.getLogger("lucy.executor.v1_3")
 _METRIC_NAMESPACE = "CloudLucy/SecurityV1_3"
@@ -96,10 +100,17 @@ def _handle(
                 retrieval_invocation, lambda_request_id=context.aws_request_id
             )
         else:
-            deletion_invocation = DeletionExecutorInvocationV2.model_validate_json(raw)
-            result = cast(RealmDeletionExecutor, runtime.executor).execute(
-                deletion_invocation, lambda_request_id=context.aws_request_id
-            )
+            payload = json.loads(raw)
+            if payload.get("object_type") == "lucy.deletion-executor-invocation.v3":
+                deletion_invocation_v3 = DeletionExecutorInvocationV3.model_validate(payload)
+                result = cast(RealmDeletionExecutor, runtime.executor).execute_v3(
+                    deletion_invocation_v3, lambda_request_id=context.aws_request_id
+                )
+            else:
+                deletion_invocation = DeletionExecutorInvocationV2.model_validate(payload)
+                result = cast(RealmDeletionExecutor, runtime.executor).execute(
+                    deletion_invocation, lambda_request_id=context.aws_request_id
+                )
         _LOGGER.info(
             "lucy_realm_executor_outcome action=%s outcome=accepted replayed=%s",
             action.value,
@@ -209,6 +220,11 @@ def _runtime(
         receipt_key_arn=_required("LUCY_AWS_RECEIPT_SIGNING_KEY_ARN"),
         minute_limit=_positive_int("LUCY_EXECUTOR_MINUTE_LIMIT"),
         day_limit=_positive_int("LUCY_EXECUTOR_DAY_LIMIT"),
+        archive_registry_id=(
+            UUID(_required("LUCY_ARCHIVE_REGISTRY_ID"))
+            if action == SensitiveActionV2.EVIDENCE_DELETE
+            else None
+        ),
     )
     verifier = V13ContractVerifier(_policy_keys(identity.environment))
     if action == SensitiveActionV2.EVIDENCE_RETRIEVE:

@@ -17,6 +17,7 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     EncryptedEvidencePackageV2,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
@@ -118,6 +119,26 @@ class DeletionExecutorInvocationV2(StrictV13Contract):
 
     @model_validator(mode="after")
     def validate_action(self) -> DeletionExecutorInvocationV2:
+        if self.permit.action != SensitiveActionV2.EVIDENCE_DELETE:
+            raise ValueError("deletion invocation contains a non-deletion permit")
+        if self.execution_grant.action != SensitiveActionV2.EVIDENCE_DELETE:
+            raise ValueError("deletion invocation contains a non-deletion grant")
+        return self
+
+
+class DeletionExecutorInvocationV3(StrictV13Contract):
+    """One realm-scoped invocation for the versioned imported-memory closure."""
+
+    contract_version: Literal["3"] = "3"
+    object_type: Literal["lucy.deletion-executor-invocation.v3"] = (
+        "lucy.deletion-executor-invocation.v3"
+    )
+    permit: SensitiveActionPermitV3
+    execution_grant: SensitiveExecutionGrantV2
+    manifest: DeletionTargetManifestV3
+
+    @model_validator(mode="after")
+    def validate_action(self) -> DeletionExecutorInvocationV3:
         if self.permit.action != SensitiveActionV2.EVIDENCE_DELETE:
             raise ValueError("deletion invocation contains a non-deletion permit")
         if self.execution_grant.action != SensitiveActionV2.EVIDENCE_DELETE:

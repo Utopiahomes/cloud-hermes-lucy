@@ -123,6 +123,14 @@ accepted `0057` migration is merged at `2807dad`.
     requires the claimed, realm-bound permit, rechecks its admission deadline, enforces the
     permit's target ceiling, and replays an already frozen V3 manifest without rebuilding or
     silently changing its authority. The V2 authority and signing path remain unchanged.
+25. The Lambda executor boundary now understands an additive V3 invocation and validates the
+    deployment's exact archive record version plus closure, tombstone, and finality policy version
+    before any mutation. Its AWS transaction replaces each wrapped key with an authenticated,
+    content-free in-place tombstone rather than deleting the registry row. The stable outcome-key
+    commitment excludes the deletion root, allowing the same multi-source provider outcome to be
+    proven destroyed by later source deletions. Foreign outcome registries fail closed, Lambda now
+    receives the exact configured registry ID, and its role has UpdateItem rather than DeleteItem.
+    V2 invocation, admission, and physical key-deletion behavior remain unchanged.
 
 ## Verification ledger
 
@@ -130,8 +138,8 @@ accepted `0057` migration is merged at `2807dad`.
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0064_memory_deletion_authority` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
 | Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0064`; includes content-free V3 policy-authority snapshot, exact signed V3 persistence/replay, execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 874 tests | Full `tests/unit` run after the V3 deletion-authority signer increment, 2026-09-12 | Relevant Python or dependency change |
-| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after the V3 deletion-authority signer increment | Relevant source change |
+| Python unit suite | Passed, 879 tests | Full `tests/unit` run after the additive V3 executor/AWS tombstone increment, 2026-09-12 | Relevant Python or dependency change |
+| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after the additive V3 executor/AWS tombstone increment | Relevant source change |
 | Mypy strict | Passed, 98 source files | `mypy --strict src` after the pilot-runner increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
@@ -160,12 +168,12 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
    disabled until the outcome-key lifecycle below is complete and a specific pilot manifest is
    separately authorized. No real provider request is currently enabled.
-2. Connect the persisted V3 manifest to a version-aware executor, receipt reconciliation, and the
+2. Connect the persisted V3 manifest through a V3-specific grant binding to receipt reconciliation and the
    quarantined recovery reader before enabling the pilot. The additive wire contract, exact target
    builder, signature-verifying adapter, and durable manifest freeze are complete; V2 remains
-   immutable. V3 execution must destroy each outcome's external wrapped key, record
-   candidate/outcome tombstones, support restore replay, and handle a shared multi-source outcome
-   idempotently. Until then, the access gates prevent approval and outcome recovery after
+   immutable. The version-aware executor and shared-key-safe external tombstones are implemented;
+   PostgreSQL must still issue the additive grant, attest/reconcile its receipt, record exact
+   candidate/outcome tombstones, and support restore replay. Until then, the access gates prevent approval and outcome recovery after
    revocation, but do not yet prove cryptographic shredding of the derived provider result. An
    interruption before the first encrypted outcome write also remains an explicit reconciliation
    case; no automatic provider retry is allowed.
