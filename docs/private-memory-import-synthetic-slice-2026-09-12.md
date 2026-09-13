@@ -64,14 +64,21 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
    user evidence, schema, routing, privacy controls, Unicode bytes, and output setting share one
    commitment and conservative byte-based input-token upper bound. Forged counts or changed request
    bytes fail before network access.
+14. The local selection proposal now displays and binds the V2 request input, output, and total
+   ceilings plus the accounting version. Exact manifest generation emits V2 rather than silently
+   interpreting a source-only V1 estimate as execution authority.
+15. The deterministic compiler packs complete records without truncation, proves exact one-time
+   coverage, blocks an individually oversized record, respects the attempt and per-attempt cost
+   ceilings, and accounts for repeated request framing in every batch. Provider-reported input
+   usage is required and must remain inside the admitted conservative bound.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 7 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL; includes atomic completion replay and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 831 tests | Full `tests/unit` run after immutable complete-request accounting, 2026-09-12 | Relevant Python or dependency change |
+| Synthetic memory-import integration | Passed, 8 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL; includes V2 exact authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 835 tests | Full `tests/unit` run after V2 proposal and deterministic batch compiler, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
 | Mypy strict | Passed, 90 source files | `mypy --strict src` after isolated OpenRouter adapter | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -81,6 +88,7 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
 | Pilot completion assembly | Passed, 3 focused tests and full-suite rerun | Provenance materialization, exact review artifact, pre-database deterministic rejection, and no artifact after uncertain database acknowledgement | Pilot completion, materializer, or review-artifact change |
 | Executable request-budget contract | Passed, focused V1/V2 contract and coordinator/provider tests | Historical V1 round trip; V2 digest binding and separate source/input/output/total constraints; real execution typed to V2 | Manifest, request compiler, tokenizer/accounting, or provider framing change |
 | Immutable provider request | Passed, 8 focused tests and full-suite rerun | Canonical request commitment, complete byte/token upper-bound accounting, Unicode/system/schema inclusion, credential exclusion, tamper rejection, and pre-network count verification | Provider request body, schema, system prompt, or accounting version change |
+| V2 proposal and deterministic compiler | Passed, focused console/manifest/compiler/provider tests and full-suite rerun | Visible bound ceilings, exact digest, deterministic packing and coverage, oversize/attempt/cost rejection, complete request accounting, and provider input-usage reconciliation | Selection proposal, manifest generation, compiler, provider framing, or usage contract change |
 | Local ChatGPT inventory, review console, and exact-manifest builder | Passed, 16 tests | Safe paths, branches, keyed commitments, attachments, compression, sync-root, token, host/origin, stale-input, idempotency, exact-record/exclusion and changed-input checks | Parser, console, manifest, or limits change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
@@ -97,10 +105,11 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Assemble the coordinator, database source-eligibility implementation, deterministic candidate
-   materializer, atomic database completion, and isolated OpenRouter adapter behind a pilot-only
-   runner. The adapter and atomic completion boundary are implemented but no real provider request
-   is enabled; the runner must require the separately authorized manifest.
+1. Assemble the coordinator, database source-eligibility implementation, deterministic compiler,
+   candidate materializer, atomic database completion, and isolated OpenRouter adapter behind a
+   pilot-only runner. Every component except the database pre-dispatch eligibility operation and
+   runner wiring is implemented; no real provider request is enabled, and the runner must require
+   the separately authorized manifest.
 2. After Public Lucy connects its accepted migration `0057` to `0056`, add a realm-scoped durable
    extraction job and encrypted provider-outcome journal. Until that exists, the pilot must stay
    fenced: a replayed reservation or uncertain completion acknowledgement requires operator

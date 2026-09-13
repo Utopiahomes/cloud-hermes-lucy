@@ -33,6 +33,7 @@ from lucy.governed_memory import (
 from lucy.memory_import import (
     AssertionStatus,
     EpistemicStatus,
+    ImportManifestV2,
     MemoryCandidatePayloadV1,
     MemoryKind,
     ProtectionClass,
@@ -487,6 +488,58 @@ def test_fixture_drives_exact_manifest_candidates_and_governed_recall() -> None:
     )
     assert len(protected) == 1
     assert len(protected[0].source_evidence_ids) == 2
+
+
+def test_v2_executable_manifest_round_trips_through_exact_campaign_authorization() -> None:
+    assert all((OWNER_URL, POLICY_URL))
+    scope_id, _ = _provision()
+    conversation = load_synthetic_conversation(
+        Path(__file__).parents[1] / "fixtures" / "synthetic_memory_conversation.v1.json"
+    )
+    base = build_synthetic_manifest(
+        conversation,
+        campaign_id=uuid4(),
+        destination_content_scope_id=scope_id,
+        fingerprint_key=b"f" * 32,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        max_model_spend_microusd=10_000,
+        max_attempts=2,
+        provider_policy_id="private-zdr-v1",
+        model_route="openai/gpt-oss-20b",
+    )
+    values = base.model_dump(exclude={"contract_version", "max_input_tokens"})
+    source_tokens = sum(record.estimated_tokens for record in base.records if record.included)
+    manifest = ImportManifestV2.model_validate(
+        {
+            **values,
+            "token_accounting_version": "canonical-json-byte-upper-bound-v1",
+            "max_source_estimated_tokens": source_tokens,
+            "max_request_input_tokens": 100_000,
+            "max_request_output_tokens": 2_000,
+            "max_request_total_tokens": 102_000,
+        }
+    )
+    policy = GovernedMemoryPolicy(create_session_factory(POLICY_URL))
+
+    assert not policy.authorize_campaign(manifest).replayed
+    assert policy.authorize_campaign(manifest).replayed
+    with pytest.raises(GovernedMemoryUnavailable, match="authorization"):
+        policy.authorize_campaign(
+            manifest.model_copy(update={"max_request_total_tokens": 102_001})
+        )
+
+    owner = create_session_factory(OWNER_URL)
+    with owner() as session:
+        stored = session.execute(
+            text(
+                "SELECT serialized_manifest,manifest_digest "
+                "FROM lucy.memory_import_campaigns_v1 WHERE id=:campaign"
+            ),
+            {"campaign": manifest.campaign_id},
+        ).one()
+    assert stored.serialized_manifest["contract_version"] == "2"
+    assert stored.serialized_manifest["max_request_total_tokens"] == 102_000
+    assert stored.manifest_digest == manifest.digest
 
 
 def test_governed_ordinary_and_protected_memory_cycle() -> None:

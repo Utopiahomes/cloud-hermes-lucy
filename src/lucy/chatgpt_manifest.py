@@ -18,7 +18,7 @@ from lucy.chatgpt_import import (
     load_bounded_chatgpt_conversations,
 )
 from lucy.contracts.canonical import canonical_json_bytes, canonical_sha256
-from lucy.memory_import import ImportManifestRecordV1, ImportManifestV1
+from lucy.memory_import import ImportManifestRecordV1, ImportManifestV1, ImportManifestV2
 from lucy.memory_import_console import PilotSelectionProposalV1
 from lucy.realm_archive_commit import RealmArchiveCommitInputV1
 
@@ -60,7 +60,7 @@ class PilotManifestBundleV1(BaseModel):
     archive_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
     campaign_id: UUID
     destination_content_scope_id: UUID
-    manifest: ImportManifestV1
+    manifest: ImportManifestV1 | ImportManifestV2
     included_record_count: int = Field(ge=1)
     excluded_record_count: int = Field(ge=0)
     included_source_bytes: int = Field(ge=1)
@@ -152,7 +152,7 @@ def build_exact_pilot_manifests(
         parsed_conversations.append(parsed)
 
     included_records = tuple(record for record in all_records if record.included)
-    manifest = ImportManifestV1(
+    manifest = ImportManifestV2(
         campaign_id=campaign_id,
         destination_content_scope_id=selection.destination_content_scope_id,
         source_namespace="raymond-private/chatgpt-export",
@@ -165,7 +165,13 @@ def build_exact_pilot_manifests(
         records=tuple(all_records),
         max_records=len(included_records),
         max_bytes=sum(record.byte_length for record in included_records),
-        max_input_tokens=sum(record.estimated_tokens for record in included_records),
+        token_accounting_version=selection.token_accounting_version,
+        max_source_estimated_tokens=sum(
+            record.estimated_tokens for record in included_records
+        ),
+        max_request_input_tokens=selection.max_request_input_tokens,
+        max_request_output_tokens=selection.max_request_output_tokens,
+        max_request_total_tokens=selection.max_request_total_tokens,
         max_model_spend_microusd=selection.max_model_spend_microusd,
         max_attempts=selection.max_attempts,
         expires_at=selection.expires_at,

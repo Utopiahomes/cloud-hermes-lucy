@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_import import (
+    ImportManifest,
     ImportManifestRecordV1,
     ImportManifestV1,
     MemoryCandidatePayloadV1,
@@ -346,7 +347,7 @@ class GovernedMemoryPolicy:
             raise GovernedMemoryUnavailable("memory candidate approval is unavailable") from exc
         return CandidateApprovalResultV1.model_validate(result)
 
-    def authorize_campaign(self, manifest: ImportManifestV1) -> ImportCampaignResultV1:
+    def authorize_campaign(self, manifest: ImportManifest) -> ImportCampaignResultV1:
         try:
             with self._sessions.begin() as session:
                 result = session.execute(

@@ -38,6 +38,9 @@ class PilotSelectionInputV1(BaseModel):
     conversation_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
     max_model_spend_microusd: int = Field(ge=0)
     max_attempts: int = Field(ge=1, le=100)
+    max_request_input_tokens: int = Field(ge=1, le=1_000_000)
+    max_request_output_tokens: int = Field(ge=1, le=100_000)
+    max_request_total_tokens: int = Field(ge=2, le=1_000_000)
     expires_at: datetime
 
     @model_validator(mode="after")
@@ -46,6 +49,11 @@ class PilotSelectionInputV1(BaseModel):
             raise ValueError("pilot conversation IDs must be unique")
         if self.expires_at.tzinfo is None or self.expires_at.utcoffset() is None:
             raise ValueError("pilot expiry must be timezone-aware")
+        if (
+            self.max_request_input_tokens + self.max_request_output_tokens
+            > self.max_request_total_tokens
+        ):
+            raise ValueError("request input and output ceilings exceed total")
         return self
 
 
@@ -81,6 +89,12 @@ class PilotSelectionProposalV1(BaseModel):
     default_protection: Literal["protected"] = "protected"
     max_model_spend_microusd: int = Field(ge=0)
     max_attempts: int = Field(ge=1)
+    token_accounting_version: Literal["canonical-json-byte-upper-bound-v1"] = (
+        "canonical-json-byte-upper-bound-v1"
+    )
+    max_request_input_tokens: int = Field(ge=1, le=1_000_000)
+    max_request_output_tokens: int = Field(ge=1, le=100_000)
+    max_request_total_tokens: int = Field(ge=2, le=1_000_000)
     expires_at: datetime
     authorization_state: Literal["proposed_not_authorized"] = "proposed_not_authorized"
 
@@ -88,6 +102,11 @@ class PilotSelectionProposalV1(BaseModel):
     def exact_aggregates(self) -> PilotSelectionProposalV1:
         if self.expires_at.tzinfo is None or self.expires_at.utcoffset() is None:
             raise ValueError("pilot selection expiry must be timezone-aware")
+        if (
+            self.max_request_input_tokens + self.max_request_output_tokens
+            > self.max_request_total_tokens
+        ):
+            raise ValueError("request input and output ceilings exceed total")
         if len({item.conversation_id for item in self.selected_conversations}) != len(
             self.selected_conversations
         ):
@@ -220,6 +239,9 @@ def create_import_console(settings: ImportConsoleSettingsV1) -> FastAPI:
             ),
             max_model_spend_microusd=proposed.max_model_spend_microusd,
             max_attempts=proposed.max_attempts,
+            max_request_input_tokens=proposed.max_request_input_tokens,
+            max_request_output_tokens=proposed.max_request_output_tokens,
+            max_request_total_tokens=proposed.max_request_total_tokens,
             expires_at=proposed.expires_at,
         )
         serialized = canonical_json_bytes(
@@ -260,6 +282,12 @@ def _console_html() -> str:
 <input id="spend" type="number" min="0" step="1" required></label>
 <label>Maximum attempts
 <input id="attempts" type="number" min="1" max="100" value="20" required></label>
+<label>Maximum complete request input tokens
+<input id="request-input" type="number" min="1" value="60000" required></label>
+<label>Maximum request output tokens
+<input id="request-output" type="number" min="1" value="4000" required></label>
+<label>Maximum request total tokens
+<input id="request-total" type="number" min="2" value="64000" required></label>
 <label>Expires at <input id="expiry" type="datetime-local" required></label>
 <button type="submit">Save non-authorizing pilot proposal</button></form>
 <pre id="result"></pre></main><script src="/imports/app.js"></script></body></html>"""
@@ -311,6 +339,9 @@ document.getElementById("proposal").addEventListener("submit", async (event) => 
     conversation_ids: selected,
     max_model_spend_microusd: Number(document.getElementById("spend").value),
     max_attempts: Number(document.getElementById("attempts").value),
+    max_request_input_tokens: Number(document.getElementById("request-input").value),
+    max_request_output_tokens: Number(document.getElementById("request-output").value),
+    max_request_total_tokens: Number(document.getElementById("request-total").value),
     expires_at: expiry.toISOString()
   };
   const response = await fetch("/api/pilot-selection", {
@@ -321,6 +352,7 @@ document.getElementById("proposal").addEventListener("submit", async (event) => 
   if (!response.ok) { result.textContent = `Proposal rejected: ${responseBody.detail}`; return; }
   result.textContent = `Saved ${responseBody.proposal.selected_record_count} records; ` +
     `~${responseBody.proposal.estimated_source_tokens} source tokens; ` +
+    `request ceiling ${responseBody.proposal.max_request_total_tokens} tokens; ` +
     `digest ${responseBody.proposal_digest}; status: proposed, NOT authorized.`;
 });
 """

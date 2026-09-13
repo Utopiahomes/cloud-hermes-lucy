@@ -104,6 +104,9 @@ def _selection(report: ChatGPTExportInventoryV1) -> PilotSelectionProposalV1:
         estimated_source_tokens=selected.estimated_source_tokens,
         max_model_spend_microusd=1_000_000,
         max_attempts=10,
+        max_request_input_tokens=60_000,
+        max_request_output_tokens=4_000,
+        max_request_total_tokens=64_000,
         expires_at=datetime.now(UTC) + timedelta(days=7),
     )
 
@@ -138,6 +141,8 @@ def test_exact_pilot_manifest_preserves_graph_and_excludes_unsupported_records(
     assert result.bundle.excluded_attachment_reference_count == 0
     records = result.bundle.manifest.records
     assert result.bundle.manifest.campaign_id == _CAMPAIGN
+    assert result.bundle.manifest.contract_version == "2"
+    assert result.bundle.manifest.max_request_total_tokens == 64_000
     assert result.bundle.manifest.source_conversation_id.startswith("pilot:")
     assert {record.native_node_id for record in records if record.included} == {
         "owner",

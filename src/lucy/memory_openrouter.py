@@ -223,6 +223,16 @@ class OpenRouterMemoryProvider:
         if not isinstance(usage, Mapping):
             raise MemoryOpenRouterUnavailable("OpenRouter response omitted usage accounting")
         billed_microusd = _cost_microusd(usage.get("cost"))
+        prompt_tokens = usage.get("prompt_tokens")
+        if (
+            isinstance(prompt_tokens, bool)
+            or not isinstance(prompt_tokens, int)
+            or prompt_tokens < 0
+            or prompt_tokens > dispatch.input_tokens
+        ):
+            raise MemoryOpenRouterUnavailable(
+                "OpenRouter input usage exceeded or omitted the admitted token ceiling"
+            )
         completion_tokens = usage.get("completion_tokens")
         if (
             isinstance(completion_tokens, bool)

@@ -72,6 +72,9 @@ def _selection(**overrides: object) -> dict[str, object]:
         "conversation_ids": ["conversation-1"],
         "max_model_spend_microusd": 2_000_000,
         "max_attempts": 20,
+        "max_request_input_tokens": 60_000,
+        "max_request_output_tokens": 4_000,
+        "max_request_total_tokens": 64_000,
         "expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
     }
     value.update(overrides)
@@ -167,6 +170,10 @@ def test_selection_is_non_authorizing_bound_and_idempotent(tmp_path: Path) -> No
     assert result["proposal"]["estimated_source_tokens"] == 1_200
     assert result["proposal"]["default_protection"] == "protected"
     assert result["proposal"]["max_model_spend_microusd"] == 2_000_000
+    assert result["proposal"]["max_request_total_tokens"] == 64_000
+    assert result["proposal"]["token_accounting_version"] == (
+        "canonical-json-byte-upper-bound-v1"
+    )
     assert result["proposal_digest"]
     on_disk = json.loads(selection_path.read_text(encoding="utf-8"))
     assert on_disk["proposal"]["authorization_state"] == "proposed_not_authorized"

@@ -105,7 +105,7 @@ def _response(**changes: object) -> dict[str, object]:
                 }
             }
         ],
-        "usage": {"completion_tokens": 20, "cost": "0.0012341"},
+        "usage": {"prompt_tokens": 400, "completion_tokens": 20, "cost": "0.0012341"},
     }
     values.update(changes)
     return values
@@ -198,8 +198,34 @@ def test_complete_request_accounting_rejects_forged_counts_before_network() -> N
         ({"model": "other/model"}, "unapproved model"),
         ({"id": ""}, "generation identity"),
         ({"usage": {}}, "billed cost"),
-        ({"usage": {"completion_tokens": 20, "cost": "NaN"}}, "billed cost"),
-        ({"usage": {"completion_tokens": 101, "cost": 0}}, "token ceiling"),
+        (
+            {"usage": {"completion_tokens": 20, "cost": "NaN"}},
+            "billed cost",
+        ),
+        (
+            {"usage": {"completion_tokens": 20, "cost": 0}},
+            "input usage",
+        ),
+        (
+            {
+                "usage": {
+                    "prompt_tokens": 999_999,
+                    "completion_tokens": 20,
+                    "cost": 0,
+                }
+            },
+            "input usage",
+        ),
+        (
+            {
+                "usage": {
+                    "prompt_tokens": 400,
+                    "completion_tokens": 101,
+                    "cost": 0,
+                }
+            },
+            "token ceiling",
+        ),
         ({"choices": []}, "candidate content"),
         (
             {"choices": [{"message": {"content": "not-json"}}]},
