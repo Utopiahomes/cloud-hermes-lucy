@@ -111,7 +111,7 @@ Resources:
               AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ArchiveRoleName}
             Action: kms:GenerateDataKey
             Resource: "*"
-            Condition: &OutcomeKmsContext
+            Condition:
               StringEquals:
                 kms:EncryptionContext:contract_version: MemoryOutcomeKmsContextV1
                 kms:EncryptionContext:tenant_account_id: !Ref TenantAccountUuid
@@ -139,7 +139,29 @@ Resources:
             Principal: {AWS: !GetAtt OutcomeRecoveryRuntimeRole.Arn}
             Action: kms:Decrypt
             Resource: "*"
-            Condition: *OutcomeKmsContext
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:contract_version: MemoryOutcomeKmsContextV1
+                kms:EncryptionContext:tenant_account_id: !Ref TenantAccountUuid
+                kms:EncryptionContext:node_id: !Ref NodeId
+                kms:EncryptionContext:node_tenure_id: !Ref NodeTenureId
+                kms:EncryptionContext:tenure_epoch: !Ref TenureEpoch
+                kms:EncryptionContext:security_realm_id: !Ref SecurityRealmId
+                kms:EncryptionContext:storage_epoch: !Ref StorageEpoch
+                kms:EncryptionContext:purpose: MEMORY_OUTCOME_DEK
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - contract_version
+                  - tenant_account_id
+                  - node_id
+                  - node_tenure_id
+                  - tenure_epoch
+                  - security_realm_id
+                  - storage_epoch
+                  - encryption_id
+                  - purpose
+              "Null":
+                kms:EncryptionContext:encryption_id: "false"
 
   OutcomeKeyAlias:
     Type: AWS::KMS::Alias
@@ -196,7 +218,29 @@ Resources:
           - Effect: Allow
             Action: kms:GenerateDataKey
             Resource: !GetAtt OutcomeKey.Arn
-            Condition: *OutcomeKmsContext
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:contract_version: MemoryOutcomeKmsContextV1
+                kms:EncryptionContext:tenant_account_id: !Ref TenantAccountUuid
+                kms:EncryptionContext:node_id: !Ref NodeId
+                kms:EncryptionContext:node_tenure_id: !Ref NodeTenureId
+                kms:EncryptionContext:tenure_epoch: !Ref TenureEpoch
+                kms:EncryptionContext:security_realm_id: !Ref SecurityRealmId
+                kms:EncryptionContext:storage_epoch: !Ref StorageEpoch
+                kms:EncryptionContext:purpose: MEMORY_OUTCOME_DEK
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - contract_version
+                  - tenant_account_id
+                  - node_id
+                  - node_tenure_id
+                  - tenure_epoch
+                  - security_realm_id
+                  - storage_epoch
+                  - encryption_id
+                  - purpose
+              "Null":
+                kms:EncryptionContext:encryption_id: "false"
           - Effect: Allow
             Action: dynamodb:PutItem
             Resource: !GetAtt OutcomeKeyRegistry.Arn
@@ -226,7 +270,29 @@ Resources:
           - Effect: Allow
             Action: kms:Decrypt
             Resource: !GetAtt OutcomeKey.Arn
-            Condition: *OutcomeKmsContext
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:contract_version: MemoryOutcomeKmsContextV1
+                kms:EncryptionContext:tenant_account_id: !Ref TenantAccountUuid
+                kms:EncryptionContext:node_id: !Ref NodeId
+                kms:EncryptionContext:node_tenure_id: !Ref NodeTenureId
+                kms:EncryptionContext:tenure_epoch: !Ref TenureEpoch
+                kms:EncryptionContext:security_realm_id: !Ref SecurityRealmId
+                kms:EncryptionContext:storage_epoch: !Ref StorageEpoch
+                kms:EncryptionContext:purpose: MEMORY_OUTCOME_DEK
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - contract_version
+                  - tenant_account_id
+                  - node_id
+                  - node_tenure_id
+                  - tenure_epoch
+                  - security_realm_id
+                  - storage_epoch
+                  - encryption_id
+                  - purpose
+              "Null":
+                kms:EncryptionContext:encryption_id: "false"
 
   OutcomeRecoveryFunction:
     Type: AWS::Lambda::Function
