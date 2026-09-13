@@ -35,7 +35,7 @@ def valid_manifest() -> dict[str, object]:
             "model_service": "lucy-public-model",
             "model_service_private_only": True,
             "trust_forwarded_host": False,
-            "max_browser_request_bytes": 65_536,
+            "max_browser_request_bytes": 8_192,
             "max_model_request_bytes": 200_000,
             "requests_per_ip_per_minute": 20,
             "requests_per_session_per_minute": 30,

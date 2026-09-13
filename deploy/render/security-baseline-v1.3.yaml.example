@@ -37,7 +37,7 @@ projects:
             name: lucy-public
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -59,7 +59,7 @@ projects:
               - {key: LUCY_PUBLIC_API_TOKEN, sync: false}
               - {key: LUCY_PUBLIC_ALLOWED_ORIGIN, value: https://www.utopiahomes.com}
               - {key: LUCY_PUBLIC_SITE_HOSTNAME, value: www.utopiahomes.com}
-              - {key: LUCY_PUBLIC_SNAPSHOT_DIGEST, value: 6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e}
+              - {key: LUCY_PUBLIC_SNAPSHOT_DIGEST, value: 95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422}
               - {key: LUCY_PUBLIC_MAX_REQUEST_BYTES, value: "8192"}
               - {key: LUCY_PUBLIC_REQUESTS_PER_IP_PER_MINUTE, value: "20"}
               - {key: LUCY_PUBLIC_REQUESTS_PER_SESSION_PER_MINUTE, value: "30"}
@@ -79,7 +79,7 @@ projects:
             name: lucy-public-model
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -125,7 +125,7 @@ projects:
             name: lucy-routine
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -174,7 +174,7 @@ projects:
             name: lucy-telegram-private
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -201,7 +201,7 @@ projects:
             name: lucy-policy
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -233,7 +233,7 @@ projects:
             name: lucy-evidence
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -261,7 +261,7 @@ projects:
             name: lucy-deletion
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -289,7 +289,7 @@ projects:
             name: lucy-finality-utility
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             schedule: "0 0 1 1 *"
@@ -314,7 +314,7 @@ projects:
             name: lucy-authority-writer
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -341,7 +341,7 @@ projects:
             name: lucy-cost-writer
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1
@@ -368,7 +368,7 @@ projects:
             name: lucy-recovery-coordinator
             runtime: docker
             repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-            branch: codex/r1-tenant-foundation
+            branch: codex/public-model-milestone-a
             region: virginia
             plan: 0.5c-512mb
             numInstances: 1

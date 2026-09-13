@@ -546,7 +546,7 @@ def test_v12_render_callers_can_invoke_only_their_qualified_alias() -> None:
         )
 
 
-def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch() -> None:
+def test_v13_render_blueprint_is_capture_off_and_pinned_to_model_release_branch() -> None:
     services = _v13_render_services()
     assert set(services) == {
         "lucy-public",
@@ -570,7 +570,7 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
         "LUCY_MAINTENANCE_DATABASE_URL",
     }
     for service in services.values():
-        assert service["branch"] == "codex/r1-tenant-foundation"
+        assert service["branch"] == "codex/public-model-milestone-a"
         assert service["autoDeployTrigger"] == "off"
         assert forbidden.isdisjoint(_environment_keys(service))
         environment = {item["key"]: item for item in service["envVars"]}
@@ -587,7 +587,7 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
     )
     assert public["LUCY_PUBLIC_SITE_HOSTNAME"]["value"] == "www.utopiahomes.com"
     assert public["LUCY_PUBLIC_SNAPSHOT_DIGEST"]["value"] == (
-        "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e"
+        "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
     )
     assert not any(
         key.startswith("AWS_")
