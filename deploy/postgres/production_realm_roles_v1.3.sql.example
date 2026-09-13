@@ -96,6 +96,9 @@ GRANT SELECT ON lucy.lifecycle, lucy.runtime_admission TO
 -- content scope from session_user; there is no request-selected realm.
 GRANT EXECUTE ON FUNCTION
   lucy.stage_memory_import_candidate_v1(jsonb),
+  lucy.register_memory_import_job_v1(jsonb),
+  lucy.record_memory_import_provider_outcome_v1(jsonb),
+  lucy.load_memory_import_provider_outcome_v1(uuid),
   lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb),
   lucy.search_governed_scoped_memory_v1(text,integer),
   lucy.reserve_memory_import_attempt_v1(uuid,text,bigint),
@@ -132,6 +135,9 @@ GRANT EXECUTE ON FUNCTION
   lucy.search_protected_scoped_memory_v1(text,integer,uuid,text),
   lucy.authorize_memory_import_campaign_v1(
     uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text),
+  lucy.admit_memory_outcome_recovery_v1(jsonb,jsonb,text,text),
+  lucy.read_memory_outcome_recovery_grant_v1(text),
+  lucy.record_memory_outcome_recovery_grant_v1(text,text,jsonb),
   lucy.issue_sensitive_action_permit_v3(jsonb,text),
   lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint),
   lucy.read_claimed_sensitive_authority_v1(uuid),

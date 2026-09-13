@@ -55,7 +55,8 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
             "POST",
             "/internal/v2/security/operations/{operation_id}/receipt-attestation",
         ),
-        ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
+            ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
+            ("POST", "/internal/v3/security/memory-outcomes/recovery-grant"),
         (
             "POST",
             "/internal/v3/security/operations/{operation_id}/deletion-manifest",
@@ -246,6 +247,46 @@ def test_v13_grant_route_is_hidden_from_v12_and_uses_policy_identity_only(
         api, "_realm_policy_services", lambda: (Grants(), object(), object())
     )
     assert api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token") is marker
+
+
+def test_memory_outcome_grant_route_is_v13_policy_only_and_gateway_authenticated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = type(
+        "Request",
+        (),
+        {"authorization": object(), "package": object()},
+    )()
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.2")
+    with pytest.raises(HTTPException) as hidden:
+        api.grant_memory_outcome_recovery_v1(
+            request, "Bearer policy-token"  # type: ignore[arg-type]
+        )
+    assert hidden.value.status_code == 404
+
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
+    with pytest.raises(HTTPException) as unauthorized:
+        api.grant_memory_outcome_recovery_v1(request, "Bearer wrong")  # type: ignore[arg-type]
+    assert unauthorized.value.status_code == 401
+
+    marker = object()
+
+    class Issuer:
+        def issue(self, **values: object) -> object:
+            assert values["authorization"] is request.authorization
+            assert values["package"] is request.package
+            assert values["now"] is not None
+            return marker
+
+    monkeypatch.setattr(api, "_memory_outcome_grant_issuer", lambda: Issuer())
+    assert (
+        api.grant_memory_outcome_recovery_v1(
+            request, "Bearer policy-token"  # type: ignore[arg-type]
+        )
+        is marker
+    )
 
 
 def test_v13_receipt_route_rejects_path_body_identity_mismatch_before_policy(

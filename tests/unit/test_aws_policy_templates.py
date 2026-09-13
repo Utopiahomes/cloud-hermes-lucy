@@ -684,7 +684,29 @@ def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
         "AWS_ROLE_ARN",
         "LUCY_AWS_EVIDENCE_KEY_ARN",
         "LUCY_AWS_WRAPPED_KEY_TABLE",
+        "LUCY_AWS_OUTCOME_KEY_ARN",
+        "LUCY_AWS_OUTCOME_KEY_TABLE",
+        "LUCY_OUTCOME_REGISTRY_ID",
+        "LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN",
+        "LUCY_POLICY_GATEWAY_TOKEN",
+        "LUCY_POLICY_HOSTPORT",
     } <= environments["lucy-routine"].keys()
+    assert environments["lucy-routine"]["LUCY_POLICY_HOSTPORT"] == {
+        "key": "LUCY_POLICY_HOSTPORT",
+        "fromService": {
+            "type": "pserv",
+            "name": "lucy-policy",
+            "property": "hostport",
+        },
+    }
+    assert "LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64" not in environments["lucy-routine"]
+    assert {
+        "LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64",
+        "LUCY_V13_TARGET_SCOPE_JSON",
+        "LUCY_V13_EXECUTION_BINDING_JSON",
+        "LUCY_V13_CALLER_IDENTITY",
+        "LUCY_MEMORY_OUTCOME_POLICY_VERSION",
+    } <= environments["lucy-policy"].keys()
     assert {
         "AWS_ROLE_ARN",
         "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN",

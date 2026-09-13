@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+from datetime import UTC, datetime
 from functools import lru_cache
 from uuid import UUID
 
@@ -41,6 +42,7 @@ from lucy.authorization import (
     SensitiveActionPermitV1,
     SensitiveActionPermitVerifier,
 )
+from lucy.contracts.memory_outcome_recovery_v1 import MemoryOutcomeRecoveryGrantV1
 from lucy.contracts.security_v1_2 import (
     ContractTrustStore,
     DeletionTargetManifestV1,
@@ -57,7 +59,9 @@ from lucy.contracts.security_v1_2 import (
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV3,
     Ed25519V13Signer,
+    ExecutionBindingV1,
     ExecutorReceiptV2,
+    OriginScopeV1,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
     V13ContractVerifier,
@@ -75,6 +79,13 @@ from lucy.evidence import (
     ForgetLastRequest,
 )
 from lucy.memory import MemoryService
+from lucy.memory_outcome import MemoryOutcomeUnavailable
+from lucy.memory_outcome_recovery import (
+    DurableMemoryOutcomeGrantIssuer,
+    MemoryOutcomeGrantRequestV1,
+    MemoryOutcomeRecoveryPolicy,
+    PostgresMemoryOutcomePolicyStore,
+)
 from lucy.model_execution import (
     ModelExecutionBegin,
     ModelExecutionBeginResult,
@@ -441,6 +452,43 @@ def _realm_policy_workflow_client() -> HttpRealmPolicyClient:
         _required_environment("LUCY_POLICY_HOSTPORT"),
         _required_environment("LUCY_POLICY_GATEWAY_TOKEN"),
     )
+
+
+@lru_cache(maxsize=1)
+def _memory_outcome_grant_issuer() -> DurableMemoryOutcomeGrantIssuer:
+    try:
+        private_seed = base64.b64decode(
+            _required_environment("LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64"),
+            validate=True,
+        )
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_seed)
+        target_scope = OriginScopeV1.model_validate_json(
+            _required_environment("LUCY_V13_TARGET_SCOPE_JSON")
+        )
+        execution_binding = ExecutionBindingV1.model_validate_json(
+            _required_environment("LUCY_V13_EXECUTION_BINDING_JSON")
+        )
+    except (ValueError, ValidationError) as exc:
+        raise ValueError("memory outcome policy configuration is invalid") from exc
+    signer = Ed25519V13Signer(
+        private_key,
+        key_id=_required_environment("LUCY_V13_POLICY_KEY_ID"),
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    store = PostgresMemoryOutcomePolicyStore(_ready_sessions())
+    policy = MemoryOutcomeRecoveryPolicy(
+        signer,
+        store,
+        environment=DeploymentEnvironment(
+            _required_environment("LUCY_SECURITY_ENVIRONMENT")
+        ),
+        issuer=_required_environment("LUCY_POLICY_ISSUER"),
+        caller_identity=_required_environment("LUCY_V13_CALLER_IDENTITY"),
+        target_scope=target_scope,
+        execution_binding=execution_binding,
+        policy_version=_positive_environment_int("LUCY_MEMORY_OUTCOME_POLICY_VERSION"),
+    )
+    return DurableMemoryOutcomeGrantIssuer(store, policy)
 
 
 @lru_cache(maxsize=1)
@@ -1309,6 +1357,31 @@ def grant_sensitive_operation_v3(
         return grants.issue_grant(operation_id)
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
+
+
+@app.post(
+    "/internal/v3/security/memory-outcomes/recovery-grant",
+    tags=["internal"],
+    response_model=MemoryOutcomeRecoveryGrantV1,
+)
+def grant_memory_outcome_recovery_v1(
+    request: MemoryOutcomeGrantRequestV1,
+    authorization: str | None = Header(default=None),
+) -> MemoryOutcomeRecoveryGrantV1:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        return _memory_outcome_grant_issuer().issue(
+            authorization=request.authorization,
+            package=request.package,
+            now=datetime.now(UTC),
+        )
+    except (MemoryOutcomeUnavailable, PermissionError, ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(
+            status_code=403, detail="memory outcome is not eligible for recovery"
+        ) from exc
 
 
 @app.post(

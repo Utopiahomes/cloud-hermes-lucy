@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.chatgpt_manifest import AuthorizedPilotManifestV1
+from lucy.contracts.canonical import canonical_sha256
 from lucy.contracts.memory_outcome_recovery_v1 import (
     MemoryOutcomeRecoveryGrantV1,
     MemoryOutcomeRecoveryPackageV1,
     MemoryOutcomeRecoveryResultV1,
+    recovery_grant_matches_package,
 )
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
@@ -35,6 +41,241 @@ from lucy.memory_outcome import (
     MemoryOutcomeUnavailable,
     memory_outcome_encryption_id,
 )
+
+MEMORY_OUTCOME_GRANT_REQUEST_PREFIX = b"LUCY-MEMORY-OUTCOME-GRANT-REQUEST-V1\0"
+
+
+class MemoryOutcomeGrantRequestV1(BaseModel):
+    """Content-bounded request sent from routine to the isolated policy service."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contract_version: Literal["1"] = "1"
+    authorization: AuthorizedPilotManifestV1
+    package: MemoryOutcomeRecoveryPackageV1
+
+    def digest_hex(self) -> str:
+        return canonical_sha256(self, prefix=MEMORY_OUTCOME_GRANT_REQUEST_PREFIX)
+
+
+class MemoryOutcomeGrantAdmissionV1(BaseModel):
+    """Content-free PostgreSQL admission result used as the signing clock."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    admitted_at: datetime
+    authorization_expires_at: datetime
+    replayed: bool
+
+
+class PostgresMemoryOutcomePolicyStore:
+    """Execute-only policy store; it cannot enumerate or load outcome ciphertext."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    @staticmethod
+    def _request(
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+    ) -> MemoryOutcomeGrantRequestV1:
+        return MemoryOutcomeGrantRequestV1(
+            authorization=authorization,
+            package=package,
+        )
+
+    def admit(
+        self,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+    ) -> MemoryOutcomeGrantAdmissionV1:
+        request = self._request(authorization, package)
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.admit_memory_outcome_recovery_v1("
+                        "CAST(:authorization AS jsonb),CAST(:package AS jsonb),"
+                        ":package_digest,:request_digest)"
+                    ),
+                    {
+                        "authorization": json.dumps(
+                            authorization.model_dump(mode="json"),
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                        "package": json.dumps(
+                            package.model_dump(mode="json"),
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                        "package_digest": package.digest_hex(),
+                        "request_digest": request.digest_hex(),
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise MemoryOutcomeUnavailable("outcome policy admission unavailable") from exc
+        return MemoryOutcomeGrantAdmissionV1.model_validate(value)
+
+    def require_recoverable(
+        self,
+        *,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+        checked_at: datetime,
+        phase: str,
+    ) -> None:
+        if phase != "pre_grant" or checked_at.tzinfo is None or checked_at.utcoffset() is None:
+            raise MemoryOutcomeUnavailable("outcome policy eligibility phase is invalid")
+        self.admit(authorization, package)
+
+    def load_grant(
+        self,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+    ) -> MemoryOutcomeRecoveryGrantV1 | None:
+        request_digest = self._request(authorization, package).digest_hex()
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text("SELECT lucy.read_memory_outcome_recovery_grant_v1(:digest)"),
+                    {"digest": request_digest},
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise MemoryOutcomeUnavailable("outcome recovery grant lookup unavailable") from exc
+        return None if value is None else MemoryOutcomeRecoveryGrantV1.model_validate(value)
+
+    def record_grant(
+        self,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+        grant: MemoryOutcomeRecoveryGrantV1,
+    ) -> MemoryOutcomeRecoveryGrantV1:
+        request_digest = self._request(authorization, package).digest_hex()
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.record_memory_outcome_recovery_grant_v1("
+                        ":request_digest,:grant_digest,CAST(:grant AS jsonb))"
+                    ),
+                    {
+                        "request_digest": request_digest,
+                        "grant_digest": grant.unsigned_digest_hex(),
+                        "grant": json.dumps(
+                            grant.model_dump(mode="json"),
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise MemoryOutcomeUnavailable("outcome recovery grant storage unavailable") from exc
+        stored = MemoryOutcomeRecoveryGrantV1.model_validate(value)
+        if not recovery_grant_matches_package(stored, package):
+            raise MemoryOutcomeUnavailable("stored recovery grant differs from package")
+        return stored
+
+
+class DurableMemoryOutcomeGrantIssuer:
+    """Issue once through PostgreSQL, returning the winning grant on concurrent replay."""
+
+    def __init__(
+        self,
+        store: PostgresMemoryOutcomePolicyStore,
+        policy: MemoryOutcomeRecoveryPolicy,
+    ) -> None:
+        self._store = store
+        self._policy = policy
+
+    def issue(
+        self,
+        *,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+        now: datetime,
+        max_plaintext_bytes: int = 1_048_576,
+    ) -> MemoryOutcomeRecoveryGrantV1:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("recovery grant request time must be timezone-aware")
+        admission = self._store.admit(authorization, package)
+        existing = self._store.load_grant(authorization, package)
+        if existing is not None:
+            if not recovery_grant_matches_package(existing, package):
+                raise MemoryOutcomeUnavailable("replayed recovery grant differs from package")
+            return existing
+        grant = self._policy.issue(
+            authorization=authorization,
+            package=package,
+            now=admission.admitted_at,
+            max_plaintext_bytes=max_plaintext_bytes,
+        )
+        return self._store.record_grant(authorization, package, grant)
+
+
+class HttpMemoryOutcomeGrantIssuer:
+    """Routine-side private policy client; caller cannot select destination or signing data."""
+
+    def __init__(self, hostport: str, token: str, *, timeout_seconds: int = 15) -> None:
+        match = re.fullmatch(
+            r"([a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?):([0-9]{2,5})", hostport
+        )
+        if match is None or not token or timeout_seconds not in range(1, 31):
+            raise ValueError("private outcome policy client configuration is invalid")
+        self._host = match.group(1)
+        self._port = int(match.group(2))
+        if self._port > 65_535:
+            raise ValueError("private outcome policy client port is invalid")
+        self._token = token
+        self._timeout = timeout_seconds
+
+    def issue(
+        self,
+        *,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+        now: datetime,
+        max_plaintext_bytes: int = 1_048_576,
+    ) -> MemoryOutcomeRecoveryGrantV1:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("recovery grant request time must be timezone-aware")
+        if max_plaintext_bytes != 1_048_576:
+            raise ValueError("remote recovery plaintext limit is policy selected")
+        request = MemoryOutcomeGrantRequestV1(
+            authorization=authorization,
+            package=package,
+        )
+        body = json.dumps(
+            request.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        if len(body) > 4_000_000:
+            raise MemoryOutcomeUnavailable("outcome grant request is too large")
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        try:
+            connection.request(
+                "POST",
+                "/internal/v3/security/memory-outcomes/recovery-grant",
+                body=body,
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            raw = response.read(262_145)
+        except (OSError, http.client.HTTPException) as exc:
+            raise MemoryOutcomeUnavailable("outcome policy service is unavailable") from exc
+        finally:
+            connection.close()
+        if response.status != 200 or len(raw) > 262_144:
+            raise MemoryOutcomeUnavailable("outcome policy rejected recovery")
+        try:
+            grant = MemoryOutcomeRecoveryGrantV1.model_validate_json(raw)
+        except ValidationError as exc:
+            raise MemoryOutcomeUnavailable("outcome policy response is invalid") from exc
+        if not recovery_grant_matches_package(grant, package):
+            raise MemoryOutcomeUnavailable("outcome policy response changed package binding")
+        return grant
 
 
 class MemoryOutcomeRecoveryEligibility(Protocol):

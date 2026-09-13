@@ -186,6 +186,17 @@ accepted `0057` migration is merged at `2807dad`.
     Both claim and completion deadlines are capped by the authorized campaign expiry. The next
     bridge will use the existing private authenticated policy transport plus a content-free,
     exact-job database eligibility check; the archive service will receive only the signed grant.
+32. The isolated policy bridge is implemented at migration `0069`. A migration-identity-only
+    registration function materializes one exact owner authorization; routine cannot register it
+    and policy cannot enumerate either authorizations or encrypted outcomes. The private policy
+    endpoint authenticates routine with the existing gateway token, rechecks current campaign,
+    exact job, service/scope binding, unsettled budget reservation, source availability, and
+    deletion fences, then durably records one signed grant. PostgreSQL independently recomputes
+    the request, package, and unsigned-grant digests and rejects changed realm, deployment, job,
+    reservation, encryption, or registry bindings. Replay returns the winning immutable grant.
+    The migration is deliberately forward-only because dropping its immutable authorization and
+    grant ledger would erase security evidence; application rollback leaves these inert records
+    in place. No personal import, provider request, or cloud deployment was performed.
 
 ## Verification ledger
 
@@ -212,6 +223,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Permit-bound exact-job outcome recovery | Passed, 10 focused contract/runtime/IAM paths plus full-suite rerun | Outcome-only KMS context; write-only worker; exact package/grant/deployment binding; one release; content-free replay; pre-grant/pre-completion eligibility; no scan/query/delete/provider/evidence permission | Outcome recovery contract, signer, cipher, registry, executor, IAM template, or eligibility adapter change |
 | Utopia outcome-recovery AWS boundary | Passed | `docs/evidence/utopia-memory-outcome-recovery-aws-2026-09-13.json`; CloudFormation `CREATE_COMPLETE` with termination protection, artifact checksum/version, KMS rotation, table deletion protection/PITR, qualified version 1, positive/negative IAM simulation, and a content-free fail-closed canary | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or realm binding change |
 | Recovery grant expiry and issuer seam | Passed, 22 focused checks plus Ruff and strict mypy | Grant claim/completion never outlive campaign authorization; recovery consumes an abstract issuer so the policy signer can remain isolated | Recovery policy, issuer protocol, campaign expiry, or coordinator construction change |
+| Isolated outcome-policy bridge | Passed, 89 focused checks on clean PostgreSQL through `0069`, plus Ruff and strict mypy | Independent exact authorization registration; database-recomputed request/package/grant digests; private authenticated endpoint; exact realm/job/key bindings; durable replay; policy ciphertext-table denial; deleted-source denial; Render identity separation | Migration `0069`, policy endpoint/client, grant issuer, realm role grants, Render blueprint, or relevant contract change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -227,12 +239,11 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Add the private authenticated outcome-grant endpoint/client and a content-free exact-job
-   PostgreSQL eligibility function, then connect the deployed environment values to the guarded
-   archive/extraction runner. The policy signer remains only in `lucy-policy`; the archive service
-   receives a signed grant and invokes the qualified alias. The endpoint must require an
-   independently provisioned exact pilot approval/bundle allowlist rather than trusting a
-   caller-supplied `AuthorizedPilotManifestV1`. No real provider request is currently enabled.
+1. Connect the implemented private outcome-policy client and deployed AWS recovery invoker to the
+   guarded archive/extraction runner. Add the operator command that independently registers an
+   exact pilot authorization only after its no-network preflight. The signer remains only in
+   `lucy-policy`; routine receives only the signed grant. No real provider request is currently
+   enabled.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

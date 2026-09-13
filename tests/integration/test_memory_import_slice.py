@@ -9,16 +9,21 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.chatgpt_manifest import AuthorizedPilotManifestV1, PilotManifestBundleV1
 from lucy.contracts.canonical import canonical_sha256
+from lucy.contracts.memory_outcome_recovery_v1 import MemoryOutcomeRecoveryPackageV1
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
     DeletionArtifactClassV3,
     DeletionTargetManifestV3,
     DeletionTargetReferenceV3,
+    Ed25519V13Signer,
+    ExecutionBindingV1,
     OriginScopeV1,
     V13SigningKeyPurpose,
     deletion_targets_digest_v3,
@@ -59,6 +64,13 @@ from lucy.memory_outcome import (
     MemoryOutcomeBindingV1,
     MemoryOutcomeEnvelopeV1,
     MemoryOutcomeUnavailable,
+    memory_outcome_encryption_id,
+)
+from lucy.memory_outcome_recovery import (
+    DurableMemoryOutcomeGrantIssuer,
+    MemoryOutcomeGrantRequestV1,
+    MemoryOutcomeRecoveryPolicy,
+    PostgresMemoryOutcomePolicyStore,
 )
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
@@ -248,6 +260,7 @@ def _provision() -> tuple[object, object]:
                     allowed_actions=[
                         "memory.candidate.approve",
                         "memory.candidate.promote",
+                        "memory.outcome.recover",
                         "memory.protected.read",
                         "sensitive.deletion_manifest.issue",
                         "sensitive.grant.issue",
@@ -390,6 +403,9 @@ def _provision() -> tuple[object, object]:
                 ",lucy.store_deletion_execution_grant_v3(uuid,jsonb) "
                 ",lucy.attest_deletion_executor_receipt_v3(uuid,jsonb) "
                 ",lucy.reconcile_scoped_deletion_v3(uuid) "
+                ",lucy.admit_memory_outcome_recovery_v1(jsonb,jsonb,text,text) "
+                ",lucy.read_memory_outcome_recovery_grant_v1(text) "
+                ",lucy.record_memory_outcome_recovery_grant_v1(text,text,jsonb) "
                 "TO lucy_raymond_policy; "
                 "GRANT EXECUTE ON FUNCTION lucy.reconcile_scoped_deletion_v3(uuid) "
                 "TO lucy_raymond_sensitive_workflow"
@@ -1851,3 +1867,282 @@ def test_success_completion_rolls_back_partial_batch_and_settlement() -> None:
         )
     assert staged == 0
     assert settled == 0
+
+
+def test_outcome_recovery_policy_requires_registered_exact_authorization() -> None:
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    scope_id, _ = _provision()
+    owner_sessions = create_session_factory(OWNER_URL)
+    raymond_sessions = create_session_factory(RAYMOND_URL)
+    policy_sessions = create_session_factory(POLICY_URL)
+    now = datetime.now(UTC)
+    campaign_id = uuid4()
+    source_record_id = "policy-bridge-source"
+    record = {
+        "source_record_id": source_record_id,
+        "content_commitment": "a" * 64,
+        "byte_length": 16,
+        "estimated_tokens": 6,
+        "source_revision": 1,
+        "role": "owner",
+        "displayed": True,
+        "included": True,
+        "exclusion_reason": None,
+        "native_role": None,
+        "native_message_id": None,
+        "native_node_id": None,
+        "occurred_at": None,
+        "parent_source_record_id": None,
+    }
+    manifest = ImportManifestV2(
+        campaign_id=campaign_id,
+        destination_content_scope_id=scope_id,
+        source_namespace="synthetic/policy-bridge",
+        source_conversation_id="policy-bridge-conversation",
+        parser_version="parser-v1",
+        extractor_version="extractor-v1",
+        prompt_version="prompt-v1",
+        provider_policy_id="synthetic-private-zdr-v1",
+        model_route="none",
+        records=(record,),
+        max_records=1,
+        max_bytes=16,
+        token_accounting_version="canonical-json-byte-upper-bound-v1",
+        max_source_estimated_tokens=6,
+        max_request_input_tokens=50,
+        max_request_output_tokens=50,
+        max_request_total_tokens=100,
+        max_model_spend_microusd=0,
+        max_attempts=1,
+        expires_at=now + timedelta(hours=1),
+    )
+    GovernedMemoryPolicy(policy_sessions).authorize_campaign(manifest)
+    evidence_id = uuid4()
+    with owner_sessions.begin() as session:
+        archive_actor_id = session.execute(
+            text(
+                "SELECT id FROM lucy.realm_sensitive_actor_bindings_v1 "
+                "WHERE content_scope_id=:scope AND actor_role='archive_writer'"
+            ),
+            {"scope": scope_id},
+        ).scalar_one()
+        session.add(
+            ScopedEvidenceRecordV2Row(
+                id=evidence_id,
+                content_scope_id=scope_id,
+                archive_actor_binding_id=archive_actor_id,
+                content_classification="memory_import.protected",
+                lineage_refs=[],
+                idempotency_key=(
+                    f"memory-import:{manifest.digest}:{source_record_id}:r1"
+                ),
+                status="active",
+                created_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            ScopedEvidencePayloadV2Row(
+                evidence_id=evidence_id,
+                record_version=1,
+                payload_ciphertext_digest="b" * 64,
+                serialized_payload={"ciphertext_b64": base64.b64encode(b"e" * 32).decode()},
+                created_at=now,
+            )
+        )
+
+    extractor = GovernedMemoryExtractor(raymond_sessions)
+    reservation = extractor.reserve_attempt(
+        campaign_id, attempt_key="policy-bridge-attempt", reserved_microusd=0
+    )
+    request_commitment = "c" * 64
+    job_id = memory_extraction_job_id(
+        campaign_id,
+        attempt_key="policy-bridge-attempt",
+        request_commitment=request_commitment,
+    )
+    job = {
+        "contract_version": "1",
+        "extraction_job_id": str(job_id),
+        "reservation_id": str(reservation.reservation_id),
+        "campaign_id": str(campaign_id),
+        "manifest_digest": manifest.digest,
+        "attempt_key": "policy-bridge-attempt",
+        "source_record_ids": [source_record_id],
+        "request_commitment": request_commitment,
+        "request_bytes": 50,
+        "input_token_upper_bound": 50,
+        "maximum_output_tokens": 50,
+        "token_accounting_version": manifest.token_accounting_version,
+        "provider_policy_id": manifest.provider_policy_id,
+        "model_route": manifest.model_route,
+        "maximum_microusd": 0,
+    }
+    with raymond_sessions.begin() as session:
+        session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(job, separators=(",", ":"))},
+        ).scalar_one()
+    encryption_id = memory_outcome_encryption_id(job_id)
+    envelope = MemoryOutcomeEnvelopeV1(
+        binding=MemoryOutcomeBindingV1(
+            extraction_job_id=job_id,
+            reservation_id=reservation.reservation_id,
+            campaign_id=campaign_id,
+            destination_content_scope_id=scope_id,
+            manifest_digest=manifest.digest,
+            attempt_key="policy-bridge-attempt",
+            source_record_ids=(source_record_id,),
+            request_commitment=request_commitment,
+            provider_policy_id=manifest.provider_policy_id,
+            model_route=manifest.model_route,
+            maximum_microusd=0,
+        ),
+        encryption_id=encryption_id,
+        registry_id=uuid4(),
+        algorithm="AES-256-GCM+AWS-KMS",
+        encryption_context_version=3,
+        record_version=1,
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        ciphertext_b64=base64.b64encode(b"encrypted-outcome-with-tag").decode(),
+        content_nonce_b64=base64.b64encode(b"n" * 12).decode(),
+        keyed_commitment="d" * 64,
+        billed_microusd=0,
+        provider_reference_commitment="e" * 64,
+    )
+    PostgresMemoryOutcomeStore(raymond_sessions).put(envelope)
+    with owner_sessions() as session:
+        scope = session.execute(
+            text(
+                "SELECT tenant_account_id,node_id,node_tenure_id,tenure_epoch,"
+                "security_realm_id,storage_epoch,deployment_id "
+                "FROM lucy.realm_content_scopes_v1 WHERE id=:scope"
+            ),
+            {"scope": scope_id},
+        ).mappings().one()
+    origin_scope = OriginScopeV1.model_validate(
+        {key: scope[key] for key in OriginScopeV1.model_fields}
+    )
+    package = MemoryOutcomeRecoveryPackageV1(
+        target_scope=origin_scope,
+        envelope=envelope,
+    )
+    bundle = PilotManifestBundleV1(
+        selection_proposal_digest="1" * 64,
+        archive_commitment="2" * 64,
+        campaign_id=campaign_id,
+        destination_content_scope_id=scope_id,
+        manifest=manifest,
+        included_record_count=1,
+        excluded_record_count=0,
+        included_source_bytes=16,
+        estimated_source_tokens=6,
+        excluded_attachment_reference_count=0,
+    )
+    authorization = AuthorizedPilotManifestV1(
+        bundle=bundle,
+        bundle_digest=bundle.digest,
+        owner_approval_ref=uuid4(),
+        owner_actor_id="raymond-owner",
+        approved_at=now,
+    )
+    store = PostgresMemoryOutcomePolicyStore(policy_sessions)
+    with pytest.raises(MemoryOutcomeUnavailable, match="admission unavailable"):
+        store.admit(authorization, package)
+    with owner_sessions.begin() as session:
+        session.execute(text("SET LOCAL ROLE lucy_migration"))
+        registered = session.execute(
+            text(
+                "SELECT lucy.register_memory_import_pilot_authorization_v1("
+                "CAST(:authorization AS jsonb))"
+            ),
+            {
+                "authorization": json.dumps(
+                    authorization.model_dump(mode="json"), separators=(",", ":")
+                )
+            },
+        ).scalar_one()
+    assert registered["owner_approval_ref"] == str(authorization.owner_approval_ref)
+    request = MemoryOutcomeGrantRequestV1(
+        authorization=authorization,
+        package=package,
+    )
+    with (
+        pytest.raises(DBAPIError, match="memory outcome recovery unavailable"),
+        policy_sessions.begin() as session,
+    ):
+        session.execute(
+            text(
+                "SELECT lucy.admit_memory_outcome_recovery_v1("
+                "CAST(:authorization AS jsonb),CAST(:package AS jsonb),"
+                ":package_digest,:request_digest)"
+            ),
+            {
+                "authorization": json.dumps(
+                    authorization.model_dump(mode="json"), separators=(",", ":")
+                ),
+                "package": json.dumps(
+                    package.model_dump(mode="json"), separators=(",", ":")
+                ),
+                "package_digest": "f" * 64,
+                "request_digest": request.digest_hex(),
+            },
+        ).scalar_one()
+    signer = Ed25519V13Signer(
+        ed25519.Ed25519PrivateKey.generate(),
+        key_id="policy-bridge-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    execution_binding = ExecutionBindingV1(
+        deployment_id=scope["deployment_id"],
+        active_realm_id=origin_scope.security_realm_id,
+        active_storage_epoch=origin_scope.storage_epoch,
+        realm_binding_generation=1,
+        node_authz_epoch=1,
+    )
+    policy = MemoryOutcomeRecoveryPolicy(
+        signer,
+        store,
+        environment=DeploymentEnvironment.TEST,
+        issuer="lucy-policy-test",
+        caller_identity="arn:aws:iam::123456789012:role/lucy-raymond-archive",
+        target_scope=origin_scope,
+        execution_binding=execution_binding,
+        policy_version=1,
+    )
+    issuer = DurableMemoryOutcomeGrantIssuer(store, policy)
+    first = issuer.issue(authorization=authorization, package=package, now=now)
+    replay = issuer.issue(
+        authorization=authorization,
+        package=package,
+        now=now + timedelta(seconds=1),
+    )
+    assert first == replay
+    changed_grant = first.model_dump(mode="json")
+    changed_grant["registry_id"] = str(uuid4())
+    changed_grant_digest = canonical_sha256(
+        {key: value for key, value in changed_grant.items() if key != "signature"},
+        prefix=b"LUCY-SIGNED-CONTRACT\0",
+    )
+    with (
+        pytest.raises(DBAPIError, match="memory outcome recovery grant is invalid"),
+        policy_sessions.begin() as session,
+    ):
+        session.execute(
+            text(
+                "SELECT lucy.record_memory_outcome_recovery_grant_v1("
+                ":request_digest,:grant_digest,CAST(:grant AS jsonb))"
+            ),
+            {
+                "request_digest": request.digest_hex(),
+                "grant_digest": changed_grant_digest,
+                "grant": json.dumps(changed_grant, separators=(",", ":")),
+            },
+        ).scalar_one()
+    with pytest.raises(DBAPIError, match="permission denied"), policy_sessions.begin() as session:
+        session.execute(text("SELECT * FROM lucy.memory_import_provider_outcomes_v1"))
+    _make_source_unavailable(evidence_id)
+    with pytest.raises(MemoryOutcomeUnavailable, match="admission unavailable"):
+        store.admit(authorization, package)

@@ -43,6 +43,9 @@ from lucy.memory_outcome_aws_v1 import (
     DynamoMemoryOutcomeKeyWriter,
 )
 from lucy.memory_outcome_recovery import (
+    DurableMemoryOutcomeGrantIssuer,
+    MemoryOutcomeGrantAdmissionV1,
+    MemoryOutcomeGrantRequestV1,
     MemoryOutcomeRecoveryPolicy,
     PermitBoundMemoryOutcomeRecovery,
 )
@@ -543,3 +546,108 @@ def test_policy_caps_recovery_deadlines_at_campaign_expiry() -> None:
 
     assert grant.execution_completion_deadline == expiring.expires_at
     assert grant.permit_claim_deadline < expiring.expires_at
+
+
+class DurablePolicyStore(Eligibility):
+    def __init__(self) -> None:
+        super().__init__()
+        self.grant: MemoryOutcomeRecoveryGrantV1 | None = None
+        self.admissions = 0
+
+    def admit(
+        self,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+    ) -> MemoryOutcomeGrantAdmissionV1:
+        assert authorization.owner_approval_ref == UUID(int=21)
+        self.admissions += 1
+        return MemoryOutcomeGrantAdmissionV1(
+            request_digest=MemoryOutcomeGrantRequestV1(
+                authorization=authorization, package=package
+            ).digest_hex(),
+            admitted_at=NOW,
+            authorization_expires_at=authorization.bundle.manifest.expires_at,
+            replayed=self.admissions > 1,
+        )
+
+    def load_grant(
+        self,
+        _authorization: AuthorizedPilotManifestV1,
+        _package: MemoryOutcomeRecoveryPackageV1,
+    ) -> MemoryOutcomeRecoveryGrantV1 | None:
+        return self.grant
+
+    def record_grant(
+        self,
+        _authorization: AuthorizedPilotManifestV1,
+        _package: MemoryOutcomeRecoveryPackageV1,
+        grant: MemoryOutcomeRecoveryGrantV1,
+    ) -> MemoryOutcomeRecoveryGrantV1:
+        if self.grant is None:
+            self.grant = grant
+        return self.grant
+
+
+def test_durable_policy_issuer_replays_one_winning_exact_grant() -> None:
+    authorization = _authorization()
+    manifest = authorization.bundle.manifest
+    assert isinstance(manifest, ImportManifestV2)
+    package = _package(FakeKms(), FakeDynamo())
+    package = package.model_copy(
+        update={
+            "envelope": package.envelope.model_copy(
+                update={
+                    "binding": package.envelope.binding.model_copy(
+                        update={"manifest_digest": manifest.digest}
+                    )
+                }
+            )
+        }
+    )
+    store = DurablePolicyStore()
+    signer, _ = _trust()
+    policy = MemoryOutcomeRecoveryPolicy(
+        signer,
+        store,
+        environment=DeploymentEnvironment.TEST,
+        issuer="lucy-policy-test",
+        caller_identity="arn:aws:iam::429870640638:role/lucy-archive",
+        target_scope=SCOPE,
+        execution_binding=BINDING,
+        policy_version=1,
+        operation_id_factory=lambda: UUID(int=30),
+        nonce_factory=lambda: "d" * 32,
+    )
+    issuer = DurableMemoryOutcomeGrantIssuer(store, policy)  # type: ignore[arg-type]
+
+    first = issuer.issue(authorization=authorization, package=package, now=NOW)
+    second = issuer.issue(
+        authorization=authorization, package=package, now=NOW + timedelta(seconds=1)
+    )
+
+    assert first == second
+    assert first.issued_at == NOW
+    assert store.grant == first
+    assert store.admissions == 2
+
+
+def test_grant_request_digest_binds_authorization_and_ciphertext_package() -> None:
+    authorization = _authorization()
+    package = _package(FakeKms(), FakeDynamo())
+    request = MemoryOutcomeGrantRequestV1(
+        authorization=authorization,
+        package=package,
+    )
+    changed = request.model_copy(
+        update={
+            "package": package.model_copy(
+                update={
+                    "envelope": package.envelope.model_copy(
+                        update={"keyed_commitment": "9" * 64}
+                    )
+                }
+            )
+        }
+    )
+
+    assert request.digest_hex() != changed.digest_hex()

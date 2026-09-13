@@ -263,6 +263,7 @@ def apply_manifest(
                 "sensitive.deletion_manifest.issue",
                 "memory.candidate.approve",
                 "memory.candidate.promote",
+                "memory.outcome.recover",
                 "memory.protected.read",
             ],
         ),

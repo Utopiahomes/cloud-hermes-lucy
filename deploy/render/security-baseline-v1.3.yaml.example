@@ -102,6 +102,13 @@ projects:
               - {key: LUCY_AWS_EVIDENCE_KEY_ARN, sync: false}
               - {key: LUCY_AWS_WRAPPED_KEY_TABLE, sync: false}
               - {key: LUCY_V13_TARGET_SCOPE_JSON, sync: false}
+              - {key: LUCY_AWS_OUTCOME_KEY_ARN, sync: false}
+              - {key: LUCY_AWS_OUTCOME_KEY_TABLE, sync: false}
+              - {key: LUCY_OUTCOME_REGISTRY_ID, sync: false}
+              - {key: LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN, sync: false}
+              - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+              - key: LUCY_POLICY_HOSTPORT
+                fromService: {type: pserv, name: lucy-policy, property: hostport}
 
           # This is an isolated gateway process, not a fifth database/AWS trust
           # boundary. It holds only the Telegram/OpenRouter credentials and the
@@ -160,6 +167,11 @@ projects:
               - {key: LUCY_V13_POLICY_KEY_ID, sync: false}
               - {key: LUCY_V13_POLICY_TRUST_STORE_JSON, sync: false}
               - {key: LUCY_V13_RECEIPT_TRUST_STORE_JSON, sync: false}
+              - {key: LUCY_POLICY_ISSUER, value: lucy-policy}
+              - {key: LUCY_V13_TARGET_SCOPE_JSON, sync: false}
+              - {key: LUCY_V13_EXECUTION_BINDING_JSON, sync: false}
+              - {key: LUCY_V13_CALLER_IDENTITY, sync: false}
+              - {key: LUCY_MEMORY_OUTCOME_POLICY_VERSION, value: "1"}
 
           - type: pserv
             name: lucy-evidence
