@@ -802,9 +802,28 @@ def test_source_eligibility_is_exact_realm_bound_and_deletion_aware() -> None:
         )
 
 
+def test_deleted_source_blocks_new_candidate_approval() -> None:
+    assert all((RAYMOND_URL, POLICY_URL))
+    scope_id, evidence_ids = _provision()
+    candidate = _candidate(
+        scope_id,
+        evidence_ids,
+        protection=ProtectionClass.PROTECTED,
+    )
+    GovernedMemoryExtractor(create_session_factory(RAYMOND_URL)).stage(candidate)
+    _make_source_unavailable(evidence_ids[0])
+
+    with pytest.raises(GovernedMemoryUnavailable, match="approval"):
+        GovernedMemoryPolicy(create_session_factory(POLICY_URL)).approve(
+            candidate,
+            owner_approval_ref=uuid4(),
+            owner_actor_id="raymond-owner",
+        )
+
+
 def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
     assert RAYMOND_URL is not None
-    scope_id, _ = _provision()
+    scope_id, evidence_ids = _provision()
     extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
     reservation = extractor.reserve_attempt(
         TEST_CAMPAIGN_ID,
@@ -893,7 +912,10 @@ def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
             session.execute(
                 text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
                 {"job": json.dumps(changed, separators=(",", ":"))},
-                ).scalar_one()
+            ).scalar_one()
+    _make_source_unavailable(evidence_ids[0])
+    with pytest.raises(MemoryOutcomeUnavailable, match="lookup unavailable"):
+        outcome_store.load(job_id)
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:
