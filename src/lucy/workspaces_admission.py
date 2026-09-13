@@ -89,7 +89,7 @@ class WorkspacesExperienceGateway:
     def preflight(
         self,
         *,
-        credential: SecretStr,
+        lucy_authority_credential: SecretStr,
         request: WorkspacesRoomAdmissionRequestV1,
         checked_at: datetime,
     ) -> WorkspacesRoomAdmissionReceiptV1:
@@ -99,7 +99,7 @@ class WorkspacesExperienceGateway:
 
         contexts = tuple(
             self._admit(
-                credential=credential,
+                credential=lucy_authority_credential,
                 request_id=request.request_id,
                 capability=capability,
                 checked_at=checked_at,
@@ -119,7 +119,7 @@ class WorkspacesExperienceGateway:
     def execute(
         self,
         *,
-        credential: SecretStr,
+        lucy_authority_credential: SecretStr,
         request_id: UUID,
         room_id: UUID,
         capability: str,
@@ -132,7 +132,7 @@ class WorkspacesExperienceGateway:
         if capability not in self._room_capabilities:
             raise InternalAdmissionDenied("Workspaces request is not authorized")
         context = self._admit(
-            credential=credential,
+            credential=lucy_authority_credential,
             request_id=request_id,
             capability=capability,
             checked_at=checked_at,

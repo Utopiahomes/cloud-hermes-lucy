@@ -112,7 +112,7 @@ def _request(*capabilities: str) -> WorkspacesRoomAdmissionRequestV1:
 def test_preflight_intersects_fixed_room_policy_and_returns_non_bearer_receipt() -> None:
     admission = SyntheticAdmission()
     receipt = _gateway(admission).preflight(
-        credential=SecretStr("identity-token"),
+        lucy_authority_credential=SecretStr("identity-token"),
         request=_request("memory.read", "task.delegate"),
         checked_at=NOW,
     )
@@ -150,7 +150,7 @@ def test_unconfigured_capability_fails_before_directory_admission() -> None:
     admission = SyntheticAdmission()
     with pytest.raises(InternalAdmissionDenied, match="not authorized"):
         _gateway(admission).preflight(
-            credential=SecretStr("identity-token"),
+            lucy_authority_credential=SecretStr("identity-token"),
             request=_request("evidence.delete"),
             checked_at=NOW,
         )
@@ -162,7 +162,7 @@ def test_mixed_authority_result_fails_closed() -> None:
     admission.principal_by_action["task.delegate"] = FIVE
     with pytest.raises(InternalAdmissionDenied, match="not authorized"):
         _gateway(admission).preflight(
-            credential=SecretStr("identity-token"),
+            lucy_authority_credential=SecretStr("identity-token"),
             request=_request("memory.read", "task.delegate"),
             checked_at=NOW,
         )
@@ -171,7 +171,7 @@ def test_mixed_authority_result_fails_closed() -> None:
 def test_execute_readmits_current_authority_and_keeps_context_inside_effect() -> None:
     admission = SyntheticAdmission()
     observed_action = _gateway(admission).execute(
-        credential=SecretStr("identity-token"),
+        lucy_authority_credential=SecretStr("identity-token"),
         request_id=ZERO,
         room_id=TWO,
         capability="memory.read",

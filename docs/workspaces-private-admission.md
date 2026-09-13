@@ -19,8 +19,9 @@ The adapter is constructed inside a realm process with:
 - a deployment-owned Workspaces room capability allow-list.
 
 The requested capability set can only narrow that configuration. Every requested capability is
-then admitted against the current customer identity and directory authority. Results from a
-multi-capability preflight must agree on principal, scope, workspace, channel, execution binding,
+then admitted against the server-selected Lucy/service authority credential and current directory
+authority. The attendee's invitation identity is never used as Cloud Lucy authority. Results from
+a multi-capability preflight must agree on principal, scope, workspace, channel, execution binding,
 and membership generations.
 
 ## Receipt and execution
@@ -34,10 +35,12 @@ time of the effect and passes the resolved execution context only to an in-proce
 This means a prior preflight cannot bypass later membership revocation, channel withdrawal, node
 authorization epoch change, or tool-policy removal.
 
-Workspaces room IDs are correlation identifiers. They do not select authority. For R1, one
-deployed Workspaces adapter has one fixed Cloud Lucy workspace/channel binding, so one room cannot
-switch nodes. Supporting several nodes requires separate trusted deployment bindings or a future
-directory-owned router; caller-provided node switching remains forbidden.
+Workspaces room IDs are correlation identifiers. They do not select authority. A prospect adapter
+can be fixed to an approved sales/public knowledge projection without making the attendee a Cloud
+Lucy principal. An internal Homes adapter can instead be fixed to the Homes node. For R1, each
+adapter has one fixed Cloud Lucy workspace/channel binding, so one room cannot switch nodes.
+Supporting several nodes requires separate trusted deployment bindings or a future directory-owned
+router; caller-provided node switching remains forbidden.
 
 ## Data and availability
 
