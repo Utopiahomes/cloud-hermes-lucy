@@ -84,6 +84,13 @@ are not live-data requests and remain answerable.
 5. Verify negative controls and the approved digest in the deployed environment.
 6. Atomically activate the new projection, then enable the conversational reader.
 
+The local R1 release controller now enforces this order with distinct `stage`,
+`approve`, and `activate` manifests and authorization markers. Stage and approval are
+accepted only at `0056` and leave the current route untouched. Activation is accepted
+only at `0057`, under quarantine, and compare-and-swaps the exact reviewed prior route
+to the separately approved candidate. The V0 all-in-one bootstrap remains unchanged
+and is not an R1 publication path.
+
 A rollback digest is not eligible merely because it was once approved. The rollback
 candidate must be separately reviewed, remain within its effective dates, exclude
 withdrawn or sensitive facts, and be explicitly pinned in both Cloud and website
@@ -136,9 +143,11 @@ The following remain owner release gates and do not block local contract/retriev
 
 | Check | Result on 2026-09-12 | Invalidated by |
 | --- | --- | --- |
-| Ruff and strict mypy | Passed after synchronization: all files; 91 typed source files | Source/dependency/config changes |
-| Unit and contract tests | Passed after synchronization: 826; 248 database-gated tests skipped; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Ruff and strict mypy | Passed after release-controller implementation: all files; 92 typed source files | Source/dependency/config changes |
+| Unit and contract tests | Passed after release-controller implementation: 830; 249 database-gated tests skipped; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
 | Public retrieval acceptance | Passed: 10 evidence-exact conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
-| PostgreSQL boundary | Passed after synchronization: one Alembic head; clean migration `0001` through `0057`; 6 focused live-SQL tests on isolated loopback/tmpfs databases; disposable containers removed afterward | Migration, roles, publication, readiness, or database-image changes |
+| PostgreSQL boundary | Passed after release-controller implementation: one Alembic head; clean migration `0001` through `0057`; 7 focused live-SQL tests on isolated loopback/tmpfs databases; disposable containers removed afterward | Migration, roles, publication, readiness, or database-image changes |
+| Three-step release controller | Passed locally: exact action/revision/authorization contracts plus one staged, approved, activated, and replayed live-SQL release; publisher/approver substitution rejected; active route advanced atomically from version 1 to 2 | Release controller, publication tables, roles, migration, or snapshot contract changes |
+| Website compatibility | Passed without website source drift: TypeScript, repository-wide ESLint, 91 unit tests, and a 27-route Next.js webpack production build; the earlier 22-scenario browser result remains valid because website code and dependencies are unchanged | Website source, dependencies, browser matrix, or public request/response contract changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
 | Production activation | Not executed | Requires explicit production authorization and completed release gates |

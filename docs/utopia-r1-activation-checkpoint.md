@@ -4,8 +4,10 @@ Status: Private Telegram Stage 2 production acceptance passed on 2026-09-12 at e
 application release `e6f66d3c2aa1b2b17bedcae1b67a4cd613346067` and PostgreSQL revision
 `0054_stage2_scoped_turn_commit`. Encrypted private-Telegram evidence capture is active;
 automatic memory writes and raw-evidence retrieval remain disabled. Public Lucy remains
-disabled and unprovisioned. Its local implementation is ready for a separately authorized,
-fail-closed public activation. The complete private record is
+disabled. Its conversational R1 implementation is synchronized onto private checkpoint
+`d7b872c69c5fed4f738d23e36ac569a6ed3b57a9`, with migrations `0055` and `0056` in
+ancestry and Public Lucy migration `0057` attached to `0056`. Its local release path is
+ready for separately authorized, fail-closed staging, approval, and activation. The complete private record is
 `docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
 ## Completed preparation
@@ -52,12 +54,24 @@ fail-closed public activation. The complete private record is
 
 ## Exact next action
 
-Prepare the digest-pinned Public Lucy provisioning and activation artifact against schema
-`0054_stage2_scoped_turn_commit`, then review it before any production mutation. Production
-migration, Render provisioning, projection publication, website enablement, DNS changes, and
-live endpoint checks still require explicit authorization.
+Review and approve the 25-entry Public Lucy R1 corpus and its canonical digest. Only then
+copy the exact approved bytes to the production artifact path and prepare the three
+identifier-only release manifests. Production migration, Render provisioning, snapshot
+staging/approval/activation, website enablement, DNS changes, and live endpoint checks
+still require explicit authorization.
 
 ## Current Public Lucy reconciliation ledger
+
+- Public/Private synchronization: passed locally on 2026-09-12 at Public Lucy commit
+  `b416d013a393d2f6573397245d7c3991bea7e292`; one Alembic head ends at `0057`, and a
+  clean `0001`-through-`0057` migration plus six focused live-SQL boundary checks passed.
+- Conversational R1 corpus/retrieval: the 25-entry review candidate has canonical digest
+  `95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422` and passed all
+  ten evidence-exact acceptance conversations. It is not approved or active.
+- R1 release ordering: the local controller now requires separate stage, approve, and
+  activate authorizations. Its synthetic live-SQL test staged and approved without route
+  mutation, rejected publisher/approver substitution, atomically advanced version 1 to 2,
+  and replayed all three steps without duplicate effects.
 
 - Repository drift review: passed at
   `a3a624211c389804ad707e87df866161f3afb6ad`; Private Stage 2 changes do not merge the

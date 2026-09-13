@@ -154,6 +154,37 @@ service, remove the temporary migration resource and its environment snapshot,
 and verify the database inbound allowlist is still empty. Never retain the
 migration-owner URL on a continuously running service.
 
+## Release a Public Lucy R1 knowledge snapshot
+
+`release_public_knowledge_v1.py` deliberately separates the R1 release into three
+independently authorized one-off jobs:
+
+```text
+python deploy/postgres/release_public_knowledge_v1.py
+```
+
+The manifest action is exactly `stage`, `approve`, or `activate`. Each action has a
+different authorization marker: `utopia-public-knowledge-stage-v1`,
+`utopia-public-knowledge-approve-v1`, or
+`utopia-public-knowledge-activate-v1`. All actions require production Render, TLS,
+disabled transcript capture, quarantined runtime admission, the private
+`lucy_migration` URL, a digest-pinned identifier-only manifest, and the canonical
+snapshot path `/app/deploy/render/utopia-public-knowledge.r1.json`.
+
+Staging and approval require schema `0056_memory_import_budget`; neither changes the
+active route. Activation requires `0057_public_conversation`, a distinct active
+publisher, the exact prior version ID/version/digest, the exact approval ID and
+candidate bytes, and a snapshot whose every entry is currently effective. The route
+compare-and-swap, immutable version, candidate state, and event are committed in one
+transaction. Exact retries are read-only. A changed active route, expired or future
+entry, conflicting identifier, publisher/approver role substitution, or stale digest
+fails closed. The utility never opens runtime admission and never prints knowledge or
+credentials.
+
+The older `commission_public_projection_v1.py` remains the frozen V0 bootstrap. Do
+not use it to publish an R1 snapshot, because it intentionally commissions the initial
+workspace, authority, approval, and V0 route together.
+
 ## Provision one V1.3 realm foundation and binding stamp
 
 For an existing accepted V1.2 Render database, prefer the single quarantine-first

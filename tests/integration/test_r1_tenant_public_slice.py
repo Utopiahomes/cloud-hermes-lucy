@@ -4,11 +4,20 @@ import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import psycopg
 import pytest
 from sqlalchemy import create_engine, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from deploy.postgres.release_public_knowledge_v1 import (
+    PublicKnowledgeReleaseConfig,
+    PublicKnowledgeReleaseError,
+    PublicKnowledgeReleaseManifestV1,
+    _activate,
+    _approve,
+    _stage,
+)
 from deploy.postgres.render_security_v1_3_sql import render_realm_roles
 from lucy.db import create_session_factory
 from lucy.db.models import (
@@ -21,6 +30,8 @@ from lucy.publication import (
     PublicationRejected,
     PublicProjectionPublisher,
     PublicProjectionReader,
+    knowledge_snapshot,
+    snapshot_digest,
 )
 from lucy.readiness import ReadinessError, admitted_session_factory
 from lucy.tenancy import ScopeNotFound, TenancyService
@@ -302,6 +313,157 @@ def test_realm_public_login_requires_ready_exact_epoch_and_its_own_channel() -> 
         connection.execute(text("SELECT * FROM lucy.public_projection_versions"))
     public_engine.dispose()
     owner.dispose()
+
+
+def test_public_knowledge_release_is_three_step_exact_and_replay_safe() -> None:
+    assert DATABASE_URL and OWNER_DATABASE_URL
+    sessions = create_session_factory(DATABASE_URL)
+    tenancy = TenancyService(sessions)
+    publisher = PublicProjectionPublisher(sessions)
+    owner = tenancy.create_principal(
+        issuer="https://synthetic-idp.invalid",
+        subject="release-owner",
+        kind="human",
+        display_name="Release Owner",
+    )
+    release_publisher = tenancy.create_principal(
+        issuer="lucy://synthetic/public-projection",
+        subject="publisher-v1",
+        kind="service",
+        display_name="Release Publisher",
+    )
+    release_approver = tenancy.create_principal(
+        issuer="lucy://synthetic/public-projection",
+        subject="approver-v1",
+        kind="human",
+        display_name="Release Approver",
+    )
+    foundation = _foundation(tenancy, "utopia", "www.utopiahomes.com")
+    tenancy.grant_workspace_membership(
+        principal_id=owner, workspace_id=foundation.workspace_id, role="owner"
+    )
+    tenancy.grant_workspace_membership(
+        principal_id=release_publisher,
+        workspace_id=foundation.workspace_id,
+        role="publisher",
+    )
+    tenancy.grant_workspace_membership(
+        principal_id=release_approver,
+        workspace_id=foundation.workspace_id,
+        role="approver",
+    )
+    current_candidate, current_digest = publisher.stage(
+        channel_binding_id=foundation.channel_binding_id,
+        actor_id=owner,
+        entries=[
+            {
+                "question": "Where is Utopia Homes located?",
+                "answer": "At the Jersey Shore.",
+                "source": "https://www.utopiahomes.com/about",
+            }
+        ],
+    )
+    publisher.approve(
+        candidate_id=current_candidate,
+        expected_digest=current_digest,
+        actor_id=owner,
+    )
+    current_version_id = publisher.publish(candidate_id=current_candidate, actor_id=owner)
+
+    snapshot = knowledge_snapshot(
+        [
+            {
+                "id": "utopia-about",
+                "service_line": "general",
+                "kind": "description",
+                "title": "Utopia Homes",
+                "approved_text": "Utopia Homes creates distinctive group stays.",
+                "topics": ["about"],
+                "route": "about",
+                "source": {
+                    "id": "utopia-about-source",
+                    "label": "About Utopia Homes",
+                    "href": "https://www.utopiahomes.com/about",
+                },
+                "effective_from": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                "direct_answer": True,
+            }
+        ]
+    )
+    release_id = uuid4()
+    candidate_id = uuid4()
+    approval_id = uuid4()
+    version_id = uuid4()
+    common = {
+        "source_commit": "a" * 40,
+        "decision_id": "synthetic-public-release",
+        "release_id": release_id,
+        "realm_slug": "utopia",
+        "storage_epoch": uuid4(),
+        "channel_binding_id": foundation.channel_binding_id,
+        "hostname": "www.utopiahomes.com",
+        "candidate_id": candidate_id,
+        "snapshot_digest": snapshot_digest(snapshot),
+        "expected_active_version_id": current_version_id,
+        "expected_active_version": 1,
+        "expected_active_digest": current_digest,
+        "authorized_at": datetime.now(UTC),
+    }
+
+    def config_for(
+        action: str,
+        *,
+        actor_id: object,
+        transition_id: object,
+    ) -> PublicKnowledgeReleaseConfig:
+        manifest = PublicKnowledgeReleaseManifestV1.model_validate(
+            common
+            | {
+                "action": action,
+                "schema_revision": (
+                    "0057_public_conversation"
+                    if action == "activate"
+                    else "0056_memory_import_budget"
+                ),
+                "actor_id": actor_id,
+                "transition_id": transition_id,
+                "approval_id": approval_id if action in {"approve", "activate"} else None,
+                "version_id": version_id if action == "activate" else None,
+            }
+        )
+        return PublicKnowledgeReleaseConfig(
+            migration_url=make_url(OWNER_DATABASE_URL),
+            manifest=manifest,
+            snapshot=snapshot,
+        )
+
+    stage = config_for("stage", actor_id=release_publisher, transition_id=uuid4())
+    approve = config_for("approve", actor_id=release_approver, transition_id=uuid4())
+    activate = config_for("activate", actor_id=release_publisher, transition_id=uuid4())
+    unauthorized = config_for("approve", actor_id=release_publisher, transition_id=uuid4())
+    owner_url = make_url(OWNER_DATABASE_URL).set(drivername="postgresql")
+    with psycopg.connect(owner_url.render_as_string(hide_password=False)) as connection:
+        assert _stage(connection, stage) is False
+        connection.commit()
+        assert _stage(connection, stage) is True
+        with pytest.raises(PublicKnowledgeReleaseError, match="authority"):
+            _approve(connection, unauthorized)
+        connection.rollback()
+        assert _approve(connection, approve) is False
+        connection.commit()
+        assert _approve(connection, approve) is True
+        assert _activate(connection, activate) is False
+        connection.commit()
+        assert _activate(connection, activate) is True
+        assert _stage(connection, stage) is True
+        assert _approve(connection, approve) is True
+        active = connection.execute(
+            "SELECT v.id,v.version,v.snapshot_digest FROM lucy.public_projection_routes r "
+            "JOIN lucy.public_projection_versions v ON v.id=r.active_version_id "
+            "WHERE r.channel_binding_id=%s",
+            (foundation.channel_binding_id,),
+        ).fetchone()
+    assert active == (version_id, 2, snapshot_digest(snapshot))
 
 
 def test_database_enforces_one_wallet_per_node_and_immutable_tenure() -> None:
