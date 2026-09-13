@@ -1,8 +1,11 @@
 # Public Lucy R1 implementation plan
 
-Status: local implementation in progress on `codex/public-conversation-r1`. Nothing in
-this plan authorizes production mutation, paid inference, a provider selection, or
-publication of a new knowledge snapshot.
+Status: implemented and accepted in production on 2026-09-12. Production runs exact Cloud
+release `fbfd95b43bb670fa04c246ef789c18c5e47de020`, website merge
+`7ff15a399057ec762b7748cbf3eca56ef536232a`, PostgreSQL revision
+`0057_public_conversation`, and approved snapshot digest
+`95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422`.
+Paid inference, a provider selection, and public transcript capture remain outside this release.
 
 Integration note: this branch is synchronized onto the clean Private Lucy checkpoint
 `d7b872c69c5fed4f738d23e36ac569a6ed3b57a9`. Migrations `0055` and `0056` are now in
@@ -161,4 +164,5 @@ The following remain owner release gates and do not block local contract/retriev
 | Three-step release controller | Passed locally: exact action/revision/authorization contracts plus one staged, approved, activated, and replayed live-SQL release; publisher/approver substitution rejected; active route advanced atomically from version 1 to 2 | Release controller, publication tables, roles, migration, or snapshot contract changes |
 | Website compatibility | Passed without website source drift: TypeScript, repository-wide ESLint, 91 unit tests, and a 27-route Next.js webpack production build; the earlier 22-scenario browser result remains valid because website code and dependencies are unchanged | Website source, dependencies, browser matrix, or public request/response contract changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
-| Production activation | Not executed | Requires explicit production authorization and completed release gates |
+| Production activation | Passed: exact 25-entry digest staged, separately approved, atomically activated as version 2, and reopened under the preserved storage epoch; all three Render processes run exact commit `fbfd95b`; website PR 2 merged and Vercel deployment `8S2RT2w3EqXrySefCNRokqWm4itv` is Ready at `7ff15a3` | Cloud/website deploy, database route, environment, role, lifecycle, or snapshot changes |
+| Live customer path | Passed: free-form question, bounded Buttercup follow-up, comparison, compound requirements, missing-season partial, and design-estimate distinction; mobile widget and homepage menu passed; browser console clean | Website/Cloud source, deployment, contract, corpus, browser layout, or environment changes |
