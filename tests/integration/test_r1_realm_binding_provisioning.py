@@ -17,6 +17,10 @@ from deploy.postgres.provision_realm_foundation_v1_3 import (
     RealmFoundationSeedV1,
     apply_foundation,
 )
+from deploy.postgres.provision_workspaces_authority_v1 import (
+    WorkspacesAuthorityMembershipV1,
+    apply_membership,
+)
 from lucy.db import create_session_factory
 from lucy.db.models import RealmBindingRow
 from lucy.realm_provisioning import RealmExecutorStampV1, RealmSecurityStampV1
@@ -30,7 +34,10 @@ ACCOUNT = "123456789012"
 def _conninfo() -> str:
     assert OWNER_URL is not None
     parsed = make_url(OWNER_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
+    if (parsed.database, parsed.host) != ("lucy_test", "127.0.0.1") or parsed.port not in {
+        54329,
+        54339,
+    }:
         raise RuntimeError("refusing to provision outside the disposable test database")
     return parsed.set(drivername="postgresql").render_as_string(hide_password=False)
 
@@ -64,7 +71,7 @@ def _stamp() -> RealmSecurityStampV1:
         realm_slug="utopia",
         workspace_slug="private",
         hostname="realm-stamp.test",
-        workspace_kind="private",
+        workspace_kind="private_realm",
         channel_kind="internal",
     )
     principals = {
@@ -178,6 +185,36 @@ def test_exact_realm_stamp_is_idempotent() -> None:
             "(SELECT count(*) FROM lucy.realm_sensitive_actor_bindings_v1),"
             "(SELECT count(*) FROM lucy.realm_executor_bindings_v2)"
         ).fetchone() == (1, 1, 4, 2)
+
+
+def test_workspaces_service_membership_is_explicit_bound_and_idempotent() -> None:
+    stamp = _stamp()
+    with psycopg.connect(_conninfo()) as connection:
+        assert apply_manifest(connection, stamp) is True
+        manifest = WorkspacesAuthorityMembershipV1(
+            realm_slug="utopia",
+            membership_id=uuid4(),
+            service_principal_id=stamp.routine_principal_id,
+            service_binding_id=stamp.service_binding_id,
+            workspace_id=stamp.workspace_id,
+            identity_issuer="https://workload.test",
+            identity_subject="render:utopia:routine",
+            granted_at=datetime.now(UTC),
+        )
+        assert apply_membership(connection, manifest) is True
+    with psycopg.connect(_conninfo()) as connection:
+        assert apply_membership(connection, manifest) is False
+        assert connection.execute(
+            "SELECT principal_id,workspace_id,role,status,generation "
+            "FROM lucy.node_memberships WHERE id=%s",
+            (manifest.membership_id,),
+        ).fetchone() == (
+            stamp.routine_principal_id,
+            stamp.workspace_id,
+            "member",
+            "active",
+            1,
+        )
 
 
 def test_exact_foundation_replays_and_admits_the_security_stamp() -> None:

@@ -26,8 +26,10 @@ The Cloud Lucy authority credential remains in this service's configuration and 
 from Workspaces.
 
 The requested capability set can only narrow that configuration. Every requested capability is
-then admitted against the server-selected Lucy/service authority credential and current directory
-authority. The attendee's invitation identity is never used as Cloud Lucy authority. Results from
+then admitted against the server-selected Lucy service authority credential and current directory
+authority. That service principal must be the principal named by the realm service binding and must
+hold its own explicit, reviewed `member` membership in the fixed node workspace. The attendee's
+invitation identity is never used as Cloud Lucy authority. Results from
 a multi-capability preflight must agree on principal, scope, workspace, channel, execution binding,
 and membership generations.
 
@@ -86,7 +88,7 @@ The existing container can run this isolated service with `python -m lucy.worksp
 `deploy/render/workspaces-private-service.yaml.example` records the review-only private-service
 shape with auto-deploy disabled; it is not connected to a live Blueprint.
 Startup requires the following secret/configuration values and refuses to listen if capture is not
-disabled, the database login differs from the fixed binding, migration `0067` is absent, the login
+disabled, the database login differs from the fixed binding, migration `0068` is absent, the login
 is elevated, required execute grants are missing, or direct task-table access exists:
 
 - `LUCY_WORKSPACES_RUNTIME_BINDING_JSON`
@@ -105,12 +107,16 @@ is elevated, required execute grants are missing, or direct task-table access ex
 - `LUCY_WORKSPACES_PROJECTION_SNAPSHOT_DIGEST`
 - `LUCY_TRANSCRIPT_CAPTURE_ENABLED=false`
 
-The runtime binding must include `memory.read`, `task.delegate`, and `task.execute` for the current
-vertical slice. The production database role template grants only the required security-definer
-functions, including the approved projection reader. Migration `0066` adds both task actions only
-to active realm service bindings that already hold `memory.read`; the realm provisioner records
-the same actions for future bindings. Applying that migration, creating service secrets, or adding
-a Render service remains a separate reviewed deployment action.
+The runtime binding must use the realm service issuer, name the bound service principal's subject,
+allow workload identity, and include `memory.read`, `task.delegate`, and `task.execute` for the
+current vertical slice. The production database role template grants only the required
+security-definer functions, including the approved projection reader. Migration `0066` adds both
+task actions only to active realm service bindings that already hold `memory.read`; migration
+`0068` requires a service caller to be that exact bound service principal and admits the production
+`private_realm` workspace kind. `provision_workspaces_authority_v1.py` creates the explicit service
+membership only from a digest-bound manifest while admission is quarantined and capture remains
+disabled. Applying migrations, provisioning that membership, creating service secrets, or adding a
+Render service remains a separate reviewed deployment action.
 
 ## Verification ledger
 
@@ -119,9 +125,9 @@ a Render service remains a separate reviewed deployment action.
 | Cloud lint | Passed | `ruff check src tests migrations deploy` on 2026-09-12 | Relevant source, migration, deploy template, or test change |
 | Cloud typing | Passed | Strict `mypy src` across 103 source files after the combined-head readiness correction on 2026-09-12 | Source or type configuration change |
 | Adapter security tests | 18 passed | Focused admission, private API, operation, task, and runtime unit tests | Adapter, API, operation, task, runtime, or test change |
-| Cloud unit and affected suite | Passed | 906 unit tests on combined commit `3db1dc9`; 40 Workspaces runtime, task, and shared-readiness tests after requiring migration `0067` | Relevant source, test, or dependency change |
-| Fresh PostgreSQL migration | Passed | Clean `0001 -> 0067_memory_deletion_recovery` migration in an isolated PostgreSQL tmpfs container on 2026-09-12, including Workspaces migration `0066` | Migration or PostgreSQL image change |
-| Directory, queue lifecycle, and role boundary | 3 passed | Workspaces admission, queue lifecycle, shared and private-runtime readiness, execute grants, and direct-table denial at migration `0067` | Directory, queue migration, queue client, runtime readiness, or realm role template change |
+| Cloud unit and affected suite | Passed | Prior 906-unit combined suite plus 12 current Workspaces admission/runtime/provisioner tests; the full Windows rerun passed 906 tests and hit only the frozen AWS template's checkout newline hash | Relevant source, test, dependency, or checkout newline policy change |
+| Fresh PostgreSQL migration | Passed | Clean `0001 -> 0068_workspaces_service_auth` migration plus `0068 -> 0067 -> 0068` reversal in an isolated PostgreSQL tmpfs container on 2026-09-12 | Migration or PostgreSQL image change |
+| Directory, membership, queue, and role boundary | 6 passed | Exact service membership, service-principal equality, missing-membership denial, production `private_realm` admission, queue lifecycle, shared/private readiness, execute grants, and direct-table denial at migration `0068` | Directory, membership provisioner, queue migration/client, runtime readiness, or realm role template change |
 | Workspaces backend suite | 83 passed | Full backend test suite plus Ruff on 2026-09-12 | Workspaces backend source or dependency change |
 | Workspaces-to-Cloud contract smoke | Passed | In-process ASGI admission, knowledge, and task calls using the real Workspaces client and Cloud API models | Either side of the transport contract changes |
 | Deployed Workspaces call | Not executed | Private API factory is intentionally not deployed | Requires approved realm construction and deployment gate |
