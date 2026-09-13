@@ -16,6 +16,7 @@ SCHEMA_REVISION = "0021_recovery_capture_safety"
 R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
 STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
+PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",
@@ -113,14 +114,26 @@ class ServiceReadiness:
             )
             expected_revisions = {SCHEMA_REVISION}
             if self._baseline == "v1.3":
-                expected_revisions = (
-                    {STAGE2_SCHEMA_REVISION, MEMORY_IMPORT_SCHEMA_REVISION}
-                    if os.getenv("LUCY_TELEGRAM_STAGE") == "2"
+                if (
+                    self._mode == "public"
+                    and os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
+                ):
+                    expected_revisions = {PUBLIC_CONVERSATION_SCHEMA_REVISION}
+                elif os.getenv("LUCY_TELEGRAM_STAGE") == "2":
+                    expected_revisions = {
+                        STAGE2_SCHEMA_REVISION,
+                        MEMORY_IMPORT_SCHEMA_REVISION,
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                    }
                     # The bridge release must remain healthy before and after
-                    # the quarantined 0053 -> 0054 migration. Stage 2 itself
-                    # admits only the new revision.
-                    else {R1_SCHEMA_REVISION, STAGE2_SCHEMA_REVISION}
-                )
+                    # the additive private-memory and public-conversation migrations.
+                else:
+                    expected_revisions = {
+                        R1_SCHEMA_REVISION,
+                        STAGE2_SCHEMA_REVISION,
+                        MEMORY_IMPORT_SCHEMA_REVISION,
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                    }
             if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
             admission = session.execute(
@@ -350,8 +363,13 @@ class ServiceReadiness:
                 {"table": table},
             ):
                 raise ReadinessError("realm service login lacks readiness permissions")
+        public_function = (
+            "lucy.public_projection_knowledge_v1(text,uuid)"
+            if os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
+            else "lucy.public_projection_answer_v2(text,text,uuid)"
+        )
         required_functions = {
-            "public": ("lucy.public_projection_answer_v2(text,text,uuid)",),
+            "public": (public_function,),
             "routine": (
                 "lucy.stage_memory_import_candidate_v1(jsonb)",
                 "lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb)",

@@ -1,0 +1,85 @@
+{
+  "contract": "lucy.public-knowledge.acceptance.v1",
+  "cases": [
+    {
+      "id": "follow-up-property-parking",
+      "question": "How many cars fit?",
+      "history": [{ "role": "visitor", "content": "Tell me about Buttercup." }],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["buttercup-parking"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "compare-pool-homes",
+      "question": "Which homes have pools, and how do they differ?",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["buttercup-outdoors", "central-outdoors"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "multiple-property-requirements",
+      "question": "We have 20 people, four cars, and want a pool.",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["buttercup-capacity", "buttercup-outdoors", "buttercup-parking"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "missing-pool-season",
+      "question": "Is the Buttercup pool open in November?",
+      "history": [],
+      "expected_outcome": "partial",
+      "expected_evidence_ids": ["buttercup-outdoors"],
+      "expected_missing_topics": ["pool_season"]
+    },
+    {
+      "id": "design-estimate-not-live-rate",
+      "question": "How does your design estimate work?",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["design-estimate"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "pet-policy-paraphrase",
+      "question": "Can I bring two dogs to Central Ave?",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["central-pets"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "booking-process",
+      "question": "How does booking a stay work?",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["booking-external-handoff"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "owner-service-paraphrase",
+      "question": "Can Utopia manage my vacation rental?",
+      "history": [],
+      "expected_outcome": "answered",
+      "expected_evidence_ids": ["owners-management-model"],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "individual-reservation-restricted",
+      "question": "Can you cancel my booking?",
+      "history": [],
+      "expected_outcome": "fallback",
+      "expected_evidence_ids": [],
+      "expected_missing_topics": []
+    },
+    {
+      "id": "unknown-amenity-fallback",
+      "question": "Do the homes provide cribs?",
+      "history": [],
+      "expected_outcome": "fallback",
+      "expected_evidence_ids": [],
+      "expected_missing_topics": []
+    }
+  ]
+}

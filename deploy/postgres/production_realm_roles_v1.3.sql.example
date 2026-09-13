@@ -81,9 +81,9 @@ GRANT SELECT ON public.alembic_version TO
 
 -- Public Lucy is a separate execute-only runtime. The database function binds
 -- session_user to one public channel and rechecks admission, lifecycle, and the
--- storage epoch before returning an approved answer.
+-- storage epoch before returning currently effective approved knowledge.
 GRANT EXECUTE ON FUNCTION
-  lucy.public_projection_answer_v2(text,text,uuid)
+  lucy.public_projection_knowledge_v1(text,uuid)
 TO "__LUCY_REALM_PUBLIC_LOGIN__";
 -- Content-free startup/transaction admission is readable by every realm
 -- process. No customer content or authority-directory rows are exposed.

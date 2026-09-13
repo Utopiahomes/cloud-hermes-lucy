@@ -16,6 +16,7 @@ COPY deploy/postgres/migrate_realm_cloud_v1_3.py ./deploy/postgres/migrate_realm
 COPY deploy/postgres/commission_telegram_stage1_v1.py ./deploy/postgres/commission_telegram_stage1_v1.py
 COPY deploy/postgres/commission_realm_runtime_v1_3.py ./deploy/postgres/commission_realm_runtime_v1_3.py
 COPY deploy/postgres/commission_public_projection_v1.py ./deploy/postgres/commission_public_projection_v1.py
+COPY deploy/postgres/release_public_knowledge_v1.py ./deploy/postgres/release_public_knowledge_v1.py
 COPY deploy/postgres/migrate_telegram_stage2_v1.py ./deploy/postgres/migrate_telegram_stage2_v1.py
 COPY deploy/postgres/activate_telegram_stage2_v1.py ./deploy/postgres/activate_telegram_stage2_v1.py
 COPY deploy/postgres/rebind_executors_cloud_v1_2.py ./deploy/postgres/rebind_executors_cloud_v1_2.py

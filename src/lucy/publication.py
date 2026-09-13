@@ -21,6 +21,7 @@ from lucy.db.models import (
     PublicProjectionRouteRow,
     PublicProjectionVersionRow,
 )
+from lucy.public_contracts import PublicKnowledgeEntry, PublicKnowledgeSnapshot
 from lucy.tenancy import ScopeNotFound
 
 
@@ -32,6 +33,13 @@ class PublicationRejected(ValueError):
 class PublicAnswer:
     answer: str
     source: str
+    version: int
+    snapshot_digest: str
+
+
+@dataclass(frozen=True)
+class PublicKnowledgeProjection:
+    entries: tuple[PublicKnowledgeEntry, ...]
     version: int
     snapshot_digest: str
 
@@ -61,6 +69,29 @@ def faq_snapshot(entries: list[dict[str, str]]) -> dict[str, Any]:
     return {"schema": "lucy-public-faq-v1", "faqs": normalized}
 
 
+def knowledge_snapshot(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Validate and canonicalize an R1 public-knowledge candidate."""
+
+    validated = PublicKnowledgeSnapshot.model_validate(
+        {"schema": "lucy-public-knowledge-v1", "entries": entries}
+    )
+    ids = [entry.id for entry in validated.entries]
+    if len(ids) != len(set(ids)):
+        raise ValueError("public knowledge entry ids must be unique")
+    property_facts: dict[str, object] = {}
+    for entry in validated.entries:
+        if entry.property_slug is None:
+            continue
+        facts = entry.property_facts
+        existing = property_facts.setdefault(entry.property_slug, facts)
+        if existing != facts:
+            raise ValueError("public knowledge property facts must be consistent per property")
+    ordered = validated.model_copy(
+        update={"entries": tuple(sorted(validated.entries, key=lambda entry: entry.id))}
+    )
+    return ordered.model_dump(mode="json", by_alias=True)
+
+
 class PublicProjectionPublisher:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -72,7 +103,34 @@ class PublicProjectionPublisher:
         entries: list[dict[str, str]],
         actor_id: UUID,
     ) -> tuple[UUID, str]:
-        snapshot = faq_snapshot(entries)
+        return self._stage_snapshot(
+            channel_binding_id=channel_binding_id,
+            snapshot=faq_snapshot(entries),
+            actor_id=actor_id,
+        )
+
+    def stage_knowledge(
+        self,
+        *,
+        channel_binding_id: UUID,
+        entries: list[dict[str, Any]],
+        actor_id: UUID,
+    ) -> tuple[UUID, str]:
+        """Stage validated R1 knowledge without making it active."""
+
+        return self._stage_snapshot(
+            channel_binding_id=channel_binding_id,
+            snapshot=knowledge_snapshot(entries),
+            actor_id=actor_id,
+        )
+
+    def _stage_snapshot(
+        self,
+        *,
+        channel_binding_id: UUID,
+        snapshot: dict[str, Any],
+        actor_id: UUID,
+    ) -> tuple[UUID, str]:
         digest = snapshot_digest(snapshot)
         candidate_id = uuid4()
         now = datetime.now(UTC)
@@ -253,9 +311,7 @@ class PublicProjectionReader:
             snapshot_digest=result["snapshot_digest"],
         )
 
-    def answer_admitted(
-        self, *, hostname: str, question: str, storage_epoch: UUID
-    ) -> PublicAnswer:
+    def answer_admitted(self, *, hostname: str, question: str, storage_epoch: UUID) -> PublicAnswer:
         """Read only through the epoch- and quarantine-gated public function."""
 
         with self._sessions() as session:
@@ -268,6 +324,27 @@ class PublicProjectionReader:
         return PublicAnswer(
             answer=result["answer"],
             source=result["source"],
+            version=result["version"],
+            snapshot_digest=result["snapshot_digest"],
+        )
+
+    def knowledge_admitted(
+        self, *, hostname: str, storage_epoch: UUID
+    ) -> PublicKnowledgeProjection:
+        """Read only currently effective records through the admitted public function."""
+
+        with self._sessions() as session:
+            result = session.execute(
+                text("SELECT lucy.public_projection_knowledge_v1(:hostname,:epoch)"),
+                {"hostname": hostname, "epoch": storage_epoch},
+            ).scalar_one()
+        if result is None:
+            raise ScopeNotFound("public knowledge is unavailable")
+        snapshot = PublicKnowledgeSnapshot.model_validate(
+            {"schema": "lucy-public-knowledge-v1", "entries": result["entries"]}
+        )
+        return PublicKnowledgeProjection(
+            entries=snapshot.entries,
             version=result["version"],
             snapshot_digest=result["snapshot_digest"],
         )

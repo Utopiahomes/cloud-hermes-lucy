@@ -53,7 +53,7 @@ def test_realm_renderer_emits_execute_only_scoped_grants() -> None:
     assert 'TO "lucy_utopia_sensitive_workflow"' in rendered
     assert 'TO "lucy_utopia_finality"' in rendered
     assert 'TO "lucy_utopia_public"' in rendered
-    assert "public_projection_answer_v2(text,text,uuid)" in rendered
+    assert "public_projection_knowledge_v1(text,uuid)" in rendered
     assert "GRANT SELECT ON lucy.scoped_" not in rendered
 
 

@@ -22,6 +22,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
+from lucy.public_contracts import PublicHistoryTurn, PublicPageContext
+from lucy.public_retrieval import PublicKnowledgeRetriever
 from lucy.publication import PublicProjectionReader
 from lucy.readiness import ReadinessError, admitted_session_factory
 from lucy.tenancy import ScopeNotFound
@@ -44,6 +46,8 @@ class PublicQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     question: str = Field(min_length=2, max_length=500)
+    page_context: PublicPageContext | None = None
+    history: tuple[PublicHistoryTurn, ...] = Field(default=(), max_length=6)
 
     @field_validator("question")
     @classmethod
@@ -52,6 +56,13 @@ class PublicQuestion(BaseModel):
         if len(normalized) < 2:
             raise ValueError("question is blank")
         return normalized
+
+    @field_validator("history")
+    @classmethod
+    def bound_history(cls, value: tuple[PublicHistoryTurn, ...]) -> tuple[PublicHistoryTurn, ...]:
+        if sum(len(turn.content) for turn in value) > 4_000:
+            raise ValueError("conversation context is too large")
+        return value
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,7 @@ class PublicApiConfiguration:
     requests_per_ip_per_minute: int
     requests_per_session_per_minute: int
     session_ttl_seconds: int
+    conversation_enabled: bool
 
     @classmethod
     def from_environment(
@@ -143,6 +155,10 @@ class PublicApiConfiguration:
             session_ttl_seconds=_bounded_int(
                 values, "LUCY_PUBLIC_SESSION_TTL_SECONDS", 300, 86_400
             ),
+            conversation_enabled=_strict_bool(
+                values.get("LUCY_PUBLIC_CONVERSATION_ENABLED", "false"),
+                "LUCY_PUBLIC_CONVERSATION_ENABLED",
+            ),
         )
 
 
@@ -161,6 +177,14 @@ def _bounded_int(values: Mapping[str, str], name: str, minimum: int, maximum: in
     if not minimum <= value <= maximum:
         raise PublicApiConfigurationError(f"public limit is invalid: {name}")
     return value
+
+
+def _strict_bool(value: str, name: str) -> bool:
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise PublicApiConfigurationError(f"public flag is invalid: {name}")
 
 
 @dataclass
@@ -195,17 +219,13 @@ class _OpaqueRateLimiter:
                 return False
             if not self._increment(ip_key, minute, config.requests_per_ip_per_minute):
                 return False
-            if not self._increment(
-                session_key, minute, config.requests_per_session_per_minute
-            ):
+            if not self._increment(session_key, minute, config.requests_per_session_per_minute):
                 return False
             self._prune(minute, now, config.session_ttl_seconds)
             return True
 
     def _commitment(self, kind: str, value: str) -> str:
-        return hmac.new(
-            self._key, f"{kind}\0{value}".encode(), hashlib.sha256
-        ).hexdigest()
+        return hmac.new(self._key, f"{kind}\0{value}".encode(), hashlib.sha256).hexdigest()
 
     def _increment(self, key: str, minute: int, ceiling: int) -> bool:
         current = self._windows.get(key)
@@ -234,6 +254,7 @@ app = FastAPI(
     redoc_url=None,
 )
 _limiter = _OpaqueRateLimiter()
+_retriever = PublicKnowledgeRetriever()
 
 
 @lru_cache(maxsize=1)
@@ -310,6 +331,37 @@ async def public_answer(request: Request) -> JSONResponse:
         return _response(400, "Invalid public request")
 
     try:
+        if config.conversation_enabled:
+            projection = _reader().knowledge_admitted(
+                hostname=config.site_hostname,
+                storage_epoch=config.storage_epoch,
+            )
+            if not secrets.compare_digest(projection.snapshot_digest, config.snapshot_digest):
+                return _response(503, "Public Lucy is unavailable")
+            result = _retriever.retrieve(
+                question=question.question,
+                entries=projection.entries,
+                page_context=question.page_context,
+                history=question.history,
+            )
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "contract": "lucy.public-answer.v2",
+                    "outcome": result.outcome,
+                    "answer": result.answer,
+                    **(
+                        {"clarification": result.clarification}
+                        if result.clarification is not None
+                        else {}
+                    ),
+                    "sources": [item.model_dump(mode="json") for item in result.sources],
+                    "links": [item.model_dump(mode="json") for item in result.links],
+                    "version": projection.version,
+                    "snapshot_digest": projection.snapshot_digest,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
         answer = _reader().answer_admitted(
             hostname=config.site_hostname,
             question=question.question,
