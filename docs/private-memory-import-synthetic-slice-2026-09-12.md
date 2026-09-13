@@ -6,7 +6,9 @@ Starting revision: `207d3af6c782747e104fa24f2b72a2a2c4eea8ff`
 Status: local synthetic slice implemented and passing; not deployed
 Current private-memory revisions: `d747509` (schema/import foundation), `d973d41`
 (bounded extraction coordinator), `204c38c` (isolated provider adapter), and `a655292`
-(atomic completion fence), plus the pilot-completion increment recorded here.
+(atomic completion fence), plus the pilot-completion, executable-budget, immutable-request,
+deterministic-compiler, and exact source-eligibility increments recorded here. Public Lucy's
+accepted `0057` migration is merged at `2807dad`.
 
 ## Scope and safety state
 
@@ -71,16 +73,21 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
    coverage, blocks an individually oversized record, respects the attempt and per-attempt cost
    ceilings, and accounts for repeated request framing in every batch. Provider-reported input
    usage is required and must remain inside the admitted conservative bound.
+16. PostgreSQL now performs an execute-only, realm-scoped eligibility check at admission,
+    immediately before provider dispatch, and after provider return. It binds every requested
+    source to the campaign's exact manifest, active evidence identity and version, and absence of
+    a deletion fence. Duplicate, blank, oversized, outside-manifest, cross-scope, stale, or deleted
+    source references fail closed.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 8 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL; includes V2 exact authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 835 tests | Full `tests/unit` run after V2 proposal and deterministic batch compiler, 2026-09-12 | Relevant Python or dependency change |
-| Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
-| Mypy strict | Passed, 90 source files | `mypy --strict src` after isolated OpenRouter adapter | Python source or type-config change |
+| Existing PostgreSQL migration `0057_public_conversation` to `0058_memory_import_eligibility` | Passed | Disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12; prior clean-chain proof through `0057` remains valid | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 9 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0058`; includes exact realm/source/version/deletion eligibility, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 861 tests | Full `tests/unit` run after the Public Lucy merge and source-eligibility increment, 2026-09-12 | Relevant Python or dependency change |
+| Ruff | Passed | `src/lucy`, unit/import tests, migrations `0055` through `0058` | Relevant source change |
+| Mypy strict | Passed, 95 source files | `mypy --strict src` after the source-eligibility increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
@@ -107,9 +114,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 1. Assemble the coordinator, database source-eligibility implementation, deterministic compiler,
    candidate materializer, atomic database completion, and isolated OpenRouter adapter behind a
-   pilot-only runner. Every component except the database pre-dispatch eligibility operation and
-   runner wiring is implemented; no real provider request is enabled, and the runner must require
-   the separately authorized manifest.
+   pilot-only runner. The component boundaries, including three-phase database eligibility, are
+   implemented; runner wiring remains. No real provider request is enabled, and the runner must
+   require the separately authorized manifest.
 2. After Public Lucy connects its accepted migration `0057` to `0056`, add a realm-scoped durable
    extraction job and encrypted provider-outcome journal. Until that exists, the pilot must stay
    fenced: a replayed reservation or uncertain completion acknowledgement requires operator

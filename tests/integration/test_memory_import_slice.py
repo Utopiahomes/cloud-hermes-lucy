@@ -291,7 +291,8 @@ def _provision() -> tuple[object, object]:
                 "lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb),"
                 "lucy.search_governed_scoped_memory_v1(text,integer),"
                 "lucy.reserve_memory_import_attempt_v1(uuid,text,bigint),"
-                "lucy.settle_memory_import_attempt_v1(uuid,bigint,text) "
+                "lucy.settle_memory_import_attempt_v1(uuid,bigint,text),"
+                "lucy.require_memory_import_sources_v1(uuid,text,jsonb) "
                 "TO lucy_raymond_routine; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text),"
@@ -750,6 +751,39 @@ def test_campaign_cap_charges_retries_and_survives_client_restart() -> None:
     runtime = create_session_factory(RAYMOND_URL)
     with pytest.raises(DBAPIError, match="permission denied"), runtime.begin() as session:
         session.execute(text("SELECT * FROM lucy.memory_import_campaigns_v1"))
+
+
+def test_source_eligibility_is_exact_realm_bound_and_deletion_aware() -> None:
+    assert RAYMOND_URL is not None
+    _, evidence_ids = _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+
+    extractor.require_eligible(
+        campaign_id=TEST_CAMPAIGN_ID,
+        manifest_digest=TEST_MANIFEST_DIGEST,
+        source_record_ids=("synthetic-record-0", "synthetic-record-1"),
+        phase="pre_dispatch",
+    )
+    for sources in (
+        ("synthetic-record-0", "synthetic-record-0"),
+        ("outside-manifest",),
+    ):
+        with pytest.raises(GovernedMemoryUnavailable, match="eligibility"):
+            extractor.require_eligible(
+                campaign_id=TEST_CAMPAIGN_ID,
+                manifest_digest=TEST_MANIFEST_DIGEST,
+                source_record_ids=sources,
+                phase="pre_dispatch",
+            )
+
+    _make_source_unavailable(evidence_ids[0])
+    with pytest.raises(GovernedMemoryUnavailable, match="eligibility"):
+        extractor.require_eligible(
+            campaign_id=TEST_CAMPAIGN_ID,
+            manifest_digest=TEST_MANIFEST_DIGEST,
+            source_record_ids=("synthetic-record-0",),
+            phase="post_dispatch",
+        )
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:

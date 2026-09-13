@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from typing import Literal
 from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,6 +134,42 @@ class GovernedMemoryExtractor:
                 "memory import attempt reservation unavailable"
             ) from exc
         return ImportAttemptResultV1.model_validate(result)
+
+    def require_eligible(
+        self,
+        *,
+        campaign_id: UUID,
+        manifest_digest: str,
+        source_record_ids: tuple[str, ...],
+        phase: Literal["admission", "pre_dispatch", "post_dispatch"],
+    ) -> None:
+        if phase not in {"admission", "pre_dispatch", "post_dispatch"}:
+            raise ValueError("memory import eligibility phase is invalid")
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text(
+                        "SELECT lucy.require_memory_import_sources_v1("
+                        ":campaign,:digest,CAST(:sources AS jsonb))"
+                    ),
+                    {
+                        "campaign": campaign_id,
+                        "digest": manifest_digest,
+                        "sources": canonical_json_bytes(source_record_ids).decode(
+                            "utf-8"
+                        ),
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise GovernedMemoryUnavailable(
+                "memory import source eligibility unavailable"
+            ) from exc
+        if value.get("eligible") is not True or value.get("source_count") != len(
+            source_record_ids
+        ):
+            raise GovernedMemoryUnavailable(
+                "memory import source eligibility result is invalid"
+            )
 
     def settle_attempt(
         self, reservation_id: UUID, *, billed_microusd: int, result: str
