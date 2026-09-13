@@ -156,6 +156,26 @@ migration-owner URL on a continuously running service.
 
 ## Release a Public Lucy R1 knowledge snapshot
 
+Before staging the snapshot, deploy the compatible application image and run the
+content-free inspection job:
+
+```text
+python deploy/postgres/inspect_public_conversation_v1.py
+```
+
+Then run the schema bridge's `prepare` action. It atomically quarantines the existing
+`0054` runtime, preserves its storage epoch and private capture state, and advances only
+to `0056`:
+
+```text
+python deploy/postgres/migrate_public_conversation_v1.py
+```
+
+The action is selected by `LUCY_PUBLIC_CONVERSATION_MIGRATION_ACTION=prepare` and
+requires `LUCY_PUBLIC_CONVERSATION_MIGRATION_AUTHORIZATION=`
+`utopia-public-conversation-prepare-v1`. The inspection and migration jobs require the
+private `lucy_migration` URL, production Render, TLS, and a capture-disabled job.
+
 `release_public_knowledge_v1.py` deliberately separates the R1 release into three
 independently authorized one-off jobs:
 
@@ -180,6 +200,22 @@ transaction. Exact retries are read-only. A changed active route, expired or fut
 entry, conflicting identifier, publisher/approver role substitution, or stale digest
 fails closed. The utility never opens runtime admission and never prints knowledge or
 credentials.
+
+After approval, rerun `migrate_public_conversation_v1.py` with action `activate` and
+authorization `utopia-public-conversation-schema-v1`. It advances `0056` to `0057`,
+installs the final five-login execute-only realm stamp, leaves admission quarantined,
+and prints only a content-free receipt. Activate the exact approved snapshot next.
+Finally, with all ordinary runtime database sessions stopped, run:
+
+```text
+python deploy/postgres/reopen_public_conversation_v1.py
+```
+
+That final gate requires authorization `utopia-public-conversation-reopen-v1`, the
+reviewed realm stamp and storage epoch, the active approved snapshot digest, and an
+explicit declaration of the already-existing private capture mode. It refuses to open
+admission if the active route, schema, execute-only grant, epoch, private capture state,
+runtime sessions, or unresolved sensitive authority differs.
 
 The older `commission_public_projection_v1.py` remains the frozen V0 bootstrap. Do
 not use it to publish an R1 snapshot, because it intentionally commissions the initial
