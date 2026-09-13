@@ -13,7 +13,7 @@ from lucy.memory_extraction import (
     MemoryExtractionProviderOutcomeV1,
     MemoryExtractionUnavailable,
 )
-from lucy.memory_import import ImportManifestRecordV1, ImportManifestV1
+from lucy.memory_import import ImportManifestRecordV1, ImportManifestV2
 from lucy.secret_filter import MemorySecretDetected
 
 NOW = datetime(2026, 9, 12, 20, 0, tzinfo=UTC)
@@ -123,8 +123,8 @@ class CompletionSpy:
         )
 
 
-def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV1:
-    return ImportManifestV1(
+def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV2:
+    return ImportManifestV2(
         campaign_id=CAMPAIGN,
         destination_content_scope_id=SCOPE,
         source_namespace="raymond-private/chatgpt-export",
@@ -134,6 +134,7 @@ def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV1:
         prompt_version="prompt-v1",
         provider_policy_id="policy-v1",
         model_route="openrouter/private-model",
+        token_accounting_version="conservative-v1",
         records=(
             ImportManifestRecordV1(
                 source_record_id="conversation:node:message",
@@ -147,7 +148,10 @@ def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV1:
         ),
         max_records=1,
         max_bytes=17,
-        max_input_tokens=100,
+        max_source_estimated_tokens=6,
+        max_request_input_tokens=100,
+        max_request_output_tokens=100,
+        max_request_total_tokens=200,
         max_model_spend_microusd=10_000,
         max_attempts=3,
         expires_at=expires_at or NOW + timedelta(hours=1),

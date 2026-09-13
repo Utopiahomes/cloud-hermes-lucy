@@ -14,6 +14,7 @@ from lucy.memory_import import (
     EpistemicStatus,
     ImportManifestRecordV1,
     ImportManifestV1,
+    ImportManifestV2,
     MemoryCandidatePayloadV1,
     MemoryKind,
     ProtectionClass,
@@ -197,6 +198,93 @@ def test_manifest_digest_and_campaign_cap_include_retry_policy() -> None:
     )
     assert manifest.digest != manifest.model_copy(update={"max_attempts": 4}).digest
     assert manifest.digest != manifest.model_copy(update={"max_model_spend_microusd": 1}).digest
+
+
+def test_v1_manifest_round_trip_preserves_historical_digest() -> None:
+    manifest = ImportManifestV1(
+        campaign_id=CANDIDATE,
+        destination_content_scope_id=SCOPE,
+        source_namespace="raymond-private/chatgpt-export",
+        source_conversation_id="synthetic-1",
+        parser_version="synthetic-v1",
+        extractor_version="extractor-v1",
+        prompt_version="prompt-v1",
+        provider_policy_id="local-only",
+        model_route="none",
+        records=(
+            ImportManifestRecordV1(
+                source_record_id="synthetic-1:root",
+                content_commitment="a" * 64,
+                byte_length=6,
+                estimated_tokens=2,
+                source_revision=1,
+                role="owner",
+                displayed=True,
+            ),
+        ),
+        max_records=1,
+        max_bytes=6,
+        max_input_tokens=2,
+        max_model_spend_microusd=50_000,
+        max_attempts=3,
+        expires_at=datetime(2026, 9, 13, tzinfo=UTC),
+    )
+
+    restored = ImportManifestV1.model_validate_json(manifest.model_dump_json())
+
+    assert restored == manifest
+    assert restored.digest == manifest.digest
+
+
+def test_v2_manifest_binds_separate_source_and_complete_request_budgets() -> None:
+    values = {
+        "campaign_id": CANDIDATE,
+        "destination_content_scope_id": SCOPE,
+        "source_namespace": "raymond-private/chatgpt-export",
+        "source_conversation_id": "pilot:selection",
+        "parser_version": "parser-v1",
+        "extractor_version": "extractor-v1",
+        "prompt_version": "prompt-v1",
+        "provider_policy_id": "private-zdr-v1",
+        "model_route": "openai/gpt-oss-20b",
+        "token_accounting_version": "openrouter-conservative-v1",
+        "records": (
+            ImportManifestRecordV1(
+                source_record_id="conversation:node:message",
+                content_commitment="a" * 64,
+                byte_length=17,
+                estimated_tokens=6,
+                source_revision=1,
+                role="owner",
+                displayed=True,
+            ),
+        ),
+        "max_records": 1,
+        "max_bytes": 17,
+        "max_source_estimated_tokens": 6,
+        "max_request_input_tokens": 100,
+        "max_request_output_tokens": 50,
+        "max_request_total_tokens": 150,
+        "max_model_spend_microusd": 10_000,
+        "max_attempts": 3,
+        "expires_at": datetime(2026, 9, 13, tzinfo=UTC),
+    }
+    manifest = ImportManifestV2.model_validate(values)
+
+    assert ImportManifestV2.model_validate_json(manifest.model_dump_json()) == manifest
+    for field, changed in (
+        ("max_source_estimated_tokens", 7),
+        ("max_request_input_tokens", 101),
+        ("max_request_output_tokens", 51),
+        ("max_request_total_tokens", 151),
+        ("token_accounting_version", "openrouter-conservative-v2"),
+    ):
+        assert manifest.model_copy(update={field: changed}).digest != manifest.digest
+
+    with pytest.raises(ValueError, match="source-token limit"):
+        ImportManifestV2.model_validate({**values, "max_source_estimated_tokens": 5})
+    with pytest.raises(ValueError, match="total ceiling"):
+        ImportManifestV2.model_validate({**values, "max_request_total_tokens": 149})
 
 
 def test_synthetic_fixture_builds_exact_protected_archive_requests() -> None:

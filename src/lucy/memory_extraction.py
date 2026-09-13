@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lucy.governed_memory import ImportAttemptResultV1
-from lucy.memory_import import ImportManifestV1
+from lucy.memory_import import ImportManifestV2
 from lucy.secret_filter import MemorySecretDetected, detect_memory_secrets
 
 
@@ -88,7 +88,7 @@ class MemoryImportProvider(Protocol):
     def infer(
         self,
         *,
-        manifest: ImportManifestV1,
+        manifest: ImportManifestV2,
         dispatch: MemoryExtractionDispatchV1,
     ) -> MemoryExtractionProviderOutcomeV1: ...
 
@@ -123,7 +123,7 @@ class MemoryExtractionCoordinator:
     def execute(
         self,
         *,
-        manifest: ImportManifestV1,
+        manifest: ImportManifestV2,
         dispatch: MemoryExtractionDispatchV1,
     ) -> MemoryExtractionResultV1:
         self._validate_dispatch(manifest, dispatch)
@@ -231,8 +231,12 @@ class MemoryExtractionCoordinator:
         )
 
     def _validate_dispatch(
-        self, manifest: ImportManifestV1, dispatch: MemoryExtractionDispatchV1
+        self, manifest: ImportManifestV2, dispatch: MemoryExtractionDispatchV1
     ) -> None:
+        if manifest.contract_version != "2":
+            raise MemoryExtractionUnavailable(
+                "real extraction requires an executable v2 import manifest"
+            )
         now = self._now()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("extraction clock must be timezone-aware")
@@ -241,8 +245,12 @@ class MemoryExtractionCoordinator:
         included = {record.source_record_id for record in manifest.records if record.included}
         if not set(dispatch.source_record_ids).issubset(included):
             raise ValueError("extraction dispatch contains records outside the manifest")
-        if dispatch.input_tokens > manifest.max_input_tokens:
+        if dispatch.input_tokens > manifest.max_request_input_tokens:
             raise ValueError("extraction input exceeds the manifest token ceiling")
+        if dispatch.output_tokens > manifest.max_request_output_tokens:
+            raise ValueError("extraction output exceeds the manifest token ceiling")
+        if dispatch.input_tokens + dispatch.output_tokens > manifest.max_request_total_tokens:
+            raise ValueError("extraction request exceeds the manifest total-token ceiling")
         if dispatch.maximum_microusd > manifest.max_model_spend_microusd:
             raise ValueError("extraction reservation exceeds the campaign spend ceiling")
         findings = detect_memory_secrets(dispatch.prompt)
@@ -251,7 +259,7 @@ class MemoryExtractionCoordinator:
 
     def _require_sources(
         self,
-        manifest: ImportManifestV1,
+        manifest: ImportManifestV2,
         dispatch: MemoryExtractionDispatchV1,
         phase: Literal["admission", "pre_dispatch", "post_dispatch"],
     ) -> None:

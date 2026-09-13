@@ -56,6 +56,10 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
    quotes to archived evidence, creates protected candidates and the owner-review artifact before
    the atomic database completion. Deterministically invalid output is charged and discarded;
    uncertain persistence exposes no candidate artifact.
+12. Real provider execution now requires an import-manifest V2 contract. V1 remains readable with
+   its historical digest and source-only token meaning, but cannot silently authorize a real call.
+   V2 separately binds selected-source estimates, complete request input, reserved output, total
+   request tokens, and the immutable token-accounting implementation.
 
 ## Verification ledger
 
@@ -63,7 +67,7 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
 | Synthetic memory-import integration | Passed, 7 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL; includes atomic completion replay and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 821 tests | Full `tests/unit` run after pilot completion assembly, 2026-09-12 | Relevant Python or dependency change |
+| Python unit suite | Passed, 823 tests | Full `tests/unit` run after executable request-budget V2 contract, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
 | Mypy strict | Passed, 90 source files | `mypy --strict src` after isolated OpenRouter adapter | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -71,6 +75,7 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
 | Isolated OpenRouter memory adapter | Passed, 11 focused tests and full-suite rerun | Exact manifest policy/route, strict JSON Schema, ZDR plus denied data collection, token/byte bounds, usage-cost parsing, keyed generation reference, malformed-response rejection, and sanitized transport errors | OpenRouter adapter, provider contract, or approved privacy policy change |
 | Pilot completion assembly | Passed, 3 focused tests and full-suite rerun | Provenance materialization, exact review artifact, pre-database deterministic rejection, and no artifact after uncertain database acknowledgement | Pilot completion, materializer, or review-artifact change |
+| Executable request-budget contract | Passed, focused V1/V2 contract and coordinator/provider tests | Historical V1 round trip; V2 digest binding and separate source/input/output/total constraints; real execution typed to V2 | Manifest, request compiler, tokenizer/accounting, or provider framing change |
 | Local ChatGPT inventory, review console, and exact-manifest builder | Passed, 16 tests | Safe paths, branches, keyed commitments, attachments, compression, sync-root, token, host/origin, stale-input, idempotency, exact-record/exclusion and changed-input checks | Parser, console, manifest, or limits change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |

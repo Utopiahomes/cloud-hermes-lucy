@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -18,6 +19,7 @@ from lucy.realm_archive_commit import RealmArchiveCommitInputV1
 
 _CANDIDATE_PREFIX = b"LUCY-MEMORY-CANDIDATE-V1\x00"
 _MANIFEST_PREFIX = b"LUCY-MEMORY-IMPORT-MANIFEST-V1\x00"
+_MANIFEST_V2_PREFIX = b"LUCY-MEMORY-IMPORT-MANIFEST-V2\x00"
 
 
 class MemoryKind(StrEnum):
@@ -213,6 +215,62 @@ class ImportManifestV1(BaseModel):
     @property
     def digest(self) -> str:
         return canonical_sha256(self, prefix=_MANIFEST_PREFIX)
+
+
+class ImportManifestV2(BaseModel):
+    """Executable manifest with separate source and complete-request budgets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contract_version: Literal["2"] = "2"
+    campaign_id: UUID
+    destination_content_scope_id: UUID
+    source_namespace: str = Field(min_length=1, max_length=200)
+    source_conversation_id: str = Field(min_length=1, max_length=512)
+    parser_version: str = Field(min_length=1, max_length=100)
+    extractor_version: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    provider_policy_id: str = Field(min_length=1, max_length=200)
+    model_route: str = Field(min_length=1, max_length=200)
+    token_accounting_version: str = Field(min_length=1, max_length=100)
+    default_protection: ProtectionClass = ProtectionClass.PROTECTED
+    records: tuple[ImportManifestRecordV1, ...] = Field(min_length=1, max_length=10_000)
+    max_records: int = Field(ge=1, le=10_000)
+    max_bytes: int = Field(ge=1)
+    max_source_estimated_tokens: int = Field(ge=1)
+    max_request_input_tokens: int = Field(ge=1)
+    max_request_output_tokens: int = Field(ge=1)
+    max_request_total_tokens: int = Field(ge=2)
+    max_model_spend_microusd: int = Field(ge=0)
+    max_attempts: int = Field(ge=1, le=10_000)
+    expires_at: datetime
+
+    @model_validator(mode="after")
+    def bounded_selection_and_request(self) -> ImportManifestV2:
+        if self.expires_at.tzinfo is None or self.expires_at.utcoffset() is None:
+            raise ValueError("manifest expiry must be timezone-aware")
+        included = tuple(record for record in self.records if record.included)
+        source_tokens = sum(record.estimated_tokens for record in included)
+        if len(included) > self.max_records:
+            raise ValueError("manifest exceeds its record limit")
+        if sum(record.byte_length for record in included) > self.max_bytes:
+            raise ValueError("manifest exceeds its byte limit")
+        if source_tokens > self.max_source_estimated_tokens:
+            raise ValueError("manifest exceeds its source-token limit")
+        if self.max_source_estimated_tokens > self.max_request_input_tokens:
+            raise ValueError("request input ceiling is below the source-token ceiling")
+        if (
+            self.max_request_input_tokens + self.max_request_output_tokens
+            > self.max_request_total_tokens
+        ):
+            raise ValueError("request input and output ceilings exceed the total ceiling")
+        return self
+
+    @property
+    def digest(self) -> str:
+        return canonical_sha256(self, prefix=_MANIFEST_V2_PREFIX)
+
+
+ImportManifest = ImportManifestV1 | ImportManifestV2
 
 
 def load_synthetic_conversation(path: Path) -> SyntheticConversationV1:

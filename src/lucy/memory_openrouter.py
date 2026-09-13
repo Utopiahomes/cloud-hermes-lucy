@@ -22,7 +22,7 @@ from lucy.memory_extraction import (
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
 )
-from lucy.memory_import import ImportManifestV1
+from lucy.memory_import import ImportManifestV2
 
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _REFERENCE_PREFIX = b"LUCY-OPENROUTER-MEMORY-REFERENCE-V1\x00"
@@ -123,9 +123,13 @@ class OpenRouterMemoryProvider:
     def infer(
         self,
         *,
-        manifest: ImportManifestV1,
+        manifest: ImportManifestV2,
         dispatch: MemoryExtractionDispatchV1,
     ) -> MemoryExtractionProviderOutcomeV1:
+        if manifest.contract_version != "2":
+            raise MemoryOpenRouterUnavailable(
+                "real extraction requires an executable v2 import manifest"
+            )
         if (
             manifest.provider_policy_id != self._policy.provider_policy_id
             or manifest.model_route != self._policy.model_route

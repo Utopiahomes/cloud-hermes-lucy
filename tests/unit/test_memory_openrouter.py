@@ -12,7 +12,7 @@ import pytest
 
 import lucy.memory_openrouter as memory_openrouter
 from lucy.memory_extraction import MemoryExtractionDispatchV1
-from lucy.memory_import import ImportManifestRecordV1, ImportManifestV1
+from lucy.memory_import import ImportManifestRecordV1, ImportManifestV2
 from lucy.memory_openrouter import (
     MemoryOpenRouterUnavailable,
     OpenRouterMemoryPolicyV1,
@@ -35,7 +35,7 @@ class TransportSpy:
         return self.response
 
 
-def _manifest(**changes: object) -> ImportManifestV1:
+def _manifest(**changes: object) -> ImportManifestV2:
     values: dict[str, object] = {
         "campaign_id": CAMPAIGN,
         "destination_content_scope_id": SCOPE,
@@ -46,6 +46,7 @@ def _manifest(**changes: object) -> ImportManifestV1:
         "prompt_version": "prompt-v1",
         "provider_policy_id": "private-zdr-v1",
         "model_route": "openai/gpt-oss-20b",
+        "token_accounting_version": "conservative-v1",
         "records": (
             ImportManifestRecordV1(
                 source_record_id="conversation:node:message",
@@ -59,13 +60,16 @@ def _manifest(**changes: object) -> ImportManifestV1:
         ),
         "max_records": 1,
         "max_bytes": 17,
-        "max_input_tokens": 100,
+        "max_source_estimated_tokens": 6,
+        "max_request_input_tokens": 100,
+        "max_request_output_tokens": 200,
+        "max_request_total_tokens": 300,
         "max_model_spend_microusd": 10_000,
         "max_attempts": 3,
         "expires_at": NOW + timedelta(hours=1),
     }
     values.update(changes)
-    return ImportManifestV1.model_validate(values)
+    return ImportManifestV2.model_validate(values)
 
 
 def _dispatch(**changes: object) -> MemoryExtractionDispatchV1:
