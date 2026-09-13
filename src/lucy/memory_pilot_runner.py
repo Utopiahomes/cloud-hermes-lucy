@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
@@ -9,7 +10,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lucy.chatgpt_manifest import LocalPilotBuildV1, build_exact_archive_requests
+from lucy.chatgpt_manifest import (
+    AuthorizedPilotManifestV1,
+    LocalPilotBuildV1,
+    build_exact_archive_requests,
+)
 from lucy.governed_memory import ImportArchiveResultV1
 from lucy.memory_candidate_review import CandidateReviewBundleArtifactV1
 from lucy.memory_extraction import (
@@ -52,6 +57,73 @@ class MemoryPilotRunResultV1(BaseModel):
     manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     archived_source_count: int = Field(ge=1)
     batches: tuple[MemoryPilotBatchResultV1, ...] = Field(min_length=1)
+
+
+class MemoryPilotAuthorizationRejected(PermissionError):
+    """The requested pilot is not the exact owner-authorized campaign."""
+
+
+def validate_authorized_memory_pilot(
+    build: LocalPilotBuildV1,
+    authorization: AuthorizedPilotManifestV1,
+    *,
+    expected_bundle_digest: str,
+    now: datetime,
+) -> None:
+    """Validate the complete effect-bearing pilot boundary before any side effect."""
+
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("pilot execution clock must be timezone-aware")
+    exact_digest = build.bundle.digest
+    if not (
+        hmac.compare_digest(expected_bundle_digest, exact_digest)
+        and hmac.compare_digest(authorization.bundle_digest, exact_digest)
+        and authorization.bundle == build.bundle
+    ):
+        raise MemoryPilotAuthorizationRejected(
+            "pilot build differs from the exact owner authorization"
+        )
+    if now < authorization.approved_at:
+        raise MemoryPilotAuthorizationRejected("pilot authorization is not yet valid")
+    if now >= build.bundle.manifest.expires_at:
+        raise MemoryPilotAuthorizationRejected("pilot authorization has expired")
+
+
+class AuthorizedMemoryPilotRunner:
+    """Fail closed before archive, provider, or database effects can begin."""
+
+    def __init__(
+        self,
+        runner: MemoryPilotRunner,
+        *,
+        now: Callable[[], datetime],
+    ) -> None:
+        self._runner = runner
+        self._now = now
+
+    def run(
+        self,
+        build: LocalPilotBuildV1,
+        authorization: AuthorizedPilotManifestV1,
+        *,
+        expected_bundle_digest: str,
+        fingerprint_key: bytes,
+        maximum_microusd_per_attempt: int,
+        timeout_seconds: int,
+    ) -> MemoryPilotRunResultV1:
+        now = self._now()
+        validate_authorized_memory_pilot(
+            build,
+            authorization,
+            expected_bundle_digest=expected_bundle_digest,
+            now=now,
+        )
+        return self._runner.run(
+            build,
+            fingerprint_key=fingerprint_key,
+            maximum_microusd_per_attempt=maximum_microusd_per_attempt,
+            timeout_seconds=timeout_seconds,
+        )
 
 
 class MemoryPilotRunner:

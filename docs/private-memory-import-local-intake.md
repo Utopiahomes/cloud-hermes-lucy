@@ -107,6 +107,56 @@ branches, and parent relationships, and emits keyed commitments rather than mess
 first pilot explicitly excludes attachment contents and unsupported message records. The output
 contains one campaign manifest, matching the database's one-manifest-per-campaign boundary.
 
+## Record the separate exact pilot authorization
+
+Do this only after Ray has reviewed and separately authorized the displayed bundle digest, scope,
+provider/model route, versions, expiry, retry ceiling, and total spend ceiling. The approval
+reference identifies that out-of-band owner decision; creating the earlier manifest is not
+approval. Replace every placeholder, including the exact digest printed by the manifest command:
+
+```powershell
+$bundleDigest = "replace-with-reviewed-64-character-bundle-digest"
+$approvalRef = "replace-with-owner-approval-uuid"
+$approvedAt = (Get-Date).ToUniversalTime().ToString("o")
+$confirmation = "AUTHORIZE PRIVATE LUCY PILOT $bundleDigest"
+
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli authorize `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --manifest "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-manifest.v1.json" `
+  --expected-bundle-digest $bundleDigest `
+  --owner-approval-ref $approvalRef `
+  --owner-actor-id "replace-with-private-owner-actor-id" `
+  --approved-at $approvedAt `
+  --confirmation $confirmation `
+  --output "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-authorization.v1.json"
+```
+
+The authorization artifact is still plaintext-free. It embeds the exact reviewed bundle and may
+permit only archive and extraction. It cannot approve candidates, promote memory, expand the
+source set, change the destination, change the provider route, or increase any limit.
+
+## Run the no-network execution preflight
+
+Immediately before execution, rebuild the bundle from the untouched ZIP and compare it with the
+exact authorization. This detects a changed export, inventory, selection, fingerprint key,
+campaign, route, or limit before any archive, database, AWS, OpenRouter, or spending effect:
+
+```powershell
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli preflight `
+  --zip "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\export.zip" `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --fingerprint-key-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\manifest-fingerprint-v1.key" `
+  --inventory "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\inventory.v1.json" `
+  --selection "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-selection.v1.json" `
+  --authorization "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-authorization.v1.json" `
+  --expected-bundle-digest $bundleDigest `
+  --output "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-preflight.v1.json"
+```
+
+The content-free preflight report says only whether that exact campaign is ready. It performs no
+upload or provider request. The effect-bearing runner repeats the same authorization and expiry
+check before its first archive write; an expired or non-exact authorization has zero side effects.
+
 ## Review extracted memory candidates locally
 
 After an authorized extraction worker has produced `candidates.v1.json`, start the separate
@@ -146,8 +196,9 @@ local authorization artifact is not automatic promotion. Rejection and deferral 
 approvable candidate bytes. Acceptance as ordinary private or marking uncertain creates a new
 exact candidate version, so an earlier digest cannot authorize the transformed result.
 
-The private-memory OpenRouter adapter is also inert until assembled into an authorized pilot
-runner. Its request contract fixes the reviewed model route, requires strict JSON Schema support,
+The private-memory OpenRouter adapter is also inert until assembled behind the authorized pilot
+runner in the protected deployment. Its request contract fixes the reviewed model route, requires
+strict JSON Schema support,
 enforces per-request zero-data-retention and denied data collection, sends no tools or plugins,
 bounds output tokens and response bytes, and requires provider-reported usage cost. The generation
 identifier is retained only as a keyed commitment. A provider/model/privacy mismatch, malformed

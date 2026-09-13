@@ -295,3 +295,117 @@ def test_manifest_cli_writes_only_plaintext_free_non_authorizing_bundle(
             provider_policy_id="private-v1",
             model_route="none",
         )
+
+
+def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    intake = tmp_path / "intake"
+    intake.mkdir()
+    archive = intake / "export.zip"
+    key = intake / "fingerprint.key"
+    inventory_path = intake / "inventory.v1.json"
+    selection_path = intake / "pilot-selection.v1.json"
+    manifest_path = intake / "pilot-manifest.v1.json"
+    authorization_path = intake / "pilot-authorization.v1.json"
+    preflight_path = intake / "pilot-preflight.v1.json"
+    _write_export(archive)
+    key.write_bytes(b"f" * 32)
+    inventory = inventory_chatgpt_export(
+        archive, intake_root=intake, fingerprint_key=key.read_bytes()
+    )
+    selection = _selection(inventory)
+    inventory_path.write_bytes(canonical_json_bytes(inventory) + b"\n")
+    selection_path.write_bytes(
+        canonical_json_bytes({"proposal": selection, "proposal_digest": selection.digest})
+        + b"\n"
+    )
+    manifest_args = [
+        "manifest",
+        "--zip",
+        str(archive),
+        "--intake-root",
+        str(intake),
+        "--fingerprint-key-file",
+        str(key),
+        "--inventory",
+        str(inventory_path),
+        "--selection",
+        str(selection_path),
+        "--output",
+        str(manifest_path),
+        "--campaign-id",
+        str(_CAMPAIGN),
+        "--extractor-version",
+        "extractor-v1",
+        "--prompt-version",
+        "prompt-v1",
+        "--provider-policy-id",
+        "private-v1",
+        "--model-route",
+        "none",
+    ]
+    assert main(manifest_args) == 0
+    digest = json.loads(manifest_path.read_bytes())["bundle_digest"]
+    approval_ref = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    authorize_args = [
+        "authorize",
+        "--intake-root",
+        str(intake),
+        "--manifest",
+        str(manifest_path),
+        "--expected-bundle-digest",
+        digest,
+        "--owner-approval-ref",
+        str(approval_ref),
+        "--owner-actor-id",
+        "raymond-private-owner",
+        "--approved-at",
+        datetime.now(UTC).isoformat(),
+        "--confirmation",
+        f"AUTHORIZE PRIVATE LUCY PILOT {digest}",
+        "--output",
+        str(authorization_path),
+    ]
+    assert main(authorize_args) == 0
+    serialized_authorization = authorization_path.read_text(encoding="utf-8")
+    assert "private canary" not in serialized_authorization
+    assert json.loads(serialized_authorization)["authorization_state"] == "authorized"
+    with pytest.raises(FileExistsError):
+        main(authorize_args)
+
+    preflight_args = [
+        "preflight",
+        "--zip",
+        str(archive),
+        "--intake-root",
+        str(intake),
+        "--fingerprint-key-file",
+        str(key),
+        "--inventory",
+        str(inventory_path),
+        "--selection",
+        str(selection_path),
+        "--authorization",
+        str(authorization_path),
+        "--expected-bundle-digest",
+        digest,
+        "--output",
+        str(preflight_path),
+    ]
+    assert main(preflight_args) == 0
+    report = json.loads(preflight_path.read_bytes())
+    assert report["ready_for_execution"] is True
+    assert report["network_calls"] == 0
+    assert report["bundle_digest"] == digest
+    assert "private canary" not in preflight_path.read_text(encoding="utf-8")
+    assert "execution performed: no" in capsys.readouterr().out
+
+    wrong_confirmation = list(authorize_args)
+    wrong_confirmation[wrong_confirmation.index("--confirmation") + 1] = "wrong"
+    with pytest.raises(PermissionError, match="confirmation is not exact"):
+        main(wrong_confirmation)
+    wrong_digest = list(preflight_args)
+    wrong_digest[wrong_digest.index("--expected-bundle-digest") + 1] = "0" * 64
+    with pytest.raises(PermissionError, match="differs"):
+        main(wrong_digest)

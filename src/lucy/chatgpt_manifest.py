@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lucy.chatgpt_import import (
     ChatGPTExportInventoryV1,
@@ -71,6 +71,70 @@ class PilotManifestBundleV1(BaseModel):
     @property
     def digest(self) -> str:
         return canonical_sha256(self, prefix=_BUNDLE_PREFIX)
+
+
+class PilotManifestBundleArtifactV1(BaseModel):
+    """Portable, plaintext-free pilot bundle with an exact digest."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    bundle: PilotManifestBundleV1
+    bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def exact_bundle(self) -> PilotManifestBundleArtifactV1:
+        if not hmac.compare_digest(self.bundle_digest, self.bundle.digest):
+            raise ValueError("pilot manifest artifact digest does not match exact bundle")
+        return self
+
+
+class AuthorizedPilotManifestV1(BaseModel):
+    """Owner authorization for one exact, plaintext-free pilot bundle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contract_version: Literal["1"] = "1"
+    bundle: PilotManifestBundleV1
+    bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    owner_approval_ref: UUID
+    owner_actor_id: str = Field(min_length=1, max_length=512)
+    approved_at: datetime
+    permitted_operations: tuple[Literal["archive", "extract"], ...] = (
+        "archive",
+        "extract",
+    )
+    authorization_state: Literal["authorized"] = "authorized"
+
+    @model_validator(mode="after")
+    def exact_authorization(self) -> AuthorizedPilotManifestV1:
+        if not hmac.compare_digest(self.bundle_digest, self.bundle.digest):
+            raise ValueError("pilot authorization does not match the exact bundle")
+        if self.approved_at.tzinfo is None or self.approved_at.utcoffset() is None:
+            raise ValueError("pilot approval timestamp must be timezone-aware")
+        if self.approved_at >= self.bundle.manifest.expires_at:
+            raise ValueError("pilot approval must precede the campaign expiry")
+        if self.permitted_operations != ("archive", "extract"):
+            raise ValueError("pilot authorization operations are not exact")
+        return self
+
+
+def authorize_pilot_manifest(
+    artifact: PilotManifestBundleArtifactV1,
+    *,
+    expected_bundle_digest: str,
+    owner_approval_ref: UUID,
+    owner_actor_id: str,
+    approved_at: datetime,
+) -> AuthorizedPilotManifestV1:
+    """Materialize a separately granted authorization for one reviewed bundle."""
+
+    if not hmac.compare_digest(expected_bundle_digest, artifact.bundle_digest):
+        raise ValueError("expected pilot digest does not match the reviewed bundle")
+    return AuthorizedPilotManifestV1(
+        bundle=artifact.bundle,
+        bundle_digest=artifact.bundle_digest,
+        owner_approval_ref=owner_approval_ref,
+        owner_actor_id=owner_actor_id,
+        approved_at=approved_at,
+    )
 
 
 class LocalPilotBuildV1(BaseModel):

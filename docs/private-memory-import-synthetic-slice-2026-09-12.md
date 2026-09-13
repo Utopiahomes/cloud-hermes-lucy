@@ -152,6 +152,14 @@ accepted `0057` migration is merged at `2807dad`.
     protected recall. The existing production recovery utility now verifies and dispatches both
     historical V2 bundles and new V3 bundles to their separately versioned database gates. Shared
     targets preserve per-operation provenance while intrinsic target metadata must agree.
+28. The real-pilot operator boundary now uses a separately materialized, plaintext-free owner
+    authorization bound to one exact bundle digest, source set, destination, provider/model route,
+    versions, expiry, attempt ceiling, and total spend ceiling. Its confirmation phrase must name
+    that digest exactly. A no-network preflight rebuilds the bundle from the untouched ZIP and
+    reviewed inventory/selection immediately before execution. The effect-bearing wrapper repeats
+    the same digest, bundle, approval-time, and expiry checks before the first archive write. A
+    mismatch or expired/future authorization therefore produces zero AWS, database, provider, or
+    spending effects; candidate approval and promotion remain separate and disabled.
 
 ## Verification ledger
 
@@ -161,7 +169,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0067`; proves present and absent derived-row restore, exact replay/conflicting replay rejection, durable candidate/outcome targets, recall/outcome/derivation fencing, plus V3 grant/receipt/reconciliation | Import, recovery, grant, receipt, migration, or scoped-memory change |
 | Historical V3 recovery contract | Passed, focused unit test | Historical policy/receipt keys, exact permit/manifest/grant/receipt binding, provider-outcome key registry preservation, changed-scope rejection | Contract, canonicalization, trust-store, or recovery change |
 | Integrated Workspaces queue | Passed, 1 PostgreSQL integration test | `tests/integration/test_workspaces_task_queue.py` at migration `0067`; exact enqueue/claim/complete/replay boundary from Public Lucy checkpoint | Workspaces runtime, task queue, or migration change |
-| Python unit suite | Passed, 906 tests | Full `tests/unit` after integrating Workspaces `0066` and V3 recovery `0067`, 2026-09-12 | Relevant Python or dependency change |
+| Python unit suite | Passed, 909 tests | Full `tests/unit` after exact pilot authorization and operator-preflight implementation, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | Full `src`, `tests`, and `migrations` tree after V3 recovery | Relevant source change |
 | Mypy strict | Passed, 104 source files | Full strict source and production recovery-utility check after V3 recovery | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -173,6 +181,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Immutable provider request | Passed, 8 focused tests and full-suite rerun | Canonical request commitment, complete byte/token upper-bound accounting, Unicode/system/schema inclusion, credential exclusion, tamper rejection, and pre-network count verification | Provider request body, schema, system prompt, or accounting version change |
 | V2 proposal and deterministic compiler | Passed, focused console/manifest/compiler/provider tests and full-suite rerun | Visible bound ceilings, exact digest, deterministic packing and coverage, oversize/attempt/cost rejection, complete request accounting, and provider input-usage reconciliation | Selection proposal, manifest generation, compiler, provider framing, or usage contract change |
 | Local ChatGPT inventory, review console, and exact-manifest builder | Passed, 16 tests | Safe paths, branches, keyed commitments, attachments, compression, sync-root, token, host/origin, stale-input, idempotency, exact-record/exclusion and changed-input checks | Parser, console, manifest, or limits change |
+| Exact pilot authorization and operator preflight | Passed, 4 focused paths | Plaintext-free authorization artifact, exact confirmation/digest, untouched-export rebuild, future/expiry rejection before effects, and content-free no-network preflight | Pilot authorization, manifest builder, operator CLI, runner, or canonicalization change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -188,8 +197,8 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
-   disabled until a specific 12–20 conversation pilot manifest is separately authorized. No real
+1. Connect the protected deployment's archive, extraction, encrypted-outcome, and candidate-store
+   adapters behind the guarded runner only after the specific pilot authorization exists. No real
    provider request is currently enabled. An interruption before the first encrypted outcome
    write remains an explicit reconciliation case; no automatic provider retry is allowed.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and

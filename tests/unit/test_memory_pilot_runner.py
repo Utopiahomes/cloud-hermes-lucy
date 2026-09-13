@@ -4,7 +4,10 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid5
 
+import pytest
+
 from lucy.chatgpt_manifest import (
+    AuthorizedPilotManifestV1,
     LocalChatGPTConversationV1,
     LocalChatGPTMessageV1,
     LocalPilotBuildV1,
@@ -23,7 +26,11 @@ from lucy.memory_extraction import (
     MemoryExtractionProviderOutcomeV1,
 )
 from lucy.memory_import import ImportManifestV2, MemoryCandidatePayloadV1
-from lucy.memory_pilot_runner import MemoryPilotRunner
+from lucy.memory_pilot_runner import (
+    AuthorizedMemoryPilotRunner,
+    MemoryPilotAuthorizationRejected,
+    MemoryPilotRunner,
+)
 
 NOW = datetime(2026, 9, 12, 12, 0, tzinfo=UTC)
 CAMPAIGN = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -220,3 +227,79 @@ def test_runner_archives_then_executes_and_returns_only_review_artifact() -> Non
         "eligible:post_dispatch",
         "complete",
     ]
+
+
+def _authorization(build: LocalPilotBuildV1) -> AuthorizedPilotManifestV1:
+    return AuthorizedPilotManifestV1(
+        bundle=build.bundle,
+        bundle_digest=build.bundle.digest,
+        owner_approval_ref=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        owner_actor_id="raymond-private-owner",
+        approved_at=NOW - timedelta(minutes=1),
+    )
+
+
+def test_authorized_runner_rejects_before_effects_and_executes_only_exact_bundle() -> None:
+    build = _build()
+    dependencies = Dependencies()
+    runner = AuthorizedMemoryPilotRunner(
+        MemoryPilotRunner(
+            archive=dependencies,
+            accounting=dependencies,
+            eligibility=dependencies,
+            provider=dependencies,
+            outcomes=dependencies,
+            candidate_store=dependencies,
+            now=lambda: NOW,
+        ),
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(MemoryPilotAuthorizationRejected, match="differs"):
+        runner.run(
+            build,
+            _authorization(build),
+            expected_bundle_digest="0" * 64,
+            fingerprint_key=b"f" * 32,
+            maximum_microusd_per_attempt=1_000,
+            timeout_seconds=30,
+        )
+    assert dependencies.events == []
+
+    result = runner.run(
+        build,
+        _authorization(build),
+        expected_bundle_digest=build.bundle.digest,
+        fingerprint_key=b"f" * 32,
+        maximum_microusd_per_attempt=1_000,
+        timeout_seconds=30,
+    )
+    assert result.manifest_digest == build.bundle.manifest.digest
+    assert dependencies.events[0] == "archive"
+
+
+def test_authorized_runner_rejects_expired_bundle_before_archive() -> None:
+    build = _build()
+    dependencies = Dependencies()
+    runner = AuthorizedMemoryPilotRunner(
+        MemoryPilotRunner(
+            archive=dependencies,
+            accounting=dependencies,
+            eligibility=dependencies,
+            provider=dependencies,
+            outcomes=dependencies,
+            candidate_store=dependencies,
+            now=lambda: NOW + timedelta(hours=2),
+        ),
+        now=lambda: NOW + timedelta(hours=2),
+    )
+    with pytest.raises(MemoryPilotAuthorizationRejected, match="expired"):
+        runner.run(
+            build,
+            _authorization(build),
+            expected_bundle_digest=build.bundle.digest,
+            fingerprint_key=b"f" * 32,
+            maximum_microusd_per_attempt=1_000,
+            timeout_seconds=30,
+        )
+    assert dependencies.events == []
