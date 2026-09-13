@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
 
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
@@ -13,10 +14,18 @@ from lucy.contracts.security_v1_3 import (
     DeletionDisposition,
     DeletionTargetManifestV3,
     DeletionTargetReferenceV3,
+    Ed25519V13Signer,
     OriginScopeV1,
+    V13ContractVerifier,
     V13SigningKeyPurpose,
+    V13VerificationKeyStatus,
+    V13VerificationKeyV1,
     deletion_targets_digest_v3,
     security_v1_3_json_schemas,
+)
+from lucy.scoped_deletion import (
+    ScopedDeletionManifestResult,
+    VerifiedScopedDeletionServiceV3,
 )
 
 ZERO = UUID("00000000-0000-4000-8000-000000000000")
@@ -178,3 +187,39 @@ def test_v3_is_additive_and_does_not_reinterpret_v2_schema() -> None:
     assert "key_registry_id" not in schemas["DeletionTargetReferenceV2"]["properties"]
     assert "key_registry_id" in schemas["DeletionTargetReferenceV3"]["properties"]
 
+
+def test_verified_v3_freeze_checks_signature_and_exact_store_result() -> None:
+    signer = Ed25519V13Signer(
+        ed25519.Ed25519PrivateKey.generate(),
+        key_id="policy-v13-test",
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    signed = signer.sign(_manifest())
+    key = V13VerificationKeyV1(
+        key_id="policy-v13-test",
+        issuer="lucy-policy-v13-test",
+        environment=DeploymentEnvironment.TEST,
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+        public_key_b64=signer.public_key_b64,
+        status=V13VerificationKeyStatus.ACTIVE,
+        valid_from=NOW - timedelta(days=1),
+        issuance_not_after=NOW + timedelta(days=1),
+        verify_not_after=NOW + timedelta(days=2),
+    )
+
+    class ExactStore:
+        def store(self, manifest: DeletionTargetManifestV3) -> ScopedDeletionManifestResult:
+            return ScopedDeletionManifestResult(
+                manifest_id=manifest.manifest_id,
+                manifest_digest=manifest.unsigned_digest_hex(),
+                targets_digest=manifest.targets_digest,
+                target_count=manifest.target_count,
+                replayed=False,
+            )
+
+    result = VerifiedScopedDeletionServiceV3(
+        ExactStore(),
+        policy_verifier=V13ContractVerifier((key,)),
+        clock=lambda: NOW + timedelta(seconds=30),
+    ).freeze(signed)
+    assert result.manifest_id == signed.manifest_id

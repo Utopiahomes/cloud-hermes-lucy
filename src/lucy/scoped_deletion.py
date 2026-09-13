@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     V13ContractVerifier,
     V13SigningKeyPurpose,
 )
@@ -35,6 +36,12 @@ class ScopedDeletionManifestResult(BaseModel):
 class ScopedDeletionManifestStore(Protocol):
     def store(
         self, manifest: DeletionTargetManifestV2
+    ) -> ScopedDeletionManifestResult: ...
+
+
+class ScopedDeletionManifestStoreV3(Protocol):
+    def store(
+        self, manifest: DeletionTargetManifestV3
     ) -> ScopedDeletionManifestResult: ...
 
 
@@ -60,6 +67,32 @@ class PostgresScopedDeletionManifestStore:
         except DBAPIError as exc:
             raise ScopedDeletionUnavailable(
                 "scoped deletion manifest operation is unavailable"
+            ) from exc
+        return ScopedDeletionManifestResult.model_validate(result)
+
+
+class PostgresScopedDeletionManifestStoreV3:
+    """Execute-only adapter for additive V3 closure persistence."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def store(self, manifest: DeletionTargetManifestV3) -> ScopedDeletionManifestResult:
+        try:
+            with self._sessions.begin() as session:
+                result = session.execute(
+                    text(
+                        "SELECT lucy.store_scoped_deletion_manifest_v4("
+                        ":operation,CAST(:manifest AS jsonb))"
+                    ),
+                    {
+                        "operation": manifest.operation_id,
+                        "manifest": manifest.model_dump_json(),
+                    },
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise ScopedDeletionUnavailable(
+                "scoped deletion manifest V3 operation is unavailable"
             ) from exc
         return ScopedDeletionManifestResult.model_validate(result)
 
@@ -95,5 +128,40 @@ class VerifiedScopedDeletionService:
         ):
             raise ScopedDeletionUnavailable(
                 "stored scoped deletion manifest differs from verified authority"
+            )
+        return result
+
+
+class VerifiedScopedDeletionServiceV3:
+    """Verify additive V3 policy authority before PostgreSQL persistence."""
+
+    def __init__(
+        self,
+        store: ScopedDeletionManifestStoreV3,
+        *,
+        policy_verifier: V13ContractVerifier,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._store = store
+        self._policy_verifier = policy_verifier
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    def freeze(
+        self, manifest: DeletionTargetManifestV3
+    ) -> ScopedDeletionManifestResult:
+        self._policy_verifier.verify(
+            manifest,
+            expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+            checked_at=self._clock(),
+        )
+        result = self._store.store(manifest)
+        if (
+            result.manifest_id != manifest.manifest_id
+            or result.manifest_digest != manifest.unsigned_digest_hex()
+            or result.targets_digest != manifest.targets_digest
+            or result.target_count != manifest.target_count
+        ):
+            raise ScopedDeletionUnavailable(
+                "stored scoped deletion manifest V3 differs from verified authority"
             )
         return result

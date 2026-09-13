@@ -112,14 +112,20 @@ accepted `0057` migration is merged at `2807dad`.
     archive, every candidate version and promoted claim sourced from it, and every encrypted
     provider outcome whose immutable extraction job included it. The policy operation receives
     identifiers and key references only; content remains unavailable.
+23. A separately named V3 manifest table and V4 database operation now persist the signed closure
+    without changing the historical V2 tables or the existing V3 database wrapper for V2. Target
+    identity includes artifact version, so every candidate revision survives the freeze. The
+    verified Python boundary checks the policy signature before storage; PostgreSQL independently
+    re-derives the closure under lock, binds it to the claimed permit, installs the deletion fence,
+    and provides exact idempotent replay.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Fresh PostgreSQL migration `0001` through `0062_memory_deletion_closure` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0062`; includes execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 872 tests | Full `tests/unit` run after the additive deletion V3 contract increment, 2026-09-12 | Relevant Python or dependency change |
+| Fresh PostgreSQL migration `0001` through `0063_memory_deletion_manifest` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0063`; includes exact signed V3 persistence/replay, execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 873 tests | Full `tests/unit` run after verified V3 manifest persistence, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, unit/import tests, migrations `0055`, `0056`, and `0058` through `0061` | Relevant source change |
 | Mypy strict | Passed, 98 source files | `mypy --strict src` after the pilot-runner increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -149,14 +155,15 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
    disabled until the outcome-key lifecycle below is complete and a specific pilot manifest is
    separately authorized. No real provider request is currently enabled.
-2. Persist and sign the PostgreSQL-built V3 closure, then implement its executor, receipt
-   reconciliation, and quarantined recovery reader before enabling the pilot. The additive wire
-   contract and exact target builder are complete; V2 remains immutable. V3 execution must destroy
-   each outcome's external wrapped key, record candidate/outcome tombstones, support restore replay,
-   and handle a shared multi-source outcome idempotently. Until then, the access gates prevent
-   approval and outcome recovery after revocation, but do not yet prove cryptographic shredding of
-   the derived provider result. An interruption before the first encrypted outcome write also
-   remains an explicit reconciliation case; no automatic provider retry is allowed.
+2. Connect the persisted V3 manifest to a version-aware executor, receipt reconciliation, and the
+   quarantined recovery reader before enabling the pilot. The additive wire contract, exact target
+   builder, signature-verifying adapter, and durable manifest freeze are complete; V2 remains
+   immutable. V3 execution must destroy each outcome's external wrapped key, record
+   candidate/outcome tombstones, support restore replay, and handle a shared multi-source outcome
+   idempotently. Until then, the access gates prevent approval and outcome recovery after
+   revocation, but do not yet prove cryptographic shredding of the derived provider result. An
+   interruption before the first encrypted outcome write also remains an explicit reconciliation
+   case; no automatic provider retry is allowed.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

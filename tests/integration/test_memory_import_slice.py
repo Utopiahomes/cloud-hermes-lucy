@@ -13,10 +13,14 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
     DeletionArtifactClassV3,
+    DeletionTargetManifestV3,
     DeletionTargetReferenceV3,
     OriginScopeV1,
+    V13SigningKeyPurpose,
+    deletion_targets_digest_v3,
 )
 from lucy.db import create_session_factory
 from lucy.db.models import (
@@ -60,6 +64,10 @@ from lucy.realm_archive import (
     RealmArchiveEncryptor,
     RealmArchiveEnvelopeV1,
     RealmArchiveIdentityV1,
+)
+from lucy.scoped_deletion import (
+    PostgresScopedDeletionManifestStoreV3,
+    ScopedDeletionUnavailable,
 )
 from lucy.tenancy import TenancyService
 
@@ -322,6 +330,7 @@ def _provision() -> tuple[object, object]:
                 ",lucy.authorize_memory_import_campaign_v1("
                 "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text) "
                 ",lucy.build_scoped_deletion_targets_v3(uuid) "
+                ",lucy.store_scoped_deletion_manifest_v4(uuid,jsonb) "
                 "TO lucy_raymond_policy"
             )
         )
@@ -389,6 +398,7 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
     permit_id = uuid4()
     representation_id = uuid4()
     wrapped_key_ref = uuid4()
+    owner_assertion_id = uuid4()
     now = datetime.now(UTC)
     owner = create_session_factory(OWNER_URL)
     with owner.begin() as session:
@@ -399,6 +409,31 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
             ),
             {"evidence": evidence_id},
         ).scalar_one()
+        scope = session.execute(
+            text(
+                "SELECT tenant_account_id,node_id,node_tenure_id,tenure_epoch,"
+                "security_realm_id,storage_epoch,workspace_id "
+                "FROM lucy.realm_content_scopes_v1 WHERE id=:scope"
+            ),
+            {"scope": scope_id},
+        ).mappings().one()
+        serialized_permit = json.dumps(
+            {
+                "workspace_id": str(scope["workspace_id"]),
+                "owner_assertion_id": str(owner_assertion_id),
+                "owner_assertion_digest": "b" * 64,
+                "target_scope": {
+                    "tenant_account_id": str(scope["tenant_account_id"]),
+                    "node_id": str(scope["node_id"]),
+                    "node_tenure_id": str(scope["node_tenure_id"]),
+                    "tenure_epoch": scope["tenure_epoch"],
+                    "security_realm_id": str(scope["security_realm_id"]),
+                    "storage_epoch": scope["storage_epoch"],
+                },
+                "max_records": 90,
+            },
+            separators=(",", ":"),
+        )
         session.execute(
             text(
                 "INSERT INTO lucy.scoped_evidence_wrappers_v2("
@@ -426,7 +461,8 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
                 "claim_idempotency_key,claimed_at,created_at) "
                 "SELECT :permit,:operation,p.content_scope_id,p.id,"
                 "p.target_service_binding_id,p.actor_principal_id,c.id,'evidence.delete',"
-                ":evidence,1,:digest,'{}',:nonce,:issue_key,:now,:claim_deadline,"
+                ":evidence,1,:digest,CAST(:serialized AS jsonb),:nonce,:issue_key,"
+                ":now,:claim_deadline,"
                 ":completion_deadline,'CLAIMED',:claim_key,:now,:now "
                 "FROM lucy.realm_sensitive_actor_bindings_v1 p "
                 "CROSS JOIN LATERAL (SELECT id FROM lucy.channel_bindings LIMIT 1) c "
@@ -437,6 +473,7 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
                 "operation": operation_id,
                 "evidence": evidence_id,
                 "digest": hashlib.sha256(permit_id.bytes).hexdigest(),
+                "serialized": serialized_permit,
                 "nonce": f"synthetic-{permit_id.hex}",
                 "issue_key": f"synthetic-issue-{permit_id}",
                 "claim_key": f"synthetic-claim-{permit_id}",
@@ -1126,6 +1163,56 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
     assert targets[-1].representation_id == encryption_id
     assert targets[-1].wrapped_key_ref == encryption_id
     assert targets[-1].key_registry_id == registry_id
+
+    owner_sessions = create_session_factory(OWNER_URL)
+    with owner_sessions.begin() as session:
+        authority = session.execute(
+            text(
+                "SELECT p.id permit_id,p.permit_digest,p.serialized_permit,"
+                "p.permit_claim_deadline,p.execution_completion_deadline,"
+                "o.claimed_at,o.claim_idempotency_key "
+                "FROM lucy.sensitive_operations_v2 o "
+                "JOIN lucy.sensitive_action_permits_v3 p ON p.id=o.permit_id "
+                "WHERE o.id=:operation"
+            ),
+            {"operation": operation_id},
+        ).mappings().one()
+    permit = authority["serialized_permit"]
+    manifest = DeletionTargetManifestV3(
+        signing_key_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+        key_id="synthetic-policy-v3",
+        issuer="synthetic-policy-v3",
+        environment=DeploymentEnvironment.TEST,
+        issued_at=authority["claimed_at"],
+        signature="synthetic-signature",
+        manifest_id=uuid4(),
+        permit_id=authority["permit_id"],
+        permit_digest=authority["permit_digest"],
+        operation_id=operation_id,
+        target_scope=OriginScopeV1.model_validate(permit["target_scope"]),
+        workspace_id=UUID(permit["workspace_id"]),
+        root_evidence_id=evidence_ids[0],
+        root_representation_id=targets[0].representation_id,
+        owner_assertion_id=UUID(permit["owner_assertion_id"]),
+        owner_assertion_digest=permit["owner_assertion_digest"],
+        idempotency_key=authority["claim_idempotency_key"],
+        closure_version=3,
+        targets=targets,
+        target_count=len(targets),
+        targets_digest=deletion_targets_digest_v3(targets),
+        tombstone_policy_version=3,
+        finality_policy_version=3,
+        permit_claim_deadline=authority["permit_claim_deadline"],
+        execution_completion_deadline=authority["execution_completion_deadline"],
+        nonce="v3-manifest-nonce-000000000000000",
+    )
+    store = PostgresScopedDeletionManifestStoreV3(policy_sessions)
+    first = store.store(manifest)
+    replay = store.store(manifest)
+    assert not first.replayed and replay.replayed
+    assert first.manifest_digest == manifest.unsigned_digest_hex()
+    with pytest.raises(ScopedDeletionUnavailable, match="unavailable"):
+        store.store(manifest.model_copy(update={"nonce": "changed-nonce-0000000000000000000"}))
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:
