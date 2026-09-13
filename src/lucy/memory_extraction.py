@@ -18,6 +18,10 @@ class MemoryExtractionUnavailable(RuntimeError):
     """The attempt cannot proceed without weakening an import boundary."""
 
 
+class MemoryExtractionCompletionRejected(ValueError):
+    """The provider output failed deterministic completion validation."""
+
+
 class MemoryExtractionDispatchV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -201,6 +205,19 @@ class MemoryExtractionCoordinator:
             self._completion.complete_success(
                 reservation_id=reservation.reservation_id,
                 outcome=outcome,
+            )
+        except MemoryExtractionCompletionRejected:
+            self._accounting.settle_attempt(
+                reservation.reservation_id,
+                billed_microusd=outcome.billed_microusd,
+                result="discarded",
+            )
+            return MemoryExtractionResultV1(
+                reservation_id=reservation.reservation_id,
+                state="discarded",
+                output=None,
+                billed_microusd=outcome.billed_microusd,
+                reason="provider output failed deterministic completion validation",
             )
         except Exception:
             raise MemoryExtractionUnavailable(

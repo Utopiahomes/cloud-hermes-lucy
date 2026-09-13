@@ -13,13 +13,26 @@ from lucy.chatgpt_manifest import (
     PilotManifestBundleV1,
     manifest_record_for_local_message,
 )
+from lucy.governed_memory import (
+    CandidateStageResultV1,
+    ImportCompletionResultV1,
+)
 from lucy.memory_candidate_extraction import (
     MemoryExtractionOutputV1,
     build_candidate_review_artifact,
     materialize_pending_candidates,
     parse_memory_extraction_output,
 )
-from lucy.memory_import import ImportManifestV1, ProtectionClass
+from lucy.memory_extraction import (
+    MemoryExtractionCompletionRejected,
+    MemoryExtractionProviderOutcomeV1,
+)
+from lucy.memory_import import (
+    ImportManifestV1,
+    MemoryCandidatePayloadV1,
+    ProtectionClass,
+)
+from lucy.memory_pilot import MemoryPilotSuccessCompletion
 from lucy.secret_filter import MemorySecretDetected
 
 NOW = datetime(2026, 9, 12, 21, 0, tzinfo=UTC)
@@ -27,6 +40,37 @@ CAMPAIGN = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 SCOPE = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 JOB = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 EVIDENCE = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+RESERVATION = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+
+
+class _BatchStoreSpy:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[tuple[UUID, tuple[MemoryCandidatePayloadV1, ...], int]] = []
+
+    def complete_success(
+        self,
+        reservation_id: UUID,
+        *,
+        candidates: tuple[MemoryCandidatePayloadV1, ...],
+        billed_microusd: int,
+    ) -> ImportCompletionResultV1:
+        self.calls.append((reservation_id, candidates, billed_microusd))
+        if self.fail:
+            raise RuntimeError("synthetic uncertain commit")
+        return ImportCompletionResultV1(
+            reservation_id=reservation_id,
+            candidates=tuple(
+                CandidateStageResultV1(
+                    candidate_id=candidate.candidate_id,
+                    candidate_version=candidate.candidate_version,
+                    candidate_digest=candidate.digest,
+                    replayed=False,
+                )
+                for candidate in candidates
+            ),
+            settlement_replayed=False,
+        )
 
 
 def _build(content: str = "Ray chose the café plan.") -> LocalPilotBuildV1:
@@ -206,3 +250,78 @@ def test_review_artifact_exposes_exact_digest_and_provenance_quote() -> None:
     assert item.candidate_digest == candidates[0].digest
     assert item.source_excerpts[0].exact_quote == "café"
     assert item.source_excerpts[0].byte_start == candidates[0].sources[0].byte_start
+
+
+def _provider_outcome(output: str) -> MemoryExtractionProviderOutcomeV1:
+    return MemoryExtractionProviderOutcomeV1(
+        output=output,
+        billed_microusd=1_234,
+        provider_policy_id="policy-v1",
+        model_route="openrouter/private-model",
+        provider_reference_commitment="e" * 64,
+    )
+
+
+def test_pilot_completion_materializes_review_and_calls_atomic_store() -> None:
+    store = _BatchStoreSpy()
+    completion = MemoryPilotSuccessCompletion(
+        store,
+        build=_build(),
+        fingerprint_key=b"f" * 32,
+        evidence_by_source_record_id={
+            "conversation-1:node-1:message-1": EVIDENCE
+        },
+        extraction_job_id=JOB,
+    )
+
+    completion.complete_success(
+        reservation_id=RESERVATION, outcome=_provider_outcome(_output())
+    )
+
+    result = completion.result
+    assert result.reservation_id == RESERVATION
+    assert result.review_artifact is not None
+    assert result.review_artifact.bundle_digest == result.review_artifact.bundle.digest
+    assert store.calls[0][2] == 1_234
+
+
+def test_pilot_completion_rejects_invalid_output_before_database_completion() -> None:
+    store = _BatchStoreSpy()
+    completion = MemoryPilotSuccessCompletion(
+        store,
+        build=_build(),
+        fingerprint_key=b"f" * 32,
+        evidence_by_source_record_id={
+            "conversation-1:node-1:message-1": EVIDENCE
+        },
+        extraction_job_id=JOB,
+    )
+
+    with pytest.raises(MemoryExtractionCompletionRejected):
+        completion.complete_success(
+            reservation_id=RESERVATION,
+            outcome=_provider_outcome(_output(quote="not in source")),
+        )
+
+    assert store.calls == []
+    with pytest.raises(RuntimeError, match="no acknowledged result"):
+        _ = completion.result
+
+
+def test_pilot_completion_exposes_nothing_when_database_ack_is_uncertain() -> None:
+    completion = MemoryPilotSuccessCompletion(
+        _BatchStoreSpy(fail=True),
+        build=_build(),
+        fingerprint_key=b"f" * 32,
+        evidence_by_source_record_id={
+            "conversation-1:node-1:message-1": EVIDENCE
+        },
+        extraction_job_id=JOB,
+    )
+
+    with pytest.raises(RuntimeError, match="uncertain commit"):
+        completion.complete_success(
+            reservation_id=RESERVATION, outcome=_provider_outcome(_output())
+        )
+    with pytest.raises(RuntimeError, match="no acknowledged result"):
+        _ = completion.result

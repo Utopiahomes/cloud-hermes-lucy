@@ -193,6 +193,26 @@ class GovernedMemoryExtractor:
                     )
                     for candidate in candidates
                 )
+                expected = tuple(
+                    (
+                        candidate.candidate_id,
+                        candidate.candidate_version,
+                        candidate.digest,
+                    )
+                    for candidate in candidates
+                )
+                observed = tuple(
+                    (
+                        result.candidate_id,
+                        result.candidate_version,
+                        result.candidate_digest,
+                    )
+                    for result in staged
+                )
+                if observed != expected:
+                    raise GovernedMemoryUnavailable(
+                        "memory import completion result mismatch"
+                    )
                 settlement = ImportAttemptResultV1.model_validate(
                     session.execute(
                         text(

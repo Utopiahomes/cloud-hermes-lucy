@@ -7,6 +7,7 @@ import pytest
 
 from lucy.governed_memory import ImportAttemptResultV1
 from lucy.memory_extraction import (
+    MemoryExtractionCompletionRejected,
     MemoryExtractionCoordinator,
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
@@ -97,10 +98,12 @@ class CompletionSpy:
         accounting: AccountingSpy,
         *,
         fail: bool = False,
+        reject: bool = False,
     ) -> None:
         self.events = events
         self.accounting = accounting
         self.fail = fail
+        self.reject = reject
 
     def complete_success(
         self,
@@ -109,6 +112,8 @@ class CompletionSpy:
         outcome: MemoryExtractionProviderOutcomeV1,
     ) -> None:
         self.events.append("complete")
+        if self.reject:
+            raise MemoryExtractionCompletionRejected("synthetic invalid output")
         if self.fail:
             raise RuntimeError("synthetic uncertain commit acknowledgement")
         self.accounting.settle_attempt(
@@ -173,6 +178,7 @@ def _coordinator(
     eligibility: EligibilitySpy | None = None,
     provider: ProviderSpy | None = None,
     completion_fails: bool = False,
+    completion_rejects: bool = False,
 ) -> tuple[MemoryExtractionCoordinator, AccountingSpy]:
     selected_accounting = accounting or AccountingSpy(events)
     return (
@@ -180,7 +186,12 @@ def _coordinator(
             selected_accounting,
             eligibility or EligibilitySpy(events),
             provider or ProviderSpy(events),
-            CompletionSpy(events, selected_accounting, fail=completion_fails),
+            CompletionSpy(
+                events,
+                selected_accounting,
+                fail=completion_fails,
+                reject=completion_rejects,
+            ),
             now=lambda: NOW,
         ),
         selected_accounting,
@@ -311,3 +322,13 @@ def test_uncertain_completion_never_returns_output_or_settles_separately() -> No
 
     assert events[-1] == "complete"
     assert accounting.settlements == []
+
+
+def test_deterministically_rejected_completion_is_charged_and_discarded() -> None:
+    events: list[str] = []
+    coordinator, accounting = _coordinator(events, completion_rejects=True)
+
+    result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert result.state == "discarded" and result.output is None
+    assert accounting.settlements == [(2_000, "discarded")]
