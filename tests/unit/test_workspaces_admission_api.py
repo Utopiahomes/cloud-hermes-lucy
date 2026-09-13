@@ -24,6 +24,7 @@ class SyntheticGateway:
     def __init__(self) -> None:
         self.received_credential: str | None = None
         self.deny = False
+        self.executed_capabilities: list[str] = []
 
     def preflight(
         self,
@@ -47,8 +48,28 @@ class SyntheticGateway:
             expires_at=NOW + timedelta(minutes=5),
         )
 
+    def execute(self, **values: object):
+        capability = values["capability"]
+        effect = values["effect"]
+        assert isinstance(capability, str)
+        assert callable(effect)
+        self.executed_capabilities.append(capability)
+        return effect(object())
 
-def _client(gateway: SyntheticGateway) -> TestClient:
+
+class SyntheticOperations:
+    def query_knowledge(self, **values: object) -> tuple[str, str, int, str]:
+        assert values["question"] == "What homes are available?"
+        return ("Shamrock House is available.", "approved-faq", 3, "a" * 64)
+
+    def delegate_task(self, **values: object) -> UUID:
+        assert values["instruction"] == "Draft a viewing plan"
+        return UUID("00000000-0000-4000-8000-000000000003")
+
+
+def _client(
+    gateway: SyntheticGateway, operations: SyntheticOperations | None = None
+) -> TestClient:
     return TestClient(
         create_workspaces_admission_app(
             settings=WorkspacesAdmissionAPISettingsV1(
@@ -56,6 +77,7 @@ def _client(gateway: SyntheticGateway) -> TestClient:
                 lucy_authority_credential="server-held-identity-token",
             ),
             gateway=gateway,
+            operations=operations,
         )
     )
 
@@ -120,4 +142,31 @@ def test_private_api_returns_content_free_denial() -> None:
 
 def test_private_api_exposes_only_health_and_admission() -> None:
     paths = {route.path for route in _client(SyntheticGateway()).app.routes}
-    assert paths == {"/health", "/v1/workspaces/rooms/admit"}
+    assert paths == {
+        "/health",
+        "/v1/workspaces/rooms/admit",
+        "/v1/workspaces/rooms/{room_id}/knowledge/query",
+        "/v1/workspaces/rooms/{room_id}/tasks",
+    }
+
+
+def test_operations_use_fresh_capability_admission() -> None:
+    gateway = SyntheticGateway()
+    client = _client(gateway, SyntheticOperations())
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    knowledge = client.post(
+        f"/v1/workspaces/rooms/{ONE}/knowledge/query",
+        headers=headers,
+        json={"request_id": str(ZERO), "question": "What homes are available?"},
+    )
+    task = client.post(
+        f"/v1/workspaces/rooms/{ONE}/tasks",
+        headers=headers,
+        json={"request_id": str(ZERO), "instruction": "Draft a viewing plan"},
+    )
+
+    assert knowledge.status_code == 200
+    assert knowledge.json()["snapshot_digest"] == "a" * 64
+    assert task.status_code == 202
+    assert task.json()["status"] == "accepted"
+    assert gateway.executed_capabilities == ["memory.read", "task.delegate"]
