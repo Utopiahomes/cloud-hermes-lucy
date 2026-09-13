@@ -54,12 +54,13 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
 | Synthetic memory-import integration | Passed, 5 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 805 tests | Full `tests/unit` run after loopback candidate-review console, 2026-09-12 | Relevant Python or dependency change |
+| Python unit suite | Passed, 816 tests | Full `tests/unit` run after isolated OpenRouter adapter, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
-| Mypy strict | Passed, 89 source files | `mypy --strict src` after loopback candidate-review console | Python source or type-config change |
+| Mypy strict | Passed, 90 source files | `mypy --strict src` after isolated OpenRouter adapter | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
+| Isolated OpenRouter memory adapter | Passed, 11 focused tests and full-suite rerun | Exact manifest policy/route, strict JSON Schema, ZDR plus denied data collection, token/byte bounds, usage-cost parsing, keyed generation reference, malformed-response rejection, and sanitized transport errors | OpenRouter adapter, provider contract, or approved privacy policy change |
 | Local ChatGPT inventory, review console, and exact-manifest builder | Passed, 16 tests | Safe paths, branches, keyed commitments, attachments, compression, sync-root, token, host/origin, stale-input, idempotency, exact-record/exclusion and changed-input checks | Parser, console, manifest, or limits change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
@@ -76,10 +77,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Connect the new bounded extraction coordinator to the existing OpenRouter policy/cost bridge.
-   The coordinator now enforces exact inputs, campaign reservations, secret quarantine, and
-   admission/pre-dispatch/post-dispatch source checks; the adapter must return the exact provider
-   policy, model route, and billed cost before a real call can be enabled.
+1. Assemble the coordinator, database campaign accounting/source-eligibility implementation,
+   and isolated OpenRouter adapter behind a pilot-only runner. The adapter is implemented but no
+   real provider request is enabled; the runner must require the separately authorized manifest.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

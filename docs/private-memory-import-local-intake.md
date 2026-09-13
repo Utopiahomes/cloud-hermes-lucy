@@ -145,3 +145,12 @@ Candidate review follows the same separation: proposal generation is not authori
 local authorization artifact is not automatic promotion. Rejection and deferral carry no
 approvable candidate bytes. Acceptance as ordinary private or marking uncertain creates a new
 exact candidate version, so an earlier digest cannot authorize the transformed result.
+
+The private-memory OpenRouter adapter is also inert until assembled into an authorized pilot
+runner. Its request contract fixes the reviewed model route, requires strict JSON Schema support,
+enforces per-request zero-data-retention and denied data collection, sends no tools or plugins,
+bounds output tokens and response bytes, and requires provider-reported usage cost. The generation
+identifier is retained only as a keyed commitment. A provider/model/privacy mismatch, malformed
+output, missing cost, token overrun, or ambiguous transport failure closes the attempt without
+returning candidate content. Real provider processing and spend still require separate pilot
+authorization.
