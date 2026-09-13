@@ -1,0 +1,76 @@
+{
+  "artifact": {
+    "bucket": "lucy-prod-v12-artifacts-429870640638-us-east-1",
+    "bytes": 23878388,
+    "code_sha256_base64": "uYBhRXhfgKE8uUYgwpEi/9eaK6OcBKhSTcStV5ZusNs=",
+    "key": "executors/63067605e9d5aa9d1bbf88cac590262c66c3df2b/lucy-security-executors-6306760.zip",
+    "sha256_hex": "b9806145785f80a13cb94620c29122ffd79a2ba39c04a8524dc4ad57966eb0db",
+    "source_commit": "63067605e9d5aa9d1bbf88cac590262c66c3df2b",
+    "version_id": "BEZHF5WTvJaN40iTkGvoVKQMWmd_bbWL"
+  },
+  "aws_account": "429870640638",
+  "checked_at": "2026-09-13T14:09:48Z",
+  "deployment": {
+    "lambda_alias": "arn:aws:lambda:us-east-1:429870640638:function:lucy-utopia-v13-memory-outcome-recovery-v1:outcome-v1",
+    "lambda_version": "1",
+    "outcome_key_arn": "arn:aws:kms:us-east-1:429870640638:key/d0e31d5a-516a-41d5-921e-89861673288a",
+    "outcome_registry_id": "42d8c0f9-e3a3-4eef-b174-a76e3d11180b",
+    "recovery_role": "arn:aws:iam::429870640638:role/lucy-utopia-v13-outcome-recovery-runtime",
+    "stack": "lucy-utopia-memory-outcome-recovery-v1",
+    "stack_status": "CREATE_COMPLETE",
+    "termination_protection": true
+  },
+  "dynamodb": {
+    "key_registry": {
+      "billing": "PAY_PER_REQUEST",
+      "deletion_protection": true,
+      "name": "lucy-utopia-v13-memory-outcome-keys",
+      "point_in_time_recovery": "ENABLED",
+      "status": "ACTIVE"
+    },
+    "receipt_ledger": {
+      "billing": "PAY_PER_REQUEST",
+      "deletion_protection": true,
+      "name": "lucy-utopia-v13-memory-outcome-recovery-receipts",
+      "point_in_time_recovery": "ENABLED",
+      "status": "ACTIVE"
+    }
+  },
+  "kms": {
+    "automatic_rotation": true,
+    "rotation_period_days": 365
+  },
+  "negative_permission_checks": {
+    "archive_decrypt_outcome_key": "implicitDeny",
+    "archive_delete_or_read_or_scan_key_registry": "implicitDeny",
+    "archive_invoke_unqualified_function": "implicitDeny",
+    "recovery_delete_or_scan_either_table": "implicitDeny",
+    "recovery_generate_outcome_data_key": "implicitDeny",
+    "recovery_put_key_registry": "implicitDeny",
+    "recovery_wrong_kms_purpose": "implicitDeny"
+  },
+  "positive_permission_checks": {
+    "archive_generate_outcome_data_key_with_exact_context": "allowed",
+    "archive_invoke_qualified_alias": "allowed",
+    "archive_put_key_registry": "allowed",
+    "recovery_decrypt_outcome_key_with_exact_context": "allowed",
+    "recovery_get_exact_registry_and_receipt_items": "allowed",
+    "recovery_put_receipt": "allowed"
+  },
+  "qualified_fail_closed_canary": {
+    "executed_version": "1",
+    "expected_code": "contract_invalid",
+    "function_error": null,
+    "request_id": "2721279f-81ef-4ac5-af93-d1fddad3d5e0",
+    "response_ok": false,
+    "status_code": 200
+  },
+  "region": "us-east-1",
+  "scope_exclusions": {
+    "automatic_memory_promotion": false,
+    "personal_import_executed": false,
+    "provider_called": false,
+    "provider_spend": false,
+    "transcript_capture_changed": false
+  }
+}

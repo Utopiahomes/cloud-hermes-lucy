@@ -178,8 +178,9 @@ accepted `0057` migration is merged at `2807dad`.
     package digest, pilot authorization, deadlines, and plaintext ceiling. PostgreSQL's existing
     exact-job load/source-eligibility gate is re-run before grant issuance and again before
     completion. One operation releases plaintext once; replay is content-free and a lost response
-    requires a fresh eligibility check and grant without repeating the paid model call. The new
-    stack remains locally validated and is not yet provisioned at this checkpoint.
+    requires a fresh eligibility check and grant without repeating the paid model call. The
+    additive Utopia stack is now deployed in `us-east-1`, termination-protected, and verified
+    against its effective AWS permissions. No personal import or provider request was executed.
 
 ## Verification ledger
 
@@ -204,6 +205,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Exact pilot authorization and operator preflight | Passed, 4 focused paths | Plaintext-free authorization artifact, exact confirmation/digest, untouched-export rebuild, future/expiry rejection before effects, and content-free no-network preflight | Pilot authorization, manifest builder, operator CLI, runner, or canonicalization change |
 | Write-only provider-outcome path | Passed, focused unit and coordinator tests | First write completes without wrapped-key read/decrypt; conflict and missing recovery stop for exact-job reconciliation with zero repeated provider calls | Outcome cipher/store, extraction coordinator, recovery interface, or provider retry change |
 | Permit-bound exact-job outcome recovery | Passed, 10 focused contract/runtime/IAM paths plus full-suite rerun | Outcome-only KMS context; write-only worker; exact package/grant/deployment binding; one release; content-free replay; pre-grant/pre-completion eligibility; no scan/query/delete/provider/evidence permission | Outcome recovery contract, signer, cipher, registry, executor, IAM template, or eligibility adapter change |
+| Utopia outcome-recovery AWS boundary | Passed | `docs/evidence/utopia-memory-outcome-recovery-aws-2026-09-13.json`; CloudFormation `CREATE_COMPLETE` with termination protection, artifact checksum/version, KMS rotation, table deletion protection/PITR, qualified version 1, positive/negative IAM simulation, and a content-free fail-closed canary | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or realm binding change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -219,11 +221,11 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Provision and inspect the separately authorized exact-job outcome-recovery AWS stamp, then
-   connect its environment values to the protected deployment's archive/extraction service behind
-   the guarded runner. The local contract, write-only cipher/registry, policy path, recovery
-   executor, exact PostgreSQL eligibility adapter, and least-privilege template are complete. No
-   real provider request is currently enabled.
+1. Connect the deployed exact-job outcome-recovery environment values to the protected
+   archive/extraction execution path behind the guarded runner. The local contract, write-only
+   cipher/registry, policy path, recovery executor, exact PostgreSQL eligibility adapter,
+   least-privilege AWS resources, and deployed permission checks are complete. No real provider
+   request is currently enabled.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
