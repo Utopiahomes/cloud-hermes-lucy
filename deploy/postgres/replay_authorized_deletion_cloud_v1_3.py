@@ -24,11 +24,14 @@ from sqlalchemy.engine import URL, make_url
 from lucy.authorized_deletion_recovery import (
     AuthorizedDeletionRecoveryError,
     build_authorized_deletion_recovery_contract_v2,
+    build_authorized_deletion_recovery_contract_v3,
     verify_authorized_deletion_recovery_v2,
+    verify_authorized_deletion_recovery_v3,
 )
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
     SensitiveExecutionGrantV2,
@@ -162,7 +165,6 @@ def _conninfo(url: URL) -> str:
 def _verified_contract(config: ScopedRecoveryReplayConfig) -> dict[str, Any]:
     try:
         permit = SensitiveActionPermitV3.model_validate(config.bundle["permit"])
-        manifest = DeletionTargetManifestV2.model_validate(config.bundle["manifest"])
         grant = SensitiveExecutionGrantV2.model_validate(config.bundle["execution_grant"])
         receipt = ExecutorReceiptV2.model_validate(config.bundle["receipt"])
         if (
@@ -170,29 +172,67 @@ def _verified_contract(config: ScopedRecoveryReplayConfig) -> dict[str, Any]:
             or permit.workspace_id != config.workspace_id
         ):
             raise AuthorizedDeletionRecoveryError("reviewed recovery scope mismatch")
-        proof = verify_authorized_deletion_recovery_v2(
-            permit=permit,
-            manifest=manifest,
-            grant=grant,
-            receipt=receipt,
-            policy_verifier=V13ContractVerifier(config.policy_keys),
-            receipt_verifier=V13ContractVerifier(config.receipt_keys),
-            environment=config.environment,
-            caller_identity=config.caller_identity,
-            executor_identity=config.executor_identity,
-            executor_alias_arn=config.executor_alias_arn,
-            executor_version=config.executor_version,
-            receipt_key_id=config.receipt_key_id,
-            checked_at=datetime.now(UTC),
+        manifest_value = config.bundle["manifest"]
+        if not isinstance(manifest_value, dict):
+            raise ValueError("deletion manifest must be an object")
+        manifest_identity = (
+            manifest_value.get("contract_version"),
+            manifest_value.get("object_type"),
         )
-        return build_authorized_deletion_recovery_contract_v2(
-            proof=proof,
-            permit=permit,
-            manifest=manifest,
-            grant=grant,
-            receipt=receipt,
-            authority_evidence_digest=config.authority_evidence_digest,
-        )
+        policy_verifier = V13ContractVerifier(config.policy_keys)
+        receipt_verifier = V13ContractVerifier(config.receipt_keys)
+        checked_at = datetime.now(UTC)
+        if manifest_identity == ("3", "lucy.deletion-target-manifest.v3"):
+            manifest_v3 = DeletionTargetManifestV3.model_validate(manifest_value)
+            proof_v3 = verify_authorized_deletion_recovery_v3(
+                permit=permit,
+                manifest=manifest_v3,
+                grant=grant,
+                receipt=receipt,
+                policy_verifier=policy_verifier,
+                receipt_verifier=receipt_verifier,
+                environment=config.environment,
+                caller_identity=config.caller_identity,
+                executor_identity=config.executor_identity,
+                executor_alias_arn=config.executor_alias_arn,
+                executor_version=config.executor_version,
+                receipt_key_id=config.receipt_key_id,
+                checked_at=checked_at,
+            )
+            return build_authorized_deletion_recovery_contract_v3(
+                proof=proof_v3,
+                permit=permit,
+                manifest=manifest_v3,
+                grant=grant,
+                receipt=receipt,
+                authority_evidence_digest=config.authority_evidence_digest,
+            )
+        if manifest_identity == ("2", "lucy.deletion-target-manifest.v2"):
+            manifest_v2 = DeletionTargetManifestV2.model_validate(manifest_value)
+            proof_v2 = verify_authorized_deletion_recovery_v2(
+                permit=permit,
+                manifest=manifest_v2,
+                grant=grant,
+                receipt=receipt,
+                policy_verifier=policy_verifier,
+                receipt_verifier=receipt_verifier,
+                environment=config.environment,
+                caller_identity=config.caller_identity,
+                executor_identity=config.executor_identity,
+                executor_alias_arn=config.executor_alias_arn,
+                executor_version=config.executor_version,
+                receipt_key_id=config.receipt_key_id,
+                checked_at=checked_at,
+            )
+            return build_authorized_deletion_recovery_contract_v2(
+                proof=proof_v2,
+                permit=permit,
+                manifest=manifest_v2,
+                grant=grant,
+                receipt=receipt,
+                authority_evidence_digest=config.authority_evidence_digest,
+            )
+        raise ValueError("deletion manifest version is unsupported")
     except (ValidationError, AuthorizedDeletionRecoveryError, ValueError) as exc:
         raise ScopedRecoveryReplayError(
             "signed scoped deletion authority verification failed"
@@ -201,6 +241,9 @@ def _verified_contract(config: ScopedRecoveryReplayConfig) -> dict[str, Any]:
 
 def run(config: ScopedRecoveryReplayConfig) -> dict[str, Any]:
     contract = _verified_contract(config)
+    contract_version = contract.get("contract_version")
+    if contract_version not in {"2", "3"}:
+        raise ScopedRecoveryReplayError("verified recovery contract version is unsupported")
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         connection.execute("SET LOCAL lock_timeout = '10s'")
         connection.execute("SET LOCAL statement_timeout = '120s'")
@@ -216,13 +259,13 @@ def run(config: ScopedRecoveryReplayConfig) -> dict[str, Any]:
         if tls != (True,) or boundary != ("quarantined", True):
             raise ScopedRecoveryReplayError("database is outside the reviewed recovery boundary")
         row = connection.execute(
-            "SELECT lucy.apply_scoped_authorized_deletion_recovery_v2(%s::jsonb)",
+            f"SELECT lucy.apply_scoped_authorized_deletion_recovery_v{contract_version}(%s::jsonb)",
             (json.dumps(contract, separators=(",", ":"), sort_keys=True),),
         ).fetchone()
         if row is None or not isinstance(row[0], dict) or row[0].get("state") != "FINALITY_PENDING":
             raise ScopedRecoveryReplayError("database did not confirm scoped deletion replay")
     return {
-        "contract": "lucy.authorized-deletion-restore-replay.v2",
+        "contract": f"lucy.authorized-deletion-restore-replay.v{contract_version}",
         "status": "passed",
         "operation_id": contract["operation_id"],
         "manifest_id": contract["manifest_id"],

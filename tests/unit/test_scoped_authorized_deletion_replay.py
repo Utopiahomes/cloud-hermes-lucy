@@ -127,7 +127,7 @@ class _Connection:
             return _Result((True,))
         if "FROM lucy.runtime_admission" in normalized:
             return _Result(("quarantined", True))
-        if "apply_scoped_authorized_deletion_recovery_v2" in normalized:
+        if "apply_scoped_authorized_deletion_recovery_v" in normalized:
             return _Result(({"state": "FINALITY_PENDING", "replayed": False},))
         return _Result()
 
@@ -138,6 +138,7 @@ def test_run_uses_only_locked_quarantined_scoped_gate(
     config = ScopedRecoveryReplayConfig.from_environment(_environment())
     connection = _Connection()
     contract = {
+        "contract_version": "2",
         "operation_id": "33333333-3333-4333-8333-333333333333",
         "manifest_id": "44444444-4444-4444-8444-444444444444",
         "target_count": 2,
@@ -162,6 +163,32 @@ def test_run_uses_only_locked_quarantined_scoped_gate(
     assert any("lucy.capture_boundary_safe_v1()" in item for item in connection.statements)
 
 
+def test_run_dispatches_verified_v3_contract_to_v3_database_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ScopedRecoveryReplayConfig.from_environment(_environment())
+    connection = _Connection()
+    contract = {
+        "contract_version": "3",
+        "operation_id": "33333333-3333-4333-8333-333333333333",
+        "manifest_id": "44444444-4444-4444-8444-444444444444",
+        "target_count": 5,
+        "recovery_digest": "b" * 64,
+        "authority_evidence_digest": "a" * 64,
+    }
+    monkeypatch.setattr(replay, "_verified_contract", lambda _config: contract)
+    monkeypatch.setattr(replay.psycopg, "connect", lambda *_args, **_kwargs: connection)
+
+    report = replay.run(config)
+
+    assert report["contract"] == "lucy.authorized-deletion-restore-replay.v3"
+    assert report["target_count"] == 5
+    assert sum(
+        "apply_scoped_authorized_deletion_recovery_v3" in item
+        for item in connection.statements
+    ) == 1
+
+
 def test_run_fails_closed_outside_quarantine(monkeypatch: pytest.MonkeyPatch) -> None:
     config = ScopedRecoveryReplayConfig.from_environment(_environment())
     connection = _Connection()
@@ -173,7 +200,7 @@ def test_run_fails_closed_outside_quarantine(monkeypatch: pytest.MonkeyPatch) ->
         return original_execute(statement, parameters)
 
     monkeypatch.setattr(connection, "execute", execute)
-    monkeypatch.setattr(replay, "_verified_contract", lambda _config: {})
+    monkeypatch.setattr(replay, "_verified_contract", lambda _config: {"contract_version": "2"})
     monkeypatch.setattr(replay.psycopg, "connect", lambda *_args, **_kwargs: connection)
 
     with pytest.raises(ScopedRecoveryReplayError, match="outside"):

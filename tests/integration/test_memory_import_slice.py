@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.contracts.canonical import canonical_sha256
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
     DeletionArtifactClassV3,
@@ -1491,6 +1492,270 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
                 "WHERE candidate_id=:candidate"
             ),
             {"candidate": candidate.candidate_id},
+        )
+
+    # Simulate a database restore whose backup predates the durable deletion
+    # fences, then replay only the independently preserved authority chain.
+    with owner_sessions.begin() as session:
+        session.execute(text("SET LOCAL session_replication_role='replica'"))
+        session.execute(
+            text("DELETE FROM lucy.scoped_evidence_deletion_fences_v2 WHERE operation_id=:id"),
+            {"id": operation_id},
+        )
+        session.execute(
+            text("DELETE FROM lucy.scoped_memory_candidate_tombstones_v3 WHERE operation_id=:id"),
+            {"id": operation_id},
+        )
+        session.execute(
+            text("DELETE FROM lucy.memory_import_outcome_tombstones_v3 WHERE operation_id=:id"),
+            {"id": operation_id},
+        )
+        session.execute(
+            text("DELETE FROM lucy.scoped_deletion_effects_v3 WHERE operation_id=:id"),
+            {"id": operation_id},
+        )
+    scope_digest = canonical_sha256(
+        OriginScopeV1.model_validate(permit["target_scope"]),
+        prefix=b"lucy:authorized-deletion-recovery-scope:v2\0",
+    )
+    recovery_bindings = {
+        "operation_id": str(operation_id),
+        "permit_digest": authority["permit_digest"],
+        "manifest_digest": manifest.unsigned_digest_hex(),
+        "grant_digest": grant_digest,
+        "receipt_digest": receipt_digest,
+        "targets_digest": manifest.targets_digest,
+        "scope_digest": scope_digest,
+    }
+    recovery = {
+        "contract_version": "3",
+        "object_type": "lucy.authorized-deletion-recovery.v3",
+        "operation_id": str(operation_id),
+        "permit_id": str(authority["permit_id"]),
+        "manifest_id": str(manifest.manifest_id),
+        "grant_id": str(grant_id),
+        "receipt_id": str(receipt_id),
+        "permit_digest": authority["permit_digest"],
+        "manifest_digest": manifest.unsigned_digest_hex(),
+        "grant_digest": grant_digest,
+        "receipt_digest": receipt_digest,
+        "targets_digest": manifest.targets_digest,
+        "target_count": manifest.target_count,
+        "scope_digest": scope_digest,
+        "target_scope": permit["target_scope"],
+        "workspace_id": permit["workspace_id"],
+        "root_evidence_id": str(evidence_ids[0]),
+        "root_representation_id": str(manifest.root_representation_id),
+        "restore_mapping_id": None,
+        "caller_identity": execution_authority["caller_identity"],
+        "executor_identity": execution_authority["executor_identity"],
+        "executor_alias_arn": execution_authority["executor_alias_arn"],
+        "executor_version": execution_authority["executor_version"],
+        "receipt_key_id": execution_authority["receipt_key_id"],
+        "completed_at": completed_at.isoformat(),
+        "reason_category": "owner_request",
+        "recovery_digest": canonical_sha256(
+            recovery_bindings,
+            prefix=b"lucy:authorized-deletion-recovery:v3\0",
+        ),
+        "authority_evidence_digest": "d" * 64,
+        "targets": [target.model_dump(mode="json") for target in manifest.targets],
+    }
+    with (
+        pytest.raises(DBAPIError, match="permission denied"),
+        raymond_sessions.begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(recovery, separators=(",", ":"))},
+        )
+    with (
+        pytest.raises(DBAPIError, match="contract is malformed"),
+        owner_sessions.begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps({**recovery, "unexpected": True}, separators=(",", ":"))},
+        )
+    with owner_sessions.begin() as session:
+        recovered = session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(recovery, separators=(",", ":"))},
+        ).scalar_one()
+        replayed = session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(recovery, separators=(",", ":"))},
+        ).scalar_one()
+    assert recovered["state"] == "FINALITY_PENDING"
+    assert recovered["replayed"] is False
+    assert recovered["derived_summary"] == {
+        "archive_keys_destroyed": 1,
+        "candidates_suppressed": 2,
+        "claims_suppressed": 1,
+        "provider_outcome_keys_destroyed": 1,
+        "target_count": 5,
+    }
+    assert replayed == {**recovered, "replayed": True}
+    with raymond_sessions.begin() as session:
+        assert session.execute(
+            text("SELECT lucy.search_governed_scoped_memory_v1(:query,:limit)"),
+            {"query": "synthetic", "limit": 10},
+        ).scalar_one() == []
+    with pytest.raises(MemoryOutcomeUnavailable, match="outcome lookup unavailable"):
+        PostgresMemoryOutcomeStore(raymond_sessions).load(job_id)
+    with (
+        pytest.raises(DBAPIError, match="scoped evidence derivation unavailable"),
+        owner_sessions.begin() as session,
+    ):
+        session.execute(
+            text(
+                "INSERT INTO lucy.scoped_memory_candidate_sources_v1("
+                "candidate_id,candidate_version,evidence_id,record_version,byte_start,"
+                "byte_end,content_scope_id) VALUES(:candidate,1,:evidence,1,0,1,:scope)"
+            ),
+            {
+                "candidate": candidate.candidate_id,
+                "evidence": evidence_ids[0],
+                "scope": scope_id,
+            },
+        )
+
+    # A backup may predate derived rows entirely. Historical deletion authority
+    # still has to install exact future-resurrection tombstones.
+    absent_operation_id = _prepare_deletion_operation(scope_id, evidence_ids[1])
+    with owner_sessions.begin() as session:
+        absent_root = session.execute(
+            text(
+                "SELECT representation_id,wrapped_key_ref FROM lucy.scoped_evidence_wrappers_v2 "
+                "WHERE evidence_id=:evidence AND current"
+            ),
+            {"evidence": evidence_ids[1]},
+        ).one()
+    absent_candidate_id = uuid4()
+    absent_job_id = uuid4()
+    absent_representation_id = uuid4()
+    absent_registry_id = uuid4()
+    absent_targets = (
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.ENCRYPTED_ARCHIVE,
+            artifact_id=evidence_ids[1],
+            artifact_version=1,
+            root_evidence_id=evidence_ids[1],
+            disposition="destroy_wrapped_key",
+            representation_id=absent_root.representation_id,
+            wrapped_key_ref=absent_root.wrapped_key_ref,
+        ),
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.MEMORY_CANDIDATE,
+            artifact_id=absent_candidate_id,
+            artifact_version=7,
+            root_evidence_id=evidence_ids[1],
+            disposition="invalidate",
+        ),
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME,
+            artifact_id=absent_job_id,
+            artifact_version=3,
+            root_evidence_id=evidence_ids[1],
+            disposition="destroy_wrapped_key",
+            representation_id=absent_representation_id,
+            wrapped_key_ref=absent_representation_id,
+            key_registry_id=absent_registry_id,
+        ),
+    )
+    absent_targets_digest = deletion_targets_digest_v3(absent_targets)
+    absent_digests = {
+        "permit_digest": "1" * 64,
+        "manifest_digest": "2" * 64,
+        "grant_digest": "3" * 64,
+        "receipt_digest": "4" * 64,
+    }
+    absent_bindings = {
+        "operation_id": str(absent_operation_id),
+        **absent_digests,
+        "targets_digest": absent_targets_digest,
+        "scope_digest": scope_digest,
+    }
+    absent_recovery = {
+        **recovery,
+        "operation_id": str(absent_operation_id),
+        "permit_id": str(uuid4()),
+        "manifest_id": str(uuid4()),
+        "grant_id": str(uuid4()),
+        "receipt_id": str(uuid4()),
+        **absent_digests,
+        "targets_digest": absent_targets_digest,
+        "target_count": len(absent_targets),
+        "root_evidence_id": str(evidence_ids[1]),
+        "root_representation_id": str(absent_root.representation_id),
+        "recovery_digest": canonical_sha256(
+            absent_bindings,
+            prefix=b"lucy:authorized-deletion-recovery:v3\0",
+        ),
+        "authority_evidence_digest": "e" * 64,
+        "targets": [target.model_dump(mode="json") for target in absent_targets],
+    }
+    with owner_sessions.begin() as session:
+        absent_result = session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(absent_recovery, separators=(",", ":"))},
+        ).scalar_one()
+        absent_rows = session.execute(
+            text(
+                "SELECT artifact_class,artifact_id,artifact_version "
+                "FROM lucy.scoped_authorized_deletion_recovery_targets_v3 "
+                "WHERE operation_id=:operation ORDER BY artifact_class"
+            ),
+            {"operation": absent_operation_id},
+        ).all()
+    assert absent_result["derived_summary"]["target_count"] == 3
+    assert absent_rows == [
+        ("encrypted_archive", evidence_ids[1], 1),
+        ("memory_candidate", absent_candidate_id, 7),
+        ("memory_import_provider_outcome", absent_job_id, 3),
+    ]
+    conflicting_recovery = {
+        **absent_recovery,
+        "receipt_digest": "5" * 64,
+    }
+    conflicting_bindings = {
+        **absent_bindings,
+        "receipt_digest": conflicting_recovery["receipt_digest"],
+    }
+    conflicting_recovery["recovery_digest"] = canonical_sha256(
+        conflicting_bindings,
+        prefix=b"lucy:authorized-deletion-recovery:v3\0",
+    )
+    with (
+        pytest.raises(DBAPIError, match="replay state mismatch"),
+        owner_sessions.begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(conflicting_recovery, separators=(",", ":"))},
+        )
+    with owner_sessions.begin() as session:
+        session.execute(
+            text(
+                "UPDATE lucy.runtime_admission SET state='ready',storage_epoch=:epoch,"
+                "updated_at=clock_timestamp() WHERE singleton"
+            ),
+            {"epoch": uuid4()},
+        )
+    with (
+        pytest.raises(DBAPIError, match="requires quarantined capture-off storage"),
+        owner_sessions.begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.apply_scoped_authorized_deletion_recovery_v3(CAST(:r AS jsonb))"),
+            {"r": json.dumps(recovery, separators=(",", ":"))},
+        )
+    with owner_sessions.begin() as session:
+        session.execute(
+            text(
+                "UPDATE lucy.runtime_admission SET state='quarantined',storage_epoch=NULL,"
+                "updated_at=clock_timestamp() WHERE singleton"
+            )
         )
 
 

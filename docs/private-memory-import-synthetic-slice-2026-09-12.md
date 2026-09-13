@@ -140,16 +140,30 @@ accepted `0057` migration is merged at `2807dad`.
     arrives after any source is deletion-fenced is rejected even when that outcome was absent
     from the frozen closure. The policy API, private-network client, deletion coordinator, and
     Lambda invocation now select the additive V3 path; historical V2 remains unchanged.
+27. Quarantined restore replay now verifies the historical V3 permit, manifest, grant, and
+    successful receipt chain before constructing a content-free recovery contract. PostgreSQL
+    accepts that contract only while capture is off and runtime admission is quarantined, under
+    the same exclusive lock used by the protected activation handoff. It stores immutable proof,
+    exact versioned targets, and a root-evidence fence without recreating any wrapped key. Targets
+    remain durable even when the restored backup predates their candidate or provider-outcome
+    rows. Existing rows must match the historical scope, provenance, version, representation, and
+    key registry; conflicting replay fails atomically. Recovery fences now block retrieval,
+    candidate source attachment, approval/promotion, provider-outcome write/read, and ordinary or
+    protected recall. The existing production recovery utility now verifies and dispatches both
+    historical V2 bundles and new V3 bundles to their separately versioned database gates. Shared
+    targets preserve per-operation provenance while intrinsic target metadata must agree.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Fresh PostgreSQL migration `0001` through `0065_memory_deletion_execution` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0065`; includes exact V3 grant/receipt/reconciliation replay, immutable candidate/outcome tombstones, late-outcome rejection after source deletion, content-free V3 authority, signed manifest persistence, exact closure discovery, authorization/round trip, atomic completion replay, and rollback | Import, grant, receipt, migration, or scoped-memory change |
-| Python unit suite | Passed, 880 tests | Full `tests/unit` run after V3 deletion application wiring, 2026-09-12 | Relevant Python or dependency change |
-| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after V3 deletion application wiring | Relevant source change |
-| Mypy strict | Passed, 98 source files | Full strict source check after V3 deletion application wiring | Python source or type-config change |
+| Fresh PostgreSQL migration `0001` through `0067_memory_deletion_recovery` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, including integrated Workspaces `0066`, 2026-09-12 | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0067`; proves present and absent derived-row restore, exact replay/conflicting replay rejection, durable candidate/outcome targets, recall/outcome/derivation fencing, plus V3 grant/receipt/reconciliation | Import, recovery, grant, receipt, migration, or scoped-memory change |
+| Historical V3 recovery contract | Passed, focused unit test | Historical policy/receipt keys, exact permit/manifest/grant/receipt binding, provider-outcome key registry preservation, changed-scope rejection | Contract, canonicalization, trust-store, or recovery change |
+| Integrated Workspaces queue | Passed, 1 PostgreSQL integration test | `tests/integration/test_workspaces_task_queue.py` at migration `0067`; exact enqueue/claim/complete/replay boundary from Public Lucy checkpoint | Workspaces runtime, task queue, or migration change |
+| Python unit suite | Passed, 906 tests | Full `tests/unit` after integrating Workspaces `0066` and V3 recovery `0067`, 2026-09-12 | Relevant Python or dependency change |
+| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after V3 recovery | Relevant source change |
+| Mypy strict | Passed, 104 source files | Full strict source and production recovery-utility check after V3 recovery | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
@@ -175,17 +189,13 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 ## Remaining work before the 12–20 conversation pilot
 
 1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
-   disabled until the outcome-key lifecycle below is complete and a specific pilot manifest is
-   separately authorized. No real provider request is currently enabled.
-2. Extend the quarantined recovery reader and replay transaction to recognize V3 grant bindings,
-   receipts, candidate/outcome tombstones, and finality effects. The live transactional path is
-   complete through the policy API and Lambda coordinator; restore replay remains the last
-   deletion-lifecycle gate before the pilot. An interruption before the first encrypted outcome
+   disabled until a specific 12–20 conversation pilot manifest is separately authorized. No real
+   provider request is currently enabled. An interruption before the first encrypted outcome
    write remains an explicit reconciliation case; no automatic provider retry is allowed.
-3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-4. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
+3. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
    the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk
