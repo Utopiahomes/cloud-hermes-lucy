@@ -364,6 +364,22 @@ def test_replayed_job_never_repeats_provider_execution() -> None:
     ]
 
 
+def test_fresh_reservation_with_replayed_job_never_repeats_provider_execution() -> None:
+    """A reservation/job race cannot grant two callers the dispatch claim."""
+
+    events: list[str] = []
+    accounting = AccountingSpy(events, replayed=False, job_replayed=True)
+    coordinator, _ = _coordinator(events, accounting=accounting)
+
+    result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert result.state == "reconciliation_required" and result.output is None
+    assert "provider" not in events
+    assert events == [
+        "eligible:admission", "reserve", "register-job", "outcome-load"
+    ]
+
+
 def test_replayed_job_without_recovery_capability_stops_before_provider() -> None:
     events: list[str] = []
     accounting = AccountingSpy(events, replayed=True, job_replayed=True)
@@ -411,6 +427,25 @@ def test_replayed_job_resumes_from_encrypted_outcome_without_provider_call() -> 
     assert result.state == "succeeded"
     assert "provider" not in events
     assert events.count("outcome-load") == 1
+
+
+def test_recovered_billed_outcome_preserves_cost_when_pre_dispatch_fence_closes() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events, replayed=False, job_replayed=True)
+    recovered = ProviderSpy(events, billed_microusd=2_750).infer()
+    events.clear()
+    coordinator, _ = _coordinator(
+        events,
+        accounting=accounting,
+        eligibility=EligibilitySpy(events, fail_phase="pre_dispatch"),
+        outcome_journal=OutcomeJournalSpy(events, recovered=recovered),
+    )
+
+    with pytest.raises(MemoryExtractionUnavailable, match="before provider dispatch"):
+        coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert "provider" not in events
+    assert accounting.settlements == [(2_750, "discarded")]
 
 
 def test_uncertain_outcome_persistence_never_completes_or_settles() -> None:

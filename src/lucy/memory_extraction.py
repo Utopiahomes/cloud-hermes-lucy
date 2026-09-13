@@ -183,7 +183,11 @@ class MemoryExtractionCoordinator:
                 "extraction job registration is uncertain; reconciliation required"
             ) from None
         outcome: MemoryExtractionProviderOutcomeV1 | None = None
-        if reservation.replayed and job.replayed:
+        # The durable job row, not the reservation response observed by this
+        # caller, owns the provider-dispatch claim. Two callers can observe
+        # different reservation replay states while racing to register the
+        # same job; only the caller that created the job may dispatch.
+        if job.replayed:
             if self._outcome_recovery is None:
                 return MemoryExtractionResultV1(
                     reservation_id=reservation.reservation_id,
@@ -213,7 +217,7 @@ class MemoryExtractionCoordinator:
         except Exception:
             self._accounting.settle_attempt(
                 reservation.reservation_id,
-                billed_microusd=0,
+                billed_microusd=outcome.billed_microusd if outcome is not None else 0,
                 result="discarded",
             )
             raise MemoryExtractionUnavailable(
