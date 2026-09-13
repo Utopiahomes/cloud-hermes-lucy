@@ -18,6 +18,7 @@ from lucy.memory_openrouter import (
     OpenRouterMemoryPolicyV1,
     OpenRouterMemoryProvider,
     UrllibOpenRouterTransport,
+    build_openrouter_memory_request,
 )
 
 NOW = datetime(2026, 9, 12, 23, 0, tzinfo=UTC)
@@ -46,7 +47,7 @@ def _manifest(**changes: object) -> ImportManifestV2:
         "prompt_version": "prompt-v1",
         "provider_policy_id": "private-zdr-v1",
         "model_route": "openai/gpt-oss-20b",
-        "token_accounting_version": "conservative-v1",
+        "token_accounting_version": "canonical-json-byte-upper-bound-v1",
         "records": (
             ImportManifestRecordV1(
                 source_record_id="conversation:node:message",
@@ -61,9 +62,9 @@ def _manifest(**changes: object) -> ImportManifestV2:
         "max_records": 1,
         "max_bytes": 17,
         "max_source_estimated_tokens": 6,
-        "max_request_input_tokens": 100,
+        "max_request_input_tokens": 100_000,
         "max_request_output_tokens": 200,
-        "max_request_total_tokens": 300,
+        "max_request_total_tokens": 100_200,
         "max_model_spend_microusd": 10_000,
         "max_attempts": 3,
         "expires_at": NOW + timedelta(hours=1),
@@ -74,13 +75,16 @@ def _manifest(**changes: object) -> ImportManifestV2:
 
 def _dispatch(**changes: object) -> MemoryExtractionDispatchV1:
     prompt = "Extract from exact synthetic history."
+    request = build_openrouter_memory_request(
+        model_route="openai/gpt-oss-20b", prompt=prompt, output_tokens=100
+    )
     values: dict[str, object] = {
         "attempt_key": "pilot:batch-1:attempt-1",
         "source_record_ids": ("conversation:node:message",),
         "prompt": prompt,
-        "input_tokens": 20,
+        "input_tokens": request.input_token_upper_bound,
         "output_tokens": 100,
-        "request_bytes": len(prompt.encode()),
+        "request_bytes": request.request_bytes,
         "maximum_microusd": 5_000,
         "timeout_seconds": 30,
     }
@@ -165,6 +169,27 @@ def test_manifest_policy_or_output_cap_mismatch_never_dispatches() -> None:
         with pytest.raises(MemoryOpenRouterUnavailable):
             _provider(transport).infer(manifest=manifest, dispatch=dispatch)
         assert transport.calls == []
+
+
+def test_complete_request_accounting_rejects_forged_counts_before_network() -> None:
+    exact = _dispatch()
+    for dispatch in (
+        exact.model_copy(update={"input_tokens": exact.input_tokens - 1}),
+        exact.model_copy(update={"request_bytes": exact.request_bytes - 1}),
+    ):
+        transport = TransportSpy(_response())
+        with pytest.raises(MemoryOpenRouterUnavailable, match="accounting differs"):
+            _provider(transport).infer(manifest=_manifest(), dispatch=dispatch)
+        assert transport.calls == []
+
+    request = build_openrouter_memory_request(
+        model_route="openai/gpt-oss-20b",
+        prompt="café",
+        output_tokens=100,
+    )
+    assert request.input_token_upper_bound > len("café".encode())
+    assert b"json_schema" in request.serialized_body
+    assert b"untrusted historical text" in request.serialized_body
 
 
 @pytest.mark.parametrize(

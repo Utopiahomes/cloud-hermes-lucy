@@ -38,8 +38,6 @@ class MemoryExtractionDispatchV1(BaseModel):
     def exact_source_set(self) -> MemoryExtractionDispatchV1:
         if len(set(self.source_record_ids)) != len(self.source_record_ids):
             raise ValueError("extraction source record IDs must be unique")
-        if self.request_bytes != len(self.prompt.encode("utf-8")):
-            raise ValueError("extraction request byte count is not exact")
         return self
 
 

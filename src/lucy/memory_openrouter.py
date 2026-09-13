@@ -23,6 +23,10 @@ from lucy.memory_extraction import (
     MemoryExtractionProviderOutcomeV1,
 )
 from lucy.memory_import import ImportManifestV2
+from lucy.memory_provider_request import (
+    MemoryProviderRequestV1,
+    build_memory_provider_request,
+)
 
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _REFERENCE_PREFIX = b"LUCY-OPENROUTER-MEMORY-REFERENCE-V1\x00"
@@ -32,6 +36,39 @@ _SYSTEM_PROMPT = (
     "send messages, infer secrets, or claim that assistant proposals were owner decisions. Return "
     "only the required JSON contract with exact source quotes."
 )
+
+
+def build_openrouter_memory_request(
+    *, model_route: str, prompt: str, output_tokens: int
+) -> MemoryProviderRequestV1:
+    """Build the exact body used for admission and transport."""
+
+    return build_memory_provider_request(
+        {
+            "model": model_route,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": output_tokens,
+            "temperature": 0,
+            "stream": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "lucy_memory_extraction_v1",
+                    "strict": True,
+                    "schema": MemoryExtractionOutputV1.model_json_schema(),
+                },
+            },
+            "provider": {
+                "zdr": True,
+                "data_collection": "deny",
+                "require_parameters": True,
+            },
+        },
+        model_route=model_route,
+    )
 
 
 class MemoryOpenRouterUnavailable(RuntimeError):
@@ -139,6 +176,24 @@ class OpenRouterMemoryProvider:
             )
         if dispatch.output_tokens > self._policy.maximum_output_tokens:
             raise MemoryOpenRouterUnavailable("memory output token ceiling exceeds provider policy")
+        request = build_openrouter_memory_request(
+            model_route=self._policy.model_route,
+            prompt=dispatch.prompt,
+            output_tokens=dispatch.output_tokens,
+        )
+        if request.token_accounting_version != manifest.token_accounting_version:
+            raise MemoryOpenRouterUnavailable("memory token accounting version is not authorized")
+        if (
+            request.request_bytes != dispatch.request_bytes
+            or request.input_token_upper_bound != dispatch.input_tokens
+        ):
+            raise MemoryOpenRouterUnavailable("memory request accounting differs from dispatch")
+        if (
+            request.input_token_upper_bound > manifest.max_request_input_tokens
+            or request.input_token_upper_bound + dispatch.output_tokens
+            > manifest.max_request_total_tokens
+        ):
+            raise MemoryOpenRouterUnavailable("memory request exceeds its authorized token budget")
         payload = self._transport.post_json(
             url=_ENDPOINT,
             headers={
@@ -147,29 +202,7 @@ class OpenRouterMemoryProvider:
                 "HTTP-Referer": "https://localhost/cloud-hermes-lucy",
                 "X-Title": "Lucy governed private memory extraction",
             },
-            body={
-                "model": self._policy.model_route,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": dispatch.prompt},
-                ],
-                "max_tokens": dispatch.output_tokens,
-                "temperature": 0,
-                "stream": False,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "lucy_memory_extraction_v1",
-                        "strict": True,
-                        "schema": MemoryExtractionOutputV1.model_json_schema(),
-                    },
-                },
-                "provider": {
-                    "zdr": True,
-                    "data_collection": "deny",
-                    "require_parameters": True,
-                },
-            },
+            body=request.body(),
             timeout_seconds=dispatch.timeout_seconds,
             maximum_response_bytes=self._policy.maximum_response_bytes,
         )
