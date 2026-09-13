@@ -181,6 +181,11 @@ accepted `0057` migration is merged at `2807dad`.
     requires a fresh eligibility check and grant without repeating the paid model call. The
     additive Utopia stack is now deployed in `us-east-1`, termination-protected, and verified
     against its effective AWS permissions. No personal import or provider request was executed.
+31. Recovery grant issuance is now typed behind a grant-issuer protocol so the deployed path can
+    use the isolated policy service rather than copying its signing key into the archive service.
+    Both claim and completion deadlines are capped by the authorized campaign expiry. The next
+    bridge will use the existing private authenticated policy transport plus a content-free,
+    exact-job database eligibility check; the archive service will receive only the signed grant.
 
 ## Verification ledger
 
@@ -206,6 +211,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Write-only provider-outcome path | Passed, focused unit and coordinator tests | First write completes without wrapped-key read/decrypt; conflict and missing recovery stop for exact-job reconciliation with zero repeated provider calls | Outcome cipher/store, extraction coordinator, recovery interface, or provider retry change |
 | Permit-bound exact-job outcome recovery | Passed, 10 focused contract/runtime/IAM paths plus full-suite rerun | Outcome-only KMS context; write-only worker; exact package/grant/deployment binding; one release; content-free replay; pre-grant/pre-completion eligibility; no scan/query/delete/provider/evidence permission | Outcome recovery contract, signer, cipher, registry, executor, IAM template, or eligibility adapter change |
 | Utopia outcome-recovery AWS boundary | Passed | `docs/evidence/utopia-memory-outcome-recovery-aws-2026-09-13.json`; CloudFormation `CREATE_COMPLETE` with termination protection, artifact checksum/version, KMS rotation, table deletion protection/PITR, qualified version 1, positive/negative IAM simulation, and a content-free fail-closed canary | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or realm binding change |
+| Recovery grant expiry and issuer seam | Passed, 22 focused checks plus Ruff and strict mypy | Grant claim/completion never outlive campaign authorization; recovery consumes an abstract issuer so the policy signer can remain isolated | Recovery policy, issuer protocol, campaign expiry, or coordinator construction change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -221,11 +227,12 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Connect the deployed exact-job outcome-recovery environment values to the protected
-   archive/extraction execution path behind the guarded runner. The local contract, write-only
-   cipher/registry, policy path, recovery executor, exact PostgreSQL eligibility adapter,
-   least-privilege AWS resources, and deployed permission checks are complete. No real provider
-   request is currently enabled.
+1. Add the private authenticated outcome-grant endpoint/client and a content-free exact-job
+   PostgreSQL eligibility function, then connect the deployed environment values to the guarded
+   archive/extraction runner. The policy signer remains only in `lucy-policy`; the archive service
+   receives a signed grant and invokes the qualified alias. The endpoint must require an
+   independently provisioned exact pilot approval/bundle allowlist rather than trusting a
+   caller-supplied `AuthorizedPilotManifestV1`. No real provider request is currently enabled.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

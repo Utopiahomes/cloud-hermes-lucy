@@ -58,6 +58,19 @@ class MemoryOutcomeRecoveryInvoker(Protocol):
     ) -> MemoryOutcomeRecoveryResultV1: ...
 
 
+class MemoryOutcomeGrantIssuer(Protocol):
+    """Issue one exact grant locally or through the isolated policy service."""
+
+    def issue(
+        self,
+        *,
+        authorization: AuthorizedPilotManifestV1,
+        package: MemoryOutcomeRecoveryPackageV1,
+        now: datetime,
+        max_plaintext_bytes: int = 1_048_576,
+    ) -> MemoryOutcomeRecoveryGrantV1: ...
+
+
 class MemoryOutcomeRecoveryPolicy:
     """Issue one short-lived grant after an exact current-state eligibility check."""
 
@@ -122,6 +135,18 @@ class MemoryOutcomeRecoveryPolicy:
             checked_at=now,
             phase="pre_grant",
         )
+        completion_deadline = min(
+            manifest.expires_at,
+            now + timedelta(minutes=5),
+        )
+        claim_deadline = min(
+            now + timedelta(seconds=60),
+            completion_deadline - timedelta(microseconds=1),
+        )
+        if claim_deadline <= now:
+            raise MemoryOutcomeUnavailable(
+                "pilot authorization expires before recovery can be claimed"
+            )
         unsigned = MemoryOutcomeRecoveryGrantV1(
             key_id=self._signer.key_id,
             issuer=self._issuer,
@@ -141,8 +166,8 @@ class MemoryOutcomeRecoveryPolicy:
             package_digest=package.digest_hex(),
             pilot_authorization_id=authorization.owner_approval_ref,
             policy_version=self._policy_version,
-            permit_claim_deadline=now + timedelta(seconds=60),
-            execution_completion_deadline=now + timedelta(minutes=5),
+            permit_claim_deadline=claim_deadline,
+            execution_completion_deadline=completion_deadline,
             max_plaintext_bytes=max_plaintext_bytes,
             nonce=self._nonce_factory(),
         )
@@ -155,7 +180,7 @@ class PermitBoundMemoryOutcomeRecovery:
     def __init__(
         self,
         store: MemoryOutcomeStore,
-        policy: MemoryOutcomeRecoveryPolicy,
+        policy: MemoryOutcomeGrantIssuer,
         eligibility: MemoryOutcomeRecoveryEligibility,
         invoker: MemoryOutcomeRecoveryInvoker,
         *,

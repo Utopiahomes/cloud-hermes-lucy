@@ -494,3 +494,52 @@ def test_policy_path_rechecks_eligibility_around_exact_recovery() -> None:
     assert outcome is not None and outcome.output == "candidate output"
     assert eligibility.phases == ["pre_grant", "pre_completion"]
     assert invoker.calls == 1
+
+
+def test_policy_caps_recovery_deadlines_at_campaign_expiry() -> None:
+    authorization = _authorization()
+    manifest = authorization.bundle.manifest
+    assert isinstance(manifest, ImportManifestV2)
+    expiring = manifest.model_copy(update={"expires_at": NOW + timedelta(seconds=30)})
+    bundle = authorization.bundle.model_copy(update={"manifest": expiring})
+    authorization = authorization.model_copy(
+        update={"bundle": bundle, "bundle_digest": bundle.digest}
+    )
+    binding = OUTCOME_BINDING.model_copy(update={"manifest_digest": expiring.digest})
+    encryption_id = memory_outcome_encryption_id(binding.extraction_job_id)
+    package = MemoryOutcomeRecoveryPackageV1(
+        target_scope=SCOPE,
+        envelope=MemoryOutcomeEnvelopeV1(
+            binding=binding,
+            encryption_id=encryption_id,
+            registry_id=REGISTRY_ID,
+            algorithm="AES-256-GCM+AWS-KMS",
+            encryption_context_version=3,
+            record_version=1,
+            storage_epoch=1,
+            registry_epoch=1,
+            key_epoch=1,
+            ciphertext_b64=base64.b64encode(b"ciphertext-with-tag").decode(),
+            content_nonce_b64=base64.b64encode(b"n" * 12).decode(),
+            keyed_commitment="c" * 64,
+            billed_microusd=123,
+            provider_reference_commitment="f" * 64,
+        ),
+    )
+    eligibility = Eligibility()
+    signer, _ = _trust()
+    policy = MemoryOutcomeRecoveryPolicy(
+        signer,
+        eligibility,
+        environment=DeploymentEnvironment.TEST,
+        issuer="lucy-policy-test",
+        caller_identity="arn:aws:iam::429870640638:role/lucy-archive",
+        target_scope=SCOPE,
+        execution_binding=BINDING,
+        policy_version=1,
+    )
+
+    grant = policy.issue(authorization=authorization, package=package, now=NOW)
+
+    assert grant.execution_completion_deadline == expiring.expires_at
+    assert grant.permit_claim_deadline < expiring.expires_at
