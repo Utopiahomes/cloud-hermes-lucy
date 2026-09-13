@@ -6,8 +6,6 @@ import base64
 from typing import Protocol
 from uuid import UUID, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from lucy.archive_crypto import (
     ArchiveCipher,
     ArchiveKeyStore,
@@ -15,6 +13,10 @@ from lucy.archive_crypto import (
     WrappedDataKey,
 )
 from lucy.contracts.canonical import canonical_json_bytes
+from lucy.contracts.memory_outcome_recovery_v1 import (
+    MemoryOutcomeBindingV1,
+    MemoryOutcomeEnvelopeV1,
+)
 from lucy.memory_extraction import (
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
@@ -24,43 +26,6 @@ from lucy.memory_import import ImportManifestV2
 
 class MemoryOutcomeUnavailable(RuntimeError):
     """The exact provider outcome cannot be durably recorded or recovered."""
-
-
-class MemoryOutcomeBindingV1(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    contract_version: str = Field(default="1", pattern=r"^1$")
-    extraction_job_id: UUID
-    reservation_id: UUID
-    campaign_id: UUID
-    destination_content_scope_id: UUID
-    manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    attempt_key: str = Field(min_length=1, max_length=512)
-    source_record_ids: tuple[str, ...] = Field(min_length=1, max_length=10_000)
-    request_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
-    provider_policy_id: str = Field(min_length=1, max_length=200)
-    model_route: str = Field(min_length=1, max_length=200)
-    maximum_microusd: int = Field(ge=0)
-
-
-class MemoryOutcomeEnvelopeV1(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    contract_version: str = Field(default="1", pattern=r"^1$")
-    binding: MemoryOutcomeBindingV1
-    encryption_id: UUID
-    registry_id: UUID
-    algorithm: str = Field(min_length=1, max_length=100)
-    encryption_context_version: int = Field(ge=1)
-    record_version: int = Field(ge=1)
-    storage_epoch: int = Field(ge=1)
-    registry_epoch: int = Field(ge=1)
-    key_epoch: int = Field(ge=1)
-    ciphertext_b64: str = Field(min_length=1)
-    content_nonce_b64: str = Field(min_length=1)
-    keyed_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
-    billed_microusd: int = Field(ge=0)
-    provider_reference_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class MemoryOutcomeStore(Protocol):

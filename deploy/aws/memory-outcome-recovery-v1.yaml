@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Lucy permit-bound exact-job memory outcome recovery boundary
+
+Parameters:
+  ResourceNamespace:
+    Type: String
+    AllowedPattern: "[a-z0-9-]{3,32}"
+  ArchiveRoleName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: Existing realm archive role; receives write-only outcome and invoke access
+  KeyAdministratorPrincipalArnPattern:
+    Type: String
+  TenantAccountUuid:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  NodeId:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  NodeTenureId:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  TenureEpoch:
+    Type: Number
+    MinValue: 1
+  SecurityRealmId:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  StorageEpoch:
+    Type: Number
+    MinValue: 1
+  DeploymentId:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  RealmBindingGeneration:
+    Type: Number
+    MinValue: 1
+  NodeAuthzEpoch:
+    Type: Number
+    MinValue: 1
+  SecurityEnvironment:
+    Type: String
+    AllowedValues: [production, development]
+  OutcomeRegistryId:
+    Type: String
+    AllowedPattern: "[0-9a-f-]{36}"
+  PolicyTrustStoreJson:
+    Type: String
+    NoEcho: true
+  PolicyTrustStoreSha256:
+    Type: String
+    AllowedPattern: "[0-9a-f]{64}"
+  ExecutorArtifactBucket:
+    Type: String
+  ExecutorArtifactKey:
+    Type: String
+  ExecutorArtifactObjectVersion:
+    Type: String
+  ExecutorArtifactCodeSha256:
+    Type: String
+
+Resources:
+  OutcomeRecoveryRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-outcome-recovery-runtime
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+
+  OutcomeKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Cloud Lucy memory-provider outcome DEK wrapping key
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: IdentityCenterHumanKeyAdministrator
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref KeyAdministratorPrincipalArnPattern
+          - Sid: OutcomeWriterGenerateOnly
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ArchiveRoleName}
+            Action: kms:GenerateDataKey
+            Resource: "*"
+            Condition: &OutcomeKmsContext
+              StringEquals:
+                kms:EncryptionContext:contract_version: MemoryOutcomeKmsContextV1
+                kms:EncryptionContext:tenant_account_id: !Ref TenantAccountUuid
+                kms:EncryptionContext:node_id: !Ref NodeId
+                kms:EncryptionContext:node_tenure_id: !Ref NodeTenureId
+                kms:EncryptionContext:tenure_epoch: !Ref TenureEpoch
+                kms:EncryptionContext:security_realm_id: !Ref SecurityRealmId
+                kms:EncryptionContext:storage_epoch: !Ref StorageEpoch
+                kms:EncryptionContext:purpose: MEMORY_OUTCOME_DEK
+              "ForAllValues:StringEquals":
+                kms:EncryptionContextKeys:
+                  - contract_version
+                  - tenant_account_id
+                  - node_id
+                  - node_tenure_id
+                  - tenure_epoch
+                  - security_realm_id
+                  - storage_epoch
+                  - encryption_id
+                  - purpose
+              "Null":
+                kms:EncryptionContext:encryption_id: "false"
+          - Sid: OutcomeRecoveryDecryptOnly
+            Effect: Allow
+            Principal: {AWS: !GetAtt OutcomeRecoveryRuntimeRole.Arn}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition: *OutcomeKmsContext
+
+  OutcomeKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ResourceNamespace}-memory-outcome
+      TargetKeyId: !Ref OutcomeKey
+
+  OutcomeKeyRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-memory-outcome-keys
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      SSESpecification: {SSEEnabled: true}
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 30
+      AttributeDefinitions: [{AttributeName: key_ref, AttributeType: S}]
+      KeySchema: [{AttributeName: key_ref, KeyType: HASH}]
+
+  OutcomeRecoveryReceiptLedger:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-memory-outcome-recovery-receipts
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      SSESpecification: {SSEEnabled: true}
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 30
+      AttributeDefinitions: [{AttributeName: operation_id, AttributeType: S}]
+      KeySchema: [{AttributeName: operation_id, KeyType: HASH}]
+
+  OutcomeRecoveryLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ResourceNamespace}-memory-outcome-recovery-v1
+      RetentionInDays: 90
+
+  ArchiveOutcomePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-memory-outcome-write-only
+      Roles: [!Ref ArchiveRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: kms:GenerateDataKey
+            Resource: !GetAtt OutcomeKey.Arn
+            Condition: *OutcomeKmsContext
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt OutcomeKeyRegistry.Arn
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref OutcomeRecoveryAlias
+
+  OutcomeRecoveryRuntimePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-memory-outcome-recovery-only
+      Roles: [!Ref OutcomeRecoveryRuntimeRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt OutcomeRecoveryLogGroup.Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              - !GetAtt OutcomeKeyRegistry.Arn
+              - !GetAtt OutcomeRecoveryReceiptLedger.Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource: !GetAtt OutcomeRecoveryReceiptLedger.Arn
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !GetAtt OutcomeKey.Arn
+            Condition: *OutcomeKmsContext
+
+  OutcomeRecoveryFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [OutcomeRecoveryRuntimePolicy, OutcomeRecoveryLogGroup]
+    Properties:
+      FunctionName: !Sub ${ResourceNamespace}-memory-outcome-recovery-v1
+      Description: Permit-bound exact-job memory-provider outcome recovery
+      Runtime: python3.12
+      RuntimeManagementConfig: {UpdateRuntimeOn: Auto}
+      Architectures: [x86_64]
+      Handler: lucy.executors.outcome_recovery_v1.memory_outcome_recovery_lambda_handler
+      Role: !GetAtt OutcomeRecoveryRuntimeRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      ReservedConcurrentExecutions: 1
+      Code:
+        S3Bucket: !Ref ExecutorArtifactBucket
+        S3Key: !Ref ExecutorArtifactKey
+        S3ObjectVersion: !Ref ExecutorArtifactObjectVersion
+      Environment:
+        Variables:
+          LUCY_EXECUTOR_ENVIRONMENT: !Ref SecurityEnvironment
+          LUCY_V13_TARGET_SCOPE_JSON: !Sub '{"tenant_account_id":"${TenantAccountUuid}","node_id":"${NodeId}","node_tenure_id":"${NodeTenureId}","tenure_epoch":${TenureEpoch},"security_realm_id":"${SecurityRealmId}","storage_epoch":${StorageEpoch}}'
+          LUCY_V13_EXECUTION_BINDING_JSON: !Sub '{"deployment_id":"${DeploymentId}","active_realm_id":"${SecurityRealmId}","active_storage_epoch":${StorageEpoch},"realm_binding_generation":${RealmBindingGeneration},"node_authz_epoch":${NodeAuthzEpoch}}'
+          LUCY_V13_CALLER_IDENTITY: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ArchiveRoleName}
+          LUCY_AWS_OUTCOME_KEY_ARN: !GetAtt OutcomeKey.Arn
+          LUCY_OUTCOME_REGISTRY_ID: !Ref OutcomeRegistryId
+          LUCY_AWS_OUTCOME_KEY_TABLE: !Ref OutcomeKeyRegistry
+          LUCY_AWS_OUTCOME_RECOVERY_RECEIPT_TABLE: !Ref OutcomeRecoveryReceiptLedger
+          LUCY_POLICY_TRUST_STORE_JSON: !Ref PolicyTrustStoreJson
+
+  OutcomeRecoveryVersion:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref OutcomeRecoveryFunction
+      CodeSha256: !Ref ExecutorArtifactCodeSha256
+      Description: !Sub Memory outcome recovery ${ExecutorArtifactCodeSha256} trust-${PolicyTrustStoreSha256}
+
+  OutcomeRecoveryAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: outcome-v1
+      FunctionName: !Ref OutcomeRecoveryFunction
+      FunctionVersion: !GetAtt OutcomeRecoveryVersion.Version
+
+Outputs:
+  OutcomeKeyArn: {Value: !GetAtt OutcomeKey.Arn}
+  OutcomeRegistryId: {Value: !Ref OutcomeRegistryId}
+  OutcomeKeyTableName: {Value: !Ref OutcomeKeyRegistry}
+  OutcomeRecoveryReceiptTableName: {Value: !Ref OutcomeRecoveryReceiptLedger}
+  OutcomeRecoveryRuntimeRoleArn: {Value: !GetAtt OutcomeRecoveryRuntimeRole.Arn}
+  OutcomeRecoveryAliasArn: {Value: !Ref OutcomeRecoveryAlias}
+  OutcomeRecoveryVersion: {Value: !GetAtt OutcomeRecoveryVersion.Version}
+  ExecutorArtifactCodeSha256: {Value: !Ref ExecutorArtifactCodeSha256}
+  PolicyTrustStoreSha256: {Value: !Ref PolicyTrustStoreSha256}
