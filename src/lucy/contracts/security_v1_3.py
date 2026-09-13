@@ -599,6 +599,18 @@ class DeletionDisposition(StrEnum):
     RECOMPUTE = "recompute"
 
 
+class DeletionArtifactClassV3(StrEnum):
+    """Artifact classes whose exact versions can belong to a V3 closure."""
+
+    ENCRYPTED_ARCHIVE = "encrypted_archive"
+    MEMORY_CANDIDATE = "memory_candidate"
+    MEMORY_CLAIM = "memory_claim"
+    MEMORY_IMPORT_PROVIDER_OUTCOME = "memory_import_provider_outcome"
+    EMBEDDING = "embedding"
+    RESULT_BODY = "result_body"
+    PUBLIC_PROJECTION = "public_projection"
+
+
 class DeletionTargetReferenceV2(StrictV13Contract):
     artifact_class: DeletionArtifactClass
     artifact_id: UUID
@@ -709,6 +721,142 @@ class DeletionTargetManifestV2(SignedV13Contract):
         if not secrets.compare_digest(
             self.targets_digest,
             deletion_targets_digest_v2(self.targets),
+        ):
+            raise ValueError("deletion target digest does not match the manifest")
+        if len(self.canonical_unsigned_bytes()) > 65_536:
+            raise ValueError("canonical deletion manifest exceeds the R1 boundary")
+        return self
+
+
+class DeletionTargetReferenceV3(StrictV13Contract):
+    """One versioned artifact in a source-evidence deletion closure."""
+
+    artifact_class: DeletionArtifactClassV3
+    artifact_id: UUID
+    artifact_version: int = Field(ge=1)
+    root_evidence_id: UUID
+    disposition: DeletionDisposition
+    representation_id: UUID | None = None
+    wrapped_key_ref: UUID | None = None
+    key_registry_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> Self:
+        keyed = self.artifact_class in {
+            DeletionArtifactClassV3.ENCRYPTED_ARCHIVE,
+            DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME,
+        }
+        if keyed and (
+            self.representation_id is None
+            or self.wrapped_key_ref is None
+            or self.disposition != DeletionDisposition.DESTROY_WRAPPED_KEY
+        ):
+            raise ValueError("encrypted deletion target requires exact representation and key")
+        if not keyed and (
+            self.representation_id is not None
+            or self.wrapped_key_ref is not None
+            or self.key_registry_id is not None
+            or self.disposition == DeletionDisposition.DESTROY_WRAPPED_KEY
+        ):
+            raise ValueError("plaintext deletion target must not carry wrapped-key authority")
+        outcome = (
+            self.artifact_class
+            == DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME
+        )
+        if outcome and self.key_registry_id is None:
+            raise ValueError("provider outcome deletion requires its exact key registry")
+        if not outcome and self.key_registry_id is not None:
+            raise ValueError("only provider outcomes bind an external key registry")
+        return self
+
+
+def deletion_targets_digest_v3(targets: tuple[DeletionTargetReferenceV3, ...]) -> str:
+    return canonical_sha256(
+        [target.model_dump(mode="python") for target in targets],
+        prefix=b"LUCY-DELETION-TARGETS-V3\0",
+    )
+
+
+class DeletionTargetManifestV3(SignedV13Contract):
+    """Frozen V3 closure including import candidates and encrypted outcomes."""
+
+    contract_version: Literal["3"] = "3"
+    object_type: Literal["lucy.deletion-target-manifest.v3"] = (
+        "lucy.deletion-target-manifest.v3"
+    )
+    signing_key_purpose: Literal[V13SigningKeyPurpose.POLICY_NOTARY] = (
+        V13SigningKeyPurpose.POLICY_NOTARY
+    )
+    manifest_id: UUID
+    permit_id: UUID
+    permit_digest: DigestHex
+    operation_id: UUID
+    action: Literal[SensitiveActionV2.EVIDENCE_DELETE] = SensitiveActionV2.EVIDENCE_DELETE
+    target_scope: OriginScopeV1
+    workspace_id: UUID
+    root_evidence_id: UUID
+    root_representation_id: UUID
+    owner_assertion_id: UUID
+    owner_assertion_digest: DigestHex
+    idempotency_key: SafeIdentifier
+    closure_version: int = Field(ge=1)
+    targets: tuple[DeletionTargetReferenceV3, ...] = Field(min_length=1, max_length=90)
+    target_count: int = Field(ge=1, le=90)
+    targets_digest: DigestHex
+    tombstone_policy_version: int = Field(ge=1)
+    finality_policy_version: int = Field(ge=1)
+    permit_claim_deadline: datetime
+    execution_completion_deadline: datetime
+    nonce: Nonce
+
+    @model_validator(mode="after")
+    def validate_manifest(self) -> Self:
+        _aware(self.issued_at, "issued_at")
+        _aware(self.permit_claim_deadline, "permit_claim_deadline")
+        _aware(self.execution_completion_deadline, "execution_completion_deadline")
+        if not self.issued_at < self.permit_claim_deadline <= self.execution_completion_deadline:
+            raise ValueError("deletion manifest deadlines are invalid")
+        if self.permit_claim_deadline > self.issued_at + timedelta(
+            seconds=V1_3_PERMIT_CLAIM_MAX_SECONDS
+        ):
+            raise ValueError("deletion manifest claim window exceeds 60 seconds")
+        if self.execution_completion_deadline > self.issued_at + timedelta(
+            seconds=V1_3_EXECUTION_MAX_SECONDS
+        ):
+            raise ValueError("deletion manifest execution window exceeds ten minutes")
+        order = tuple(
+            (
+                target.artifact_class.value,
+                str(target.artifact_id),
+                target.artifact_version,
+                str(target.representation_id or UUID(int=0)),
+            )
+            for target in self.targets
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("deletion targets are not in canonical order")
+        identities = {
+            (target.artifact_class, target.artifact_id, target.artifact_version)
+            for target in self.targets
+        }
+        if len(identities) != len(self.targets):
+            raise ValueError("deletion manifest contains duplicate artifact versions")
+        if any(target.root_evidence_id != self.root_evidence_id for target in self.targets):
+            raise ValueError("deletion target is outside the root evidence closure")
+        root_matches = [
+            target
+            for target in self.targets
+            if target.artifact_class == DeletionArtifactClassV3.ENCRYPTED_ARCHIVE
+            and target.artifact_id == self.root_evidence_id
+            and target.representation_id == self.root_representation_id
+        ]
+        if len(root_matches) != 1:
+            raise ValueError("deletion manifest lacks its exact root representation")
+        if self.target_count != len(self.targets):
+            raise ValueError("deletion target count does not match the manifest")
+        if not secrets.compare_digest(
+            self.targets_digest,
+            deletion_targets_digest_v3(self.targets),
         ):
             raise ValueError("deletion target digest does not match the manifest")
         if len(self.canonical_unsigned_bytes()) > 65_536:
@@ -966,7 +1114,7 @@ def _live_deadline(contract: SignedV13Contract) -> datetime | None:
         return contract.permit_claim_deadline
     if isinstance(contract, SensitiveExecutionGrantV2):
         return contract.execution_completion_deadline
-    if isinstance(contract, DeletionTargetManifestV2):
+    if isinstance(contract, (DeletionTargetManifestV2, DeletionTargetManifestV3)):
         return contract.execution_completion_deadline
     return None
 
@@ -986,6 +1134,8 @@ def security_v1_3_json_schemas() -> dict[str, dict[str, object]]:
         EncryptedEvidencePackageV2,
         DeletionTargetReferenceV2,
         DeletionTargetManifestV2,
+        DeletionTargetReferenceV3,
+        DeletionTargetManifestV3,
         SensitiveExecutionGrantV2,
         ExecutorReceiptV2,
         KmsEncryptionContextV2,
