@@ -64,6 +64,8 @@ def compile_memory_pilot_batches(
         raise ValueError("compiled pilot exceeds the authorized attempt ceiling")
     if maximum_microusd_per_attempt > manifest.max_model_spend_microusd:
         raise ValueError("per-attempt cost ceiling exceeds the campaign ceiling")
+    if len(packed) * maximum_microusd_per_attempt > manifest.max_model_spend_microusd:
+        raise ValueError("compiled pilot reservations exceed the campaign spend ceiling")
     batches = tuple(
         _dispatch(
             manifest,

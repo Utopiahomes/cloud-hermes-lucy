@@ -170,3 +170,8 @@ def test_compiler_blocks_oversized_record_and_attempt_or_cost_expansion() -> Non
         compile_memory_pilot_batches(
             _build(1), maximum_microusd_per_attempt=10_001, timeout_seconds=30
         )
+    two_batches = _build(2, input_ceiling=one_size)
+    with pytest.raises(ValueError, match="reservations exceed"):
+        compile_memory_pilot_batches(
+            two_batches, maximum_microusd_per_attempt=6_000, timeout_seconds=30
+        )

@@ -16,7 +16,6 @@ from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_import import (
     ImportManifest,
     ImportManifestRecordV1,
-    ImportManifestV1,
     ImportManifestV2,
     MemoryCandidatePayloadV1,
     ProtectionClass,
@@ -334,7 +333,7 @@ class GovernedMemoryArchive:
 
     def preserve(
         self,
-        manifest: ImportManifestV1,
+        manifest: ImportManifest,
         record: ImportManifestRecordV1,
         request: RealmArchiveCommitInputV1,
     ) -> ImportArchiveResultV1:

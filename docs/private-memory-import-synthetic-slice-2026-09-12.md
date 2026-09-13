@@ -91,6 +91,12 @@ accepted `0057` migration is merged at `2807dad`.
     and a keyed provider-reference commitment as content-free metadata. Replays must match exactly,
     missing keys and altered ciphertext fail closed, and recovery resumes from the encrypted result
     without another paid provider call.
+19. A pilot-only runner now assembles the entire local vertical slice in the required order:
+    exact plaintext recheck, protected evidence archival, omission-free compilation, durable job
+    registration, bounded provider execution, encrypted outcome persistence, post-call source
+    recheck, atomic protected-candidate staging/settlement, and owner-review artifact creation.
+    It exposes no raw provider output and rejects a batch plan whose combined reservations could
+    exceed the campaign cap.
 
 ## Verification ledger
 
@@ -98,9 +104,9 @@ accepted `0057` migration is merged at `2807dad`.
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0060_memory_import_outcomes` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
 | Synthetic memory-import integration | Passed, 10 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0060`; includes execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 867 tests | Full `tests/unit` run after encrypted outcome recovery was connected to the coordinator, 2026-09-12 | Relevant Python or dependency change |
+| Python unit suite | Passed, 868 tests | Full `tests/unit` run after the pilot-only runner assembled the vertical slice, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, unit/import tests, migrations `0055` through `0058` | Relevant source change |
-| Mypy strict | Passed, 97 source files | `mypy --strict src` after the encrypted-outcome increment | Python source or type-config change |
+| Mypy strict | Passed, 98 source files | `mypy --strict src` after the pilot-runner increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
@@ -125,11 +131,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Assemble the coordinator, database source-eligibility implementation, deterministic compiler,
-   candidate materializer, atomic database completion, and isolated OpenRouter adapter behind a
-   pilot-only runner. The component boundaries, including three-phase database eligibility, are
-   implemented; runner wiring remains. No real provider request is enabled, and the runner must
-   require the separately authorized manifest.
+1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
+   disabled until the outcome-key lifecycle below is complete and a specific pilot manifest is
+   separately authorized. No real provider request is currently enabled.
 2. Connect outcome-key lifecycle to governed source deletion and define bounded post-campaign
    retention. The journal already prevents a replayed durable job from repeating the provider call,
    but the pilot stays fenced until deleting source evidence also makes its derived provider output
