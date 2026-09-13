@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from uuid import UUID, uuid5
 
@@ -18,6 +19,7 @@ from lucy.memory_candidate_review import (
 from lucy.memory_import import (
     AssertionStatus,
     EpistemicStatus,
+    ImportManifest,
     MemoryCandidatePayloadV1,
     MemoryKind,
     ProtectionClass,
@@ -80,15 +82,35 @@ def materialize_pending_candidates(
 
     build_exact_archive_requests(build, fingerprint_key=fingerprint_key)
     manifest = build.bundle.manifest
-    local_messages = {
-        message.source_record_id: message
+    plaintext = {
+        message.source_record_id: message.content
         for conversation in build.conversations
         for message in conversation.messages
+        if message.content is not None
     }
+    return materialize_verified_pending_candidates(
+        output,
+        manifest=manifest,
+        plaintext_by_source_record_id=plaintext,
+        permitted_source_record_ids=frozenset(plaintext),
+        evidence_by_source_record_id=evidence_by_source_record_id,
+        extraction_job_id=extraction_job_id,
+    )
+
+
+def materialize_verified_pending_candidates(
+    output: MemoryExtractionOutputV1,
+    *,
+    manifest: ImportManifest,
+    plaintext_by_source_record_id: Mapping[str, str],
+    permitted_source_record_ids: frozenset[str],
+    evidence_by_source_record_id: Mapping[str, UUID],
+    extraction_job_id: UUID,
+) -> tuple[MemoryCandidatePayloadV1, ...]:
+    """Bind candidates to a previously verified, explicitly bounded plaintext set."""
+
     manifest_records = {
-        record.source_record_id: record
-        for record in manifest.records
-        if record.included
+        record.source_record_id: record for record in manifest.records if record.included
     }
     candidates: list[MemoryCandidatePayloadV1] = []
     for index, draft in enumerate(output.candidates):
@@ -97,17 +119,17 @@ def materialize_pending_candidates(
             raise MemorySecretDetected(tuple(item.category for item in findings))
         spans: list[SourceSpanV1] = []
         for source in draft.sources:
-            message = local_messages.get(source.source_record_id)
+            content_text = plaintext_by_source_record_id.get(source.source_record_id)
             record = manifest_records.get(source.source_record_id)
             evidence_id = evidence_by_source_record_id.get(source.source_record_id)
             if (
-                message is None
-                or message.content is None
+                source.source_record_id not in permitted_source_record_ids
+                or content_text is None
                 or record is None
                 or evidence_id is None
             ):
                 raise ValueError("candidate source is outside the exact archived manifest")
-            content = message.content.encode("utf-8")
+            content = content_text.encode("utf-8")
             quote = source.exact_quote.encode("utf-8")
             start = content.find(quote)
             if start < 0 or content.find(quote, start + 1) >= 0:

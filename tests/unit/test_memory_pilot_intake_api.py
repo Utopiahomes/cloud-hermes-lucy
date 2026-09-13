@@ -7,11 +7,16 @@ from test_memory_pilot_transport import NOW, _authorization
 
 from lucy.memory_pilot_intake_api import (
     MemoryPilotIntakeConfigurationV1,
+    create_memory_pilot_execution_app,
     create_memory_pilot_intake_app,
 )
 from lucy.memory_pilot_transport import (
     MemoryPilotTransportAdmissionReceiptV1,
     prepare_memory_pilot_transport,
+)
+from lucy.memory_pilot_transport_runner import (
+    MemoryPilotTransportExecutionReceiptV1,
+    MemoryPilotTransportExecutionResult,
 )
 
 
@@ -26,6 +31,24 @@ class _Admission:
             batch_id=batch.batch_id,  # type: ignore[attr-defined]
             admitted_at=NOW,
             replayed=self.calls > 1,
+        )
+
+
+class _Executor:
+    def execute(self, batch: object, *, capability_token: bytes) -> object:
+        assert capability_token == b"c" * 32
+        return MemoryPilotTransportExecutionResult(
+            MemoryPilotTransportExecutionReceiptV1(
+                campaign_id=batch.campaign_id,  # type: ignore[attr-defined]
+                batch_id=batch.batch_id,  # type: ignore[attr-defined]
+                extraction_job_id=batch.dispatch.extraction_job_id,  # type: ignore[attr-defined]
+                reservation_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                state="succeeded",
+                archived_source_count=len(batch.records),  # type: ignore[attr-defined]
+                billed_microusd=0,
+                candidate_count=0,
+            ),
+            None,
         )
 
 
@@ -89,3 +112,20 @@ def test_missing_capability_wrong_path_and_oversized_body_fail_closed() -> None:
         headers={"Authorization": f"Bearer {token}"},
     ).status_code == 413
     assert admission.calls == 0
+
+
+def test_execution_intake_returns_no_store_content_free_status() -> None:
+    client = TestClient(create_memory_pilot_execution_app(_Executor()))  # type: ignore[arg-type]
+    batch_id, body = _request()
+    token = base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
+    response = client.post(
+        f"/v1/private-memory/pilot/batches/{batch_id}",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["receipt"]["state"] == "succeeded"
+    assert response.json()["review_artifact"] is None
+    assert "private synthetic history" not in response.text

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid5
@@ -39,6 +40,7 @@ class MemoryPilotTransportRecordV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_record_id: str = Field(min_length=1, max_length=2_000)
+    source_conversation_id: str = Field(min_length=1, max_length=512)
     source_revision: int = Field(ge=1)
     role: Literal["owner", "assistant", "system"]
     native_role: str | None = Field(default=None, max_length=100)
@@ -173,6 +175,15 @@ class MemoryPilotTransportUnavailable(PermissionError):
     """The batch cannot be admitted without weakening its transport boundary."""
 
 
+@dataclass(frozen=True)
+class AdmittedMemoryPilotTransportBatch:
+    """Sensitive in-process context; never serialize this as a status response."""
+
+    receipt: MemoryPilotTransportAdmissionReceiptV1
+    manifest: ImportManifestV2
+    batch: MemoryPilotTransportBatchV1
+
+
 class PostgresMemoryPilotTransportAdmission:
     """Validate plaintext in memory, while PostgreSQL sees content-free commitments only."""
 
@@ -187,6 +198,16 @@ class PostgresMemoryPilotTransportAdmission:
         *,
         capability_token: bytes,
     ) -> MemoryPilotTransportAdmissionReceiptV1:
+        return self.admit_for_execution(
+            batch, capability_token=capability_token
+        ).receipt
+
+    def admit_for_execution(
+        self,
+        batch: MemoryPilotTransportBatchV1,
+        *,
+        capability_token: bytes,
+    ) -> AdmittedMemoryPilotTransportBatch:
         digest = capability_token_digest(capability_token)
         try:
             with self._sessions.begin() as session:
@@ -244,7 +265,11 @@ class PostgresMemoryPilotTransportAdmission:
             raise MemoryPilotTransportUnavailable(
                 "memory pilot transport admission unavailable"
             ) from exc
-        return MemoryPilotTransportAdmissionReceiptV1.model_validate(admitted)
+        return AdmittedMemoryPilotTransportBatch(
+            receipt=MemoryPilotTransportAdmissionReceiptV1.model_validate(admitted),
+            manifest=expected.manifest,
+            batch=batch,
+        )
 
 
 def transfer_key_commitment(transfer_key: bytes) -> str:
@@ -389,7 +414,9 @@ def validate_memory_pilot_transport_batch(
         record = manifest_records.get(supplied.source_record_id)
         if record is None or not record.included:
             raise ValueError("transport source is not included in the exact manifest")
-        if _transport_metadata(record) != supplied.model_dump(exclude={"content"}):
+        if _transport_metadata(record) != supplied.model_dump(
+            exclude={"content", "source_conversation_id"}
+        ):
             raise ValueError("transport source metadata differs from the exact manifest")
         if len(supplied.content.encode("utf-8")) != record.byte_length:
             raise ValueError("transport source byte length differs from the exact manifest")
@@ -429,7 +456,11 @@ def _transport_record(
     if message.content is None:
         raise ValueError("selected pilot content is unavailable")
     return MemoryPilotTransportRecordV1.model_validate(
-        {**_transport_metadata(record), "content": message.content}
+        {
+            **_transport_metadata(record),
+            "source_conversation_id": message.conversation_id,
+            "content": message.content,
+        }
     )
 
 

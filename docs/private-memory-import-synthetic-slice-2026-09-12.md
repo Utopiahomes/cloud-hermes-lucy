@@ -214,9 +214,17 @@ accepted `0057` migration is merged at `2807dad`.
     campaign capability plus a known batch ID, cannot enumerate the transport tables, and passes no
     plaintext to PostgreSQL. Admission is synchronous and replay-safe; durable operator revocation
     blocks both new and replayed admission. The CLI can prepare and register the content-free plan,
-    and a bounded, documentation-free HTTP surface admits an exact batch. That endpoint does not yet
-    dispatch a model request or write a candidate-review artifact. No personal data, provider call,
-    AWS operation, or cloud deployment was performed.
+    and a bounded, documentation-free HTTP surface admits an exact batch. No personal data,
+    provider call, AWS operation, or cloud deployment was performed.
+35. The admitted-batch executor now preserves original conversation identity without receiving the
+    permanent fingerprint key, rechecks current transport authority before each archive effect and
+    before dispatch, and passes the original immutable dispatch into the durable extraction
+    coordinator. Candidate provenance is limited to the current verified batch; archive requests
+    are byte-for-byte equivalent to the local verified path. The synchronous execution endpoint
+    returns a content-free status plus the separately typed protected review artifact with
+    `Cache-Control: no-store`. A deterministic zero-cost fake provider has no credential, network,
+    or production fallback. Partial archive retry and full execution replay reuse stable identities
+    and do not repeat the provider call. This remains synthetic/injected-boundary evidence only.
 
 ## Verification ledger
 
@@ -247,6 +255,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Operator registration and routine recovery assembly | Passed, 14 focused tests plus Ruff and strict mypy | Exact fresh preflight, digest-specific operator confirmation, content-free receipt, routine/v1.3 mode restriction, private policy client, qualified Lambda alias, and no signing key in routine configuration | Import CLI, preflight/authorization contracts, recovery environment assembly, or deployment variables change |
 | Pilot transport contracts and database admission | Passed, focused unit/integration checks on clean PostgreSQL through `0070`, plus Ruff and strict mypy | Locally verified exact batch compilation; plaintext-free registration; separate transfer HMAC and capability; wrong-key/wrong-capability/tamper denial; execute-only realm-evidence admission; table-enumeration denial; idempotent replay; durable revocation; a real two-connection admission/revocation race that fails closed; bounded HTTP body | Migration `0070`, transport contracts/CLI/API, compiler, realm role grants, canonicalization, or PostgreSQL image change |
 | Durable extraction dispatch ownership | Passed, 20 focused coordinator/pilot-runner tests plus Ruff and strict mypy | A fresh reservation paired with a replayed exact job recovers or reconciles without a second provider call; a recovered billed outcome retains its known cost if the pre-dispatch source fence closes | Extraction coordinator, job-registration semantics, outcome recovery, accounting settlement, or PostgreSQL job constraints change |
+| Verified transport execution | Passed, 38 focused transport/materialization/coordinator/HTTP checks plus Ruff and strict mypy | Original conversation provenance; local/transport archive-request equivalence; authority rechecks; partial archive recovery; cross-batch quote denial; one zero-cost fake-provider call across replay; content-free status; protected no-store review response | Transport record/executor, archive request, candidate materializer, coordinator, intake API, or fake-provider boundary change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -262,9 +271,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Connect the admitted HTTP batch to the existing archive/extraction/outcome-recovery coordinator
-   and return its sensitive candidate-review artifact to the protected Windows intake. First prove
-   this with a fake provider and injected AWS boundaries; real OpenRouter remains disabled.
+1. Assemble the verified executor with the existing PostgreSQL, archive, and encrypted outcome
+   adapters and prove the injected-boundary slice against PostgreSQL before any cloud deployment.
+   Real OpenRouter remains disabled.
 2. Add the Windows uploader that rebuilds batches in memory from the untouched ZIP, sends them
    sequentially over HTTPS, writes review artifacts only under the protected intake root, and uses
    the same immutable batch identity to recover a lost response without repeating a provider call.
