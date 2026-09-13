@@ -697,3 +697,97 @@ def test_campaign_cap_charges_retries_and_survives_client_restart() -> None:
     runtime = create_session_factory(RAYMOND_URL)
     with pytest.raises(DBAPIError, match="permission denied"), runtime.begin() as session:
         session.execute(text("SELECT * FROM lucy.memory_import_campaigns_v1"))
+
+
+def test_success_completion_atomically_stages_batch_and_settles() -> None:
+    assert all((OWNER_URL, RAYMOND_URL))
+    scope_id, evidence_ids = _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    reservation = extractor.reserve_attempt(
+        TEST_CAMPAIGN_ID, attempt_key="atomic-success", reserved_microusd=0
+    )
+    first = _candidate(
+        scope_id,
+        evidence_ids,
+        protection=ProtectionClass.ORDINARY_PRIVATE,
+        object_text="Use plan B",
+    )
+    second = _candidate(
+        scope_id,
+        evidence_ids[:1],
+        protection=ProtectionClass.PROTECTED,
+        object_text="The earlier plan was reversed",
+    )
+
+    completed = extractor.complete_success(
+        reservation.reservation_id,
+        candidates=(first, second),
+        billed_microusd=0,
+    )
+    replayed = extractor.complete_success(
+        reservation.reservation_id,
+        candidates=(first, second),
+        billed_microusd=0,
+    )
+
+    assert [candidate.replayed for candidate in completed.candidates] == [False, False]
+    assert not completed.settlement_replayed
+    assert [candidate.replayed for candidate in replayed.candidates] == [True, True]
+    assert replayed.settlement_replayed
+
+
+def test_success_completion_rolls_back_partial_batch_and_settlement() -> None:
+    assert all((OWNER_URL, RAYMOND_URL))
+    scope_id, evidence_ids = _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    reservation = extractor.reserve_attempt(
+        TEST_CAMPAIGN_ID, attempt_key="atomic-rollback", reserved_microusd=0
+    )
+    first = _candidate(
+        scope_id,
+        evidence_ids,
+        protection=ProtectionClass.ORDINARY_PRIVATE,
+    )
+    invalid_second = _candidate(
+        scope_id,
+        evidence_ids[:1],
+        protection=ProtectionClass.PROTECTED,
+    ).model_copy(
+        update={
+            "sources": (
+                SourceSpanV1(
+                    source_record_id="outside-approved-manifest",
+                    evidence_id=evidence_ids[0],
+                    record_version=1,
+                    byte_start=0,
+                    byte_end=10,
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(GovernedMemoryUnavailable, match="completion"):
+        extractor.complete_success(
+            reservation.reservation_id,
+            candidates=(first, invalid_second),
+            billed_microusd=0,
+        )
+
+    owner = create_session_factory(OWNER_URL)
+    with owner() as session:
+        staged = session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.scoped_memory_candidate_versions_v1 "
+                "WHERE candidate_id=:candidate"
+            ),
+            {"candidate": first.candidate_id},
+        )
+        settled = session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.memory_import_attempt_settlements_v1 "
+                "WHERE reservation_id=:reservation"
+            ),
+            {"reservation": reservation.reservation_id},
+        )
+    assert staged == 0
+    assert settled == 0

@@ -90,6 +90,34 @@ class ProviderSpy:
         )
 
 
+class CompletionSpy:
+    def __init__(
+        self,
+        events: list[str],
+        accounting: AccountingSpy,
+        *,
+        fail: bool = False,
+    ) -> None:
+        self.events = events
+        self.accounting = accounting
+        self.fail = fail
+
+    def complete_success(
+        self,
+        *,
+        reservation_id: UUID,
+        outcome: MemoryExtractionProviderOutcomeV1,
+    ) -> None:
+        self.events.append("complete")
+        if self.fail:
+            raise RuntimeError("synthetic uncertain commit acknowledgement")
+        self.accounting.settle_attempt(
+            reservation_id,
+            billed_microusd=outcome.billed_microusd,
+            result="succeeded",
+        )
+
+
 def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV1:
     return ImportManifestV1(
         campaign_id=CAMPAIGN,
@@ -144,6 +172,7 @@ def _coordinator(
     accounting: AccountingSpy | None = None,
     eligibility: EligibilitySpy | None = None,
     provider: ProviderSpy | None = None,
+    completion_fails: bool = False,
 ) -> tuple[MemoryExtractionCoordinator, AccountingSpy]:
     selected_accounting = accounting or AccountingSpy(events)
     return (
@@ -151,6 +180,7 @@ def _coordinator(
             selected_accounting,
             eligibility or EligibilitySpy(events),
             provider or ProviderSpy(events),
+            CompletionSpy(events, selected_accounting, fail=completion_fails),
             now=lambda: NOW,
         ),
         selected_accounting,
@@ -173,6 +203,7 @@ def test_success_rechecks_sources_and_settles_before_returning_output() -> None:
         "eligible:pre_dispatch",
         "provider",
         "eligible:post_dispatch",
+        "complete",
         "settle:succeeded:2000",
     ]
 
@@ -269,3 +300,14 @@ def test_provider_over_cap_charges_admitted_maximum_and_returns_no_output() -> N
         coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
 
     assert accounting.settlements == [(5_000, "failed")]
+
+
+def test_uncertain_completion_never_returns_output_or_settles_separately() -> None:
+    events: list[str] = []
+    coordinator, accounting = _coordinator(events, completion_fails=True)
+
+    with pytest.raises(MemoryExtractionUnavailable, match="reconciliation required"):
+        coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert events[-1] == "complete"
+    assert accounting.settlements == []

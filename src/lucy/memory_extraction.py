@@ -89,6 +89,15 @@ class MemoryImportProvider(Protocol):
     ) -> MemoryExtractionProviderOutcomeV1: ...
 
 
+class MemoryExtractionSuccessCompletion(Protocol):
+    def complete_success(
+        self,
+        *,
+        reservation_id: UUID,
+        outcome: MemoryExtractionProviderOutcomeV1,
+    ) -> None: ...
+
+
 class MemoryExtractionCoordinator:
     """Reserve, recheck, execute, recheck, and settle one exact import attempt."""
 
@@ -97,12 +106,14 @@ class MemoryExtractionCoordinator:
         accounting: MemoryImportCampaignAccounting,
         eligibility: MemoryImportSourceEligibility,
         provider: MemoryImportProvider,
+        completion: MemoryExtractionSuccessCompletion,
         *,
         now: Callable[[], datetime],
     ) -> None:
         self._accounting = accounting
         self._eligibility = eligibility
         self._provider = provider
+        self._completion = completion
         self._now = now
 
     def execute(
@@ -186,11 +197,15 @@ class MemoryExtractionCoordinator:
                 billed_microusd=outcome.billed_microusd,
                 reason="source became ineligible during provider execution",
             )
-        self._accounting.settle_attempt(
-            reservation.reservation_id,
-            billed_microusd=outcome.billed_microusd,
-            result="succeeded",
-        )
+        try:
+            self._completion.complete_success(
+                reservation_id=reservation.reservation_id,
+                outcome=outcome,
+            )
+        except Exception:
+            raise MemoryExtractionUnavailable(
+                "provider outcome completion is uncertain; reconciliation required"
+            ) from None
         return MemoryExtractionResultV1(
             reservation_id=reservation.reservation_id,
             state="succeeded",

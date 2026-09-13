@@ -47,14 +47,18 @@ Current private-memory revisions: `d747509` (schema/import foundation), `d973d41
    retried attempts remain charged against the authorized campaign ceiling.
 9. The context compiler allocates memory inside one total request budget rather than treating
    model context and import expense as interchangeable budgets.
+10. Successful provider completion stages the entire candidate batch and settles its campaign
+   reservation in one PostgreSQL transaction. A failed candidate rolls back the whole batch and
+   settlement; an uncertain commit acknowledgement returns no output and requires reconciliation
+   rather than automatically paying for a second provider call.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
 | Fresh PostgreSQL migration `0001` through `0056_memory_import_budget` | Passed | Clean tmpfs database on `127.0.0.1:54329`, rerun after exact-manifest changes on 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 5 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 816 tests | Full `tests/unit` run after isolated OpenRouter adapter, 2026-09-12 | Relevant Python or dependency change |
+| Synthetic memory-import integration | Passed, 7 tests on current revision | `tests/integration/test_memory_import_slice.py` against fresh PostgreSQL; includes atomic completion replay and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 817 tests | Full `tests/unit` run after atomic provider-completion fencing, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, import tests, migrations `0055`/`0056` | Relevant source change |
 | Mypy strict | Passed, 90 source files | `mypy --strict src` after isolated OpenRouter adapter | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -77,13 +81,20 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Assemble the coordinator, database campaign accounting/source-eligibility implementation,
-   and isolated OpenRouter adapter behind a pilot-only runner. The adapter is implemented but no
-   real provider request is enabled; the runner must require the separately authorized manifest.
-2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+1. Assemble the coordinator, database source-eligibility implementation, deterministic candidate
+   materializer, atomic database completion, and isolated OpenRouter adapter behind a pilot-only
+   runner. The adapter and atomic completion boundary are implemented but no real provider request
+   is enabled; the runner must require the separately authorized manifest.
+2. After Public Lucy connects its accepted migration `0057` to `0056`, add a realm-scoped durable
+   extraction job and encrypted provider-outcome journal. Until that exists, the pilot must stay
+   fenced: a replayed reservation or uncertain completion acknowledgement requires operator
+   reconciliation, and the provider is never called again automatically. This interim boundary
+   cannot recover output lost before database commit or regenerate the review artifact after an
+   acknowledged commit.
+3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-3. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
+4. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
    the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk

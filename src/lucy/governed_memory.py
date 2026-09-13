@@ -66,6 +66,13 @@ class ImportArchiveResultV1(BaseModel):
     replayed: bool
 
 
+class ImportCompletionResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    reservation_id: UUID
+    candidates: tuple[CandidateStageResultV1, ...]
+    settlement_replayed: bool
+
+
 class GovernedMemoryClaimV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     claim_id: UUID
@@ -145,6 +152,65 @@ class GovernedMemoryExtractor:
         except DBAPIError as exc:
             raise GovernedMemoryUnavailable("memory import attempt settlement unavailable") from exc
         return ImportAttemptResultV1.model_validate(value)
+
+    def complete_success(
+        self,
+        reservation_id: UUID,
+        *,
+        candidates: tuple[MemoryCandidatePayloadV1, ...],
+        billed_microusd: int,
+    ) -> ImportCompletionResultV1:
+        """Stage the complete candidate batch and settle success in one transaction."""
+
+        if billed_microusd < 0:
+            raise ValueError("memory import completion cost is invalid")
+        identities: set[tuple[UUID, int]] = set()
+        for candidate in candidates:
+            findings = detect_memory_secrets(
+                candidate.subject, candidate.predicate, candidate.object
+            )
+            if findings:
+                raise MemorySecretDetected(tuple(item.category for item in findings))
+            identity = (candidate.candidate_id, candidate.candidate_version)
+            if identity in identities:
+                raise ValueError("memory import completion candidates must be unique")
+            identities.add(identity)
+        try:
+            with self._sessions.begin() as session:
+                staged = tuple(
+                    CandidateStageResultV1.model_validate(
+                        session.execute(
+                            text(
+                                "SELECT lucy.stage_memory_import_candidate_v1("
+                                "CAST(:candidate AS jsonb))"
+                            ),
+                            {
+                                "candidate": canonical_json_bytes(candidate).decode(
+                                    "utf-8"
+                                )
+                            },
+                        ).scalar_one()
+                    )
+                    for candidate in candidates
+                )
+                settlement = ImportAttemptResultV1.model_validate(
+                    session.execute(
+                        text(
+                            "SELECT lucy.settle_memory_import_attempt_v1("
+                            ":reservation,:billed,'succeeded')"
+                        ),
+                        {"reservation": reservation_id, "billed": billed_microusd},
+                    ).scalar_one()
+                )
+        except DBAPIError as exc:
+            raise GovernedMemoryUnavailable(
+                "memory import completion is unavailable"
+            ) from exc
+        return ImportCompletionResultV1(
+            reservation_id=reservation_id,
+            candidates=staged,
+            settlement_replayed=settlement.replayed,
+        )
 
 
 class GovernedMemoryArchive:
