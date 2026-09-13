@@ -13,8 +13,10 @@ from lucy.contracts.security_v1_2 import DeploymentEnvironment, SensitiveActionV
 from lucy.contracts.security_v1_3 import (
     AuthenticationStrength,
     DeletionArtifactClass,
+    DeletionArtifactClassV3,
     DeletionDisposition,
     DeletionTargetReferenceV2,
+    DeletionTargetReferenceV3,
     Ed25519V13Signer,
     ExactObjectSelectorV1,
     ExecutionBindingV1,
@@ -28,12 +30,14 @@ from lucy.contracts.security_v1_3 import (
     V13VerificationKeyStatus,
     V13VerificationKeyV1,
     deletion_targets_digest_v2,
+    deletion_targets_digest_v3,
 )
 from lucy.realm_security_workflows import (
     HttpRealmPolicyClient,
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
     RealmDeletionAuthorityV1,
+    RealmDeletionAuthorityV2,
     RealmDeletionCoordinator,
     RealmGrantAuthorityV1,
     RealmLambdaExecutorInvoker,
@@ -41,6 +45,7 @@ from lucy.realm_security_workflows import (
     RealmOperationStatusV1,
     RealmPermitAuthorityV1,
     RealmPolicyDeletionService,
+    RealmPolicyDeletionServiceV3,
     RealmPolicyGrantService,
     RealmPolicyPermitService,
     RealmRetrievalCoordinator,
@@ -530,6 +535,102 @@ def test_policy_deletion_service_builds_and_replays_exact_manifest() -> None:
     assert service.prepare_manifest(permit.operation_id) == manifest
     assert store.manifests == [manifest]
 
+
+class _DeletionStoreV3:
+    def __init__(self, authority: RealmDeletionAuthorityV2) -> None:
+        self.authority = authority
+        self.manifests: list[Any] = []
+
+    def deletion_authority_v3(self, _operation_id: UUID) -> RealmDeletionAuthorityV2:
+        return self.authority
+
+    def store_manifest_v3(self, manifest: Any) -> ScopedDeletionManifestResult:
+        self.manifests.append(manifest)
+        return ScopedDeletionManifestResult(
+            manifest_id=manifest.manifest_id,
+            manifest_digest=manifest.unsigned_digest_hex(),
+            targets_digest=manifest.targets_digest,
+            target_count=manifest.target_count,
+            replayed=False,
+        )
+
+
+def test_policy_deletion_service_v3_signs_versioned_import_closure() -> None:
+    permit, verifier, signer = _permit(SensitiveActionV2.EVIDENCE_DELETE)
+    evidence_id = permit.resource_selector.object_id
+    representation_id = uuid4()
+    candidate_id = uuid4()
+    outcome_id = uuid4()
+    outcome_encryption_id = uuid4()
+    targets = (
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.ENCRYPTED_ARCHIVE,
+            artifact_id=evidence_id,
+            artifact_version=permit.resource_selector.object_version,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=representation_id,
+            wrapped_key_ref=uuid4(),
+        ),
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.MEMORY_CANDIDATE,
+            artifact_id=candidate_id,
+            artifact_version=2,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.INVALIDATE,
+        ),
+        DeletionTargetReferenceV3(
+            artifact_class=DeletionArtifactClassV3.MEMORY_IMPORT_PROVIDER_OUTCOME,
+            artifact_id=outcome_id,
+            artifact_version=1,
+            root_evidence_id=evidence_id,
+            disposition=DeletionDisposition.DESTROY_WRAPPED_KEY,
+            representation_id=outcome_encryption_id,
+            wrapped_key_ref=outcome_encryption_id,
+            key_registry_id=uuid4(),
+        ),
+    )
+    authority = RealmDeletionAuthorityV2(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-delete-v3-once",
+        permit=permit,
+        root_evidence_id=evidence_id,
+        record_version=permit.resource_selector.object_version,
+        root_representation_id=representation_id,
+        targets=targets,
+        target_count=len(targets),
+        targets_digest=deletion_targets_digest_v3(targets),
+        closure_version=3,
+        tombstone_policy_version=3,
+        finality_policy_version=3,
+    )
+    store = _DeletionStoreV3(authority)
+    service = RealmPolicyDeletionServiceV3(
+        store,
+        signer=signer,
+        verifier=verifier,
+        clock=lambda: permit.issued_at + timedelta(seconds=1),
+    )
+    manifest = service.prepare_manifest(permit.operation_id)
+    assert manifest.contract_version == "3"
+    assert manifest.targets == targets
+    assert manifest.signature
+    assert store.manifests == [manifest]
+
+    store.authority = RealmDeletionAuthorityV2(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-delete-v3-once",
+        permit=permit,
+        root_evidence_id=evidence_id,
+        record_version=permit.resource_selector.object_version,
+        existing_manifest=manifest,
+    )
+    assert service.prepare_manifest(permit.operation_id) == manifest
+    assert store.manifests == [manifest]
 
 def test_grant_authority_migration_is_policy_only_and_content_free() -> None:
     source = (

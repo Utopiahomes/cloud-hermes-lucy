@@ -118,15 +118,20 @@ accepted `0057` migration is merged at `2807dad`.
     verified Python boundary checks the policy signature before storage; PostgreSQL independently
     re-derives the closure under lock, binds it to the claimed permit, installs the deletion fence,
     and provides exact idempotent replay.
+24. The realm policy signer can now read a content-free V3 deletion-authority snapshot, sign the
+    exact versioned closure, and freeze it through the verified V3 manifest adapter. PostgreSQL
+    requires the claimed, realm-bound permit, rechecks its admission deadline, enforces the
+    permit's target ceiling, and replays an already frozen V3 manifest without rebuilding or
+    silently changing its authority. The V2 authority and signing path remain unchanged.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Fresh PostgreSQL migration `0001` through `0063_memory_deletion_manifest` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0063`; includes exact signed V3 persistence/replay, execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 873 tests | Full `tests/unit` run after verified V3 manifest persistence, 2026-09-12 | Relevant Python or dependency change |
-| Ruff | Passed | `src/lucy`, unit/import tests, migrations `0055`, `0056`, and `0058` through `0061` | Relevant source change |
+| Fresh PostgreSQL migration `0001` through `0064_memory_deletion_authority` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0064`; includes content-free V3 policy-authority snapshot, exact signed V3 persistence/replay, execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 874 tests | Full `tests/unit` run after the V3 deletion-authority signer increment, 2026-09-12 | Relevant Python or dependency change |
+| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after the V3 deletion-authority signer increment | Relevant source change |
 | Mypy strict | Passed, 98 source files | `mypy --strict src` after the pilot-runner increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |

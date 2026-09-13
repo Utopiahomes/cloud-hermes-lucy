@@ -25,7 +25,9 @@ from lucy.contracts.security_v1_2 import (
 )
 from lucy.contracts.security_v1_3 import (
     DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     DeletionTargetReferenceV2,
+    DeletionTargetReferenceV3,
     Ed25519V13Signer,
     EncryptedEvidencePackageV2,
     ExactObjectSelectorV1,
@@ -38,6 +40,7 @@ from lucy.contracts.security_v1_3 import (
     V13ContractVerifier,
     V13SigningKeyPurpose,
     deletion_targets_digest_v2,
+    deletion_targets_digest_v3,
 )
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
@@ -216,6 +219,67 @@ class RealmDeletionAuthorityV1(BaseModel):
         return self
 
 
+class RealmDeletionAuthorityV2(BaseModel):
+    """Exact additive V3 closure material for one claimed deletion operation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    operation_id: UUID
+    action: SensitiveActionV2
+    claimed_at: datetime
+    claim_idempotency_key: str = Field(min_length=1, max_length=512)
+    permit: SensitiveActionPermitV3
+    root_evidence_id: UUID
+    record_version: int = Field(ge=1)
+    root_representation_id: UUID | None = None
+    targets: tuple[DeletionTargetReferenceV3, ...] = ()
+    target_count: int | None = Field(default=None, ge=1, le=90)
+    targets_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    closure_version: int | None = Field(default=None, ge=1)
+    tombstone_policy_version: int | None = Field(default=None, ge=1)
+    finality_policy_version: int | None = Field(default=None, ge=1)
+    existing_manifest: DeletionTargetManifestV3 | None = None
+
+    @model_validator(mode="after")
+    def validate_authority(self) -> RealmDeletionAuthorityV2:
+        selector = self.permit.resource_selector
+        if (
+            self.action != SensitiveActionV2.EVIDENCE_DELETE
+            or self.permit.action != self.action
+            or self.permit.operation_id != self.operation_id
+            or selector.object_id != self.root_evidence_id
+            or selector.object_version != self.record_version
+        ):
+            raise ValueError("deletion authority V3 binding differs")
+        if self.existing_manifest is not None:
+            manifest = self.existing_manifest
+            if (
+                manifest.operation_id != self.operation_id
+                or manifest.permit_id != self.permit.permit_id
+                or manifest.root_evidence_id != self.root_evidence_id
+            ):
+                raise ValueError("existing deletion manifest V3 differs from authority")
+            return self
+        if (
+            self.root_representation_id is None
+            or self.target_count != len(self.targets)
+            or self.targets_digest is None
+            or self.targets_digest != deletion_targets_digest_v3(self.targets)
+            or self.closure_version != 3
+            or self.tombstone_policy_version != 3
+            or self.finality_policy_version != 3
+        ):
+            raise ValueError("deletion authority V3 closure differs")
+        return self
+
+
+class RealmPolicyDeletionStoreV3(Protocol):
+    def deletion_authority_v3(self, operation_id: UUID) -> RealmDeletionAuthorityV2: ...
+
+    def store_manifest_v3(
+        self, manifest: DeletionTargetManifestV3
+    ) -> ScopedDeletionManifestResult: ...
+
+
 class RealmPolicyStore(Protocol):
     def permit_authority(
         self,
@@ -311,11 +375,33 @@ class PostgresRealmPolicyStore:
             raise RealmWorkflowUnavailable("deletion authority operation differs")
         return authority
 
+    def deletion_authority_v3(self, operation_id: UUID) -> RealmDeletionAuthorityV2:
+        result = self._execute(
+            "SELECT lucy.read_claimed_deletion_authority_v2(:operation)",
+            {"operation": operation_id},
+        )
+        authority = RealmDeletionAuthorityV2.model_validate(result)
+        if authority.operation_id != operation_id:
+            raise RealmWorkflowUnavailable("deletion authority V3 operation differs")
+        return authority
+
     def store_manifest(
         self, manifest: DeletionTargetManifestV2
     ) -> ScopedDeletionManifestResult:
         result = self._execute(
             "SELECT lucy.store_scoped_deletion_manifest_v3(:operation,:manifest)",
+            {
+                "operation": manifest.operation_id,
+                "manifest": manifest.model_dump_json(),
+            },
+        )
+        return ScopedDeletionManifestResult.model_validate(result)
+
+    def store_manifest_v3(
+        self, manifest: DeletionTargetManifestV3
+    ) -> ScopedDeletionManifestResult:
+        result = self._execute(
+            "SELECT lucy.store_scoped_deletion_manifest_v4(:operation,:manifest)",
             {
                 "operation": manifest.operation_id,
                 "manifest": manifest.model_dump_json(),
@@ -654,6 +740,85 @@ class RealmPolicyDeletionService:
         ):
             raise RealmWorkflowUnavailable(
                 "stored deletion manifest differs from signed authority"
+            )
+        return manifest
+
+
+class RealmPolicyDeletionServiceV3:
+    """Construct, sign, and freeze the additive V3 deletion closure."""
+
+    def __init__(
+        self,
+        store: RealmPolicyDeletionStoreV3,
+        *,
+        signer: Ed25519V13Signer,
+        verifier: V13ContractVerifier,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._store = store
+        self._signer = signer
+        self._verifier = verifier
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    def prepare_manifest(self, operation_id: UUID) -> DeletionTargetManifestV3:
+        authority = self._store.deletion_authority_v3(operation_id)
+        now = self._clock()
+        self._verifier.verify(
+            authority.permit,
+            expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+            checked_at=now,
+        )
+        if authority.existing_manifest is not None:
+            manifest = authority.existing_manifest
+            self._verifier.verify(
+                manifest,
+                expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+                checked_at=now,
+            )
+            return manifest
+        assert authority.root_representation_id is not None
+        assert authority.target_count is not None
+        assert authority.targets_digest is not None
+        assert authority.closure_version is not None
+        assert authority.tombstone_policy_version is not None
+        assert authority.finality_policy_version is not None
+        permit = authority.permit
+        unsigned = DeletionTargetManifestV3(
+            key_id=permit.key_id,
+            issuer=permit.issuer,
+            environment=permit.environment,
+            issued_at=now,
+            manifest_id=uuid4(),
+            permit_id=permit.permit_id,
+            permit_digest=permit.unsigned_digest_hex(),
+            operation_id=authority.operation_id,
+            target_scope=permit.target_scope,
+            workspace_id=permit.workspace_id,
+            root_evidence_id=authority.root_evidence_id,
+            root_representation_id=authority.root_representation_id,
+            owner_assertion_id=permit.owner_assertion_id,
+            owner_assertion_digest=permit.owner_assertion_digest,
+            idempotency_key=authority.claim_idempotency_key,
+            closure_version=authority.closure_version,
+            targets=authority.targets,
+            target_count=authority.target_count,
+            targets_digest=authority.targets_digest,
+            tombstone_policy_version=authority.tombstone_policy_version,
+            finality_policy_version=authority.finality_policy_version,
+            permit_claim_deadline=permit.permit_claim_deadline,
+            execution_completion_deadline=permit.execution_completion_deadline,
+            nonce=secrets.token_hex(16),
+        )
+        manifest = self._signer.sign(unsigned)
+        frozen = self._store.store_manifest_v3(manifest)
+        if (
+            frozen.manifest_id != manifest.manifest_id
+            or frozen.manifest_digest != manifest.unsigned_digest_hex()
+            or frozen.targets_digest != manifest.targets_digest
+            or frozen.target_count != manifest.target_count
+        ):
+            raise RealmWorkflowUnavailable(
+                "stored deletion manifest V3 differs from signed authority"
             )
         return manifest
 

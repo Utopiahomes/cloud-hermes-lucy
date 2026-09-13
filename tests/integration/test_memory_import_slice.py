@@ -330,6 +330,7 @@ def _provision() -> tuple[object, object]:
                 ",lucy.authorize_memory_import_campaign_v1("
                 "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text) "
                 ",lucy.build_scoped_deletion_targets_v3(uuid) "
+                ",lucy.read_claimed_deletion_authority_v2(uuid) "
                 ",lucy.store_scoped_deletion_manifest_v4(uuid,jsonb) "
                 "TO lucy_raymond_policy"
             )
@@ -1147,6 +1148,10 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
             text("SELECT lucy.build_scoped_deletion_targets_v3(:operation)"),
             {"operation": operation_id},
         ).scalar_one()
+        authority_snapshot = session.execute(
+            text("SELECT lucy.read_claimed_deletion_authority_v2(:operation)"),
+            {"operation": operation_id},
+        ).scalar_one()
     targets = tuple(DeletionTargetReferenceV3.model_validate(item) for item in raw_targets)
 
     assert [target.artifact_class for target in targets] == [
@@ -1163,6 +1168,8 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
     assert targets[-1].representation_id == encryption_id
     assert targets[-1].wrapped_key_ref == encryption_id
     assert targets[-1].key_registry_id == registry_id
+    assert authority_snapshot["targets"] == raw_targets
+    assert authority_snapshot["closure_version"] == 3
 
     owner_sessions = create_session_factory(OWNER_URL)
     with owner_sessions.begin() as session:
