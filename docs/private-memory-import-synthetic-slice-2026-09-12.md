@@ -131,16 +131,25 @@ accepted `0057` migration is merged at `2807dad`.
     proven destroyed by later source deletions. Foreign outcome registries fail closed, Lambda now
     receives the exact configured registry ID, and its role has UpdateItem rather than DeleteItem.
     V2 invocation, admission, and physical key-deletion behavior remain unchanged.
+26. PostgreSQL now binds the signed V3 manifest to one strict post-claim execution grant,
+    attests the exact deletion receipt, and atomically reconciles successful execution to
+    immutable candidate-version and encrypted-provider-outcome tombstones plus 30-day finality
+    pending. Grant admission rechecks current owner/channel/realm/service authority; receipt
+    admission binds every identity, scope, deadline, manifest, grant, and transaction token.
+    Reconciliation is replay-safe for shared multi-source artifacts, and a provider outcome that
+    arrives after any source is deletion-fenced is rejected even when that outcome was absent
+    from the frozen closure. The policy API, private-network client, deletion coordinator, and
+    Lambda invocation now select the additive V3 path; historical V2 remains unchanged.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Fresh PostgreSQL migration `0001` through `0064_memory_deletion_authority` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0064`; includes content-free V3 policy-authority snapshot, exact signed V3 persistence/replay, execute-only encrypted-outcome storage, immutable job replay/conflict, exact realm/source/version/deletion eligibility, post-revocation approval/outcome denial, complete V3 candidate-version/claim/outcome closure discovery, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 879 tests | Full `tests/unit` run after the additive V3 executor/AWS tombstone increment, 2026-09-12 | Relevant Python or dependency change |
-| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after the additive V3 executor/AWS tombstone increment | Relevant source change |
-| Mypy strict | Passed, 98 source files | `mypy --strict src` after the pilot-runner increment | Python source or type-config change |
+| Fresh PostgreSQL migration `0001` through `0065_memory_deletion_execution` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0065`; includes exact V3 grant/receipt/reconciliation replay, immutable candidate/outcome tombstones, late-outcome rejection after source deletion, content-free V3 authority, signed manifest persistence, exact closure discovery, authorization/round trip, atomic completion replay, and rollback | Import, grant, receipt, migration, or scoped-memory change |
+| Python unit suite | Passed, 880 tests | Full `tests/unit` run after V3 deletion application wiring, 2026-09-12 | Relevant Python or dependency change |
+| Ruff | Passed | Full `src`, `tests`, and `migrations` tree after V3 deletion application wiring | Relevant source change |
+| Mypy strict | Passed, 98 source files | Full strict source check after V3 deletion application wiring | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
 | Exact owner-review contracts | Passed, 7 focused tests | Complete-batch decisions, protected/ordinary/uncertain transforms, stale/duplicate/incomplete rejection, and exact two-step authorization | Candidate review contract or canonicalization change |
 | Loopback candidate-review console | Passed, 5 focused tests and full-suite rerun | Token/host/origin checks, safe rendering, exact proposal, explicit authorization phrase, immutable replay/conflict behavior, and protected-path confinement | Candidate console, browser contract, or intake-path change |
@@ -168,15 +177,11 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 1. Add a deliberately narrow operator entry point for the assembled pilot runner, but keep it
    disabled until the outcome-key lifecycle below is complete and a specific pilot manifest is
    separately authorized. No real provider request is currently enabled.
-2. Connect the persisted V3 manifest through a V3-specific grant binding to receipt reconciliation and the
-   quarantined recovery reader before enabling the pilot. The additive wire contract, exact target
-   builder, signature-verifying adapter, and durable manifest freeze are complete; V2 remains
-   immutable. The version-aware executor and shared-key-safe external tombstones are implemented;
-   PostgreSQL must still issue the additive grant, attest/reconcile its receipt, record exact
-   candidate/outcome tombstones, and support restore replay. Until then, the access gates prevent approval and outcome recovery after
-   revocation, but do not yet prove cryptographic shredding of the derived provider result. An
-   interruption before the first encrypted outcome write also remains an explicit reconciliation
-   case; no automatic provider retry is allowed.
+2. Extend the quarantined recovery reader and replay transaction to recognize V3 grant bindings,
+   receipts, candidate/outcome tombstones, and finality effects. The live transactional path is
+   complete through the policy API and Lambda coordinator; restore replay remains the last
+   deletion-lifecycle gate before the pilot. An interruption before the first encrypted outcome
+   write remains an explicit reconciliation case; no automatic provider retry is allowed.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

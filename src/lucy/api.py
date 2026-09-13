@@ -55,7 +55,7 @@ from lucy.contracts.security_v1_2 import (
     VerificationKeyV1,
 )
 from lucy.contracts.security_v1_3 import (
-    DeletionTargetManifestV2,
+    DeletionTargetManifestV3,
     Ed25519V13Signer,
     ExecutorReceiptV2,
     SensitiveActionPermitV3,
@@ -103,11 +103,11 @@ from lucy.realm_security_workflows import (
     HttpRealmPolicyClient,
     PostgresRealmPolicyStore,
     PostgresRealmWorkflowStore,
-    RealmDeletionCoordinator,
+    RealmDeletionCoordinatorV3,
     RealmDeletionWorkflowResultV1,
     RealmLambdaExecutorInvoker,
-    RealmPolicyDeletionService,
-    RealmPolicyGrantService,
+    RealmPolicyDeletionServiceV3,
+    RealmPolicyGrantServiceV3,
     RealmRetrievalCoordinator,
     RealmRetrievalWorkflowResultV1,
     RealmWorkflowUnavailable,
@@ -394,8 +394,8 @@ def _executor_invoker(mode: str) -> BotoLambdaExecutorInvoker:
 
 @lru_cache(maxsize=1)
 def _realm_policy_services() -> tuple[
-    RealmPolicyGrantService,
-    RealmPolicyDeletionService,
+    RealmPolicyGrantServiceV3,
+    RealmPolicyDeletionServiceV3,
     VerifiedRealmPolicyAdapter,
 ]:
     try:
@@ -416,12 +416,12 @@ def _realm_policy_services() -> tuple[
         _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
     )
     return (
-        RealmPolicyGrantService(
+        RealmPolicyGrantServiceV3(
             store,
             signer=signer,
             verifier=verifier,
         ),
-        RealmPolicyDeletionService(
+        RealmPolicyDeletionServiceV3(
             store,
             signer=signer,
             verifier=verifier,
@@ -1328,7 +1328,7 @@ def attest_executor_receipt_v3(
         raise HTTPException(status_code=400, detail="operation identity mismatch")
     try:
         _grants, _deletions, receipts = _realm_policy_services()
-        return {"receipt_digest": receipts.attest_receipt(receipt)}
+        return {"receipt_digest": receipts.attest_receipt_v3(receipt)}
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=403, detail="executor receipt not trusted") from exc
 
@@ -1336,12 +1336,12 @@ def attest_executor_receipt_v3(
 @app.post(
     "/internal/v3/security/operations/{operation_id}/deletion-manifest",
     tags=["internal"],
-    response_model=DeletionTargetManifestV2,
+    response_model=DeletionTargetManifestV3,
 )
 def prepare_deletion_manifest_v3(
     operation_id: UUID,
     authorization: str | None = Header(default=None),
-) -> DeletionTargetManifestV2:
+) -> DeletionTargetManifestV3:
     _require_mode("policy")
     if security_baseline_from_environment() != "v1.3":
         raise HTTPException(status_code=404, detail="endpoint unavailable")
@@ -1399,7 +1399,7 @@ def owner_delete_evidence_v3(
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
-        return RealmDeletionCoordinator(
+        return RealmDeletionCoordinatorV3(
             PostgresRealmWorkflowStore(_ready_sessions()),
             _realm_policy_workflow_client(),
             _realm_deletion_executor(),

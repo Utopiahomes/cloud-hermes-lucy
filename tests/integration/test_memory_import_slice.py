@@ -75,6 +75,7 @@ APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
 OWNER_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 RAYMOND_URL = os.getenv("LUCY_TEST_RAYMOND_DATABASE_URL")
 POLICY_URL = os.getenv("LUCY_TEST_RAYMOND_POLICY_DATABASE_URL")
+WORKFLOW_URL = os.getenv("LUCY_TEST_RAYMOND_WORKFLOW_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not APP_URL, reason="requires PostgreSQL integration database")
 TEST_CAMPAIGN_ID = UUID("00000000-0000-4000-8000-000000000055")
 TEST_MANIFEST_DIGEST = "c" * 64
@@ -162,6 +163,17 @@ def _provision() -> tuple[object, object]:
         kind="service",
         display_name="Raymond policy",
     )
+    owner_principal = tenancy.create_principal(
+        issuer="https://owner.invalid",
+        subject="raymond-owner",
+        kind="human",
+        display_name="Raymond owner",
+    )
+    tenancy.grant_workspace_membership(
+        principal_id=owner_principal,
+        workspace_id=foundation.workspace_id,
+        role="owner",
+    )
     with app() as session:
         realm_binding_id = session.execute(
             select(RealmBindingRow.id).where(
@@ -173,6 +185,7 @@ def _provision() -> tuple[object, object]:
     service_id = uuid4()
     archive_actor_id = uuid4()
     policy_actor_id = uuid4()
+    workflow_actor_id = uuid4()
     evidence_ids = (uuid4(), uuid4())
     now = datetime.now(UTC)
     with owner.begin() as session:
@@ -236,6 +249,8 @@ def _provision() -> tuple[object, object]:
                         "memory.candidate.promote",
                         "memory.protected.read",
                         "sensitive.deletion_manifest.issue",
+                        "sensitive.grant.issue",
+                        "sensitive.receipt.attest",
                     ],
                     binding_generation=1,
                     node_authz_epoch=1,
@@ -243,7 +258,45 @@ def _provision() -> tuple[object, object]:
                     active=True,
                     created_at=now,
                 ),
+                RealmSensitiveActorBindingRow(
+                    id=workflow_actor_id,
+                    session_login="lucy_raymond_sensitive_workflow",
+                    actor_principal_id=policy_principal,
+                    target_service_binding_id=service_id,
+                    content_scope_id=scope_id,
+                    actor_role="sensitive_workflow",
+                    allowed_actions=["sensitive.operation.reconcile"],
+                    binding_generation=1,
+                    node_authz_epoch=1,
+                    policy_version=1,
+                    active=True,
+                    created_at=now,
+                ),
             )
+        )
+        session.execute(
+            text(
+                "INSERT INTO lucy.realm_executor_bindings_v2("
+                "id,content_scope_id,action,caller_identity,executor_identity,"
+                "executor_alias_arn,executor_version,receipt_key_id,binding_generation,"
+                "node_authz_epoch,policy_version,active,created_at) VALUES("
+                ":id,:scope,'evidence.delete',:caller,:executor,:alias,1,:receipt,1,1,1,true,:now)"
+            ),
+            {
+                "id": uuid4(),
+                "scope": scope_id,
+                "caller": "arn:aws:iam::123456789012:role/lucy-raymond-deletion",
+                "executor": "lucy-raymond-deletion-executor",
+                "alias": (
+                    "arn:aws:lambda:us-east-1:123456789012:function:"
+                    "lucy-raymond-deletion-executor-v13:realm-v13"
+                ),
+                "receipt": (
+                    "arn:aws:kms:us-east-1:123456789012:key/"
+                    "22222222-2222-4222-8222-222222222222"
+                ),
+                "now": now,
+            },
         )
         session.flush()
         session.add(
@@ -271,7 +324,7 @@ def _provision() -> tuple[object, object]:
                 prompt_version="synthetic-prompt-v1",
                 model_route="none",
                 max_model_spend_microusd=0,
-                max_attempts=1,
+                max_attempts=2,
                 expires_at=now + timedelta(hours=1),
                 created_at=now,
             )
@@ -332,7 +385,13 @@ def _provision() -> tuple[object, object]:
                 ",lucy.build_scoped_deletion_targets_v3(uuid) "
                 ",lucy.read_claimed_deletion_authority_v2(uuid) "
                 ",lucy.store_scoped_deletion_manifest_v4(uuid,jsonb) "
-                "TO lucy_raymond_policy"
+                ",lucy.read_claimed_sensitive_authority_v2(uuid) "
+                ",lucy.store_deletion_execution_grant_v3(uuid,jsonb) "
+                ",lucy.attest_deletion_executor_receipt_v3(uuid,jsonb) "
+                ",lucy.reconcile_scoped_deletion_v3(uuid) "
+                "TO lucy_raymond_policy; "
+                "GRANT EXECUTE ON FUNCTION lucy.reconcile_scoped_deletion_v3(uuid) "
+                "TO lucy_raymond_sensitive_workflow"
             )
         )
     return scope_id, evidence_ids
@@ -413,7 +472,7 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
         scope = session.execute(
             text(
                 "SELECT tenant_account_id,node_id,node_tenure_id,tenure_epoch,"
-                "security_realm_id,storage_epoch,workspace_id "
+                "security_realm_id,storage_epoch,workspace_id,deployment_id "
                 "FROM lucy.realm_content_scopes_v1 WHERE id=:scope"
             ),
             {"scope": scope_id},
@@ -431,7 +490,22 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
                     "security_realm_id": str(scope["security_realm_id"]),
                     "storage_epoch": scope["storage_epoch"],
                 },
+                "resource_selector": {
+                    "object_id": str(evidence_id),
+                    "object_version": 1,
+                },
+                "execution_binding": {
+                    "deployment_id": str(scope["deployment_id"]),
+                    "active_realm_id": str(scope["security_realm_id"]),
+                    "active_storage_epoch": scope["storage_epoch"],
+                    "realm_binding_generation": 1,
+                    "node_authz_epoch": 1,
+                },
+                "membership_generation": 1,
+                "channel_generation": 1,
+                "service_binding_generation": 1,
                 "max_records": 90,
+                "max_bytes": 131_072,
             },
             separators=(",", ":"),
         )
@@ -461,11 +535,14 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
                 "permit_claim_deadline,execution_completion_deadline,state,"
                 "claim_idempotency_key,claimed_at,created_at) "
                 "SELECT :permit,:operation,p.content_scope_id,p.id,"
-                "p.target_service_binding_id,p.actor_principal_id,c.id,'evidence.delete',"
+                "p.target_service_binding_id,m.principal_id,c.id,'evidence.delete',"
                 ":evidence,1,:digest,CAST(:serialized AS jsonb),:nonce,:issue_key,"
                 ":now,:claim_deadline,"
                 ":completion_deadline,'CLAIMED',:claim_key,:now,:now "
                 "FROM lucy.realm_sensitive_actor_bindings_v1 p "
+                "JOIN lucy.realm_content_scopes_v1 s ON s.id=p.content_scope_id "
+                "JOIN lucy.node_memberships m ON m.workspace_id=s.workspace_id "
+                "AND m.role='owner' AND m.status='active' "
                 "CROSS JOIN LATERAL (SELECT id FROM lucy.channel_bindings LIMIT 1) c "
                 "WHERE p.content_scope_id=:scope AND p.actor_role='policy_notary'"
             ),
@@ -494,7 +571,7 @@ def _prepare_deletion_operation(scope_id: object, evidence_id: object) -> UUID:
                 "p.target_service_binding_id,'evidence.delete',:evidence,1,"
                 ":claim_key,'CLAIMED',:now "
                 "FROM lucy.realm_sensitive_actor_bindings_v1 p "
-                "WHERE p.content_scope_id=:scope AND p.actor_role='policy_notary'"
+                "WHERE p.content_scope_id=:scope AND p.actor_role='sensitive_workflow'"
             ),
             {
                 "operation": operation_id,
@@ -1050,7 +1127,7 @@ def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
 
 
 def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> None:
-    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL, WORKFLOW_URL))
     scope_id, evidence_ids = _provision()
     raymond_sessions = create_session_factory(RAYMOND_URL)
     policy_sessions = create_session_factory(POLICY_URL)
@@ -1142,6 +1219,30 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
     )
     PostgresMemoryOutcomeStore(raymond_sessions).put(envelope)
 
+    late_reservation = extractor.reserve_attempt(
+        TEST_CAMPAIGN_ID,
+        attempt_key="v3-deletion-late-outcome",
+        reserved_microusd=0,
+    )
+    late_commitment = "6" * 64
+    late_job_id = memory_extraction_job_id(
+        TEST_CAMPAIGN_ID,
+        attempt_key="v3-deletion-late-outcome",
+        request_commitment=late_commitment,
+    )
+    late_job = {
+        **job,
+        "extraction_job_id": str(late_job_id),
+        "reservation_id": str(late_reservation.reservation_id),
+        "attempt_key": "v3-deletion-late-outcome",
+        "request_commitment": late_commitment,
+    }
+    with raymond_sessions.begin() as session:
+        session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(late_job, separators=(",", ":"))},
+        ).scalar_one()
+
     operation_id = _prepare_deletion_operation(scope_id, evidence_ids[0])
     with policy_sessions.begin() as session:
         raw_targets = session.execute(
@@ -1220,6 +1321,177 @@ def test_v3_deletion_closure_finds_candidate_claim_and_encrypted_outcome() -> No
     assert first.manifest_digest == manifest.unsigned_digest_hex()
     with pytest.raises(ScopedDeletionUnavailable, match="unavailable"):
         store.store(manifest.model_copy(update={"nonce": "changed-nonce-0000000000000000000"}))
+
+    with policy_sessions.begin() as session:
+        execution_authority = session.execute(
+            text("SELECT lucy.read_claimed_sensitive_authority_v2(:operation)"),
+            {"operation": operation_id},
+        ).scalar_one()
+    issued_at = datetime.now(UTC)
+    grant_id = uuid4()
+    grant = {
+        "canonicalization_version": "lucy-cjson-1",
+        "signature_algorithm": "Ed25519",
+        "signing_key_purpose": "policy_notary_v13",
+        "key_id": "synthetic-policy-v3",
+        "issuer": "synthetic-policy-v3",
+        "environment": "test",
+        "issued_at": issued_at.isoformat(),
+        "signature": "synthetic-signature",
+        "contract_version": "2",
+        "object_type": "lucy.sensitive-execution-grant.v2",
+        "grant_id": str(grant_id),
+        "action": "evidence.delete",
+        "permit_id": str(authority["permit_id"]),
+        "permit_digest": authority["permit_digest"],
+        "operation_id": str(operation_id),
+        "caller_identity": execution_authority["caller_identity"],
+        "target_scope": permit["target_scope"],
+        "workspace_id": permit["workspace_id"],
+        "resource_selector": permit["resource_selector"],
+        "execution_binding": permit["execution_binding"],
+        "restore_mapping_id": None,
+        "deletion_manifest_id": str(manifest.manifest_id),
+        "deletion_manifest_digest": manifest.unsigned_digest_hex(),
+        "encrypted_package_digest": manifest.unsigned_digest_hex(),
+        "package_size_bytes": execution_authority["package_size_bytes"],
+        "idempotency_key": execution_authority["claim_idempotency_key"],
+        "executor_identity": execution_authority["executor_identity"],
+        "executor_alias_arn": execution_authority["executor_alias_arn"],
+        "executor_version": execution_authority["executor_version"],
+        "permit_claimed_at": authority["claimed_at"].isoformat(),
+        "permit_claim_deadline": authority["permit_claim_deadline"].isoformat(),
+        "execution_completion_deadline": authority[
+            "execution_completion_deadline"
+        ].isoformat(),
+        "max_records": permit["max_records"],
+        "max_bytes": permit["max_bytes"],
+        "nonce": "synthetic-grant-nonce-000000000000000",
+    }
+    with policy_sessions.begin() as session:
+        grant_digest = session.execute(
+            text(
+                "SELECT lucy.store_deletion_execution_grant_v3("
+                ":operation,CAST(:grant AS jsonb))"
+            ),
+            {"operation": operation_id, "grant": json.dumps(grant)},
+        ).scalar_one()
+        assert session.execute(
+            text(
+                "SELECT lucy.store_deletion_execution_grant_v3("
+                ":operation,CAST(:grant AS jsonb))"
+            ),
+            {"operation": operation_id, "grant": json.dumps(grant)},
+        ).scalar_one() == grant_digest
+
+    completed_at = datetime.now(UTC)
+    receipt_id = uuid4()
+    receipt = {
+        "canonicalization_version": "lucy-cjson-1",
+        "signature_algorithm": "ECDSA_SHA_256",
+        "signing_key_purpose": "deletion_receipt_v13",
+        "key_id": execution_authority["receipt_key_id"],
+        "issuer": execution_authority["executor_identity"],
+        "environment": "test",
+        "issued_at": completed_at.isoformat(),
+        "signature": "synthetic-signature",
+        "contract_version": "2",
+        "object_type": "lucy.executor-receipt.v2",
+        "receipt_id": str(receipt_id),
+        "action": "evidence.delete",
+        "executor_identity": execution_authority["executor_identity"],
+        "executor_alias_arn": execution_authority["executor_alias_arn"],
+        "executor_version": execution_authority["executor_version"],
+        "caller_identity": execution_authority["caller_identity"],
+        "target_scope": permit["target_scope"],
+        "execution_binding": permit["execution_binding"],
+        "operation_id": str(operation_id),
+        "permit_id": str(authority["permit_id"]),
+        "permit_digest": authority["permit_digest"],
+        "execution_grant_id": str(grant_id),
+        "execution_grant_digest": grant_digest,
+        "deletion_manifest_id": str(manifest.manifest_id),
+        "deletion_manifest_digest": manifest.unsigned_digest_hex(),
+        "package_digest": manifest.unsigned_digest_hex(),
+        "result": "deletion_succeeded",
+        "lambda_request_id": "synthetic-lambda-request",
+        "kms_request_id": None,
+        "transaction_client_token": "synthetic-deletion-transaction",
+        "execution_completion_deadline": authority[
+            "execution_completion_deadline"
+        ].isoformat(),
+        "completed_at": completed_at.isoformat(),
+        "record_version": 1,
+        "journal_ref": "synthetic-journal-ref",
+        "finality_state": "operationally_deleted",
+    }
+    workflow_sessions = create_session_factory(WORKFLOW_URL)
+    with policy_sessions.begin() as session:
+        receipt_digest = session.execute(
+            text(
+                "SELECT lucy.attest_deletion_executor_receipt_v3("
+                ":operation,CAST(:receipt AS jsonb))"
+            ),
+            {"operation": operation_id, "receipt": json.dumps(receipt)},
+        ).scalar_one()
+    with workflow_sessions.begin() as session:
+        first_reconcile = session.execute(
+            text("SELECT lucy.reconcile_scoped_deletion_v3(:operation)"),
+            {"operation": operation_id},
+        ).scalar_one()
+        replay_reconcile = session.execute(
+            text("SELECT lucy.reconcile_scoped_deletion_v3(:operation)"),
+            {"operation": operation_id},
+        ).scalar_one()
+    assert first_reconcile["state"] == "FINALITY_PENDING"
+    assert first_reconcile["receipt_digest"] == receipt_digest
+    assert not first_reconcile["replayed"] and replay_reconcile["replayed"]
+
+    with owner_sessions.begin() as session:
+        candidate_versions = session.execute(
+            text(
+                "SELECT candidate_version FROM lucy.scoped_memory_candidate_tombstones_v3 "
+                "WHERE candidate_id=:candidate ORDER BY candidate_version"
+            ),
+            {"candidate": candidate.candidate_id},
+        ).scalars().all()
+        outcome_tombstone = session.execute(
+            text(
+                "SELECT representation_id,wrapped_key_ref,key_registry_id "
+                "FROM lucy.memory_import_outcome_tombstones_v3 "
+                "WHERE extraction_job_id=:job"
+            ),
+            {"job": job_id},
+        ).one()
+    assert candidate_versions == [1, 2]
+    assert tuple(outcome_tombstone) == (encryption_id, encryption_id, registry_id)
+    late_envelope = envelope.model_copy(
+        update={
+            "binding": envelope.binding.model_copy(
+                update={
+                    "extraction_job_id": late_job_id,
+                    "reservation_id": late_reservation.reservation_id,
+                    "attempt_key": "v3-deletion-late-outcome",
+                    "request_commitment": late_commitment,
+                }
+            ),
+            "encryption_id": uuid4(),
+            "registry_id": uuid4(),
+        }
+    )
+    with pytest.raises(MemoryOutcomeUnavailable, match="outcome write unavailable"):
+        PostgresMemoryOutcomeStore(raymond_sessions).put(late_envelope)
+    with (
+        pytest.raises(DBAPIError, match="append-only"),
+        owner_sessions.begin() as session,
+    ):
+        session.execute(
+            text(
+                "DELETE FROM lucy.scoped_memory_candidate_tombstones_v3 "
+                "WHERE candidate_id=:candidate"
+            ),
+            {"candidate": candidate.candidate_id},
+        )
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:

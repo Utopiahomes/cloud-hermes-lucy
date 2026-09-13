@@ -47,6 +47,7 @@ from lucy.realm_security_workflows import (
     RealmPolicyDeletionService,
     RealmPolicyDeletionServiceV3,
     RealmPolicyGrantService,
+    RealmPolicyGrantServiceV3,
     RealmPolicyPermitService,
     RealmRetrievalCoordinator,
     RealmWorkflowUnavailable,
@@ -540,6 +541,8 @@ class _DeletionStoreV3:
     def __init__(self, authority: RealmDeletionAuthorityV2) -> None:
         self.authority = authority
         self.manifests: list[Any] = []
+        self.grant_authority: RealmGrantAuthorityV1 | None = None
+        self.grants: list[SensitiveExecutionGrantV2] = []
 
     def deletion_authority_v3(self, _operation_id: UUID) -> RealmDeletionAuthorityV2:
         return self.authority
@@ -553,6 +556,14 @@ class _DeletionStoreV3:
             target_count=manifest.target_count,
             replayed=False,
         )
+
+    def grant_authority_v3(self, _operation_id: UUID) -> RealmGrantAuthorityV1:
+        assert self.grant_authority is not None
+        return self.grant_authority
+
+    def store_grant_v3(self, grant: SensitiveExecutionGrantV2) -> str:
+        self.grants.append(grant)
+        return grant.unsigned_digest_hex()
 
 
 def test_policy_deletion_service_v3_signs_versioned_import_closure() -> None:
@@ -619,6 +630,39 @@ def test_policy_deletion_service_v3_signs_versioned_import_closure() -> None:
     assert manifest.signature
     assert store.manifests == [manifest]
 
+    store.grant_authority = RealmGrantAuthorityV1(
+        operation_id=permit.operation_id,
+        action=permit.action,
+        claimed_at=permit.issued_at,
+        claim_idempotency_key="claim-delete-v3-once",
+        permit=permit,
+        package_digest=manifest.unsigned_digest_hex(),
+        package_size_bytes=len(manifest.canonical_unsigned_bytes()),
+        executor_binding_id=uuid4(),
+        caller_identity="arn:aws:iam::123456789012:role/lucy-utopia-deletion",
+        executor_identity="lucy-utopia-deletion",
+        executor_alias_arn=(
+            "arn:aws:lambda:us-east-1:123456789012:"
+            "function:lucy-utopia-deletion:realm-v13"
+        ),
+        executor_version=1,
+        receipt_key_id=(
+            "arn:aws:kms:us-east-1:123456789012:"
+            "key/00000000-0000-4000-8000-000000000001"
+        ),
+        deletion_manifest_id=manifest.manifest_id,
+        deletion_manifest_digest=manifest.unsigned_digest_hex(),
+    )
+    grant = RealmPolicyGrantServiceV3(
+        store,
+        signer=signer,
+        verifier=verifier,
+        clock=lambda: permit.issued_at + timedelta(seconds=1),
+    ).issue_grant(permit.operation_id)
+    assert grant.deletion_manifest_id == manifest.manifest_id
+    assert grant.encrypted_package_digest == manifest.unsigned_digest_hex()
+    assert store.grants == [grant]
+
     store.authority = RealmDeletionAuthorityV2(
         operation_id=permit.operation_id,
         action=permit.action,
@@ -667,6 +711,25 @@ def test_deletion_authority_snapshot_is_exact_content_free_and_rechecks_after_lo
     )
     assert lock < current_time < delegated_store
     assert "REVOKE ALL ON FUNCTION lucy.read_claimed_deletion_authority_v1" in source
+
+
+def test_v3_deletion_execution_migration_is_additive_and_tombstones_derivations() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "versions"
+        / "0065_memory_deletion_execution_v3.py"
+    ).read_text(encoding="utf-8")
+    assert "scoped_deletion_execution_grants_v3" in source
+    assert "scoped_memory_candidate_tombstones_v3" in source
+    assert "memory_import_outcome_tombstones_v3" in source
+    assert "scoped_deletion_effects_v3" in source
+    assert "read_claimed_sensitive_authority_v2" in source
+    assert "store_deletion_execution_grant_v3" in source
+    assert "attest_deletion_executor_receipt_v3" in source
+    assert "reconcile_scoped_deletion_v3" in source
+    assert "memory_import_outcome_v3_deletion_gate" in source
+    assert "DROP FUNCTION lucy.reconcile_scoped_deletion_v2" not in source
 
 
 def test_permit_authority_migration_is_exact_fenced_and_role_scoped() -> None:
@@ -973,6 +1036,14 @@ def test_workflow_store_selects_action_specific_reconciliation() -> None:
                 "finality_not_before": datetime.now(UTC).isoformat(),
                 "replayed": False,
             },
+            {
+                "operation_id": str(operation_id),
+                "state": "FINALITY_PENDING",
+                "result": "deletion_succeeded",
+                "receipt_digest": "c" * 64,
+                "finality_not_before": datetime.now(UTC).isoformat(),
+                "replayed": False,
+            },
         ]
     )
     store = PostgresRealmWorkflowStore(sessions)  # type: ignore[arg-type]
@@ -984,8 +1055,10 @@ def test_workflow_store_selects_action_specific_reconciliation() -> None:
     assert store.reconcile(operation_id, SensitiveActionV2.EVIDENCE_DELETE).state == (
         "FINALITY_PENDING"
     )
+    assert store.reconcile_deletion_v3(operation_id).state == "FINALITY_PENDING"
     statements = sessions.session.statements
     assert "claim_sensitive_operation_v2" in statements[0]
     assert "read_sensitive_operation_status_v1" in statements[1]
     assert "reconcile_sensitive_operation_v2" in statements[2]
     assert "reconcile_scoped_deletion_v2" in statements[3]
+    assert "reconcile_scoped_deletion_v3" in statements[4]

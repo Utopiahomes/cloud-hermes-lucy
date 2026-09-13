@@ -44,6 +44,7 @@ from lucy.contracts.security_v1_3 import (
 )
 from lucy.executors.models import (
     DeletionExecutorInvocationV2,
+    DeletionExecutorInvocationV3,
     ExecutorInvocationResultV2,
     RetrievalExecutorInvocationV2,
 )
@@ -279,6 +280,12 @@ class RealmPolicyDeletionStoreV3(Protocol):
         self, manifest: DeletionTargetManifestV3
     ) -> ScopedDeletionManifestResult: ...
 
+    def grant_authority_v3(self, operation_id: UUID) -> RealmGrantAuthorityV1: ...
+
+    def store_grant_v3(self, grant: SensitiveExecutionGrantV2) -> str: ...
+
+    def attest_receipt_v3(self, receipt: ExecutorReceiptV2) -> str: ...
+
 
 class RealmPolicyStore(Protocol):
     def permit_authority(
@@ -385,6 +392,24 @@ class PostgresRealmPolicyStore:
             raise RealmWorkflowUnavailable("deletion authority V3 operation differs")
         return authority
 
+    def grant_authority_v3(self, operation_id: UUID) -> RealmGrantAuthorityV1:
+        result = self._execute(
+            "SELECT lucy.read_claimed_sensitive_authority_v2(:operation)",
+            {"operation": operation_id},
+        )
+        authority = RealmGrantAuthorityV1.model_validate(result)
+        if authority.operation_id != operation_id:
+            raise RealmWorkflowUnavailable("grant authority V3 operation differs")
+        return authority
+
+    def store_grant_v3(self, grant: SensitiveExecutionGrantV2) -> str:
+        return str(
+            self._execute(
+                "SELECT lucy.store_deletion_execution_grant_v3(:operation,:contract)",
+                {"operation": grant.operation_id, "contract": grant.model_dump_json()},
+            )
+        )
+
     def store_manifest(
         self, manifest: DeletionTargetManifestV2
     ) -> ScopedDeletionManifestResult:
@@ -418,6 +443,14 @@ class PostgresRealmPolicyStore:
         return str(
             self._execute(
                 f"SELECT lucy.{function}(:operation,:contract)",
+                {"operation": receipt.operation_id, "contract": receipt.model_dump_json()},
+            )
+        )
+
+    def attest_receipt_v3(self, receipt: ExecutorReceiptV2) -> str:
+        return str(
+            self._execute(
+                "SELECT lucy.attest_deletion_executor_receipt_v3(:operation,:contract)",
                 {"operation": receipt.operation_id, "contract": receipt.model_dump_json()},
             )
         )
@@ -468,6 +501,16 @@ class VerifiedRealmPolicyAdapter:
         digest = self._store.attest_receipt(receipt)
         if digest != receipt.unsigned_digest_hex():
             raise RealmWorkflowUnavailable("stored receipt differs from verified authority")
+        return digest
+
+    def attest_receipt_v3(self, receipt: ExecutorReceiptV2) -> str:
+        self._verify(receipt, V13SigningKeyPurpose.DELETION_RECEIPT)
+        attest = getattr(self._store, "attest_receipt_v3", None)
+        if not callable(attest):
+            raise RealmWorkflowUnavailable("V3 receipt store is unavailable")
+        digest = str(attest(receipt))
+        if digest != receipt.unsigned_digest_hex():
+            raise RealmWorkflowUnavailable("stored V3 receipt differs from verified authority")
         return digest
 
     def _verify(
@@ -662,6 +705,79 @@ class RealmPolicyGrantService:
         digest = self._store.store_grant(grant)
         if digest != grant.unsigned_digest_hex():
             raise RealmWorkflowUnavailable("stored grant differs from signed authority")
+        return grant
+
+
+class RealmPolicyGrantServiceV3:
+    """Sign the V3-manifest-bound deletion execution grant."""
+
+    def __init__(
+        self,
+        store: RealmPolicyDeletionStoreV3,
+        *,
+        signer: Ed25519V13Signer,
+        verifier: V13ContractVerifier,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._store = store
+        self._signer = signer
+        self._verifier = verifier
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2:
+        authority = self._store.grant_authority_v3(operation_id)
+        now = self._clock()
+        self._verifier.verify(
+            authority.permit,
+            expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+            checked_at=now,
+        )
+        if authority.existing_grant is not None:
+            grant = authority.existing_grant
+            self._verifier.verify(
+                grant,
+                expected_purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+                checked_at=now,
+            )
+        else:
+            if authority.permit.restore_mapping_id is not None:
+                raise RealmWorkflowUnavailable("restore-mapped grant requires a later feature gate")
+            permit = authority.permit
+            grant = self._signer.sign(
+                SensitiveExecutionGrantV2(
+                    key_id=permit.key_id,
+                    issuer=permit.issuer,
+                    environment=permit.environment,
+                    issued_at=now,
+                    grant_id=uuid4(),
+                    action=authority.action,
+                    permit_id=permit.permit_id,
+                    permit_digest=permit.unsigned_digest_hex(),
+                    operation_id=authority.operation_id,
+                    caller_identity=authority.caller_identity,
+                    target_scope=permit.target_scope,
+                    workspace_id=permit.workspace_id,
+                    resource_selector=permit.resource_selector,
+                    execution_binding=permit.execution_binding,
+                    deletion_manifest_id=authority.deletion_manifest_id,
+                    deletion_manifest_digest=authority.deletion_manifest_digest,
+                    encrypted_package_digest=authority.package_digest,
+                    package_size_bytes=authority.package_size_bytes,
+                    idempotency_key=authority.claim_idempotency_key,
+                    executor_identity=authority.executor_identity,
+                    executor_alias_arn=authority.executor_alias_arn,
+                    executor_version=authority.executor_version,
+                    permit_claimed_at=authority.claimed_at,
+                    permit_claim_deadline=permit.permit_claim_deadline,
+                    execution_completion_deadline=permit.execution_completion_deadline,
+                    max_records=permit.max_records,
+                    max_bytes=permit.max_bytes,
+                    nonce=secrets.token_hex(16),
+                )
+            )
+        digest = self._store.store_grant_v3(grant)
+        if digest != grant.unsigned_digest_hex():
+            raise RealmWorkflowUnavailable("stored V3 grant differs from signed authority")
         return grant
 
 
@@ -886,6 +1002,16 @@ class PostgresRealmWorkflowStore:
             raise RealmWorkflowUnavailable("reconciled operation differs")
         return reconciled
 
+    def reconcile_deletion_v3(self, operation_id: UUID) -> RealmReconciliationResultV1:
+        result = self._execute(
+            "SELECT lucy.reconcile_scoped_deletion_v3(:operation)",
+            {"operation": operation_id},
+        )
+        reconciled = RealmReconciliationResultV1.model_validate(result)
+        if reconciled.operation_id != operation_id:
+            raise RealmWorkflowUnavailable("V3 reconciled operation differs")
+        return reconciled
+
     def _execute(self, statement: str, parameters: dict[str, object]) -> object:
         try:
             with self._sessions.begin() as session:
@@ -934,10 +1060,23 @@ class RealmLambdaExecutorInvoker:
             self._deletion_alias, invocation, SensitiveActionV2.EVIDENCE_DELETE
         )
 
+    def invoke_deletion_v3(
+        self, invocation: DeletionExecutorInvocationV3
+    ) -> ExecutorInvocationResultV2:
+        if self._deletion_alias is None:
+            raise RealmWorkflowUnavailable("realm deletion executor is not configured")
+        return self._invoke(
+            self._deletion_alias, invocation, SensitiveActionV2.EVIDENCE_DELETE
+        )
+
     def _invoke(
         self,
         alias: str,
-        invocation: RetrievalExecutorInvocationV2 | DeletionExecutorInvocationV2,
+        invocation: (
+            RetrievalExecutorInvocationV2
+            | DeletionExecutorInvocationV2
+            | DeletionExecutorInvocationV3
+        ),
         action: SensitiveActionV2,
     ) -> ExecutorInvocationResultV2:
         if invocation.execution_grant.executor_alias_arn != alias:
@@ -1000,6 +1139,16 @@ class RealmPolicyClient(Protocol):
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
 
 
+class RealmPolicyClientV3(Protocol):
+    def prepare_deletion_manifest_v3(
+        self, operation_id: UUID
+    ) -> DeletionTargetManifestV3: ...
+
+    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
+
+    def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
+
+
 class HttpRealmPolicyClient:
     """Bounded private-network V1.3 policy client with no caller-selected URL."""
 
@@ -1030,6 +1179,14 @@ class HttpRealmPolicyClient:
             f"/internal/v3/security/operations/{operation_id}/deletion-manifest", {}
         )
         return DeletionTargetManifestV2.model_validate(payload)
+
+    def prepare_deletion_manifest_v3(
+        self, operation_id: UUID
+    ) -> DeletionTargetManifestV3:
+        payload = self._post(
+            f"/internal/v3/security/operations/{operation_id}/deletion-manifest", {}
+        )
+        return DeletionTargetManifestV3.model_validate(payload)
 
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str:
         payload = self._post(
@@ -1189,6 +1346,66 @@ class RealmDeletionCoordinator:
         reconciled = self._workflow.reconcile(
             claim.operation_id, SensitiveActionV2.EVIDENCE_DELETE
         )
+        return RealmDeletionWorkflowResultV1(
+            operation_id=reconciled.operation_id,
+            state=reconciled.state,
+            receipt_digest=reconciled.receipt_digest,
+            finality_not_before=reconciled.finality_not_before,
+            executor_replayed=result.replayed,
+        )
+
+
+class RealmDeletionCoordinatorV3:
+    """Execute the V3 imported-memory closure without changing V2 recovery semantics."""
+
+    _TERMINAL_STATES = RealmDeletionCoordinator._TERMINAL_STATES
+
+    def __init__(
+        self,
+        workflow: PostgresRealmWorkflowStore,
+        policy: RealmPolicyClientV3,
+        executor: RealmLambdaExecutorInvoker,
+    ) -> None:
+        self._workflow = workflow
+        self._policy = policy
+        self._executor = executor
+
+    def execute(
+        self, permit: SensitiveActionPermitV3, *, idempotency_key: str
+    ) -> RealmDeletionWorkflowResultV1:
+        if permit.action != SensitiveActionV2.EVIDENCE_DELETE:
+            raise RealmWorkflowUnavailable("deletion permit required")
+        claim = self._workflow.claim(permit.permit_id, idempotency_key)
+        status = self._workflow.status(claim.operation_id)
+        if claim.operation_id != permit.operation_id or status.action != permit.action:
+            raise RealmWorkflowUnavailable("claimed V3 operation differs from permit")
+        if status.state in self._TERMINAL_STATES:
+            return RealmDeletionWorkflowResultV1(
+                operation_id=status.operation_id,
+                state=status.state,
+                receipt_digest=status.receipt_digest,
+                finality_not_before=status.finality_not_before,
+                executor_replayed=True,
+            )
+        if status.state != "CLAIMED":
+            raise RealmWorkflowUnavailable("deletion operation state is unavailable")
+        manifest = self._policy.prepare_deletion_manifest_v3(claim.operation_id)
+        if (
+            manifest.operation_id != claim.operation_id
+            or manifest.permit_id != permit.permit_id
+            or manifest.root_evidence_id != permit.resource_selector.object_id
+        ):
+            raise RealmWorkflowUnavailable("V3 deletion manifest differs from permit")
+        grant = self._policy.issue_grant(claim.operation_id)
+        result = self._executor.invoke_deletion_v3(
+            DeletionExecutorInvocationV3(
+                permit=permit,
+                execution_grant=grant,
+                manifest=manifest,
+            )
+        )
+        self._policy.attest_receipt(result.receipt)
+        reconciled = self._workflow.reconcile_deletion_v3(claim.operation_id)
         return RealmDeletionWorkflowResultV1(
             operation_id=reconciled.operation_id,
             state=reconciled.state,
