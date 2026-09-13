@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -14,8 +16,15 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from lucy.chatgpt_manifest import AuthorizedPilotManifestV1, PilotManifestBundleV1
-from lucy.contracts.canonical import canonical_sha256
+from lucy.chatgpt_manifest import (
+    AuthorizedPilotManifestV1,
+    LocalChatGPTConversationV1,
+    LocalChatGPTMessageV1,
+    LocalPilotBuildV1,
+    PilotManifestBundleV1,
+    manifest_record_for_local_message,
+)
+from lucy.contracts.canonical import canonical_json_bytes, canonical_sha256
 from lucy.contracts.memory_outcome_recovery_v1 import MemoryOutcomeRecoveryPackageV1
 from lucy.contracts.security_v1_2 import DeploymentEnvironment
 from lucy.contracts.security_v1_3 import (
@@ -71,6 +80,11 @@ from lucy.memory_outcome_recovery import (
     MemoryOutcomeGrantRequestV1,
     MemoryOutcomeRecoveryPolicy,
     PostgresMemoryOutcomePolicyStore,
+)
+from lucy.memory_pilot_transport import (
+    MemoryPilotTransportUnavailable,
+    PostgresMemoryPilotTransportAdmission,
+    prepare_memory_pilot_transport,
 )
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
@@ -389,6 +403,8 @@ def _provision() -> tuple[object, object]:
                 ",lucy.register_memory_import_job_v1(jsonb) "
                 ",lucy.record_memory_import_provider_outcome_v1(jsonb) "
                 ",lucy.load_memory_import_provider_outcome_v1(uuid) "
+                ",lucy.read_memory_pilot_transport_admission_v1(text,uuid) "
+                ",lucy.admit_memory_pilot_transport_v1(text,uuid,text,bigint,uuid,text) "
                 "TO lucy_raymond_routine; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text),"
@@ -2146,3 +2162,197 @@ def test_outcome_recovery_policy_requires_registered_exact_authorization() -> No
     _make_source_unavailable(evidence_id)
     with pytest.raises(MemoryOutcomeUnavailable, match="admission unavailable"):
         store.admit(authorization, package)
+
+
+def test_memory_pilot_transport_is_capability_scoped_idempotent_and_revocable() -> None:
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    scope_id, _ = _provision()
+    now = datetime.now(UTC)
+    campaign_id = uuid4()
+    message = LocalChatGPTMessageV1(
+        source_record_id="transport-conversation:node-1:message-1",
+        conversation_id="transport-conversation",
+        native_node_id="node-1",
+        native_message_id="message-1",
+        parent_source_record_id=None,
+        native_role="user",
+        role="owner",
+        occurred_at=now,
+        displayed=True,
+        content="Synthetic transport evidence; no personal history.",
+        inclusion_state="included",
+    )
+    record = manifest_record_for_local_message(message, b"f" * 32)
+    manifest = ImportManifestV2(
+        campaign_id=campaign_id,
+        destination_content_scope_id=scope_id,
+        source_namespace="synthetic/transport",
+        source_conversation_id="transport-conversation",
+        parser_version="parser-v1",
+        extractor_version="extractor-v1",
+        prompt_version="prompt-v1",
+        provider_policy_id="synthetic-private-zdr-v1",
+        model_route="none",
+        token_accounting_version="canonical-json-byte-upper-bound-v1",
+        records=(record,),
+        max_records=1,
+        max_bytes=record.byte_length,
+        max_source_estimated_tokens=record.estimated_tokens,
+        max_request_input_tokens=10_000,
+        max_request_output_tokens=100,
+        max_request_total_tokens=10_100,
+        max_model_spend_microusd=0,
+        max_attempts=1,
+        expires_at=now + timedelta(hours=1),
+    )
+    GovernedMemoryPolicy(create_session_factory(POLICY_URL)).authorize_campaign(manifest)
+    bundle = PilotManifestBundleV1(
+        selection_proposal_digest="a" * 64,
+        archive_commitment="b" * 64,
+        campaign_id=campaign_id,
+        destination_content_scope_id=scope_id,
+        manifest=manifest,
+        included_record_count=1,
+        excluded_record_count=0,
+        included_source_bytes=record.byte_length,
+        estimated_source_tokens=record.estimated_tokens,
+        excluded_attachment_reference_count=0,
+    )
+    authorization = AuthorizedPilotManifestV1(
+        bundle=bundle,
+        bundle_digest=bundle.digest,
+        owner_approval_ref=uuid4(),
+        owner_actor_id="raymond-owner",
+        approved_at=now,
+    )
+    prepared = prepare_memory_pilot_transport(
+        LocalPilotBuildV1(
+            bundle=bundle,
+            conversations=(
+                LocalChatGPTConversationV1(
+                    conversation_id="transport-conversation", messages=(message,)
+                ),
+            ),
+        ),
+        authorization,
+        expected_bundle_digest=bundle.digest,
+        transfer_key=b"t" * 32,
+        capability_token=b"c" * 32,
+        maximum_microusd_per_attempt=0,
+        timeout_seconds=30,
+        expires_at=now + timedelta(minutes=30),
+        now=now + timedelta(seconds=1),
+    )
+    owner_sessions = create_session_factory(OWNER_URL)
+    with owner_sessions.begin() as session:
+        session.execute(text("SET LOCAL ROLE lucy_migration"))
+        session.execute(
+            text(
+                "SELECT lucy.register_memory_import_pilot_authorization_v1("
+                "CAST(:authorization AS jsonb))"
+            ),
+            {"authorization": canonical_json_bytes(authorization).decode("utf-8")},
+        ).scalar_one()
+        registration = session.execute(
+            text(
+                "SELECT lucy.register_memory_pilot_transport_v1("
+                "CAST(:registration AS jsonb))"
+            ),
+            {
+                "registration": canonical_json_bytes(prepared.registration).decode(
+                    "utf-8"
+                )
+            },
+        ).scalar_one()
+    assert registration["replayed"] is False
+    with (
+        pytest.raises(DBAPIError, match="permission denied"),
+        create_session_factory(RAYMOND_URL).begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.register_memory_pilot_transport_v1('{}'::jsonb)")
+        )
+    with (
+        pytest.raises(DBAPIError, match="permission denied"),
+        create_session_factory(POLICY_URL).begin() as session,
+    ):
+        session.execute(
+            text(
+                "SELECT lucy.read_memory_pilot_transport_admission_v1("
+                ":capability,:batch)"
+            ),
+            {
+                "capability": prepared.registration.capability_token_digest,
+                "batch": prepared.batches[0].batch_id,
+            },
+        )
+    admission = PostgresMemoryPilotTransportAdmission(
+        create_session_factory(RAYMOND_URL), transfer_key=b"t" * 32
+    )
+    with pytest.raises(MemoryPilotTransportUnavailable):
+        admission.admit(
+            prepared.batches[0], capability_token=b"w" * 32
+        )
+    first = admission.admit(
+        prepared.batches[0], capability_token=b"c" * 32
+    )
+    replay = admission.admit(
+        prepared.batches[0], capability_token=b"c" * 32
+    )
+    assert first.batch_id == replay.batch_id
+    assert first.replayed is False and replay.replayed is True
+    with (
+        pytest.raises(DBAPIError, match="permission denied"),
+        create_session_factory(RAYMOND_URL).begin() as session,
+    ):
+        session.execute(text("SELECT * FROM lucy.memory_pilot_transport_batches_v1"))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with owner_sessions.begin() as session:
+            session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock(hashtextextended("
+                    "'memory-pilot-transport:'||CAST(:campaign AS text),0))"
+                ),
+                {"campaign": campaign_id},
+            )
+            waiting_admission = executor.submit(
+                admission.admit,
+                prepared.batches[0],
+                capability_token=b"c" * 32,
+            )
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with owner_sessions() as observer:
+                    waiting = bool(
+                        observer.scalar(
+                            text(
+                                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity "
+                                "WHERE usename='lucy_raymond_routine' "
+                                "AND wait_event_type='Lock' AND wait_event='advisory')"
+                            )
+                        )
+                    )
+                if waiting:
+                    break
+                time.sleep(0.02)
+            assert waiting, "admission did not reach the campaign-lock race"
+            session.execute(text("SET LOCAL ROLE lucy_migration"))
+            revoked = session.execute(
+                text(
+                    "SELECT lucy.revoke_memory_pilot_transport_v1("
+                    ":campaign,:revocation,:reason)"
+                ),
+                {
+                    "campaign": campaign_id,
+                    "revocation": uuid4(),
+                    "reason": hashlib.sha256(b"synthetic owner stop").hexdigest(),
+                },
+            ).scalar_one()
+        with pytest.raises(MemoryPilotTransportUnavailable):
+            waiting_admission.result(timeout=5)
+    assert revoked["campaign_id"] == str(campaign_id)
+    with pytest.raises(MemoryPilotTransportUnavailable):
+        admission.admit(
+            prepared.batches[0], capability_token=b"c" * 32
+        )

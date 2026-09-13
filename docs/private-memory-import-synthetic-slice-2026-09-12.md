@@ -205,6 +205,18 @@ accepted `0057` migration is merged at `2807dad`.
     policy client, and one qualified Lambda alias. The assembly has no policy signing key. These
     paths were tested with synthetic artifacts and injected clients only; registration against
     production and any personal-data execution remain separately gated.
+34. The Windows-to-Render pilot transport is now an additive, synthetic-only boundary at migration
+    `0070`. Windows retains the full ZIP and permanent fingerprint key, rebuilds the exact locally
+    authorized selection, and emits only a plaintext-free transport registration. Every sensitive
+    batch is bound by a separate random transfer-key HMAC; the runtime receives neither the
+    fingerprint key nor authority to register its own commitments. PostgreSQL stores only campaign,
+    capability, batch, request, and byte commitments. The realm-evidence login needs one random
+    campaign capability plus a known batch ID, cannot enumerate the transport tables, and passes no
+    plaintext to PostgreSQL. Admission is synchronous and replay-safe; durable operator revocation
+    blocks both new and replayed admission. The CLI can prepare and register the content-free plan,
+    and a bounded, documentation-free HTTP surface admits an exact batch. That endpoint does not yet
+    dispatch a model request or write a candidate-review artifact. No personal data, provider call,
+    AWS operation, or cloud deployment was performed.
 
 ## Verification ledger
 
@@ -233,6 +245,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Recovery grant expiry and issuer seam | Passed, 22 focused checks plus Ruff and strict mypy | Grant claim/completion never outlive campaign authorization; recovery consumes an abstract issuer so the policy signer can remain isolated | Recovery policy, issuer protocol, campaign expiry, or coordinator construction change |
 | Isolated outcome-policy bridge | Passed, 89 focused checks on clean PostgreSQL through `0069`, plus Ruff and strict mypy | Independent exact authorization registration; database-recomputed request/package/grant digests; private authenticated endpoint; exact realm/job/key bindings; durable replay; policy ciphertext-table denial; deleted-source denial; Render identity separation | Migration `0069`, policy endpoint/client, grant issuer, realm role grants, Render blueprint, or relevant contract change |
 | Operator registration and routine recovery assembly | Passed, 14 focused tests plus Ruff and strict mypy | Exact fresh preflight, digest-specific operator confirmation, content-free receipt, routine/v1.3 mode restriction, private policy client, qualified Lambda alias, and no signing key in routine configuration | Import CLI, preflight/authorization contracts, recovery environment assembly, or deployment variables change |
+| Pilot transport contracts and database admission | Passed, focused unit/integration checks on clean PostgreSQL through `0070`, plus Ruff and strict mypy | Locally verified exact batch compilation; plaintext-free registration; separate transfer HMAC and capability; wrong-key/wrong-capability/tamper denial; execute-only realm-evidence admission; table-enumeration denial; idempotent replay; durable revocation; a real two-connection admission/revocation race that fails closed; bounded HTTP body | Migration `0070`, transport contracts/CLI/API, compiler, realm role grants, canonicalization, or PostgreSQL image change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -248,14 +261,16 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Add the effect-bearing pilot execution command that rebuilds the untouched ZIP again, invokes
-   the guarded runner with the implemented routine recovery assembly, and writes the extracted
-   candidate-review artifact without approving or promoting it. No real provider request is
-   currently enabled.
-2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+1. Connect the admitted HTTP batch to the existing archive/extraction/outcome-recovery coordinator
+   and return its sensitive candidate-review artifact to the protected Windows intake. First prove
+   this with a fake provider and injected AWS boundaries; real OpenRouter remains disabled.
+2. Add the Windows uploader that rebuilds batches in memory from the untouched ZIP, sends them
+   sequentially over HTTPS, writes review artifacts only under the protected intake root, and uses
+   the same immutable batch identity to recover a lost response without repeating a provider call.
+3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-3. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
+4. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
    the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk

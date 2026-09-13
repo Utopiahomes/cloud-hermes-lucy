@@ -28,6 +28,10 @@ from lucy.contracts.canonical import canonical_json_bytes
 from lucy.db import create_session_factory
 from lucy.memory_import_console import PilotSelectionProposalV1
 from lucy.memory_pilot_runner import validate_authorized_memory_pilot
+from lucy.memory_pilot_transport import (
+    MemoryPilotTransportRegistrationV1,
+    prepare_memory_pilot_transport,
+)
 
 
 class PilotExecutionPreflightV1(BaseModel):
@@ -62,6 +66,26 @@ class PilotAuthorizationRegistrationReceiptV1(BaseModel):
     campaign_id: UUID
     destination_content_scope_id: UUID
     bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    replayed: bool
+    registered_at: datetime
+    provider_calls: int = 0
+    aws_calls: int = 0
+
+
+class PilotTransportRegistrationReceiptV1(BaseModel):
+    """Content-free proof that one exact transport plan was registered."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contract_version: str = Field(default="1", pattern=r"^1$")
+    object_type: str = Field(
+        default="lucy.memory-pilot-transport-registration-receipt.v1",
+        pattern=r"^lucy\.memory-pilot-transport-registration-receipt\.v1$",
+    )
+    campaign_id: UUID
+    bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    batch_count: int = Field(ge=1)
+    maximum_transport_bytes: int = Field(ge=1)
+    expires_at: datetime
     replayed: bool
     registered_at: datetime
     provider_calls: int = 0
@@ -129,6 +153,32 @@ def _parser() -> argparse.ArgumentParser:
     register.add_argument("--expected-bundle-digest", required=True)
     register.add_argument("--confirmation", required=True)
     register.add_argument("--output", type=Path, required=True)
+    transport_plan = commands.add_parser(
+        "transport-plan",
+        help="prepare exact content-free batch commitments without uploading plaintext",
+    )
+    transport_plan.add_argument("--zip", type=Path, required=True)
+    transport_plan.add_argument("--intake-root", type=Path, required=True)
+    transport_plan.add_argument("--fingerprint-key-file", type=Path, required=True)
+    transport_plan.add_argument("--transfer-key-file", type=Path, required=True)
+    transport_plan.add_argument("--capability-token-file", type=Path, required=True)
+    transport_plan.add_argument("--inventory", type=Path, required=True)
+    transport_plan.add_argument("--selection", type=Path, required=True)
+    transport_plan.add_argument("--authorization", type=Path, required=True)
+    transport_plan.add_argument("--expected-bundle-digest", required=True)
+    transport_plan.add_argument("--maximum-microusd-per-attempt", type=int, required=True)
+    transport_plan.add_argument("--timeout-seconds", type=int, required=True)
+    transport_plan.add_argument("--expires-at", type=datetime.fromisoformat, required=True)
+    transport_plan.add_argument("--output", type=Path, required=True)
+    transport_register = commands.add_parser(
+        "transport-register",
+        help="register one exact content-free pilot transport plan in PostgreSQL",
+    )
+    transport_register.add_argument("--intake-root", type=Path, required=True)
+    transport_register.add_argument("--registration", type=Path, required=True)
+    transport_register.add_argument("--expected-bundle-digest", required=True)
+    transport_register.add_argument("--confirmation", required=True)
+    transport_register.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -242,6 +292,58 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if args.command == "transport-register":
+        registration_path = verified_intake_path(
+            args.registration,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        registration = MemoryPilotTransportRegistrationV1.model_validate_json(
+            registration_path.read_bytes()
+        )
+        expected_confirmation = (
+            f"REGISTER PRIVATE LUCY TRANSPORT {args.expected_bundle_digest}"
+        )
+        now = datetime.now(UTC)
+        if args.confirmation != expected_confirmation:
+            raise PermissionError("pilot transport registration confirmation is not exact")
+        if (
+            args.expected_bundle_digest != registration.bundle_digest
+            or registration.expires_at <= now
+        ):
+            raise PermissionError("pilot transport registration is not current and exact")
+        database_url = os.environ.get("LUCY_MIGRATION_DATABASE_URL", "").strip()
+        if not database_url:
+            raise ValueError("LUCY_MIGRATION_DATABASE_URL is required for registration")
+        sessions = create_session_factory(database_url)
+        with sessions.begin() as session:
+            registered = session.execute(
+                text(
+                    "SELECT lucy.register_memory_pilot_transport_v1("
+                    "CAST(:registration AS jsonb))"
+                ),
+                {"registration": canonical_json_bytes(registration).decode("utf-8")},
+            ).scalar_one()
+        if registered.get("campaign_id") != str(registration.campaign_id):
+            raise RuntimeError("transport registration acknowledgement changed campaign")
+        transport_receipt = PilotTransportRegistrationReceiptV1(
+            campaign_id=registration.campaign_id,
+            bundle_digest=registration.bundle_digest,
+            batch_count=len(registration.batches),
+            maximum_transport_bytes=registration.maximum_transport_bytes,
+            expires_at=registration.expires_at,
+            replayed=bool(registered.get("replayed")),
+            registered_at=now,
+        )
+        _write_new_artifact(output, transport_receipt)
+        print(
+            f"Registered {transport_receipt.batch_count} exact transport batches; "
+            f"replayed: {str(transport_receipt.replayed).lower()}; "
+            "plaintext uploaded: no; provider calls: 0; AWS calls: 0"
+        )
+        return 0
+
     key = args.fingerprint_key_file.read_bytes()
     if args.command == "inventory":
         report = inventory_chatgpt_export(
@@ -257,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(report.attachments)} archive attachments; network calls: 0"
         )
         return 0
-    if args.command not in {"manifest", "preflight"}:
+    if args.command not in {"manifest", "preflight", "transport-plan"}:
         raise RuntimeError("unsupported command")
     inventory_path = verified_intake_path(
         args.inventory,
@@ -282,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     selection = PilotSelectionProposalV1.model_validate(selection_document.get("proposal"))
     if selection_document.get("proposal_digest") != selection.digest:
         raise ValueError("pilot selection digest does not match its exact proposal")
-    if args.command == "preflight":
+    if args.command in {"preflight", "transport-plan"}:
         authorization_path = verified_intake_path(
             args.authorization,
             intake_root=root,
@@ -318,6 +420,36 @@ def main(argv: list[str] | None = None) -> int:
         repository_roots=(repository,),
         synchronization_roots=sync_roots,
     )
+    if args.command == "transport-plan":
+        transfer_key_path = verified_intake_path(
+            args.transfer_key_file,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        capability_path = verified_intake_path(
+            args.capability_token_file,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        prepared = prepare_memory_pilot_transport(
+            built,
+            authorization,
+            expected_bundle_digest=args.expected_bundle_digest,
+            transfer_key=transfer_key_path.read_bytes(),
+            capability_token=capability_path.read_bytes(),
+            maximum_microusd_per_attempt=args.maximum_microusd_per_attempt,
+            timeout_seconds=args.timeout_seconds,
+            expires_at=args.expires_at,
+            now=datetime.now(UTC),
+        )
+        _write_new_artifact(output, prepared.registration)
+        print(
+            f"Prepared {len(prepared.registration.batches)} exact transport commitments; "
+            "plaintext uploaded: no; provider calls: 0; AWS calls: 0"
+        )
+        return 0
     if args.command == "preflight":
         checked_at = datetime.now(UTC)
         validate_authorized_memory_pilot(

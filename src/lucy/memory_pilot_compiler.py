@@ -67,7 +67,7 @@ def compile_memory_pilot_batches(
     if len(packed) * maximum_microusd_per_attempt > manifest.max_model_spend_microusd:
         raise ValueError("compiled pilot reservations exceed the campaign spend ceiling")
     batches = tuple(
-        _dispatch(
+        compile_memory_pilot_dispatch(
             manifest,
             records,
             local,
@@ -102,7 +102,7 @@ def _fits(
     )
 
 
-def _dispatch(
+def compile_memory_pilot_dispatch(
     manifest: ImportManifestV2,
     records: tuple[ImportManifestRecordV1, ...],
     local: dict[str, LocalChatGPTMessageV1],
@@ -111,7 +111,9 @@ def _dispatch(
     maximum_microusd: int,
     timeout_seconds: int,
 ) -> MemoryExtractionDispatchV1:
-    prompt = _prompt(records, local)
+    """Compile one exact batch from already locally verified records."""
+
+    prompt = memory_pilot_prompt(records, local)
     request = build_openrouter_memory_request(
         model_route=manifest.model_route,
         prompt=prompt,
@@ -143,15 +145,17 @@ def _request(
 ) -> MemoryProviderRequestV1:
     return build_openrouter_memory_request(
         model_route=manifest.model_route,
-        prompt=_prompt(records, local),
+        prompt=memory_pilot_prompt(records, local),
         output_tokens=manifest.max_request_output_tokens,
     )
 
 
-def _prompt(
+def memory_pilot_prompt(
     records: tuple[ImportManifestRecordV1, ...],
     local: dict[str, LocalChatGPTMessageV1],
 ) -> str:
+    """Render the canonical provider prompt for one exact record batch."""
+
     evidence: list[dict[str, object]] = []
     for record in records:
         message = local.get(record.source_record_id)

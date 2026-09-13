@@ -458,6 +458,98 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     assert registration["aws_calls"] == 0
     assert "private canary" not in registration_path.read_text(encoding="utf-8")
 
+    transfer_key = intake / "transport.key"
+    capability_token = intake / "capability.token"
+    transport_plan_path = intake / "transport-plan.v1.json"
+    transfer_key.write_bytes(b"t" * 32)
+    capability_token.write_bytes(b"c" * 32)
+    transport_plan_args = [
+        "transport-plan",
+        "--zip",
+        str(archive),
+        "--intake-root",
+        str(intake),
+        "--fingerprint-key-file",
+        str(key),
+        "--transfer-key-file",
+        str(transfer_key),
+        "--capability-token-file",
+        str(capability_token),
+        "--inventory",
+        str(inventory_path),
+        "--selection",
+        str(selection_path),
+        "--authorization",
+        str(authorization_path),
+        "--expected-bundle-digest",
+        digest,
+        "--maximum-microusd-per-attempt",
+        "0",
+        "--timeout-seconds",
+        "30",
+        "--expires-at",
+        (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
+        "--output",
+        str(transport_plan_path),
+    ]
+    assert main(transport_plan_args) == 0
+    transport_plan = json.loads(transport_plan_path.read_bytes())
+    assert transport_plan["bundle_digest"] == digest
+    assert transport_plan["batches"]
+    assert "private canary" not in transport_plan_path.read_text(encoding="utf-8")
+    assert "shown answer" not in transport_plan_path.read_text(encoding="utf-8")
+
+    class TransportRegistrationTransaction:
+        def __enter__(self) -> TransportRegistrationTransaction:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, values: dict[str, str]) -> object:
+            assert "register_memory_pilot_transport_v1" in str(statement)
+            assert "private canary" not in values["registration"]
+            return type(
+                "Result",
+                (),
+                {
+                    "scalar_one": lambda self: {
+                        "campaign_id": str(_CAMPAIGN),
+                        "replayed": False,
+                    }
+                },
+            )()
+
+    class TransportRegistrationSessions:
+        def begin(self) -> TransportRegistrationTransaction:
+            return TransportRegistrationTransaction()
+
+    monkeypatch.setattr(
+        memory_import_cli,
+        "create_session_factory",
+        lambda _url: TransportRegistrationSessions(),
+    )
+    transport_receipt_path = intake / "transport-registration-receipt.v1.json"
+    assert main(
+        [
+            "transport-register",
+            "--intake-root",
+            str(intake),
+            "--registration",
+            str(transport_plan_path),
+            "--expected-bundle-digest",
+            digest,
+            "--confirmation",
+            f"REGISTER PRIVATE LUCY TRANSPORT {digest}",
+            "--output",
+            str(transport_receipt_path),
+        ]
+    ) == 0
+    transport_receipt = json.loads(transport_receipt_path.read_bytes())
+    assert transport_receipt["batch_count"] == len(transport_plan["batches"])
+    assert transport_receipt["provider_calls"] == 0
+    assert transport_receipt["aws_calls"] == 0
+
     wrong_confirmation = list(authorize_args)
     wrong_confirmation[wrong_confirmation.index("--confirmation") + 1] = "wrong"
     with pytest.raises(PermissionError, match="confirmation is not exact"):

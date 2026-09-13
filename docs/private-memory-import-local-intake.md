@@ -182,6 +182,49 @@ bundle digest against its exact campaign before recording an immutable allowlist
 Lucy and the policy service cannot perform this registration. The content-free receipt can be
 replayed, but a changed authorization conflicts rather than widening the prior approval.
 
+## Prepare and register exact transport commitments
+
+This step still does not upload plaintext or call a model. Create a separate random transfer key
+and campaign capability under the protected intake root. They are campaign-scoped secrets, not the
+permanent fingerprint key; never place them in the repository or a synchronized folder. The
+transfer key is delivered separately to the private realm-evidence service, while the capability
+stays with the Windows uploader. The production secret-delivery and uploader steps are not yet
+commissioned.
+
+```powershell
+$transportExpiry = (Get-Date).ToUniversalTime().AddMinutes(30).ToString("o")
+$transportPlan = "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\transport-plan.v1.json"
+
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli transport-plan `
+  --zip "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\export.zip" `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --fingerprint-key-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\manifest-fingerprint-v1.key" `
+  --transfer-key-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\pilot-transfer-v1.key" `
+  --capability-token-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\pilot-capability-v1.token" `
+  --inventory "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\inventory.v1.json" `
+  --selection "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-selection.v1.json" `
+  --authorization "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-authorization.v1.json" `
+  --expected-bundle-digest $bundleDigest `
+  --maximum-microusd-per-attempt 0 `
+  --timeout-seconds 30 `
+  --expires-at $transportExpiry `
+  --output $transportPlan
+
+$transportConfirmation = "REGISTER PRIVATE LUCY TRANSPORT $bundleDigest"
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli transport-register `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --registration $transportPlan `
+  --expected-bundle-digest $bundleDigest `
+  --confirmation $transportConfirmation `
+  --output "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\transport-registration-receipt.v1.json"
+```
+
+The plan contains record IDs, request identities, size ceilings, and cryptographic commitments,
+but no conversation text. PostgreSQL sees only that content-free plan. During the later upload,
+the service will obtain the exact manifest from PostgreSQL, verify the uploaded batch HMAC and
+canonical provider request in memory, and durably admit it once. A wrong capability, wrong key,
+altered batch, expired campaign, or revoked transport fails before provider execution.
+
 ## Review extracted memory candidates locally
 
 After an authorized extraction worker has produced `candidates.v1.json`, start the separate
