@@ -8,7 +8,12 @@ from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lucy.archive_crypto import ArchiveCipher, ArchiveKeyStore, EncryptedPayload
+from lucy.archive_crypto import (
+    ArchiveCipher,
+    ArchiveKeyStore,
+    EncryptedPayload,
+    WrappedDataKey,
+)
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_extraction import (
     MemoryExtractionDispatchV1,
@@ -62,6 +67,97 @@ class MemoryOutcomeStore(Protocol):
     def load(self, extraction_job_id: UUID) -> MemoryOutcomeEnvelopeV1 | None: ...
 
     def put(self, envelope: MemoryOutcomeEnvelopeV1) -> MemoryOutcomeEnvelopeV1: ...
+
+
+class MemoryOutcomeEncryptor(Protocol):
+    """Encryption-only surface safe for the outcome writer identity."""
+
+    @property
+    def algorithm(self) -> str: ...
+
+    @property
+    def encryption_context_version(self) -> int: ...
+
+    @property
+    def record_version(self) -> int: ...
+
+    @property
+    def storage_epoch(self) -> int: ...
+
+    @property
+    def registry_epoch(self) -> int: ...
+
+    @property
+    def key_epoch(self) -> int: ...
+
+    def encrypt(self, evidence_id: UUID, plaintext: bytes, aad: bytes) -> EncryptedPayload: ...
+
+
+class MemoryOutcomeKeyWriter(Protocol):
+    """Write-only wrapped-key surface; collision resolution requires recovery."""
+
+    @property
+    def registry_identity(self) -> UUID: ...
+
+    def put_new(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None: ...
+
+
+class WriteOnlyEncryptedMemoryOutcomeJournal:
+    """Persist a first outcome without wrapped-key reads or KMS decryption."""
+
+    def __init__(
+        self,
+        store: MemoryOutcomeStore,
+        *,
+        cipher: MemoryOutcomeEncryptor,
+        key_writer: MemoryOutcomeKeyWriter,
+    ) -> None:
+        self._store = store
+        self._cipher = cipher
+        self._keys = key_writer
+
+    def record(
+        self,
+        *,
+        manifest: ImportManifestV2,
+        dispatch: MemoryExtractionDispatchV1,
+        reservation_id: UUID,
+        outcome: MemoryExtractionProviderOutcomeV1,
+    ) -> MemoryExtractionProviderOutcomeV1:
+        binding = _binding(manifest, dispatch, reservation_id)
+        EncryptedMemoryOutcomeJournal._validate_outcome(binding, outcome)
+        encryption_id = memory_outcome_encryption_id(dispatch.extraction_job_id)
+        plaintext = canonical_json_bytes(outcome)
+        aad = canonical_json_bytes(binding)
+        try:
+            encrypted = self._cipher.encrypt(encryption_id, plaintext, aad)
+            envelope = MemoryOutcomeEnvelopeV1(
+                binding=binding,
+                encryption_id=encryption_id,
+                registry_id=self._keys.registry_identity,
+                algorithm=self._cipher.algorithm,
+                encryption_context_version=self._cipher.encryption_context_version,
+                record_version=self._cipher.record_version,
+                storage_epoch=self._cipher.storage_epoch,
+                registry_epoch=self._cipher.registry_epoch,
+                key_epoch=self._cipher.key_epoch,
+                ciphertext_b64=base64.b64encode(encrypted.ciphertext).decode("ascii"),
+                content_nonce_b64=base64.b64encode(encrypted.content_nonce).decode("ascii"),
+                keyed_commitment=encrypted.keyed_commitment,
+                billed_microusd=outcome.billed_microusd,
+                provider_reference_commitment=outcome.provider_reference_commitment,
+            )
+            self._keys.put_new(encryption_id, encrypted.wrapped_key)
+            stored = self._store.put(envelope)
+        except Exception as exc:
+            raise MemoryOutcomeUnavailable(
+                "provider outcome write is uncertain; exact-job recovery required"
+            ) from exc
+        if stored != envelope:
+            raise MemoryOutcomeUnavailable(
+                "provider outcome acknowledgement differs; exact-job recovery required"
+            )
+        return outcome
 
 
 class EncryptedMemoryOutcomeJournal:

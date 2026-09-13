@@ -237,18 +237,20 @@ def _coordinator(
     completion_rejects: bool = False,
 ) -> tuple[MemoryExtractionCoordinator, AccountingSpy]:
     selected_accounting = accounting or AccountingSpy(events)
+    selected_journal = outcome_journal or OutcomeJournalSpy(events)
     return (
         MemoryExtractionCoordinator(
             selected_accounting,
             eligibility or EligibilitySpy(events),
             provider or ProviderSpy(events),
-            outcome_journal or OutcomeJournalSpy(events),
+            selected_journal,
             CompletionSpy(
                 events,
                 selected_accounting,
                 fail=completion_fails,
                 reject=completion_rejects,
             ),
+            outcome_recovery=selected_journal,
             now=lambda: NOW,
         ),
         selected_accounting,
@@ -360,6 +362,26 @@ def test_replayed_job_never_repeats_provider_execution() -> None:
     assert events == [
         "eligible:admission", "reserve", "register-job", "outcome-load"
     ]
+
+
+def test_replayed_job_without_recovery_capability_stops_before_provider() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events, replayed=True, job_replayed=True)
+    writer = OutcomeJournalSpy(events)
+    coordinator = MemoryExtractionCoordinator(
+        accounting,
+        EligibilitySpy(events),
+        ProviderSpy(events),
+        writer,
+        CompletionSpy(events, accounting),
+        now=lambda: NOW,
+    )
+
+    result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert result.state == "reconciliation_required"
+    assert "exact-job outcome recovery" in (result.reason or "")
+    assert events == ["eligible:admission", "reserve", "register-job"]
 
 
 def test_replayed_reservation_without_job_can_safely_begin_dispatch() -> None:

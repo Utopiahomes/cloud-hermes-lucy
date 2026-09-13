@@ -19,7 +19,8 @@ from lucy.governed_memory import ImportArchiveResultV1
 from lucy.memory_candidate_review import CandidateReviewBundleArtifactV1
 from lucy.memory_extraction import (
     MemoryExtractionCoordinator,
-    MemoryExtractionOutcomeJournal,
+    MemoryExtractionOutcomeRecovery,
+    MemoryExtractionOutcomeWriter,
     MemoryImportCampaignAccounting,
     MemoryImportProvider,
     MemoryImportSourceEligibility,
@@ -136,15 +137,17 @@ class MemoryPilotRunner:
         accounting: MemoryImportCampaignAccounting,
         eligibility: MemoryImportSourceEligibility,
         provider: MemoryImportProvider,
-        outcomes: MemoryExtractionOutcomeJournal,
+        outcomes: MemoryExtractionOutcomeWriter,
         candidate_store: MemoryCandidateBatchStore,
         now: Callable[[], datetime],
+        outcome_recovery: MemoryExtractionOutcomeRecovery | None = None,
     ) -> None:
         self._archive = archive
         self._accounting = accounting
         self._eligibility = eligibility
         self._provider = provider
         self._outcomes = outcomes
+        self._outcome_recovery = outcome_recovery
         self._candidate_store = candidate_store
         self._now = now
 
@@ -187,6 +190,7 @@ class MemoryPilotRunner:
                 self._provider,
                 self._outcomes,
                 completion,
+                outcome_recovery=self._outcome_recovery,
                 now=self._now,
             ).execute(manifest=manifest, dispatch=dispatch)
             artifact: CandidateReviewBundleArtifactV1 | None = None

@@ -5,7 +5,12 @@ from uuid import UUID
 
 import pytest
 
-from lucy.archive_crypto import EnvelopeCipher, MemoryArchiveKeyStore
+from lucy.archive_crypto import (
+    EncryptedPayload,
+    EnvelopeCipher,
+    MemoryArchiveKeyStore,
+    WrappedDataKey,
+)
 from lucy.memory_extraction import (
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
@@ -16,6 +21,7 @@ from lucy.memory_outcome import (
     EncryptedMemoryOutcomeJournal,
     MemoryOutcomeEnvelopeV1,
     MemoryOutcomeUnavailable,
+    WriteOnlyEncryptedMemoryOutcomeJournal,
 )
 
 CAMPAIGN = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -27,8 +33,10 @@ NOW = datetime(2026, 9, 12, tzinfo=UTC)
 class Store:
     def __init__(self) -> None:
         self.value: MemoryOutcomeEnvelopeV1 | None = None
+        self.load_calls = 0
 
     def load(self, extraction_job_id: UUID) -> MemoryOutcomeEnvelopeV1 | None:
+        self.load_calls += 1
         if self.value is None or self.value.binding.extraction_job_id != extraction_job_id:
             return None
         return self.value
@@ -38,6 +46,56 @@ class Store:
             raise ValueError("outcome conflict")
         self.value = envelope
         return envelope
+
+
+class DecryptForbiddenCipher(EnvelopeCipher):
+    def decrypt(
+        self, evidence_id: UUID, payload: EncryptedPayload, aad: bytes
+    ) -> bytes:
+        raise AssertionError("write-only outcome path must never decrypt")
+
+
+class WriteOnlyKeys:
+    def __init__(self) -> None:
+        self.registry_identity = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        self.values: dict[UUID, WrappedDataKey] = {}
+
+    def put_new(self, key_ref: UUID, wrapped_key: WrappedDataKey) -> None:
+        if key_ref in self.values:
+            raise PermissionError("exact-job recovery required")
+        self.values[key_ref] = wrapped_key
+
+
+def test_write_only_outcome_path_never_reads_or_decrypts() -> None:
+    store = Store()
+    keys = WriteOnlyKeys()
+    journal = WriteOnlyEncryptedMemoryOutcomeJournal(
+        store,
+        cipher=DecryptForbiddenCipher(
+            b"k" * 32, b"c" * 32, kek_version="write-only-test-v1"
+        ),
+        key_writer=keys,
+    )
+
+    assert journal.record(
+        manifest=_manifest(),
+        dispatch=_dispatch(),
+        reservation_id=RESERVATION,
+        outcome=_outcome(),
+    ) == _outcome()
+    assert store.load_calls == 0
+    assert store.value is not None
+    assert set(keys.values) == {store.value.encryption_id}
+    assert _outcome().output not in store.value.ciphertext_b64
+
+    with pytest.raises(MemoryOutcomeUnavailable, match="exact-job recovery required"):
+        journal.record(
+            manifest=_manifest(),
+            dispatch=_dispatch(),
+            reservation_id=RESERVATION,
+            outcome=_outcome(),
+        )
+    assert store.load_calls == 0
 
 
 def _manifest() -> ImportManifestV2:

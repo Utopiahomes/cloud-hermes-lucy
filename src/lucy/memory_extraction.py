@@ -101,7 +101,7 @@ class MemoryImportProvider(Protocol):
     ) -> MemoryExtractionProviderOutcomeV1: ...
 
 
-class MemoryExtractionOutcomeJournal(Protocol):
+class MemoryExtractionOutcomeWriter(Protocol):
     def record(
         self,
         *,
@@ -111,6 +111,8 @@ class MemoryExtractionOutcomeJournal(Protocol):
         outcome: MemoryExtractionProviderOutcomeV1,
     ) -> MemoryExtractionProviderOutcomeV1: ...
 
+
+class MemoryExtractionOutcomeRecovery(Protocol):
     def load(
         self,
         *,
@@ -118,6 +120,12 @@ class MemoryExtractionOutcomeJournal(Protocol):
         dispatch: MemoryExtractionDispatchV1,
         reservation_id: UUID,
     ) -> MemoryExtractionProviderOutcomeV1 | None: ...
+
+
+class MemoryExtractionOutcomeJournal(
+    MemoryExtractionOutcomeWriter, MemoryExtractionOutcomeRecovery, Protocol
+):
+    """Compatibility protocol for stores that deliberately hold both capabilities."""
 
 
 class MemoryExtractionSuccessCompletion(Protocol):
@@ -137,15 +145,17 @@ class MemoryExtractionCoordinator:
         accounting: MemoryImportCampaignAccounting,
         eligibility: MemoryImportSourceEligibility,
         provider: MemoryImportProvider,
-        outcome_journal: MemoryExtractionOutcomeJournal,
+        outcome_writer: MemoryExtractionOutcomeWriter,
         completion: MemoryExtractionSuccessCompletion,
         *,
+        outcome_recovery: MemoryExtractionOutcomeRecovery | None = None,
         now: Callable[[], datetime],
     ) -> None:
         self._accounting = accounting
         self._eligibility = eligibility
         self._provider = provider
-        self._outcomes = outcome_journal
+        self._outcome_writer = outcome_writer
+        self._outcome_recovery = outcome_recovery
         self._completion = completion
         self._now = now
 
@@ -174,8 +184,16 @@ class MemoryExtractionCoordinator:
             ) from None
         outcome: MemoryExtractionProviderOutcomeV1 | None = None
         if reservation.replayed and job.replayed:
+            if self._outcome_recovery is None:
+                return MemoryExtractionResultV1(
+                    reservation_id=reservation.reservation_id,
+                    state="reconciliation_required",
+                    output=None,
+                    billed_microusd=0,
+                    reason="durable extraction job requires exact-job outcome recovery",
+                )
             try:
-                outcome = self._outcomes.load(
+                outcome = self._outcome_recovery.load(
                     manifest=manifest,
                     dispatch=dispatch,
                     reservation_id=reservation.reservation_id,
@@ -214,7 +232,7 @@ class MemoryExtractionCoordinator:
                     "provider outcome is unknown; full reservation charged to campaign"
                 ) from None
             try:
-                outcome = self._outcomes.record(
+                outcome = self._outcome_writer.record(
                     manifest=manifest,
                     dispatch=dispatch,
                     reservation_id=reservation.reservation_id,
