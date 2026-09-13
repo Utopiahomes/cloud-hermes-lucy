@@ -5,13 +5,14 @@ from uuid import UUID
 
 import pytest
 
-from lucy.governed_memory import ImportAttemptResultV1
+from lucy.governed_memory import ImportAttemptResultV1, ImportJobResultV1
 from lucy.memory_extraction import (
     MemoryExtractionCompletionRejected,
     MemoryExtractionCoordinator,
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
     MemoryExtractionUnavailable,
+    memory_extraction_job_id,
 )
 from lucy.memory_import import ImportManifestRecordV1, ImportManifestV2
 from lucy.secret_filter import MemorySecretDetected
@@ -23,9 +24,14 @@ RESERVATION = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 
 
 class AccountingSpy:
-    def __init__(self, events: list[str], *, replayed: bool = False) -> None:
+    def __init__(
+        self, events: list[str], *, replayed: bool = False, job_replayed: bool = False,
+        job_fails: bool = False
+    ) -> None:
         self.events = events
         self.replayed = replayed
+        self.job_replayed = job_replayed
+        self.job_fails = job_fails
         self.settlements: list[tuple[int, str]] = []
 
     def reserve_attempt(
@@ -37,6 +43,18 @@ class AccountingSpy:
         self.events.append("reserve")
         return ImportAttemptResultV1(
             reservation_id=RESERVATION, replayed=self.replayed
+        )
+
+    def register_job(self, **values: object) -> ImportJobResultV1:
+        assert values["reservation_id"] == RESERVATION
+        dispatch = values["dispatch"]
+        assert isinstance(dispatch, MemoryExtractionDispatchV1)
+        self.events.append("register-job")
+        if self.job_fails:
+            raise RuntimeError("synthetic uncertain job registration")
+        return ImportJobResultV1(
+            extraction_job_id=dispatch.extraction_job_id,
+            replayed=self.job_replayed,
         )
 
     def settle_attempt(
@@ -161,13 +179,21 @@ def _manifest(*, expires_at: datetime | None = None) -> ImportManifestV2:
 def _dispatch(
     *, prompt: str = "synthetic history", **changes: object
 ) -> MemoryExtractionDispatchV1:
+    attempt_key = "pilot:batch-1:attempt-1"
+    request_commitment = "e" * 64
     values: dict[str, object] = {
-        "attempt_key": "pilot:batch-1:attempt-1",
+        "extraction_job_id": memory_extraction_job_id(
+            CAMPAIGN,
+            attempt_key=attempt_key,
+            request_commitment=request_commitment,
+        ),
+        "attempt_key": attempt_key,
         "source_record_ids": ("conversation:node:message",),
         "prompt": prompt,
         "input_tokens": 20,
         "output_tokens": 50,
         "request_bytes": len(prompt.encode("utf-8")),
+        "request_commitment": request_commitment,
         "maximum_microusd": 5_000,
         "timeout_seconds": 30,
     }
@@ -215,6 +241,7 @@ def test_success_rechecks_sources_and_settles_before_returning_output() -> None:
     assert events == [
         "eligible:admission",
         "reserve",
+        "register-job",
         "eligible:pre_dispatch",
         "provider",
         "eligible:post_dispatch",
@@ -294,15 +321,38 @@ def test_policy_mismatch_is_billed_and_discarded() -> None:
     assert accounting.settlements == [(2_000, "discarded")]
 
 
-def test_replayed_reservation_never_repeats_provider_execution() -> None:
+def test_replayed_job_never_repeats_provider_execution() -> None:
     events: list[str] = []
-    accounting = AccountingSpy(events, replayed=True)
+    accounting = AccountingSpy(events, replayed=True, job_replayed=True)
     coordinator, _ = _coordinator(events, accounting=accounting)
 
     result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
 
     assert result.state == "reconciliation_required" and result.output is None
-    assert events == ["eligible:admission", "reserve"]
+    assert events == ["eligible:admission", "reserve", "register-job"]
+
+
+def test_replayed_reservation_without_job_can_safely_begin_dispatch() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events, replayed=True, job_replayed=False)
+    coordinator, _ = _coordinator(events, accounting=accounting)
+
+    result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert result.state == "succeeded"
+    assert events.count("provider") == 1
+
+
+def test_uncertain_job_registration_never_dispatches_or_settles() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events, job_fails=True)
+    coordinator, _ = _coordinator(events, accounting=accounting)
+
+    with pytest.raises(MemoryExtractionUnavailable, match="job registration is uncertain"):
+        coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert "provider" not in events
+    assert accounting.settlements == []
 
 
 def test_provider_over_cap_charges_admitted_maximum_and_returns_no_output() -> None:

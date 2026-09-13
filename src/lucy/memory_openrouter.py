@@ -186,6 +186,7 @@ class OpenRouterMemoryProvider:
         if (
             request.request_bytes != dispatch.request_bytes
             or request.input_token_upper_bound != dispatch.input_tokens
+            or request.request_commitment != dispatch.request_commitment
         ):
             raise MemoryOpenRouterUnavailable("memory request accounting differs from dispatch")
         if (

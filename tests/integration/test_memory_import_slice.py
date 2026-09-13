@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,6 +31,7 @@ from lucy.governed_memory import (
     GovernedMemoryReader,
     GovernedMemoryUnavailable,
 )
+from lucy.memory_extraction import memory_extraction_job_id
 from lucy.memory_import import (
     AssertionStatus,
     EpistemicStatus,
@@ -232,6 +234,11 @@ def _provision() -> tuple[object, object]:
                 policy_actor_binding_id=policy_actor_id,
                 manifest_digest=TEST_MANIFEST_DIGEST,
                 serialized_manifest={
+                    "provider_policy_id": "synthetic-private-zdr-v1",
+                    "token_accounting_version": "canonical-json-byte-upper-bound-v1",
+                    "max_request_input_tokens": 100,
+                    "max_request_output_tokens": 100,
+                    "max_request_total_tokens": 200,
                     "records": [
                         {
                             "source_record_id": f"synthetic-record-{index}",
@@ -293,6 +300,7 @@ def _provision() -> tuple[object, object]:
                 "lucy.reserve_memory_import_attempt_v1(uuid,text,bigint),"
                 "lucy.settle_memory_import_attempt_v1(uuid,bigint,text),"
                 "lucy.require_memory_import_sources_v1(uuid,text,jsonb) "
+                ",lucy.register_memory_import_job_v1(jsonb) "
                 "TO lucy_raymond_routine; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text),"
@@ -784,6 +792,62 @@ def test_source_eligibility_is_exact_realm_bound_and_deletion_aware() -> None:
             source_record_ids=("synthetic-record-0",),
             phase="post_dispatch",
         )
+
+
+def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
+    assert RAYMOND_URL is not None
+    _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    reservation = extractor.reserve_attempt(
+        TEST_CAMPAIGN_ID,
+        attempt_key="pilot:batch:1:attempt:1",
+        reserved_microusd=0,
+    )
+    request_commitment = "d" * 64
+    job_id = memory_extraction_job_id(
+        TEST_CAMPAIGN_ID,
+        attempt_key="pilot:batch:1:attempt:1",
+        request_commitment=request_commitment,
+    )
+    job = {
+        "contract_version": "1",
+        "extraction_job_id": str(job_id),
+        "reservation_id": str(reservation.reservation_id),
+        "campaign_id": str(TEST_CAMPAIGN_ID),
+        "manifest_digest": TEST_MANIFEST_DIGEST,
+        "attempt_key": "pilot:batch:1:attempt:1",
+        "source_record_ids": ["synthetic-record-0"],
+        "request_commitment": request_commitment,
+        "request_bytes": 50,
+        "input_token_upper_bound": 50,
+        "maximum_output_tokens": 50,
+        "token_accounting_version": "canonical-json-byte-upper-bound-v1",
+        "provider_policy_id": "synthetic-private-zdr-v1",
+        "model_route": "none",
+        "maximum_microusd": 0,
+    }
+    sessions = create_session_factory(RAYMOND_URL)
+    with sessions.begin() as session:
+        first = session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(job, separators=(",", ":"))},
+        ).scalar_one()
+        replay = session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(job, separators=(",", ":"))},
+        ).scalar_one()
+    assert first == {"extraction_job_id": str(job_id), "replayed": False}
+    assert replay == {"extraction_job_id": str(job_id), "replayed": True}
+
+    for changed in (
+        {**job, "source_record_ids": ["synthetic-record-1"]},
+        {**job, "request_commitment": "e" * 64},
+    ):
+        with pytest.raises(DBAPIError), sessions.begin() as session:
+            session.execute(
+                text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+                {"job": json.dumps(changed, separators=(",", ":"))},
+            ).scalar_one()
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:

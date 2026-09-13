@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lucy.chatgpt_manifest import LocalChatGPTMessageV1, LocalPilotBuildV1
 from lucy.contracts.canonical import canonical_json_bytes
-from lucy.memory_extraction import MemoryExtractionDispatchV1
+from lucy.memory_extraction import MemoryExtractionDispatchV1, memory_extraction_job_id
 from lucy.memory_import import ImportManifestRecordV1, ImportManifestV2
 from lucy.memory_openrouter import build_openrouter_memory_request
 from lucy.memory_provider_request import MemoryProviderRequestV1
@@ -115,13 +115,20 @@ def _dispatch(
         prompt=prompt,
         output_tokens=manifest.max_request_output_tokens,
     )
+    attempt_key = f"pilot:{manifest.campaign_id}:batch:{batch_index}:attempt:1"
     return MemoryExtractionDispatchV1(
-        attempt_key=f"pilot:{manifest.campaign_id}:batch:{batch_index}:attempt:1",
+        extraction_job_id=memory_extraction_job_id(
+            manifest.campaign_id,
+            attempt_key=attempt_key,
+            request_commitment=request.request_commitment,
+        ),
+        attempt_key=attempt_key,
         source_record_ids=tuple(record.source_record_id for record in records),
         prompt=prompt,
         input_tokens=request.input_token_upper_bound,
         output_tokens=manifest.max_request_output_tokens,
         request_bytes=request.request_bytes,
+        request_commitment=request.request_commitment,
         maximum_microusd=maximum_microusd,
         timeout_seconds=timeout_seconds,
     )

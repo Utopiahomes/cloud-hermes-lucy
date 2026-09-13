@@ -11,7 +11,7 @@ from uuid import UUID
 import pytest
 
 import lucy.memory_openrouter as memory_openrouter
-from lucy.memory_extraction import MemoryExtractionDispatchV1
+from lucy.memory_extraction import MemoryExtractionDispatchV1, memory_extraction_job_id
 from lucy.memory_import import ImportManifestRecordV1, ImportManifestV2
 from lucy.memory_openrouter import (
     MemoryOpenRouterUnavailable,
@@ -75,16 +75,23 @@ def _manifest(**changes: object) -> ImportManifestV2:
 
 def _dispatch(**changes: object) -> MemoryExtractionDispatchV1:
     prompt = "Extract from exact synthetic history."
+    attempt_key = "pilot:batch-1:attempt-1"
     request = build_openrouter_memory_request(
         model_route="openai/gpt-oss-20b", prompt=prompt, output_tokens=100
     )
     values: dict[str, object] = {
-        "attempt_key": "pilot:batch-1:attempt-1",
+        "extraction_job_id": memory_extraction_job_id(
+            CAMPAIGN,
+            attempt_key=attempt_key,
+            request_commitment=request.request_commitment,
+        ),
+        "attempt_key": attempt_key,
         "source_record_ids": ("conversation:node:message",),
         "prompt": prompt,
         "input_tokens": request.input_token_upper_bound,
         "output_tokens": 100,
         "request_bytes": request.request_bytes,
+        "request_commitment": request.request_commitment,
         "maximum_microusd": 5_000,
         "timeout_seconds": 30,
     }
@@ -176,6 +183,7 @@ def test_complete_request_accounting_rejects_forged_counts_before_network() -> N
     for dispatch in (
         exact.model_copy(update={"input_tokens": exact.input_tokens - 1}),
         exact.model_copy(update={"request_bytes": exact.request_bytes - 1}),
+        exact.model_copy(update={"request_commitment": "0" * 64}),
     ):
         transport = TransportSpy(_response())
         with pytest.raises(MemoryOpenRouterUnavailable, match="accounting differs"):

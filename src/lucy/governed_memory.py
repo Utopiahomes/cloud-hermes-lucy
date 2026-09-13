@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,12 +17,16 @@ from lucy.memory_import import (
     ImportManifest,
     ImportManifestRecordV1,
     ImportManifestV1,
+    ImportManifestV2,
     MemoryCandidatePayloadV1,
     ProtectionClass,
 )
 from lucy.realm_archive import RealmArchiveEncryptor
 from lucy.realm_archive_commit import RealmArchiveCommitInputV1
 from lucy.secret_filter import MemorySecretDetected, detect_memory_secrets
+
+if TYPE_CHECKING:
+    from lucy.memory_extraction import MemoryExtractionDispatchV1
 
 
 class GovernedMemoryUnavailable(PermissionError):
@@ -58,6 +62,12 @@ class ImportCampaignResultV1(BaseModel):
 class ImportAttemptResultV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     reservation_id: UUID
+    replayed: bool
+
+
+class ImportJobResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    extraction_job_id: UUID
     replayed: bool
 
 
@@ -170,6 +180,41 @@ class GovernedMemoryExtractor:
             raise GovernedMemoryUnavailable(
                 "memory import source eligibility result is invalid"
             )
+
+    def register_job(
+        self, *, manifest: ImportManifest, dispatch: MemoryExtractionDispatchV1,
+        reservation_id: UUID
+    ) -> ImportJobResultV1:
+        if not isinstance(manifest, ImportManifestV2):
+            raise ValueError("memory import job requires an executable v2 manifest")
+        payload = {
+            "contract_version": "1",
+            "extraction_job_id": str(dispatch.extraction_job_id),
+            "reservation_id": str(reservation_id),
+            "campaign_id": str(manifest.campaign_id),
+            "manifest_digest": manifest.digest,
+            "attempt_key": dispatch.attempt_key,
+            "source_record_ids": list(dispatch.source_record_ids),
+            "request_commitment": dispatch.request_commitment,
+            "request_bytes": dispatch.request_bytes,
+            "input_token_upper_bound": dispatch.input_tokens,
+            "maximum_output_tokens": dispatch.output_tokens,
+            "token_accounting_version": manifest.token_accounting_version,
+            "provider_policy_id": manifest.provider_policy_id,
+            "model_route": manifest.model_route,
+            "maximum_microusd": dispatch.maximum_microusd,
+        }
+        try:
+            with self._sessions.begin() as session:
+                value = session.execute(
+                    text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+                    {"job": canonical_json_bytes(payload).decode("utf-8")},
+                ).scalar_one()
+        except DBAPIError as exc:
+            raise GovernedMemoryUnavailable(
+                "memory import job registration unavailable"
+            ) from exc
+        return ImportJobResultV1.model_validate(value)
 
     def settle_attempt(
         self, reservation_id: UUID, *, billed_microusd: int, result: str

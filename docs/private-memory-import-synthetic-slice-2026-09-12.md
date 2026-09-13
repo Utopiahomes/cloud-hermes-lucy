@@ -78,14 +78,20 @@ accepted `0057` migration is merged at `2807dad`.
     source to the campaign's exact manifest, active evidence identity and version, and absence of
     a deletion fence. Duplicate, blank, oversized, outside-manifest, cross-scope, stale, or deleted
     source references fail closed.
+17. Every provider dispatch now has a deterministic extraction-job identity derived from its
+    campaign, attempt key, and immutable full-request commitment. PostgreSQL durably binds that
+    job to the exact reservation, realm, manifest, sources, route, token ceilings, and cost ceiling
+    before provider execution. A replayed reservation with no job may safely create the job and
+    proceed; a replayed durable job never repeats the provider call and requires outcome
+    reconciliation. Job registration and settlement serialize on the same reservation lock.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 |---|---|---|---|
-| Existing PostgreSQL migration `0057_public_conversation` to `0058_memory_import_eligibility` | Passed | Disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12; prior clean-chain proof through `0057` remains valid | Migration or PostgreSQL-image change |
-| Synthetic memory-import integration | Passed, 9 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0058`; includes exact realm/source/version/deletion eligibility, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
-| Python unit suite | Passed, 861 tests | Full `tests/unit` run after the Public Lucy merge and source-eligibility increment, 2026-09-12 | Relevant Python or dependency change |
+| Fresh PostgreSQL migration `0001` through `0059_memory_import_jobs` | Passed | Clean disposable PostgreSQL on `127.0.0.1:54329`, 2026-09-12 | Migration or PostgreSQL-image change |
+| Synthetic memory-import integration | Passed, 10 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0059`; includes immutable job replay/conflict, exact realm/source/version/deletion eligibility, V2 authorization/round trip, atomic completion replay, and partial-batch rollback | Import, grant, migration, or scoped-memory change |
+| Python unit suite | Passed, 863 tests | Full `tests/unit` run after the Public Lucy merge and durable extraction-job increment, 2026-09-12 | Relevant Python or dependency change |
 | Ruff | Passed | `src/lucy`, unit/import tests, migrations `0055` through `0058` | Relevant source change |
 | Mypy strict | Passed, 95 source files | `mypy --strict src` after the source-eligibility increment | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -117,12 +123,11 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
    pilot-only runner. The component boundaries, including three-phase database eligibility, are
    implemented; runner wiring remains. No real provider request is enabled, and the runner must
    require the separately authorized manifest.
-2. After Public Lucy connects its accepted migration `0057` to `0056`, add a realm-scoped durable
-   extraction job and encrypted provider-outcome journal. Until that exists, the pilot must stay
-   fenced: a replayed reservation or uncertain completion acknowledgement requires operator
-   reconciliation, and the provider is never called again automatically. This interim boundary
-   cannot recover output lost before database commit or regenerate the review artifact after an
-   acknowledged commit.
+2. Add the encrypted provider-outcome journal to the new realm-scoped durable extraction job.
+   Until that exists, the pilot must stay fenced: a replayed durable job or uncertain completion
+   acknowledgement requires operator reconciliation, and the provider is never called again
+   automatically. This interim boundary cannot recover output lost before database commit or
+   regenerate the review artifact after an acknowledged commit.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

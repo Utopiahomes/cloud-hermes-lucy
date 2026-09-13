@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from typing import Literal, Protocol
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lucy.governed_memory import ImportAttemptResultV1
+from lucy.governed_memory import ImportAttemptResultV1, ImportJobResultV1
 from lucy.memory_import import ImportManifestV2
 from lucy.secret_filter import MemorySecretDetected, detect_memory_secrets
 
@@ -25,12 +25,14 @@ class MemoryExtractionCompletionRejected(ValueError):
 class MemoryExtractionDispatchV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    extraction_job_id: UUID
     attempt_key: str = Field(min_length=1, max_length=512)
     source_record_ids: tuple[str, ...] = Field(min_length=1, max_length=10_000)
     prompt: str = Field(min_length=1, max_length=2_000_000)
     input_tokens: int = Field(ge=1)
     output_tokens: int = Field(ge=1)
     request_bytes: int = Field(ge=1)
+    request_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
     maximum_microusd: int = Field(ge=0)
     timeout_seconds: int = Field(ge=1, le=600)
 
@@ -69,6 +71,14 @@ class MemoryImportCampaignAccounting(Protocol):
     def settle_attempt(
         self, reservation_id: UUID, *, billed_microusd: int, result: str
     ) -> ImportAttemptResultV1: ...
+
+    def register_job(
+        self,
+        *,
+        manifest: ImportManifestV2,
+        dispatch: MemoryExtractionDispatchV1,
+        reservation_id: UUID,
+    ) -> ImportJobResultV1: ...
 
 
 class MemoryImportSourceEligibility(Protocol):
@@ -131,13 +141,23 @@ class MemoryExtractionCoordinator:
             attempt_key=dispatch.attempt_key,
             reserved_microusd=dispatch.maximum_microusd,
         )
-        if reservation.replayed:
+        try:
+            job = self._accounting.register_job(
+                manifest=manifest,
+                dispatch=dispatch,
+                reservation_id=reservation.reservation_id,
+            )
+        except Exception:
+            raise MemoryExtractionUnavailable(
+                "extraction job registration is uncertain; reconciliation required"
+            ) from None
+        if reservation.replayed and job.replayed:
             return MemoryExtractionResultV1(
                 reservation_id=reservation.reservation_id,
                 state="reconciliation_required",
                 output=None,
                 billed_microusd=0,
-                reason="campaign reservation replay requires durable outcome reconciliation",
+                reason="durable extraction job replay requires outcome reconciliation",
             )
         try:
             self._require_sources(manifest, dispatch, "pre_dispatch")
@@ -241,6 +261,12 @@ class MemoryExtractionCoordinator:
         if now >= manifest.expires_at:
             raise MemoryExtractionUnavailable("memory import campaign has expired")
         included = {record.source_record_id for record in manifest.records if record.included}
+        if dispatch.extraction_job_id != memory_extraction_job_id(
+            manifest.campaign_id,
+            attempt_key=dispatch.attempt_key,
+            request_commitment=dispatch.request_commitment,
+        ):
+            raise ValueError("extraction job identity is not bound to its request")
         if not set(dispatch.source_record_ids).issubset(included):
             raise ValueError("extraction dispatch contains records outside the manifest")
         if dispatch.input_tokens > manifest.max_request_input_tokens:
@@ -267,3 +293,17 @@ class MemoryExtractionCoordinator:
             source_record_ids=dispatch.source_record_ids,
             phase=phase,
         )
+
+
+def memory_extraction_job_id(
+    campaign_id: UUID, *, attempt_key: str, request_commitment: str
+) -> UUID:
+    """Derive the stable identity used by the durable execution and outcome records."""
+
+    if not attempt_key or len(attempt_key) > 512:
+        raise ValueError("memory extraction attempt key is invalid")
+    if len(request_commitment) != 64 or any(
+        character not in "0123456789abcdef" for character in request_commitment
+    ):
+        raise ValueError("memory extraction request commitment is invalid")
+    return uuid5(campaign_id, f"memory-extraction:{attempt_key}:{request_commitment}")
