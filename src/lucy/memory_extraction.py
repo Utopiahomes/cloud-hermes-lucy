@@ -101,6 +101,25 @@ class MemoryImportProvider(Protocol):
     ) -> MemoryExtractionProviderOutcomeV1: ...
 
 
+class MemoryExtractionOutcomeJournal(Protocol):
+    def record(
+        self,
+        *,
+        manifest: ImportManifestV2,
+        dispatch: MemoryExtractionDispatchV1,
+        reservation_id: UUID,
+        outcome: MemoryExtractionProviderOutcomeV1,
+    ) -> MemoryExtractionProviderOutcomeV1: ...
+
+    def load(
+        self,
+        *,
+        manifest: ImportManifestV2,
+        dispatch: MemoryExtractionDispatchV1,
+        reservation_id: UUID,
+    ) -> MemoryExtractionProviderOutcomeV1 | None: ...
+
+
 class MemoryExtractionSuccessCompletion(Protocol):
     def complete_success(
         self,
@@ -118,6 +137,7 @@ class MemoryExtractionCoordinator:
         accounting: MemoryImportCampaignAccounting,
         eligibility: MemoryImportSourceEligibility,
         provider: MemoryImportProvider,
+        outcome_journal: MemoryExtractionOutcomeJournal,
         completion: MemoryExtractionSuccessCompletion,
         *,
         now: Callable[[], datetime],
@@ -125,6 +145,7 @@ class MemoryExtractionCoordinator:
         self._accounting = accounting
         self._eligibility = eligibility
         self._provider = provider
+        self._outcomes = outcome_journal
         self._completion = completion
         self._now = now
 
@@ -151,14 +172,24 @@ class MemoryExtractionCoordinator:
             raise MemoryExtractionUnavailable(
                 "extraction job registration is uncertain; reconciliation required"
             ) from None
+        outcome: MemoryExtractionProviderOutcomeV1 | None = None
         if reservation.replayed and job.replayed:
-            return MemoryExtractionResultV1(
-                reservation_id=reservation.reservation_id,
-                state="reconciliation_required",
-                output=None,
-                billed_microusd=0,
-                reason="durable extraction job replay requires outcome reconciliation",
-            )
+            try:
+                outcome = self._outcomes.load(
+                    manifest=manifest,
+                    dispatch=dispatch,
+                    reservation_id=reservation.reservation_id,
+                )
+            except Exception:
+                outcome = None
+            if outcome is None:
+                return MemoryExtractionResultV1(
+                    reservation_id=reservation.reservation_id,
+                    state="reconciliation_required",
+                    output=None,
+                    billed_microusd=0,
+                    reason="durable extraction job has no recoverable outcome",
+                )
         try:
             self._require_sources(manifest, dispatch, "pre_dispatch")
         except Exception:
@@ -170,17 +201,29 @@ class MemoryExtractionCoordinator:
             raise MemoryExtractionUnavailable(
                 "source eligibility changed before provider dispatch"
             ) from None
-        try:
-            outcome = self._provider.infer(manifest=manifest, dispatch=dispatch)
-        except Exception:
-            self._accounting.settle_attempt(
-                reservation.reservation_id,
-                billed_microusd=dispatch.maximum_microusd,
-                result="failed",
-            )
-            raise MemoryExtractionUnavailable(
-                "provider outcome is unknown; full reservation charged to campaign"
-            ) from None
+        if outcome is None:
+            try:
+                outcome = self._provider.infer(manifest=manifest, dispatch=dispatch)
+            except Exception:
+                self._accounting.settle_attempt(
+                    reservation.reservation_id,
+                    billed_microusd=dispatch.maximum_microusd,
+                    result="failed",
+                )
+                raise MemoryExtractionUnavailable(
+                    "provider outcome is unknown; full reservation charged to campaign"
+                ) from None
+            try:
+                outcome = self._outcomes.record(
+                    manifest=manifest,
+                    dispatch=dispatch,
+                    reservation_id=reservation.reservation_id,
+                    outcome=outcome,
+                )
+            except Exception:
+                raise MemoryExtractionUnavailable(
+                    "provider outcome persistence is uncertain; reconciliation required"
+                ) from None
         if outcome.billed_microusd > dispatch.maximum_microusd:
             self._accounting.settle_attempt(
                 reservation.reservation_id,

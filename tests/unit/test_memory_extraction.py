@@ -109,6 +109,31 @@ class ProviderSpy:
         )
 
 
+class OutcomeJournalSpy:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        recovered: MemoryExtractionProviderOutcomeV1 | None = None,
+        record_fails: bool = False,
+    ) -> None:
+        self.events = events
+        self.recovered = recovered
+        self.record_fails = record_fails
+
+    def load(self, **_: object) -> MemoryExtractionProviderOutcomeV1 | None:
+        self.events.append("outcome-load")
+        return self.recovered
+
+    def record(self, **values: object) -> MemoryExtractionProviderOutcomeV1:
+        self.events.append("outcome-record")
+        if self.record_fails:
+            raise RuntimeError("synthetic uncertain outcome persistence")
+        outcome = values["outcome"]
+        assert isinstance(outcome, MemoryExtractionProviderOutcomeV1)
+        return outcome
+
+
 class CompletionSpy:
     def __init__(
         self,
@@ -207,6 +232,7 @@ def _coordinator(
     accounting: AccountingSpy | None = None,
     eligibility: EligibilitySpy | None = None,
     provider: ProviderSpy | None = None,
+    outcome_journal: OutcomeJournalSpy | None = None,
     completion_fails: bool = False,
     completion_rejects: bool = False,
 ) -> tuple[MemoryExtractionCoordinator, AccountingSpy]:
@@ -216,6 +242,7 @@ def _coordinator(
             selected_accounting,
             eligibility or EligibilitySpy(events),
             provider or ProviderSpy(events),
+            outcome_journal or OutcomeJournalSpy(events),
             CompletionSpy(
                 events,
                 selected_accounting,
@@ -244,6 +271,7 @@ def test_success_rechecks_sources_and_settles_before_returning_output() -> None:
         "register-job",
         "eligible:pre_dispatch",
         "provider",
+        "outcome-record",
         "eligible:post_dispatch",
         "complete",
         "settle:succeeded:2000",
@@ -329,7 +357,9 @@ def test_replayed_job_never_repeats_provider_execution() -> None:
     result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
 
     assert result.state == "reconciliation_required" and result.output is None
-    assert events == ["eligible:admission", "reserve", "register-job"]
+    assert events == [
+        "eligible:admission", "reserve", "register-job", "outcome-load"
+    ]
 
 
 def test_replayed_reservation_without_job_can_safely_begin_dispatch() -> None:
@@ -341,6 +371,40 @@ def test_replayed_reservation_without_job_can_safely_begin_dispatch() -> None:
 
     assert result.state == "succeeded"
     assert events.count("provider") == 1
+
+
+def test_replayed_job_resumes_from_encrypted_outcome_without_provider_call() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events, replayed=True, job_replayed=True)
+    recovered = ProviderSpy(events).infer()
+    events.clear()
+    coordinator, _ = _coordinator(
+        events,
+        accounting=accounting,
+        outcome_journal=OutcomeJournalSpy(events, recovered=recovered),
+    )
+
+    result = coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert result.state == "succeeded"
+    assert "provider" not in events
+    assert events.count("outcome-load") == 1
+
+
+def test_uncertain_outcome_persistence_never_completes_or_settles() -> None:
+    events: list[str] = []
+    accounting = AccountingSpy(events)
+    coordinator, _ = _coordinator(
+        events,
+        accounting=accounting,
+        outcome_journal=OutcomeJournalSpy(events, record_fails=True),
+    )
+
+    with pytest.raises(MemoryExtractionUnavailable, match="persistence is uncertain"):
+        coordinator.execute(manifest=_manifest(), dispatch=_dispatch())
+
+    assert "complete" not in events
+    assert accounting.settlements == []
 
 
 def test_uncertain_job_registration_never_dispatches_or_settles() -> None:

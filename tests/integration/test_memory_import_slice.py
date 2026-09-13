@@ -31,6 +31,7 @@ from lucy.governed_memory import (
     GovernedMemoryReader,
     GovernedMemoryUnavailable,
 )
+from lucy.governed_memory_outcome import PostgresMemoryOutcomeStore
 from lucy.memory_extraction import memory_extraction_job_id
 from lucy.memory_import import (
     AssertionStatus,
@@ -44,6 +45,11 @@ from lucy.memory_import import (
     build_synthetic_manifest,
     extract_synthetic_candidate,
     load_synthetic_conversation,
+)
+from lucy.memory_outcome import (
+    MemoryOutcomeBindingV1,
+    MemoryOutcomeEnvelopeV1,
+    MemoryOutcomeUnavailable,
 )
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
@@ -301,6 +307,8 @@ def _provision() -> tuple[object, object]:
                 "lucy.settle_memory_import_attempt_v1(uuid,bigint,text),"
                 "lucy.require_memory_import_sources_v1(uuid,text,jsonb) "
                 ",lucy.register_memory_import_job_v1(jsonb) "
+                ",lucy.record_memory_import_provider_outcome_v1(jsonb) "
+                ",lucy.load_memory_import_provider_outcome_v1(uuid) "
                 "TO lucy_raymond_routine; "
                 "GRANT EXECUTE ON FUNCTION "
                 "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text),"
@@ -796,7 +804,7 @@ def test_source_eligibility_is_exact_realm_bound_and_deletion_aware() -> None:
 
 def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
     assert RAYMOND_URL is not None
-    _provision()
+    scope_id, _ = _provision()
     extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
     reservation = extractor.reserve_attempt(
         TEST_CAMPAIGN_ID,
@@ -839,6 +847,44 @@ def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
     assert first == {"extraction_job_id": str(job_id), "replayed": False}
     assert replay == {"extraction_job_id": str(job_id), "replayed": True}
 
+    outcome_store = PostgresMemoryOutcomeStore(sessions)
+    envelope = MemoryOutcomeEnvelopeV1(
+        binding=MemoryOutcomeBindingV1(
+            extraction_job_id=job_id,
+            reservation_id=reservation.reservation_id,
+            campaign_id=TEST_CAMPAIGN_ID,
+            destination_content_scope_id=scope_id,
+            manifest_digest=TEST_MANIFEST_DIGEST,
+            attempt_key="pilot:batch:1:attempt:1",
+            source_record_ids=("synthetic-record-0",),
+            request_commitment=request_commitment,
+            provider_policy_id="synthetic-private-zdr-v1",
+            model_route="none",
+            maximum_microusd=0,
+        ),
+        encryption_id=uuid4(),
+        registry_id=uuid4(),
+        algorithm="AES-256-GCM+AES-KW-GCM",
+        encryption_context_version=1,
+        record_version=1,
+        storage_epoch=1,
+        registry_epoch=1,
+        key_epoch=1,
+        ciphertext_b64=base64.b64encode(b"encrypted outcome").decode("ascii"),
+        content_nonce_b64=base64.b64encode(b"n" * 12).decode("ascii"),
+        keyed_commitment="f" * 64,
+        billed_microusd=0,
+        provider_reference_commitment="a" * 64,
+    )
+    assert outcome_store.put(envelope) == envelope
+    assert outcome_store.put(envelope) == envelope
+    assert outcome_store.load(job_id) == envelope
+    assert outcome_store.load(uuid4()) is None
+    with pytest.raises(MemoryOutcomeUnavailable, match="outcome write unavailable"):
+        outcome_store.put(envelope.model_copy(update={"billed_microusd": 1}))
+    with pytest.raises(DBAPIError, match="permission denied"), sessions.begin() as session:
+        session.execute(text("SELECT * FROM lucy.memory_import_provider_outcomes_v1"))
+
     for changed in (
         {**job, "source_record_ids": ["synthetic-record-1"]},
         {**job, "request_commitment": "e" * 64},
@@ -847,7 +893,7 @@ def test_extraction_job_binds_exact_reservation_request_and_sources() -> None:
             session.execute(
                 text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
                 {"job": json.dumps(changed, separators=(",", ":"))},
-            ).scalar_one()
+                ).scalar_one()
 
 
 def test_success_completion_atomically_stages_batch_and_settles() -> None:
