@@ -104,8 +104,6 @@ class ServiceReadiness:
             session.execute(
                 text("SELECT pg_advisory_xact_lock_shared(:key)"), {"key": ADMISSION_LOCK}
             )
-            if self._mode != "all-local":
-                self._check_identity(session)
             revisions = list(
                 session.scalars(
                     text(
@@ -142,6 +140,8 @@ class ServiceReadiness:
                     }
             if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
+            if self._mode != "all-local":
+                self._check_identity(session, schema_revision=revisions[0])
             admission = session.execute(
                 text(
                     "SELECT state, storage_epoch FROM lucy.runtime_admission "
@@ -164,7 +164,7 @@ class ServiceReadiness:
             if self._baseline == "v1.2" and self._mode in {"routine", "all-local"}:
                 check_journal_admission(session.connection(), self._journal)
 
-    def _check_identity(self, session: Session) -> None:
+    def _check_identity(self, session: Session, *, schema_revision: str) -> None:
         if self._expected_database_login is not None:
             actual_login = session.scalar(text("SELECT session_user"))
             if actual_login != self._expected_database_login:
@@ -199,7 +199,7 @@ class ServiceReadiness:
         if elevated_storage:
             raise ReadinessError("service login can administer storage")
         if self._baseline == "v1.3":
-            self._check_v13_identity(session)
+            self._check_v13_identity(session, schema_revision=schema_revision)
             return
         forbidden = [
             ("lucy.deletion_journal_binding", "INSERT,UPDATE,DELETE,TRUNCATE"),
@@ -339,7 +339,7 @@ class ServiceReadiness:
             ):
                 raise ReadinessError("service login lacks readiness permissions")
 
-    def _check_v13_identity(self, session: Session) -> None:
+    def _check_v13_identity(self, session: Session, *, schema_revision: str) -> None:
         # V1.3 realm logins are execute-only. The two gate tables and Alembic
         # revision contain no customer content and are the sole direct reads.
         allowed_reads = {
@@ -369,29 +369,78 @@ class ServiceReadiness:
                 {"table": table},
             ):
                 raise ReadinessError("realm service login lacks readiness permissions")
-        public_function = (
-            "lucy.public_projection_knowledge_v1(text,uuid)"
-            if os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
-            else "lucy.public_projection_answer_v2(text,text,uuid)"
+        required_functions = _v13_required_functions(
+            mode=self._mode,
+            schema_revision=schema_revision,
+            public_conversation_enabled=(
+                os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
+            ),
+            telegram_stage2=os.getenv("LUCY_TELEGRAM_STAGE") == "2",
         )
-        required_functions = {
-            "public": (public_function,),
-            "routine": (
+        for function in required_functions:
+            if not session.scalar(
+                text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),
+                {"function": function},
+            ):
+                raise ReadinessError("realm service login lacks its exact function grants")
+
+
+def _v13_required_functions(
+    *,
+    mode: str,
+    schema_revision: str,
+    public_conversation_enabled: bool,
+    telegram_stage2: bool,
+) -> tuple[str, ...]:
+    """Return the exact grants required on either side of the 0054 -> 0056 bridge."""
+
+    if mode == "public":
+        return (
+            (
+                "lucy.public_projection_knowledge_v1(text,uuid)"
+                if public_conversation_enabled
+                else "lucy.public_projection_answer_v2(text,text,uuid)"
+            ),
+        )
+
+    post_memory_import = schema_revision in {
+        MEMORY_IMPORT_SCHEMA_REVISION,
+        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+    }
+    routine_memory_functions = (
+        (
                 "lucy.stage_memory_import_candidate_v1(jsonb)",
                 "lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb)",
                 "lucy.search_governed_scoped_memory_v1(text,integer)",
                 "lucy.reserve_memory_import_attempt_v1(uuid,text,bigint)",
                 "lucy.settle_memory_import_attempt_v1(uuid,bigint,text)",
+        )
+        if post_memory_import
+        else (
+            "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint)",
+            "lucy.search_scoped_memory_v1(text,integer)",
+        )
+    )
+    policy_memory_functions = (
+        (
+            "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text)",
+            "lucy.promote_scoped_memory_candidate_v1(uuid,text)",
+            "lucy.search_protected_scoped_memory_v1(text,integer,uuid,text)",
+            "lucy.authorize_memory_import_campaign_v1("
+            "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text)",
+        )
+        if post_memory_import
+        else ()
+    )
+    required_functions = {
+        "routine": routine_memory_functions
+        + (
                 "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
                 "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
                 "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
             ),
-            "policy": (
-                "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text)",
-                "lucy.promote_scoped_memory_candidate_v1(uuid,text)",
-                "lucy.search_protected_scoped_memory_v1(text,integer,uuid,text)",
-                "lucy.authorize_memory_import_campaign_v1("
-                "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text)",
+        "policy": policy_memory_functions
+        + (
                 "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
                 "lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint)",
                 "lucy.read_claimed_sensitive_authority_v1(uuid)",
@@ -413,18 +462,13 @@ class ServiceReadiness:
                 "lucy.read_sensitive_operation_status_v1(uuid)",
                 "lucy.reconcile_scoped_deletion_v2(uuid)",
             ),
-        }
-        if self._mode == "routine" and os.getenv("LUCY_TELEGRAM_STAGE") == "2":
+    }
+    if mode == "routine" and telegram_stage2:
             required_functions["routine"] += (
                 "lucy.set_and_accept_scoped_capture_turn_v1(text,text,boolean,text)",
                 "lucy.commit_capturable_scoped_turn_v1(uuid,uuid)",
             )
-        for function in required_functions.get(self._mode, ()):
-            if not session.scalar(
-                text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),
-                {"function": function},
-            ):
-                raise ReadinessError("realm service login lacks its exact function grants")
+    return required_functions.get(mode, ())
 
 
 class AdmittedSession(Session):

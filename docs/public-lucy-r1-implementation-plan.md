@@ -84,6 +84,13 @@ are not live-data requests and remain answerable.
 5. Verify negative controls and the approved digest in the deployed environment.
 6. Atomically activate the new projection, then enable the conversational reader.
 
+The packaged production path now includes a readiness bridge that selects only the
+functions present at the live schema revision, plus separate inspect, prepare-migration,
+activation-migration, and guarded-reopen jobs. This lets the reviewed image run at
+`0054` before quarantine, stage and approve at `0056`, activate at `0057`, and reopen
+the same storage epoch without changing the existing encrypted Private Lucy capture
+mode.
+
 The local R1 release controller now enforces this order with distinct `stage`,
 `approve`, and `activate` manifests and authorization markers. Stage and approval are
 accepted only at `0056` and leave the current route untouched. Activation is accepted
