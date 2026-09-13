@@ -20,6 +20,7 @@ from lucy.public_contracts import (
 )
 from lucy.public_model import (
     PublicConversationEngine,
+    PublicJsonModel,
     PublicModelCall,
     PublicModelCompletion,
     PublicModelRejected,
@@ -65,7 +66,7 @@ class EvaluationSuite(StrictModel):
 
 
 class RecordingModel:
-    def __init__(self, inner: OpenRouterPublicJsonModel) -> None:
+    def __init__(self, inner: PublicJsonModel) -> None:
         self._inner = inner
         self.calls: list[PublicModelCall] = []
         self.completions: list[PublicModelCompletion] = []
@@ -94,11 +95,14 @@ def _price_ceiling(model: str) -> tuple[float, float]:
     return 0.8, 4.0
 
 
-def _provider(api_key: str, model: str) -> OpenRouterPublicJsonModel:
+def _provider(
+    api_key: str, model: str, allowed_providers: tuple[str, ...]
+) -> OpenRouterPublicJsonModel:
     prompt, completion = _price_ceiling(model)
     return OpenRouterPublicJsonModel(
         api_key=api_key,
         model=model,
+        allowed_providers=allowed_providers,
         maximum_prompt_usd_per_million=prompt,
         maximum_completion_usd_per_million=completion,
     )
@@ -141,6 +145,7 @@ def evaluate(
     models: tuple[str, ...],
     repeats: int,
     conversation_ids: tuple[str, ...] = (),
+    allowed_providers: tuple[str, ...] = (),
 ) -> dict[str, object]:
     conversations = tuple(
         item
@@ -164,8 +169,10 @@ def evaluate(
     ambiguous_reserved_cost = 0
     for model in models:
         for repeat in range(1, repeats + 1):
-            generator = RecordingModel(_provider(api_key, model))
-            verifier = RecordingModel(_provider(api_key, VERIFIER_MODEL))
+            generator = RecordingModel(_provider(api_key, model, allowed_providers))
+            verifier = RecordingModel(
+                _provider(api_key, VERIFIER_MODEL, allowed_providers)
+            )
             engine = PublicConversationEngine(
                 generator,
                 verifier,
@@ -312,6 +319,7 @@ def evaluate(
         "ambiguous_reserved_cost_microusd": ambiguous_reserved_cost,
         "accounted_cost_microusd": provider_reported_cost + ambiguous_reserved_cost,
         "models": list(models),
+        "allowed_providers": list(allowed_providers),
         "verifier_model": VERIFIER_MODEL,
         "repeats": repeats,
         "summary": {
@@ -341,6 +349,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--models", nargs="*", default=list(MODELS))
     parser.add_argument("--conversation", action="append", default=[])
+    parser.add_argument("--allowed-provider", action="append", default=[])
     args = parser.parse_args()
     if args.repeats not in range(1, 6):
         raise ValueError("repeats must be between one and five")
@@ -360,6 +369,7 @@ def main() -> int:
         models=models,
         repeats=args.repeats,
         conversation_ids=tuple(args.conversation),
+        allowed_providers=tuple(args.allowed_provider),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

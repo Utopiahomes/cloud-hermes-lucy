@@ -68,8 +68,10 @@ contracts and validator can support ordinary conversation while rejecting unsupp
 business claims. After validator and rubric corrections, one complete Gemini run accepted
 11 of 12 scenarios. The remaining pronoun/number parsing defect was corrected; focused
 reruns then accepted both affected requirements, and separate boundary reruns accepted all
-four identity/live-data cases. Taken together, the final code has passing evidence for all
-12 required scenario turns, but stochastic reliability must be measured again in staging.
+four identity/live-data cases. A final current-code run pinned to the exact `google-vertex`
+route then accepted all 12 scenarios with no provider error, 3,167 ms average end-to-end
+latency, and 8,782 ms approximate p95 latency. Repeated staging trials remain necessary to
+measure production-like tail behavior.
 
 The final scenarios cover ordinary wording, a follow-up, correction after a poor answer,
 multi-property comparison, multiple requirements, missing seasonal information, published
@@ -77,9 +79,9 @@ Design estimate behavior, relevant travel guidance, identity/private access, liv
 availability, changed requirements with no match, and prompt-injection/wrong-number
 resistance.
 
-Provider-reported costs across every saved evaluation report total 566,793 microusd.
+Provider-reported costs across every saved evaluation report total 596,121 microusd.
 Charging four ambiguous/aborted calls at their complete reservations adds 120,000
-microusd, for a conservative accounted total of 686,793 microusd ($0.686793) against Ray's
+microusd, for a conservative accounted total of 716,121 microusd ($0.716121) against Ray's
 $5 authorization.
 
 Primary evidence files are stored outside the repository beside this isolated worktree:
@@ -91,6 +93,7 @@ Primary evidence files are stored outside the repository beside this isolated wo
 | `public-model-eval-final-code.json` | `74daf616af127455705360c9273007b3b7019e9d8e73e23d7f49966094d0d8ba` |
 | `public-model-eval-boundaries-final.json` | `30b48ef79461efb88db59d6b50bca91d77916da0f123be670927f777bb6d7e49` |
 | `public-model-eval-changed-requirements-final.json` | `b45d402a9f0a3ecb23ab3ad80a3b9d71b0a718a12cbe187bf890667ab4afc5df` |
+| `public-model-eval-google-vertex-final.json` | `305162883e98e8405c2a66b5d1e1c11d6a517bb76ad5243e9bc51d6e10612481` |
 
 ## Local verification ledger
 
@@ -116,8 +119,9 @@ The reviewed development defaults are Gemini 3.1 Flash Lite for both generation 
 verification, a six-second per-provider-call limit, a 15-second public-API-to-model limit,
 an 18-second website-to-public-API limit, strict output/token/cost bounds, a nonempty
 provider allowlist, zero-data-retention routing, data collection denied, and fallbacks
-disabled. The exact provider routing slug and a dedicated account-capped production key
-remain activation inputs, not assumptions made by this implementation.
+disabled. The reviewed route is the OpenRouter `google-vertex` base slug, which matches
+Vertex regions while request-level ZDR excludes Google AI Studio. A dedicated
+account-capped production key remains an activation input.
 
 Activation must keep staging, approval, and traffic movement distinct:
 
@@ -153,8 +157,8 @@ snapshot sets, and the transcript-capture-off boundary.
 
 ## Remaining activation gates
 
-- Confirm the exact OpenRouter provider allowlist route and its current privacy/retention
-  behavior, then create a dedicated key with an account-level spending cap.
+- Recheck the current `google-vertex` endpoint privacy/retention behavior immediately before
+  activation, then create a dedicated key with an account-level spending cap.
 - Set the production per-request and daily spending policies.
 - Provision the private model service and secrets, run migration and PostgreSQL identity
   checks, and execute staging acceptance with repeated trials and measured tail latency.

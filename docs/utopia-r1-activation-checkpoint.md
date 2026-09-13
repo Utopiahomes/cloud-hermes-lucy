@@ -18,9 +18,10 @@ answer/evidence contracts, independent displayed-answer verification, existing d
 cost admission, an OpenRouter adapter with privacy routing controls, a synthetic acceptance
 suite, and a fail-closed feature gate. Production remains on deterministic R1.
 
-Gemini 3.1 Flash Lite is the provisional development default. All 12 acceptance scenarios
-have passing evidence on the final code across the complete run and focused defect reruns.
-Conservative total evaluation spend was $0.686793 against the authorized $5 cap. The full
+Gemini 3.1 Flash Lite through the `google-vertex` ZDR route is the provisional development
+default. A final current-code run passed all 12 acceptance scenarios in one suite, with no
+provider errors, 3.17-second average latency, and 8.78-second approximate p95 latency.
+Conservative total evaluation spend was $0.716121 against the authorized $5 cap. The full
 implementation, authority precedence, evaluation evidence, privacy boundary, activation
 order, and rollback plan are recorded in
 `docs/public-lucy-model-milestone-a-2026-09-13.md`.

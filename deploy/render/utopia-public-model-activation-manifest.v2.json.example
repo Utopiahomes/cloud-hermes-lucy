@@ -30,7 +30,7 @@
   "routing": {
     "provider": "openrouter",
     "model": "google/gemini-3.1-flash-lite",
-    "allowed_providers": ["replace-with-reviewed-provider-slug"],
+    "allowed_providers": ["google-vertex"],
     "rate_version": "replace-with-reviewed-rate-version",
     "credential_scope_reference": "render:lucy-public-model:OPENROUTER_API_KEY",
     "zero_data_retention": true,

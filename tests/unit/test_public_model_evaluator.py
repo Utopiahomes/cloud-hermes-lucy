@@ -13,7 +13,7 @@ class FailingModel:
 
 
 def test_recording_model_retains_attempt_when_no_billable_response_is_parseable() -> None:
-    recorder = RecordingModel(FailingModel())  # type: ignore[arg-type]
+    recorder = RecordingModel(FailingModel())
     call = PublicModelCall(
         purpose="answer",
         messages=(PublicModelMessage(role="user", content="Synthetic"),),
