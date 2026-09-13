@@ -214,6 +214,7 @@ class DeterministicFakeMemoryImportProvider:
 
     def __init__(self, output: MemoryExtractionOutputV1) -> None:
         self._output = output
+        self.calls = 0
 
     def infer(
         self, *, manifest: ImportManifestV2, dispatch: MemoryExtractionDispatchV1
@@ -224,6 +225,7 @@ class DeterministicFakeMemoryImportProvider:
             or manifest.max_model_spend_microusd != 0
         ):
             raise PermissionError("fake provider requires a zero-cost synthetic manifest")
+        self.calls += 1
         raw = self._output.model_dump_json()
         return MemoryExtractionProviderOutcomeV1(
             output=raw,

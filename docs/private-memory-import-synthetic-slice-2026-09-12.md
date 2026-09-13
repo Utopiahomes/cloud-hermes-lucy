@@ -235,6 +235,16 @@ accepted `0057` migration is merged at `2807dad`.
     and requires a digest-specific upload confirmation. It writes only the content-free upload
     receipt and protected review artifacts under the intake root. The CLI path was exercised with an
     injected HTTPS uploader; no real endpoint or personal export was used.
+38. The complete verified transport executor now runs against the real PostgreSQL admission,
+    archive-intent, campaign-accounting, candidate, settlement, and encrypted provider-outcome
+    adapters. One synthetic batch produces one independently encrypted evidence record, one
+    encrypted provider outcome, one provenance-linked pending candidate, and one successful
+    settlement. Exact replay performs no second archive write or provider call. This proof exposed
+    and fixed a database recovery-ordering defect at migration `0071`: an already-settled
+    reservation may now replay only its byte-for-byte identical, still-current existing extraction
+    job after all current realm, campaign, source, and deletion checks pass; it still cannot create
+    a new job. The provider output remains absent from the PostgreSQL envelope plaintext. No real
+    provider, AWS operation, personal data, or cloud endpoint was used.
 
 ## Verification ledger
 
@@ -268,6 +278,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Verified transport execution | Passed, 38 focused transport/materialization/coordinator/HTTP checks plus Ruff and strict mypy | Original conversation provenance; local/transport archive-request equivalence; authority rechecks; partial archive recovery; cross-batch quote denial; one zero-cost fake-provider call across replay; content-free status; protected no-store review response | Transport record/executor, archive request, candidate materializer, coordinator, intake API, or fake-provider boundary change |
 | Protected sequential uploader | Passed, 3 focused uploader checks plus Ruff and strict mypy | HTTPS-only endpoint; sequential exact bytes; in-memory bearer capability; bounded, identity-checked response; protected-root confinement; content-free receipt; exact retry after lost response | Uploader, transport/response contracts, intake-root policy, or HTTP boundary change |
 | Exact CLI upload reconstruction | Passed, focused end-to-end local CLI check plus Ruff and strict mypy | Untouched-ZIP rebuild; exact registered-plan equality; digest-specific confirmation; protected review directory; content-free receipt; injected HTTPS boundary | Import CLI, manifest builder, transport preparation/registration, uploader, or intake-root policy change |
+| Complete synthetic transport execution and replay | Passed, 55 focused checks on PostgreSQL through `0071`, plus Ruff and strict mypy | Exact transport admission; encrypted archive and provider-outcome persistence; provenance-linked pending candidate; one settlement; exact replay with one archive data-key generation and one synthetic provider dispatch; settled-reservation new-job denial retained by migration ordering | Migration `0071`, executor, coordinator, archive/outcome adapters, candidate materialization, transport authority, or PostgreSQL image change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -283,13 +294,10 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Assemble the verified executor with the existing PostgreSQL, archive, and encrypted outcome
-   adapters and prove the injected-boundary slice against PostgreSQL before any cloud deployment.
-   Real OpenRouter remains disabled.
-2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+1. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-3. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
+2. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
    the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk

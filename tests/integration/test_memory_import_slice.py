@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from lucy.archive_crypto import EnvelopeCipher, MemoryArchiveKeyStore
 from lucy.chatgpt_manifest import (
     AuthorizedPilotManifestV1,
     LocalChatGPTConversationV1,
@@ -55,6 +56,11 @@ from lucy.governed_memory import (
     GovernedMemoryUnavailable,
 )
 from lucy.governed_memory_outcome import PostgresMemoryOutcomeStore
+from lucy.memory_candidate_extraction import (
+    ExtractedCandidateDraftV1,
+    ExtractedSourceQuoteV1,
+    MemoryExtractionOutputV1,
+)
 from lucy.memory_extraction import memory_extraction_job_id
 from lucy.memory_import import (
     AssertionStatus,
@@ -70,6 +76,7 @@ from lucy.memory_import import (
     load_synthetic_conversation,
 )
 from lucy.memory_outcome import (
+    EncryptedMemoryOutcomeJournal,
     MemoryOutcomeBindingV1,
     MemoryOutcomeEnvelopeV1,
     MemoryOutcomeUnavailable,
@@ -85,6 +92,10 @@ from lucy.memory_pilot_transport import (
     MemoryPilotTransportUnavailable,
     PostgresMemoryPilotTransportAdmission,
     prepare_memory_pilot_transport,
+)
+from lucy.memory_pilot_transport_runner import (
+    DeterministicFakeMemoryImportProvider,
+    VerifiedMemoryPilotBatchExecutor,
 )
 from lucy.realm_archive import (
     GeneratedDataKeyV1,
@@ -2191,7 +2202,7 @@ def test_memory_pilot_transport_is_capability_scoped_idempotent_and_revocable() 
         parser_version="parser-v1",
         extractor_version="extractor-v1",
         prompt_version="prompt-v1",
-        provider_policy_id="synthetic-private-zdr-v1",
+        provider_policy_id="local-synthetic-only",
         model_route="none",
         token_accounting_version="canonical-json-byte-upper-bound-v1",
         records=(record,),
@@ -2301,6 +2312,126 @@ def test_memory_pilot_transport_is_capability_scoped_idempotent_and_revocable() 
     )
     assert first.batch_id == replay.batch_id
     assert first.replayed is False and replay.replayed is True
+    with owner_sessions() as session:
+        scope = session.get(RealmContentScopeRow, scope_id)
+        assert scope is not None
+        origin_scope = OriginScopeV1(
+            tenant_account_id=scope.tenant_account_id,
+            node_id=scope.node_id,
+            node_tenure_id=scope.node_tenure_id,
+            tenure_epoch=scope.tenure_epoch,
+            security_realm_id=scope.security_realm_id,
+            storage_epoch=scope.storage_epoch,
+        )
+    backend = _ImportArchiveBackend()
+    archive = GovernedMemoryArchive(
+        create_session_factory(RAYMOND_URL),
+        RealmArchiveEncryptor(
+            backend,
+            RealmArchiveIdentityV1(
+                target_scope=origin_scope,
+                evidence_key_arn=TEST_KMS_ARN,
+                record_version=1,
+            ),
+            commitment_key=b"k" * 32,
+        ),
+        request_commitment_key=b"r" * 32,
+    )
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    provider = DeterministicFakeMemoryImportProvider(
+        MemoryExtractionOutputV1(
+            candidates=(
+                ExtractedCandidateDraftV1(
+                    subject="synthetic transport",
+                    predicate="contains",
+                    object="no personal history",
+                    confidence_millionths=900_000,
+                    memory_kind="assertion",
+                    assertion_status="report",
+                    epistemic_status="current",
+                    domain_tags=("synthetic",),
+                    sources=(
+                        ExtractedSourceQuoteV1(
+                            source_record_id=record.source_record_id,
+                            exact_quote="no personal history",
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+    outcomes = EncryptedMemoryOutcomeJournal(
+        PostgresMemoryOutcomeStore(create_session_factory(RAYMOND_URL)),
+        cipher=EnvelopeCipher(
+            b"o" * 32, b"p" * 32, kek_version="synthetic-transport-outcome-v1"
+        ),
+        key_store=MemoryArchiveKeyStore(),
+    )
+    executor = VerifiedMemoryPilotBatchExecutor(
+        admission=admission,
+        archive=archive,
+        accounting=extractor,
+        eligibility=extractor,
+        provider=provider,
+        outcomes=outcomes,
+        outcome_recovery=outcomes,
+        candidate_store=extractor,
+        now=lambda: datetime.now(UTC),
+    )
+    executed = executor.execute(prepared.batches[0], capability_token=b"c" * 32)
+    executed_replay = executor.execute(
+        prepared.batches[0], capability_token=b"c" * 32
+    )
+    assert executed.receipt.state == executed_replay.receipt.state == "succeeded"
+    assert executed.receipt.candidate_count == 1
+    assert executed.review_artifact == executed_replay.review_artifact
+    assert provider.calls == 1
+    assert backend.generate_calls == 1
+    assert executed.review_artifact is not None
+    candidate_id = executed.review_artifact.bundle.items[0].candidate.candidate_id
+    with owner_sessions() as session:
+        settled_job = session.scalar(
+            text(
+                "SELECT serialized_job FROM lucy.memory_import_extraction_jobs_v1 "
+                "WHERE id=:job"
+            ),
+            {"job": prepared.batches[0].dispatch.extraction_job_id},
+        )
+    assert isinstance(settled_job, dict)
+    conflicting_job = {**settled_job, "extraction_job_id": str(uuid4())}
+    with (
+        pytest.raises(DBAPIError, match="memory import job conflict"),
+        create_session_factory(RAYMOND_URL).begin() as session,
+    ):
+        session.execute(
+            text("SELECT lucy.register_memory_import_job_v1(CAST(:job AS jsonb))"),
+            {"job": json.dumps(conflicting_job, separators=(",", ":"))},
+        ).scalar_one()
+    with owner_sessions() as session:
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.scoped_memory_candidate_versions_v1 "
+                "WHERE candidate_id=:candidate"
+            ),
+            {"candidate": candidate_id},
+        ) == 1
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM lucy.memory_import_attempt_settlements_v1 "
+                "WHERE campaign_id=:campaign AND result='succeeded'"
+            ),
+            {"campaign": campaign_id},
+        ) == 1
+        outcome_count, serialized_outcome = session.execute(
+            text(
+                "SELECT count(*), min(serialized_envelope::text) "
+                "FROM lucy.memory_import_provider_outcomes_v1 "
+                "WHERE extraction_job_id=:job"
+            ),
+            {"job": prepared.batches[0].dispatch.extraction_job_id},
+        ).one()
+        assert outcome_count == 1
+        assert "no personal history" not in serialized_outcome
     with (
         pytest.raises(DBAPIError, match="permission denied"),
         create_session_factory(RAYMOND_URL).begin() as session,
