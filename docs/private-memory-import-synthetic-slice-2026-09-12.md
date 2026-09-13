@@ -197,6 +197,14 @@ accepted `0057` migration is merged at `2807dad`.
     The migration is deliberately forward-only because dropping its immutable authorization and
     grant ledger would erase security evidence; application rollback leaves these inert records
     in place. No personal import, provider request, or cloud deployment was performed.
+33. The operator and routine handoffs are now explicit. A `register` CLI command accepts only one
+    exact owner authorization plus a matching, unexpired preflight no more than 15 minutes old,
+    requires a digest-specific confirmation phrase, and calls only the migration-owned exact
+    registration function. Its receipt is content-free. Routine assembly is restricted to v1.3
+    routine mode and combines PostgreSQL exact-job loading/rechecks, the authenticated private
+    policy client, and one qualified Lambda alias. The assembly has no policy signing key. These
+    paths were tested with synthetic artifacts and injected clients only; registration against
+    production and any personal-data execution remain separately gated.
 
 ## Verification ledger
 
@@ -224,6 +232,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Utopia outcome-recovery AWS boundary | Passed | `docs/evidence/utopia-memory-outcome-recovery-aws-2026-09-13.json`; CloudFormation `CREATE_COMPLETE` with termination protection, artifact checksum/version, KMS rotation, table deletion protection/PITR, qualified version 1, positive/negative IAM simulation, and a content-free fail-closed canary | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or realm binding change |
 | Recovery grant expiry and issuer seam | Passed, 22 focused checks plus Ruff and strict mypy | Grant claim/completion never outlive campaign authorization; recovery consumes an abstract issuer so the policy signer can remain isolated | Recovery policy, issuer protocol, campaign expiry, or coordinator construction change |
 | Isolated outcome-policy bridge | Passed, 89 focused checks on clean PostgreSQL through `0069`, plus Ruff and strict mypy | Independent exact authorization registration; database-recomputed request/package/grant digests; private authenticated endpoint; exact realm/job/key bindings; durable replay; policy ciphertext-table denial; deleted-source denial; Render identity separation | Migration `0069`, policy endpoint/client, grant issuer, realm role grants, Render blueprint, or relevant contract change |
+| Operator registration and routine recovery assembly | Passed, 14 focused tests plus Ruff and strict mypy | Exact fresh preflight, digest-specific operator confirmation, content-free receipt, routine/v1.3 mode restriction, private policy client, qualified Lambda alias, and no signing key in routine configuration | Import CLI, preflight/authorization contracts, recovery environment assembly, or deployment variables change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -239,11 +248,10 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Connect the implemented private outcome-policy client and deployed AWS recovery invoker to the
-   guarded archive/extraction runner. Add the operator command that independently registers an
-   exact pilot authorization only after its no-network preflight. The signer remains only in
-   `lucy-policy`; routine receives only the signed grant. No real provider request is currently
-   enabled.
+1. Add the effect-bearing pilot execution command that rebuilds the untouched ZIP again, invokes
+   the guarded runner with the implemented routine recovery assembly, and writes the extracted
+   candidate-review artifact without approving or promoting it. No real provider request is
+   currently enabled.
 2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.

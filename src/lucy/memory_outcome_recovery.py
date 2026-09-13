@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import re
 import secrets
-from collections.abc import Callable
-from datetime import datetime, timedelta
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
@@ -31,6 +32,7 @@ from lucy.contracts.security_v1_3 import (
     OriginScopeV1,
     V13SigningKeyPurpose,
 )
+from lucy.governed_memory_outcome import PostgresMemoryOutcomeStore
 from lucy.memory_extraction import (
     MemoryExtractionDispatchV1,
     MemoryExtractionProviderOutcomeV1,
@@ -546,3 +548,53 @@ class AwsLambdaMemoryOutcomeRecoveryInvoker:
             return MemoryOutcomeRecoveryResultV1.model_validate(payload["result"])
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             raise MemoryOutcomeUnavailable("outcome recovery response is invalid") from exc
+
+
+def memory_outcome_recovery_from_environment(
+    sessions: sessionmaker[Session],
+    authorization: AuthorizedPilotManifestV1,
+    *,
+    values: Mapping[str, str] | None = None,
+    lambda_client: Any | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> PermitBoundMemoryOutcomeRecovery:
+    """Assemble routine recovery without exposing policy signing authority."""
+
+    configured = os.environ if values is None else values
+
+    def required(name: str) -> str:
+        value = configured.get(name, "").strip()
+        if not value:
+            raise ValueError(f"required outcome recovery configuration is missing: {name}")
+        return value
+
+    if required("LUCY_SERVICE_MODE") != "routine":
+        raise ValueError("memory outcome recovery is restricted to routine mode")
+    if required("LUCY_SECURITY_BASELINE") != "v1.3":
+        raise ValueError("memory outcome recovery requires security baseline v1.3")
+    try:
+        target_scope = OriginScopeV1.model_validate_json(
+            required("LUCY_V13_TARGET_SCOPE_JSON")
+        )
+    except ValidationError as exc:
+        raise ValueError("memory outcome recovery scope is invalid") from exc
+    if lambda_client is None:
+        import boto3  # type: ignore[import-untyped]
+
+        lambda_client = boto3.client("lambda", region_name=required("AWS_REGION"))
+    store = PostgresMemoryOutcomeStore(sessions)
+    return PermitBoundMemoryOutcomeRecovery(
+        store,
+        HttpMemoryOutcomeGrantIssuer(
+            required("LUCY_POLICY_HOSTPORT"),
+            required("LUCY_POLICY_GATEWAY_TOKEN"),
+        ),
+        store,
+        AwsLambdaMemoryOutcomeRecoveryInvoker(
+            lambda_client,
+            alias_arn=required("LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN"),
+        ),
+        authorization=authorization,
+        target_scope=target_scope,
+        clock=clock,
+    )

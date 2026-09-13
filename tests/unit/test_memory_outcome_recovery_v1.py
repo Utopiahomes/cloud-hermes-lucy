@@ -43,11 +43,14 @@ from lucy.memory_outcome_aws_v1 import (
     DynamoMemoryOutcomeKeyWriter,
 )
 from lucy.memory_outcome_recovery import (
+    AwsLambdaMemoryOutcomeRecoveryInvoker,
     DurableMemoryOutcomeGrantIssuer,
+    HttpMemoryOutcomeGrantIssuer,
     MemoryOutcomeGrantAdmissionV1,
     MemoryOutcomeGrantRequestV1,
     MemoryOutcomeRecoveryPolicy,
     PermitBoundMemoryOutcomeRecovery,
+    memory_outcome_recovery_from_environment,
 )
 
 NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -651,3 +654,37 @@ def test_grant_request_digest_binds_authorization_and_ciphertext_package() -> No
     )
 
     assert request.digest_hex() != changed.digest_hex()
+
+
+def test_routine_environment_assembles_private_policy_and_qualified_lambda_only() -> None:
+    values = {
+        "LUCY_SERVICE_MODE": "routine",
+        "LUCY_SECURITY_BASELINE": "v1.3",
+        "LUCY_V13_TARGET_SCOPE_JSON": canonical_json_bytes(SCOPE).decode("utf-8"),
+        "LUCY_POLICY_HOSTPORT": "lucy-policy:10000",
+        "LUCY_POLICY_GATEWAY_TOKEN": "synthetic-policy-token",
+        "LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN": (
+            "arn:aws:lambda:us-east-1:429870640638:"
+            "function:lucy-outcome-recovery:live"
+        ),
+    }
+    recovery = memory_outcome_recovery_from_environment(
+        object(),  # type: ignore[arg-type]
+        _authorization(),
+        values=values,
+        lambda_client=object(),
+        clock=lambda: NOW,
+    )
+
+    assert isinstance(recovery, PermitBoundMemoryOutcomeRecovery)
+    assert isinstance(recovery._policy, HttpMemoryOutcomeGrantIssuer)
+    assert isinstance(recovery._invoker, AwsLambdaMemoryOutcomeRecoveryInvoker)
+    assert not any("SIGNING_PRIVATE" in key for key in values)
+
+    with pytest.raises(ValueError, match="restricted to routine mode"):
+        memory_outcome_recovery_from_environment(
+            object(),  # type: ignore[arg-type]
+            _authorization(),
+            values={**values, "LUCY_SERVICE_MODE": "policy"},
+            lambda_client=object(),
+        )

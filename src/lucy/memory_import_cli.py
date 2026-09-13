@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 
 from lucy.chatgpt_import import (
     ChatGPTExportInventoryV1,
@@ -24,6 +25,7 @@ from lucy.chatgpt_manifest import (
     build_exact_pilot_manifests,
 )
 from lucy.contracts.canonical import canonical_json_bytes
+from lucy.db import create_session_factory
 from lucy.memory_import_console import PilotSelectionProposalV1
 from lucy.memory_pilot_runner import validate_authorized_memory_pilot
 
@@ -45,6 +47,25 @@ class PilotExecutionPreflightV1(BaseModel):
     expires_at: datetime
     checked_at: datetime
     network_calls: int = 0
+
+
+class PilotAuthorizationRegistrationReceiptV1(BaseModel):
+    """Content-free proof that PostgreSQL admitted one exact owner authorization."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contract_version: str = Field(default="1", pattern=r"^1$")
+    object_type: str = Field(
+        default="lucy.memory-pilot-authorization-registration.v1",
+        pattern=r"^lucy\.memory-pilot-authorization-registration\.v1$",
+    )
+    owner_approval_ref: UUID
+    campaign_id: UUID
+    destination_content_scope_id: UUID
+    bundle_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    replayed: bool
+    registered_at: datetime
+    provider_calls: int = 0
+    aws_calls: int = 0
 
 
 def _write_new_artifact(path: Path, value: object) -> None:
@@ -98,6 +119,16 @@ def _parser() -> argparse.ArgumentParser:
     preflight.add_argument("--authorization", type=Path, required=True)
     preflight.add_argument("--expected-bundle-digest", required=True)
     preflight.add_argument("--output", type=Path, required=True)
+    register = commands.add_parser(
+        "register",
+        help="materialize one exact preflighted owner authorization in PostgreSQL",
+    )
+    register.add_argument("--intake-root", type=Path, required=True)
+    register.add_argument("--authorization", type=Path, required=True)
+    register.add_argument("--preflight", type=Path, required=True)
+    register.add_argument("--expected-bundle-digest", required=True)
+    register.add_argument("--confirmation", required=True)
+    register.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -136,6 +167,78 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Authorized exact pilot bundle {authorization.bundle_digest}; "
             "execution performed: no; network calls: 0"
+        )
+        return 0
+
+    if args.command == "register":
+        authorization_path = verified_intake_path(
+            args.authorization,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        preflight_path = verified_intake_path(
+            args.preflight,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        authorization = AuthorizedPilotManifestV1.model_validate_json(
+            authorization_path.read_bytes()
+        )
+        preflight_report = PilotExecutionPreflightV1.model_validate_json(
+            preflight_path.read_bytes()
+        )
+        expected_confirmation = (
+            f"REGISTER PRIVATE LUCY PILOT {args.expected_bundle_digest}"
+        )
+        now = datetime.now(UTC)
+        if args.confirmation != expected_confirmation:
+            raise PermissionError("pilot registration confirmation is not exact")
+        if not (
+            args.expected_bundle_digest == authorization.bundle_digest
+            == preflight_report.bundle_digest
+            and preflight_report.ready_for_execution
+            and preflight_report.network_calls == 0
+            and preflight_report.owner_approval_ref == authorization.owner_approval_ref
+            and preflight_report.campaign_id == authorization.bundle.campaign_id
+            and preflight_report.destination_content_scope_id
+            == authorization.bundle.destination_content_scope_id
+            and preflight_report.expires_at == authorization.bundle.manifest.expires_at
+            and authorization.approved_at <= preflight_report.checked_at <= now
+            and now < preflight_report.expires_at
+            and (now - preflight_report.checked_at).total_seconds() <= 900
+        ):
+            raise PermissionError("pilot registration inputs are not one fresh exact approval")
+        database_url = os.environ.get("LUCY_MIGRATION_DATABASE_URL", "").strip()
+        if not database_url:
+            raise ValueError("LUCY_MIGRATION_DATABASE_URL is required for registration")
+        sessions = create_session_factory(database_url)
+        with sessions.begin() as session:
+            registered = session.execute(
+                text(
+                    "SELECT lucy.register_memory_import_pilot_authorization_v1("
+                    "CAST(:authorization AS jsonb))"
+                ),
+                {
+                    "authorization": canonical_json_bytes(authorization).decode("utf-8")
+                },
+            ).scalar_one()
+        if registered.get("owner_approval_ref") != str(authorization.owner_approval_ref):
+            raise RuntimeError("pilot registration acknowledgement changed owner approval")
+        receipt = PilotAuthorizationRegistrationReceiptV1(
+            owner_approval_ref=authorization.owner_approval_ref,
+            campaign_id=authorization.bundle.campaign_id,
+            destination_content_scope_id=authorization.bundle.destination_content_scope_id,
+            bundle_digest=authorization.bundle_digest,
+            replayed=bool(registered.get("replayed")),
+            registered_at=now,
+        )
+        _write_new_artifact(output, receipt)
+        print(
+            f"Registered exact pilot bundle {receipt.bundle_digest}; "
+            f"replayed: {str(receipt.replayed).lower()}; "
+            "provider calls: 0; AWS calls: 0"
         )
         return 0
 

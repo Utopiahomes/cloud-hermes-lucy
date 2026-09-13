@@ -157,6 +157,31 @@ The content-free preflight report says only whether that exact campaign is ready
 upload or provider request. The effect-bearing runner repeats the same authorization and expiry
 check before its first archive write; an expired or non-exact authorization has zero side effects.
 
+## Register the exact authorization with the operator identity
+
+Registration is a distinct operator step. It does not upload the ZIP, call AWS or OpenRouter, or
+start extraction. It lets the isolated policy service recognize only the exact authorization that
+already passed owner approval and a fresh no-network preflight. Run it only in a protected operator
+session where `LUCY_MIGRATION_DATABASE_URL` is already supplied through the deployment secret
+boundary; do not paste or save that URL in the intake folder or repository:
+
+```powershell
+$registrationConfirmation = "REGISTER PRIVATE LUCY PILOT $bundleDigest"
+
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli register `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --authorization "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-authorization.v1.json" `
+  --preflight "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-preflight.v1.json" `
+  --expected-bundle-digest $bundleDigest `
+  --confirmation $registrationConfirmation `
+  --output "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-registration.v1.json"
+```
+
+The preflight must be no more than 15 minutes old and still unexpired. PostgreSQL recomputes the
+bundle digest against its exact campaign before recording an immutable allowlist entry. Routine
+Lucy and the policy service cannot perform this registration. The content-free receipt can be
+replayed, but a changed authorization conflicts rather than widening the prior approval.
+
 ## Review extracted memory candidates locally
 
 After an authorized extraction worker has produced `candidates.v1.json`, start the separate
@@ -196,8 +221,10 @@ local authorization artifact is not automatic promotion. Rejection and deferral 
 approvable candidate bytes. Acceptance as ordinary private or marking uncertain creates a new
 exact candidate version, so an earlier digest cannot authorize the transformed result.
 
-The private-memory OpenRouter adapter is also inert until assembled behind the authorized pilot
-runner in the protected deployment. Its request contract fixes the reviewed model route, requires
+The private-memory OpenRouter adapter remains inert until the separately authorized pilot is run.
+The deployment-ready recovery assembly keeps the signer in `lucy-policy`: routine Lucy authenticates
+to that private service for one signed exact-job recovery grant and invokes only the configured,
+qualified AWS Lambda alias. Its request contract fixes the reviewed model route, requires
 strict JSON Schema support,
 enforces per-request zero-data-retention and denied data collection, sends no tools or plugins,
 bounds output tokens and response bytes, and requires provider-reported usage cost. The generation

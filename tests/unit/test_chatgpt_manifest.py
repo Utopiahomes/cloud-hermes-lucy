@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+import lucy.memory_import_cli as memory_import_cli
 from lucy.chatgpt_import import ChatGPTExportInventoryV1, inventory_chatgpt_export
 from lucy.chatgpt_manifest import (
     LocalChatGPTConversationV1,
@@ -298,7 +299,9 @@ def test_manifest_cli_writes_only_plaintext_free_non_authorizing_bundle(
 
 
 def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     intake = tmp_path / "intake"
     intake.mkdir()
@@ -401,6 +404,60 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     assert "private canary" not in preflight_path.read_text(encoding="utf-8")
     assert "execution performed: no" in capsys.readouterr().out
 
+    registration_path = intake / "pilot-registration.v1.json"
+
+    class RegistrationTransaction:
+        def __enter__(self) -> RegistrationTransaction:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, values: dict[str, str]) -> object:
+            assert "register_memory_import_pilot_authorization_v1" in str(statement)
+            assert "private canary" not in values["authorization"]
+            return type(
+                "Result",
+                (),
+                {"scalar_one": lambda self: {
+                    "owner_approval_ref": str(approval_ref),
+                    "replayed": False,
+                }},
+            )()
+
+    class RegistrationSessions:
+        def begin(self) -> RegistrationTransaction:
+            return RegistrationTransaction()
+
+    monkeypatch.setenv("LUCY_MIGRATION_DATABASE_URL", "synthetic://migration")
+    monkeypatch.setattr(
+        memory_import_cli,
+        "create_session_factory",
+        lambda _url: RegistrationSessions(),
+    )
+    register_args = [
+        "register",
+        "--intake-root",
+        str(intake),
+        "--authorization",
+        str(authorization_path),
+        "--preflight",
+        str(preflight_path),
+        "--expected-bundle-digest",
+        digest,
+        "--confirmation",
+        f"REGISTER PRIVATE LUCY PILOT {digest}",
+        "--output",
+        str(registration_path),
+    ]
+    assert main(register_args) == 0
+    registration = json.loads(registration_path.read_bytes())
+    assert registration["bundle_digest"] == digest
+    assert registration["owner_approval_ref"] == str(approval_ref)
+    assert registration["provider_calls"] == 0
+    assert registration["aws_calls"] == 0
+    assert "private canary" not in registration_path.read_text(encoding="utf-8")
+
     wrong_confirmation = list(authorize_args)
     wrong_confirmation[wrong_confirmation.index("--confirmation") + 1] = "wrong"
     with pytest.raises(PermissionError, match="confirmation is not exact"):
@@ -409,3 +466,7 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     wrong_digest[wrong_digest.index("--expected-bundle-digest") + 1] = "0" * 64
     with pytest.raises(PermissionError, match="differs"):
         main(wrong_digest)
+    wrong_registration = list(register_args)
+    wrong_registration[wrong_registration.index("--confirmation") + 1] = "wrong"
+    with pytest.raises(PermissionError, match="confirmation is not exact"):
+        main(wrong_registration)
