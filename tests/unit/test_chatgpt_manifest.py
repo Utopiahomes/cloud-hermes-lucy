@@ -22,6 +22,7 @@ from lucy.memory_import_console import (
     PilotConversationSelectionV1,
     PilotSelectionProposalV1,
 )
+from lucy.memory_pilot_uploader import MemoryPilotUploadReceiptV1
 
 _SCOPE = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 _CAMPAIGN = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -549,6 +550,70 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     assert transport_receipt["batch_count"] == len(transport_plan["batches"])
     assert transport_receipt["provider_calls"] == 0
     assert transport_receipt["aws_calls"] == 0
+
+    review_directory = intake / "reviews"
+    review_directory.mkdir()
+    upload_receipt_path = intake / "transport-upload-receipt.v1.json"
+    uploaded: list[object] = []
+
+    class SyntheticUploader:
+        def __init__(self, *, endpoint: str) -> None:
+            assert endpoint == "https://private-lucy.example"
+
+        def upload(self, prepared: object, **values: object) -> MemoryPilotUploadReceiptV1:
+            uploaded.append(prepared)
+            assert values["capability_token"] == b"c" * 32
+            assert values["review_directory"] == review_directory
+            return MemoryPilotUploadReceiptV1(
+                campaign_id=str(_CAMPAIGN),
+                uploaded_batch_count=len(transport_plan["batches"]),
+                succeeded_batch_count=len(transport_plan["batches"]),
+                candidate_count=1,
+                review_artifact_paths=(str(review_directory / "synthetic.review.json"),),
+            )
+
+    monkeypatch.setattr(memory_import_cli, "SequentialMemoryPilotUploader", SyntheticUploader)
+    assert main(
+        [
+            "transport-upload",
+            "--zip",
+            str(archive),
+            "--intake-root",
+            str(intake),
+            "--fingerprint-key-file",
+            str(key),
+            "--transfer-key-file",
+            str(transfer_key),
+            "--capability-token-file",
+            str(capability_token),
+            "--inventory",
+            str(inventory_path),
+            "--selection",
+            str(selection_path),
+            "--authorization",
+            str(authorization_path),
+            "--registration",
+            str(transport_plan_path),
+            "--expected-bundle-digest",
+            digest,
+            "--maximum-microusd-per-attempt",
+            "0",
+            "--timeout-seconds",
+            "30",
+            "--endpoint",
+            "https://private-lucy.example",
+            "--review-directory",
+            str(review_directory),
+            "--confirmation",
+            f"UPLOAD PRIVATE LUCY PILOT {digest}",
+            "--output",
+            str(upload_receipt_path),
+        ]
+    ) == 0
+    assert len(uploaded) == 1
+    upload_receipt = json.loads(upload_receipt_path.read_bytes())
+    assert upload_receipt["candidate_count"] == 1
+    assert "private canary" not in upload_receipt_path.read_text(encoding="utf-8")
 
     wrong_confirmation = list(authorize_args)
     wrong_confirmation[wrong_confirmation.index("--confirmation") + 1] = "wrong"

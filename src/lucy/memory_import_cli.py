@@ -32,6 +32,7 @@ from lucy.memory_pilot_transport import (
     MemoryPilotTransportRegistrationV1,
     prepare_memory_pilot_transport,
 )
+from lucy.memory_pilot_uploader import SequentialMemoryPilotUploader
 
 
 class PilotExecutionPreflightV1(BaseModel):
@@ -179,6 +180,27 @@ def _parser() -> argparse.ArgumentParser:
     transport_register.add_argument("--expected-bundle-digest", required=True)
     transport_register.add_argument("--confirmation", required=True)
     transport_register.add_argument("--output", type=Path, required=True)
+    transport_upload = commands.add_parser(
+        "transport-upload",
+        help="rebuild and sequentially upload one exact authorized pilot",
+    )
+    transport_upload.add_argument("--zip", type=Path, required=True)
+    transport_upload.add_argument("--intake-root", type=Path, required=True)
+    transport_upload.add_argument("--fingerprint-key-file", type=Path, required=True)
+    transport_upload.add_argument("--transfer-key-file", type=Path, required=True)
+    transport_upload.add_argument("--capability-token-file", type=Path, required=True)
+    transport_upload.add_argument("--inventory", type=Path, required=True)
+    transport_upload.add_argument("--selection", type=Path, required=True)
+    transport_upload.add_argument("--authorization", type=Path, required=True)
+    transport_upload.add_argument("--registration", type=Path, required=True)
+    transport_upload.add_argument("--expected-bundle-digest", required=True)
+    transport_upload.add_argument("--maximum-microusd-per-attempt", type=int, required=True)
+    transport_upload.add_argument("--timeout-seconds", type=int, required=True)
+    transport_upload.add_argument("--upload-timeout-seconds", type=int, default=120)
+    transport_upload.add_argument("--endpoint", required=True)
+    transport_upload.add_argument("--review-directory", type=Path, required=True)
+    transport_upload.add_argument("--confirmation", required=True)
+    transport_upload.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -359,7 +381,12 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(report.attachments)} archive attachments; network calls: 0"
         )
         return 0
-    if args.command not in {"manifest", "preflight", "transport-plan"}:
+    if args.command not in {
+        "manifest",
+        "preflight",
+        "transport-plan",
+        "transport-upload",
+    }:
         raise RuntimeError("unsupported command")
     inventory_path = verified_intake_path(
         args.inventory,
@@ -384,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     selection = PilotSelectionProposalV1.model_validate(selection_document.get("proposal"))
     if selection_document.get("proposal_digest") != selection.digest:
         raise ValueError("pilot selection digest does not match its exact proposal")
-    if args.command in {"preflight", "transport-plan"}:
+    if args.command in {"preflight", "transport-plan", "transport-upload"}:
         authorization_path = verified_intake_path(
             args.authorization,
             intake_root=root,
@@ -448,6 +475,60 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Prepared {len(prepared.registration.batches)} exact transport commitments; "
             "plaintext uploaded: no; provider calls: 0; AWS calls: 0"
+        )
+        return 0
+    if args.command == "transport-upload":
+        registration_path = verified_intake_path(
+            args.registration,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        registration = MemoryPilotTransportRegistrationV1.model_validate_json(
+            registration_path.read_bytes()
+        )
+        expected_confirmation = (
+            f"UPLOAD PRIVATE LUCY PILOT {args.expected_bundle_digest}"
+        )
+        if args.confirmation != expected_confirmation:
+            raise PermissionError("pilot transport upload confirmation is not exact")
+        transfer_key_path = verified_intake_path(
+            args.transfer_key_file,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        capability_path = verified_intake_path(
+            args.capability_token_file,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        prepared = prepare_memory_pilot_transport(
+            built,
+            authorization,
+            expected_bundle_digest=args.expected_bundle_digest,
+            transfer_key=transfer_key_path.read_bytes(),
+            capability_token=capability_path.read_bytes(),
+            maximum_microusd_per_attempt=args.maximum_microusd_per_attempt,
+            timeout_seconds=args.timeout_seconds,
+            expires_at=registration.expires_at,
+            now=datetime.now(UTC),
+        )
+        if prepared.registration != registration:
+            raise PermissionError("rebuilt pilot transport differs from registration")
+        upload_receipt = SequentialMemoryPilotUploader(endpoint=args.endpoint).upload(
+            prepared,
+            capability_token=capability_path.read_bytes(),
+            intake_root=root,
+            review_directory=args.review_directory,
+            timeout_seconds=args.upload_timeout_seconds,
+        )
+        _write_new_artifact(output, upload_receipt)
+        print(
+            f"Uploaded {upload_receipt.uploaded_batch_count} exact pilot batches; "
+            f"succeeded: {upload_receipt.succeeded_batch_count}; "
+            f"candidate count: {upload_receipt.candidate_count}"
         )
         return 0
     if args.command == "preflight":

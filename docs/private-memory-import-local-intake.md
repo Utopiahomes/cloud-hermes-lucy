@@ -225,6 +225,37 @@ the service will obtain the exact manifest from PostgreSQL, verify the uploaded 
 canonical provider request in memory, and durably admit it once. A wrong capability, wrong key,
 altered batch, expired campaign, or revoked transport fails before provider execution.
 
+## Upload the exact registered pilot
+
+This command reopens the untouched ZIP, rebuilds every exact batch in memory, verifies that the
+result is identical to the registered content-free plan, and then uploads batches sequentially.
+The review directory must already exist beneath the protected intake root. A lost response stops
+the run; repeat the same command to recover through the immutable batch/job identity.
+
+```powershell
+$uploadConfirmation = "UPLOAD PRIVATE LUCY PILOT $bundleDigest"
+.\.venv\Scripts\python.exe -m lucy.memory_import_cli transport-upload `
+  --zip "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\export.zip" `
+  --intake-root "C:\Users\Forti\Private\cloud-lucy-imports" `
+  --fingerprint-key-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\manifest-fingerprint-v1.key" `
+  --transfer-key-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\pilot-transfer-v1.key" `
+  --capability-token-file "C:\Users\Forti\Private\cloud-lucy-imports\keys\pilot-capability-v1.token" `
+  --inventory "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\inventory.v1.json" `
+  --selection "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-selection.v1.json" `
+  --authorization "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\pilot-authorization.v1.json" `
+  --registration $transportPlan `
+  --expected-bundle-digest $bundleDigest `
+  --maximum-microusd-per-attempt 0 `
+  --timeout-seconds 30 `
+  --endpoint "https://replace-with-private-intake-host" `
+  --review-directory "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\reviews" `
+  --confirmation $uploadConfirmation `
+  --output "C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-12\upload-receipt.v1.json"
+```
+
+The capability is sent only as the HTTPS bearer credential. Neither it, the transfer key, the
+fingerprint key, nor conversation text is written to the content-free upload receipt.
+
 ## Review extracted memory candidates locally
 
 After an authorized extraction worker has produced `candidates.v1.json`, start the separate

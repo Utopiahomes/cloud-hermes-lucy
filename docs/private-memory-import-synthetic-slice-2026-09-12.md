@@ -230,6 +230,11 @@ accepted `0057` migration is merged at `2807dad`.
     and refuses review output outside the existing intake root. A lost response stops with an
     explicit exact-identity retry requirement; retry sends identical canonical batch bytes. Existing
     review artifacts can only be replayed byte-for-byte, never overwritten. No endpoint was contacted.
+37. The local CLI now reconstructs the authorized batch set directly from the untouched ZIP before
+    upload, compares the complete reconstructed registration with the operator-registered artifact,
+    and requires a digest-specific upload confirmation. It writes only the content-free upload
+    receipt and protected review artifacts under the intake root. The CLI path was exercised with an
+    injected HTTPS uploader; no real endpoint or personal export was used.
 
 ## Verification ledger
 
@@ -262,6 +267,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Durable extraction dispatch ownership | Passed, 20 focused coordinator/pilot-runner tests plus Ruff and strict mypy | A fresh reservation paired with a replayed exact job recovers or reconciles without a second provider call; a recovered billed outcome retains its known cost if the pre-dispatch source fence closes | Extraction coordinator, job-registration semantics, outcome recovery, accounting settlement, or PostgreSQL job constraints change |
 | Verified transport execution | Passed, 38 focused transport/materialization/coordinator/HTTP checks plus Ruff and strict mypy | Original conversation provenance; local/transport archive-request equivalence; authority rechecks; partial archive recovery; cross-batch quote denial; one zero-cost fake-provider call across replay; content-free status; protected no-store review response | Transport record/executor, archive request, candidate materializer, coordinator, intake API, or fake-provider boundary change |
 | Protected sequential uploader | Passed, 3 focused uploader checks plus Ruff and strict mypy | HTTPS-only endpoint; sequential exact bytes; in-memory bearer capability; bounded, identity-checked response; protected-root confinement; content-free receipt; exact retry after lost response | Uploader, transport/response contracts, intake-root policy, or HTTP boundary change |
+| Exact CLI upload reconstruction | Passed, focused end-to-end local CLI check plus Ruff and strict mypy | Untouched-ZIP rebuild; exact registered-plan equality; digest-specific confirmation; protected review directory; content-free receipt; injected HTTPS boundary | Import CLI, manifest builder, transport preparation/registration, uploader, or intake-root policy change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -280,12 +286,10 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 1. Assemble the verified executor with the existing PostgreSQL, archive, and encrypted outcome
    adapters and prove the injected-boundary slice against PostgreSQL before any cloud deployment.
    Real OpenRouter remains disabled.
-2. Wire the sequential uploader into the local CLI so each run rebuilds batches in memory from the
-   untouched ZIP and writes review artifacts only under the protected intake root.
-3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+2. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-4. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
+3. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
    the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk
