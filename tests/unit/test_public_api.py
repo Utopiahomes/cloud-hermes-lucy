@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import lucy.public_api as api
 from lucy.public_contracts import PublicKnowledgeEntry, PublicReference
+from lucy.public_model_service import PublicModelServiceResponse
 from lucy.publication import PublicAnswer, PublicKnowledgeProjection
 from lucy.readiness import ReadinessError
 from lucy.tenancy import ScopeNotFound
@@ -51,14 +53,17 @@ def _headers(**changes: str) -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def reset_api(monkeypatch: pytest.MonkeyPatch) -> None:
     cached_reader = api._reader
+    cached_model_client = api._model_client
     for key, value in _environment().items():
         monkeypatch.setenv(key, value)
     api._configuration.cache_clear()
     api._reader.cache_clear()
+    cached_model_client.cache_clear()
     monkeypatch.setattr(api, "_limiter", api._OpaqueRateLimiter(commitment_key=b"k" * 32))
     yield
     api._configuration.cache_clear()
     cached_reader.cache_clear()
+    cached_model_client.cache_clear()
 
 
 def test_public_api_exposes_only_health_and_exact_answer_route() -> None:
@@ -209,6 +214,111 @@ def test_conversational_answer_uses_temporary_history_after_public_scope_is_esta
         "snapshot_digest": DIGEST,
     }
     assert len(calls) == 1
+
+
+def test_model_route_receives_only_approved_projection_and_keyed_commitments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "true")
+    monkeypatch.setenv("LUCY_PUBLIC_MODEL_ENABLED", "true")
+    monkeypatch.setenv("LUCY_PUBLIC_MODEL_HOSTPORT", "lucy-public-model:10000")
+    monkeypatch.setenv("LUCY_PUBLIC_MODEL_TOKEN", "model-service-token-that-is-long-enough")
+    monkeypatch.setenv(
+        "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64",
+        base64.b64encode(b"m" * 32).decode(),
+    )
+    api._configuration.cache_clear()
+    source = PublicReference(
+        id="buttercup-source",
+        label="Buttercup Beauty",
+        href="https://www.utopiahomes.com/stays/buttercup-beauty",
+    )
+    entry = PublicKnowledgeEntry.model_validate(
+        {
+            "id": "buttercup-parking",
+            "service_line": "homes",
+            "kind": "fact",
+            "title": "Buttercup parking",
+            "approved_text": "Buttercup Beauty has parking for 4 cars.",
+            "aliases": [],
+            "topics": ["parking"],
+            "route": "property",
+            "property_slug": "buttercup-beauty",
+            "property_facts": {
+                "max_guests": 22,
+                "parking_spaces": 4,
+                "has_pool": True,
+                "has_hot_tub": True,
+                "bedrooms": 7,
+                "bathrooms": 3.5,
+                "pets_allowed": True,
+            },
+            "source": source,
+            "links": [],
+            "effective_from": "2026-01-01T00:00:00Z",
+            "effective_until": None,
+            "direct_answer": True,
+        }
+    )
+    projection = PublicKnowledgeProjection(
+        entries=(entry,), version=2, snapshot_digest=DIGEST
+    )
+    monkeypatch.setattr(
+        api,
+        "_reader",
+        lambda: SimpleNamespace(knowledge_admitted=lambda **_kwargs: projection),
+    )
+    requests: list[object] = []
+
+    def model_answer(request):
+        requests.append(request)
+        return PublicModelServiceResponse(
+            contract="lucy.public-model-response.v1",
+            request_id=request.request_id,
+            snapshot_digest=request.snapshot_digest,
+            answer={
+                "outcome": "answered",
+                "answer": "Buttercup Beauty has parking for 4 cars.",
+                "sources": [source.model_dump(mode="json")],
+                "evidence_ids": ["buttercup-parking"],
+            },
+        )
+
+    monkeypatch.setattr(
+        api, "_model_client", lambda: SimpleNamespace(answer=model_answer)
+    )
+    response = TestClient(api.app).post(
+        "/v1/public/answer",
+        json={"question": "How many cars fit?"},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Buttercup Beauty has parking for 4 cars."
+    sent = requests[0]
+    assert sent.entries == (entry,)
+    assert sent.snapshot_digest == DIGEST
+    assert sent.session_commitment != SESSION
+    assert sent.ip_commitment != "testclient"
+    assert len(sent.session_commitment) == len(sent.ip_commitment) == 64
+
+
+def test_model_configuration_rejects_a_non_private_hostport_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = _environment()
+    environment.update(
+        {
+            "LUCY_PUBLIC_CONVERSATION_ENABLED": "true",
+            "LUCY_PUBLIC_MODEL_ENABLED": "true",
+            "LUCY_PUBLIC_MODEL_HOSTPORT": "https://lucy-public-model.example/path",
+            "LUCY_PUBLIC_MODEL_TOKEN": "model-service-token-that-is-long-enough",
+            "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64": base64.b64encode(b"m" * 32).decode(),
+        }
+    )
+
+    with pytest.raises(api.PublicApiConfigurationError, match="destination is invalid"):
+        api.PublicApiConfiguration.from_environment(environment)
 
 
 def test_answer_is_bounded_strict_and_uses_only_fixed_scope(

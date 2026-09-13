@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -14,7 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -23,6 +24,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from lucy.public_contracts import PublicHistoryTurn, PublicPageContext
+from lucy.public_model_service import (
+    HttpPublicModelClient,
+    PublicModelServiceRequest,
+    PublicModelServiceUnavailable,
+)
 from lucy.public_retrieval import PublicKnowledgeRetriever
 from lucy.publication import PublicProjectionReader
 from lucy.readiness import ReadinessError, admitted_session_factory
@@ -78,6 +84,10 @@ class PublicApiConfiguration:
     requests_per_session_per_minute: int
     session_ttl_seconds: int
     conversation_enabled: bool
+    model_enabled: bool
+    model_hostport: str | None
+    model_token: str | None
+    cost_commitment_key: bytes | None
 
     @classmethod
     def from_environment(
@@ -136,6 +146,38 @@ class PublicApiConfiguration:
         except ValueError as exc:
             raise PublicApiConfigurationError("public storage epoch is invalid") from exc
 
+        conversation_enabled = _strict_bool(
+            values.get("LUCY_PUBLIC_CONVERSATION_ENABLED", "false"),
+            "LUCY_PUBLIC_CONVERSATION_ENABLED",
+        )
+        model_enabled = _strict_bool(
+            values.get("LUCY_PUBLIC_MODEL_ENABLED", "false"),
+            "LUCY_PUBLIC_MODEL_ENABLED",
+        )
+        model_hostport: str | None = None
+        model_token: str | None = None
+        cost_commitment_key: bytes | None = None
+        if model_enabled:
+            if not conversation_enabled:
+                raise PublicApiConfigurationError(
+                    "public model requires the conversation contract"
+                )
+            model_hostport = _required(values, "LUCY_PUBLIC_MODEL_HOSTPORT")
+            model_token = _required(values, "LUCY_PUBLIC_MODEL_TOKEN")
+            if not 32 <= len(model_token) <= 512:
+                raise PublicApiConfigurationError("public model credential is invalid")
+            try:
+                # Validate the private destination during configuration so a malformed
+                # host cannot escape the normal fail-closed API error path at first use.
+                HttpPublicModelClient(model_hostport, model_token)
+            except ValueError:
+                raise PublicApiConfigurationError(
+                    "public model destination is invalid"
+                ) from None
+            cost_commitment_key = _base64_key(
+                values, "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64"
+            )
+
         return cls(
             database_url=database_url,
             api_token=api_token,
@@ -155,10 +197,11 @@ class PublicApiConfiguration:
             session_ttl_seconds=_bounded_int(
                 values, "LUCY_PUBLIC_SESSION_TTL_SECONDS", 300, 86_400
             ),
-            conversation_enabled=_strict_bool(
-                values.get("LUCY_PUBLIC_CONVERSATION_ENABLED", "false"),
-                "LUCY_PUBLIC_CONVERSATION_ENABLED",
-            ),
+            conversation_enabled=conversation_enabled,
+            model_enabled=model_enabled,
+            model_hostport=model_hostport,
+            model_token=model_token,
+            cost_commitment_key=cost_commitment_key,
         )
 
 
@@ -185,6 +228,16 @@ def _strict_bool(value: str, name: str) -> bool:
     if value == "false":
         return False
     raise PublicApiConfigurationError(f"public flag is invalid: {name}")
+
+
+def _base64_key(values: Mapping[str, str], name: str) -> bytes:
+    try:
+        decoded = base64.b64decode(_required(values, name), validate=True)
+    except ValueError:
+        raise PublicApiConfigurationError(f"public key is invalid: {name}") from None
+    if len(decoded) < 32:
+        raise PublicApiConfigurationError(f"public key is invalid: {name}")
+    return decoded
 
 
 @dataclass
@@ -274,6 +327,22 @@ def _reader() -> PublicProjectionReader:
     return PublicProjectionReader(sessions)
 
 
+@lru_cache(maxsize=1)
+def _model_client() -> HttpPublicModelClient:
+    config = _configuration()
+    if (
+        not config.model_enabled
+        or config.model_hostport is None
+        or config.model_token is None
+    ):
+        raise PublicModelServiceUnavailable("public model service is disabled")
+    return HttpPublicModelClient(config.model_hostport, config.model_token)
+
+
+def _cost_commitment(key: bytes, kind: str, value: str) -> str:
+    return hmac.new(key, f"{kind}\0{value}".encode(), hashlib.sha256).hexdigest()
+
+
 @app.get("/health", tags=["operations"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -307,6 +376,7 @@ async def public_answer(request: Request) -> JSONResponse:
         return _response(400, "Invalid public session")
     if request.client is None or not _limiter.allow(request.client.host, session_id, config):
         return _response(429, "Public request limit reached")
+    client_ip = request.client.host
 
     content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type != "application/json":
@@ -338,12 +408,34 @@ async def public_answer(request: Request) -> JSONResponse:
             )
             if not secrets.compare_digest(projection.snapshot_digest, config.snapshot_digest):
                 return _response(503, "Public Lucy is unavailable")
-            result = _retriever.retrieve(
-                question=question.question,
-                entries=projection.entries,
-                page_context=question.page_context,
-                history=question.history,
-            )
+            if config.model_enabled:
+                if config.cost_commitment_key is None:
+                    return _response(503, "Public Lucy is unavailable")
+                model_response = _model_client().answer(
+                    PublicModelServiceRequest(
+                        contract="lucy.public-model-request.v1",
+                        request_id=uuid4(),
+                        snapshot_digest=projection.snapshot_digest,
+                        session_commitment=_cost_commitment(
+                            config.cost_commitment_key, "session", str(session_id)
+                        ),
+                        ip_commitment=_cost_commitment(
+                            config.cost_commitment_key, "ip", client_ip
+                        ),
+                        question=question.question,
+                        entries=projection.entries,
+                        page_context=question.page_context,
+                        history=question.history,
+                    )
+                )
+                result = model_response.answer
+            else:
+                result = _retriever.retrieve(
+                    question=question.question,
+                    entries=projection.entries,
+                    page_context=question.page_context,
+                    history=question.history,
+                )
             return JSONResponse(
                 status_code=200,
                 content={
@@ -369,7 +461,7 @@ async def public_answer(request: Request) -> JSONResponse:
         )
     except ScopeNotFound:
         return _response(404, "Public answer is unavailable")
-    except (ReadinessError, SQLAlchemyError):
+    except (ReadinessError, SQLAlchemyError, PublicModelServiceUnavailable):
         return _response(503, "Public Lucy is unavailable")
     if not secrets.compare_digest(answer.snapshot_digest, config.snapshot_digest):
         return _response(503, "Public Lucy is unavailable")

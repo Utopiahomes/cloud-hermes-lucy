@@ -9,6 +9,27 @@ Public transcript capture and OpenRouter remain disabled. The earlier Private Lu
 epoch and capture-disabled state were preserved through the migration. The complete private
 record remains `docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
+## Milestone A model-development checkpoint
+
+Ray authorized local implementation and bounded model evaluation on 2026-09-13, but not
+product activation. The isolated `codex/public-model-milestone-a` worktree now contains a
+separate model service, full-packet context assembly, temporary-history support, strict
+answer/evidence contracts, independent displayed-answer verification, existing durable
+cost admission, an OpenRouter adapter with privacy routing controls, a synthetic acceptance
+suite, and a fail-closed feature gate. Production remains on deterministic R1.
+
+Gemini 3.1 Flash Lite is the provisional development default. All 12 acceptance scenarios
+have passing evidence on the final code across the complete run and focused defect reruns.
+Conservative total evaluation spend was $0.686793 against the authorized $5 cap. The full
+implementation, authority precedence, evaluation evidence, privacy boundary, activation
+order, and rollback plan are recorded in
+`docs/public-lucy-model-milestone-a-2026-09-13.md`.
+
+The next shared-backend action requires a clean Private Lucy checkpoint. The Private branch
+has advanced through migration `0070` and currently contains uncommitted transport work;
+the Public branch still ends at `0057`. Do not update the shared activation manifest or
+claim production schema compatibility until that checkpoint is available and reconciled.
+
 ## Completed preparation
 
 - R1-0 through R1-5 technical acceptance passed at commit
@@ -53,9 +74,11 @@ record remains `docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
 ## Exact next action
 
-No release action remains. Monitor ordinary production operation without capturing visitor
-questions. A future corpus replacement, model-provider connection, Private Lucy change, or
-DNS change remains a separate release requiring its own review and authorization.
+Finish local verification and commit Milestone A, then synchronize it onto a clean Private
+Lucy checkpoint at or beyond migration `0070`. After synchronization, prepare and test the
+disabled staging configuration. Enabling model traffic remains a separate product
+activation decision. Until then, monitor ordinary production operation without capturing
+visitor questions.
 
 ## Public Lucy R1 production acceptance
 

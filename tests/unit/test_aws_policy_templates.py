@@ -550,6 +550,7 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
     services = _v13_render_services()
     assert set(services) == {
         "lucy-public",
+        "lucy-public-model",
         "lucy-routine",
         "lucy-telegram-private",
         "lucy-policy",
@@ -594,6 +595,34 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
         or "OPENROUTER" in key
         or key in {"LUCY_OWNER_TOKEN", "LUCY_POLICY_GATEWAY_TOKEN"}
         for key in public
+    )
+    model = {item["key"]: item for item in services["lucy-public-model"]["envVars"]}
+    assert public["LUCY_PUBLIC_MODEL_ENABLED"]["value"] == "false"
+    assert public["LUCY_PUBLIC_MODEL_HOSTPORT"]["fromService"] == {
+        "type": "pserv",
+        "name": "lucy-public-model",
+        "property": "hostport",
+    }
+    assert services["lucy-public-model"]["type"] == "pserv"
+    assert services["lucy-public-model"]["dockerCommand"] == (
+        "python -m lucy.public_model_runtime"
+    )
+    assert model["LUCY_SERVICE_MODE"]["value"] == "public-model"
+    assert model["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert model["LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN"]["value"] == (
+        "lucy_cost_admission"
+    )
+    assert "OPENROUTER_API_KEY" in model
+    assert not any(
+        key.startswith("LUCY_AWS_")
+        or key
+        in {
+            "AWS_ROLE_ARN",
+            "LUCY_OWNER_TOKEN",
+            "LUCY_POLICY_GATEWAY_TOKEN",
+            "LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64",
+        }
+        for key in model
     )
     assert routine["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
     assert "LUCY_ARCHIVE_COMMITMENT_KEY_B64" in routine
@@ -657,6 +686,9 @@ def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
     }
     for name, login in expected_logins.items():
         assert environments[name]["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == login
+    assert environments["lucy-public-model"][
+        "LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN"
+    ]["value"] == "lucy_cost_admission"
 
     assert environments["lucy-authority-writer"][
         "LUCY_RECOVERY_WRITER_DATABASE_LOGIN"

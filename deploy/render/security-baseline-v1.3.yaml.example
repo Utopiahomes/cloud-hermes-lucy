@@ -64,6 +64,62 @@ projects:
               - {key: LUCY_PUBLIC_REQUESTS_PER_IP_PER_MINUTE, value: "20"}
               - {key: LUCY_PUBLIC_REQUESTS_PER_SESSION_PER_MINUTE, value: "30"}
               - {key: LUCY_PUBLIC_SESSION_TTL_SECONDS, value: "3600"}
+              - {key: LUCY_PUBLIC_CONVERSATION_ENABLED, value: "true"}
+              - {key: LUCY_PUBLIC_MODEL_ENABLED, value: "false"}
+              - key: LUCY_PUBLIC_MODEL_HOSTPORT
+                fromService: {type: pserv, name: lucy-public-model, property: hostport}
+              - {key: LUCY_PUBLIC_MODEL_TOKEN, sync: false}
+              - {key: LUCY_PUBLIC_COST_COMMITMENT_KEY_B64, sync: false}
+
+          # Separate body-bearing inference process. It has no public listener,
+          # public-projection database identity, archive credential, or private
+          # Lucy credential. The model flag above remains false until the exact
+          # service, cost policy, provider route, and snapshot set are commissioned.
+          - type: pserv
+            name: lucy-public-model
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.public_model_runtime
+            healthCheckPath: /health
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: public-model}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_DATABASE_URL, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN, value: lucy_cost_admission}
+              - {key: LUCY_PUBLIC_MODEL_TOKEN, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_ALLOWED_SNAPSHOT_DIGESTS, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_NODE_ID, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_CHANNEL_BINDING_ID, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_ID, value: google/gemini-3.1-flash-lite}
+              - {key: LUCY_PUBLIC_MODEL_ALLOWED_PROVIDERS, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_RATE_VERSION, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_MAX_PROMPT_USD_PER_MILLION, value: "0.8"}
+              - {key: LUCY_PUBLIC_MODEL_MAX_COMPLETION_USD_PER_MILLION, value: "4"}
+              - {key: LUCY_PUBLIC_MODEL_GENERATOR_MAX_MICROUSD, value: "30000"}
+              - {key: LUCY_PUBLIC_MODEL_VERIFIER_MAX_MICROUSD, value: "15000"}
+              - {key: LUCY_PUBLIC_MODEL_GENERATOR_MAX_TOKENS, value: "700"}
+              - {key: LUCY_PUBLIC_MODEL_VERIFIER_MAX_TOKENS, value: "300"}
+              - {key: LUCY_PUBLIC_MODEL_TIMEOUT_SECONDS, value: "6"}
+              - {key: LUCY_PUBLIC_MODEL_MAX_REQUEST_BYTES, value: "200000"}
+              - {key: LUCY_PUBLIC_MODEL_REQUEST_COMMITMENT_KEY_B64, sync: false}
+              - {key: LUCY_PUBLIC_MODEL_PROVIDER_REFERENCE_KEY_B64, sync: false}
+              - key: LUCY_COST_WRITER_HOSTPORT
+                fromService: {type: pserv, name: lucy-cost-writer, property: hostport}
+              - {key: LUCY_COST_WRITER_TOKEN, sync: false}
+              - key: LUCY_RECOVERY_ACK_HOSTPORT
+                fromService: {type: pserv, name: lucy-recovery-coordinator, property: hostport}
+              - {key: LUCY_RECOVERY_ACK_TOKEN, sync: false}
+              - {key: OPENROUTER_API_KEY, sync: false}
 
           - type: pserv
             name: lucy-routine
