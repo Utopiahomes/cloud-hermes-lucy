@@ -25,10 +25,18 @@ implementation, authority precedence, evaluation evidence, privacy boundary, act
 order, and rollback plan are recorded in
 `docs/public-lucy-model-milestone-a-2026-09-13.md`.
 
-The next shared-backend action requires a clean Private Lucy checkpoint. The Private branch
-has advanced through migration `0070` and currently contains uncommitted transport work;
-the Public branch still ends at `0057`. Do not update the shared activation manifest or
-claim production schema compatibility until that checkpoint is available and reconciled.
+Private Lucy paused cleanly at
+`beaa2031b6ef69bd8b50177b6771469a5253c836`, migration
+`0071_memory_import_job_replay`, without creating `0072`. Public Lucy rebased onto that
+checkpoint without conflicts. Its rebased model commit is
+`a6473c26ea1fa34ca19d0a809698150f367be37f`, and the worktree is clean.
+
+A separate Public Lucy model activation V2 contract now preserves the historical V1
+manifest while permitting public-only paid inference under explicit model-release controls.
+It has distinct `staged-disabled`, `staging-test`, and `active` states; only `active` can
+enable visitor model traffic. The contract pins schema `0071`, privacy routing, cost and
+timeout envelopes, browser-memory history, snapshot eligibility/withdrawal, and both Cloud
+and website revisions.
 
 ## Completed preparation
 
@@ -74,11 +82,11 @@ claim production schema compatibility until that checkpoint is available and rec
 
 ## Exact next action
 
-Finish local verification and commit Milestone A, then synchronize it onto a clean Private
-Lucy checkpoint at or beyond migration `0070`. After synchronization, prepare and test the
-disabled staging configuration. Enabling model traffic remains a separate product
-activation decision. Until then, monitor ordinary production operation without capturing
-visitor questions.
+Populate the synchronized V2 manifest with final artifact digests, the reviewed OpenRouter
+provider slug/rate version, operational contacts, and approved production budgets. Validate
+and deploy only its `staged-disabled` state. Enabling staging provider calls and enabling
+visitor model traffic remain separate decisions. Until then, monitor ordinary production
+operation without capturing visitor questions.
 
 ## Public Lucy R1 production acceptance
 

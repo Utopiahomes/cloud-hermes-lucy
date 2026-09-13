@@ -1,0 +1,93 @@
+{
+  "contract": "lucy.utopia.public-model.activation-manifest.v2",
+  "environment": "production",
+  "realm_slug": "utopia",
+  "release_state": "staged-disabled",
+  "release_decision_id": "replace-with-reviewed-release-decision-id",
+  "artifacts": {
+    "cloud_source_commit": "replace-with-40-lowercase-hex-characters",
+    "cloud_rollback_commit": "replace-with-40-lowercase-hex-characters",
+    "website_source_commit": "replace-with-40-lowercase-hex-characters",
+    "website_rollback_commit": "replace-with-40-lowercase-hex-characters",
+    "image_digest": "replace-with-64-lowercase-hex-characters",
+    "base_image_digest": "replace-with-64-lowercase-hex-characters",
+    "schema_revision": "0071_memory_import_job_replay",
+    "aws_realm_template_sha256": "replace-with-64-lowercase-hex-characters",
+    "aws_recovery_template_sha256": "replace-with-64-lowercase-hex-characters"
+  },
+  "ingress": {
+    "website_origin": "https://www.utopiahomes.com",
+    "website_api_path": "/api/lucy",
+    "public_service": "lucy-public",
+    "model_service": "lucy-public-model",
+    "model_service_private_only": true,
+    "trust_forwarded_host": false,
+    "max_browser_request_bytes": 65536,
+    "max_model_request_bytes": 200000,
+    "requests_per_ip_per_minute": 20,
+    "requests_per_session_per_minute": 30
+  },
+  "routing": {
+    "provider": "openrouter",
+    "model": "google/gemini-3.1-flash-lite",
+    "allowed_providers": ["replace-with-reviewed-provider-slug"],
+    "rate_version": "replace-with-reviewed-rate-version",
+    "credential_scope_reference": "render:lucy-public-model:OPENROUTER_API_KEY",
+    "zero_data_retention": true,
+    "data_collection": "deny",
+    "allow_fallbacks": false,
+    "max_prompt_usd_per_million": 0.8,
+    "max_completion_usd_per_million": 4.0
+  },
+  "cost_policy": {
+    "kill_state": "disabled",
+    "platform_daily_cap_microusd": 10000000,
+    "node_daily_cap_microusd": 1000000,
+    "site_daily_cap_microusd": 1000000,
+    "provider_daily_cap_microusd": 1000000,
+    "outstanding_cap_microusd": 90000,
+    "per_attempt_cap_microusd": 30000,
+    "per_conversation_cap_microusd": 45000,
+    "concurrency_limit": 2,
+    "requests_per_minute": 60,
+    "session_requests_per_minute": 30,
+    "ip_requests_per_minute": 20
+  },
+  "execution": {
+    "generator_max_microusd": 30000,
+    "verifier_max_microusd": 15000,
+    "generator_max_output_tokens": 700,
+    "verifier_max_output_tokens": 300,
+    "max_input_tokens": 20000,
+    "provider_timeout_seconds": 6,
+    "public_to_model_timeout_seconds": 15,
+    "website_to_public_timeout_seconds": 18
+  },
+  "history": {
+    "storage": "browser-memory-only",
+    "max_turns": 6,
+    "max_characters": 4000,
+    "expires_after_seconds": 1800,
+    "clears_on_refresh": true,
+    "clears_on_close": true,
+    "prior_messages_are_evidence": false
+  },
+  "publication": {
+    "active_snapshot_sha256": "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422",
+    "rollback_snapshot_sha256": "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e",
+    "model_allowed_snapshot_sha256": [
+      "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
+    ],
+    "withdrawn_snapshot_sha256": [],
+    "source_lineage": ["utopia-homes-web:lucy-public-knowledge.r1:25-entries"]
+  },
+  "model_traffic_enabled": false,
+  "transcript_capture_enabled": false,
+  "permitted_data_classes": [
+    "approved-public-knowledge",
+    "temporary-browser-conversation-context"
+  ],
+  "permitted_actions": ["public-read-only-model-answer"],
+  "operations_contact": "replace-with-operations-contact",
+  "rollback_owner": "replace-with-rollback-owner"
+}

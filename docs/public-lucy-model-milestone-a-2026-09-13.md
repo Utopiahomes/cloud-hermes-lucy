@@ -94,8 +94,8 @@ Primary evidence files are stored outside the repository beside this isolated wo
 
 ## Local verification ledger
 
-- Ruff: passed repository-wide after the model implementation.
-- Strict mypy: passed across 97 source files.
+- Ruff: passed repository-wide after the model implementation and again after synchronization.
+- Strict mypy: passed across 118 source files after synchronization.
 - Pytest: 873 tests passed and 250 PostgreSQL/Docker-dependent tests skipped in the
   repository-wide run. The sole initial failure was the known Windows line-ending digest
   of an immutable AWS fixture; regenerating its LF bytes from the pinned source made all
@@ -106,6 +106,9 @@ Primary evidence files are stored outside the repository beside this isolated wo
 - The website adapter passed TypeScript, repository-wide ESLint, all 92 Vitest tests, and a
   Next.js production build of 27 routes after its upstream timeout was aligned with the
   isolated model handoff.
+- After rebasing onto Private migration `0071` and adding the V2 activation contract, the
+  complete merged Python suite passed 1,005 tests with 263 PostgreSQL/Docker-dependent
+  skips. Alembic reported exactly one head: `0071_memory_import_job_replay`.
 
 ## Activation configuration and order
 
@@ -131,17 +134,32 @@ Rollback first disables the model feature, returning traffic to deterministic R1
 snapshot may be reactivated only if it remains eligible. A digest withdrawn for incorrect
 or sensitive content must not be revived merely because it was previously approved.
 
+## Synchronization checkpoint
+
+Private Lucy paused cleanly at commit
+`beaa2031b6ef69bd8b50177b6771469a5253c836`, migration
+`0071_memory_import_job_replay`. Public Lucy rebased without conflicts and now includes
+that complete ancestry; the rebased Milestone A commit is
+`a6473c26ea1fa34ca19d0a809698150f367be37f`. No `0072` migration was created.
+
+The legacy V1 activation manifest remains unchanged because it is evidence for the
+deterministic launch and intentionally forbids paid inference in `public_only` mode. The
+model release instead uses
+`deploy/render/utopia-public-model-activation-manifest.v2.json.example`. Its validator
+distinguishes `staged-disabled`, `staging-test`, and `active`; only the last state permits
+visitor model traffic. It pins schema `0071`, both repositories, privacy routing, an exact
+provider allowlist, cost and timeout envelopes, browser-only history, eligible and withdrawn
+snapshot sets, and the transcript-capture-off boundary.
+
 ## Remaining activation gates
 
-- Private Lucy currently has migrations through `0070` and uncommitted work. Public Lucy
-  must rebase onto a clean checkpoint before changing the shared activation manifest or
-  claiming schema compatibility.
 - Confirm the exact OpenRouter provider allowlist route and its current privacy/retention
   behavior, then create a dedicated key with an account-level spending cap.
 - Set the production per-request and daily spending policies.
 - Provision the private model service and secrets, run migration and PostgreSQL identity
   checks, and execute staging acceptance with repeated trials and measured tail latency.
-- Prepare a synchronized activation manifest that pins the exact source commits, schema,
-  model, provider route, snapshot digests, budgets, privacy mode, and rollback state.
+- Replace the V2 manifest placeholders with reviewed image/template digests, the final
+  rebased commits, exact provider slug/rate version, operational contacts, and approved
+  budgets; validate it first in `staged-disabled` state.
 - Obtain explicit product activation authorization. This implementation authorization does
   not itself publish the model path.

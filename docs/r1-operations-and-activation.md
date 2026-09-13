@@ -84,6 +84,15 @@ populated manifest in the ignored operator evidence store. Validate it with
 prints only a content-free result and rejects moving revisions, undeclared origins,
 forwarded-host trust, incomplete paid-inference limits, and capture enablement.
 
+The V1 manifest is retained as the immutable contract for deterministic Public Lucy. A
+model-backed public-only release uses the separate
+`deploy/render/utopia-public-model-activation-manifest.v2.json.example` and
+`python deploy/render/validate_public_model_activation_v2.py <manifest>`. Its
+`staged-disabled` state provisions no visitor model traffic and keeps the cost policy kill
+state disabled. `staging-test` permits only separately authorized synthetic commissioning;
+`active` is the only state that permits visitor model traffic. Never convert one state to
+another without a new reviewed manifest and decision identifier.
+
 Immediately before activation, verify drift against the accepted evidence, deploy the
 same exact reviewed revision to the selected services, prove negative authentication,
 cross-realm, direct-SQL, and AWS-role controls, then perform a protected handoff. No
