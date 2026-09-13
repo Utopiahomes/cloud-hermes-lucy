@@ -36,6 +36,7 @@ COPY deploy/postgres/production_realm_roles_v1.3.sql.example ./deploy/postgres/p
 COPY deploy/postgres/production_recovery_roles_v1.3.sql.example ./deploy/postgres/production_recovery_roles_v1.3.sql.example
 COPY deploy/postgres/configure_security_v1.2.sql.example ./deploy/postgres/configure_security_v1.2.sql.example
 COPY deploy/render/utopia-public-projection.v0.json ./deploy/render/utopia-public-projection.v0.json
+COPY deploy/render/utopia-public-knowledge.r1.json ./deploy/render/utopia-public-knowledge.r1.json
 COPY alembic.ini hermes.lock ./
 COPY migrations ./migrations
 COPY src ./src

@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from deploy.render.validate_public_knowledge import validate_candidate
+from lucy.public_contracts import PublicKnowledgeSnapshot
+from lucy.publication import knowledge_snapshot, snapshot_digest
+
+ROOT = Path(__file__).parents[2]
+APPROVED_DIGEST = "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
 
 
 def candidate_entry() -> dict[str, object]:
@@ -62,3 +67,15 @@ def test_validator_rejects_inconsistent_duplicate_property_facts(tmp_path: Path)
     write_candidate(path, [candidate_entry(), changed])
     with pytest.raises(ValueError, match="consistent"):
         validate_candidate(path)
+
+
+def test_owner_approved_test_corpus_is_exact_canonical_and_packaged() -> None:
+    path = ROOT / "deploy/render/utopia-public-knowledge.r1.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    snapshot = PublicKnowledgeSnapshot.model_validate(raw)
+    canonical = knowledge_snapshot(raw["entries"])
+    assert len(snapshot.entries) == 25
+    assert snapshot_digest(canonical) == APPROVED_DIGEST
+    assert "deploy/render/utopia-public-knowledge.r1.json" in (
+        ROOT / "Dockerfile"
+    ).read_text(encoding="utf-8")
