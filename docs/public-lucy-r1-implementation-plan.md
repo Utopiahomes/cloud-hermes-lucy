@@ -4,11 +4,11 @@ Status: local implementation in progress on `codex/public-conversation-r1`. Noth
 this plan authorizes production mutation, paid inference, a provider selection, or
 publication of a new knowledge snapshot.
 
-Integration note: concurrent private-memory work currently occupies uncommitted
-migrations `0055` and `0056` in the source checkout. This branch reserves Public Lucy as
-`0057`; its migration parent remains the branch-local `0054` only for isolated testing.
-After the private work is committed, rebase this branch and change the `0057` parent to
-the accepted `0056` revision before merge or deployment.
+Integration note: this branch is synchronized onto the clean Private Lucy checkpoint
+`d7b872c69c5fed4f738d23e36ac569a6ed3b57a9`. Migrations `0055` and `0056` are now in
+its ancestry, and Public Lucy migration `0057` follows the accepted `0056` revision.
+Future migration numbers must be coordinated at the next merge point while the two
+tracks continue in separate worktrees and branches.
 
 ## Finish line and exclusions
 
@@ -136,9 +136,9 @@ The following remain owner release gates and do not block local contract/retriev
 
 | Check | Result on 2026-09-12 | Invalidated by |
 | --- | --- | --- |
-| Ruff and strict mypy | Passed: all files; 81 typed source files | Source/dependency/config changes |
-| Unit and contract tests | Passed: 777; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Ruff and strict mypy | Passed after synchronization: all files; 91 typed source files | Source/dependency/config changes |
+| Unit and contract tests | Passed after synchronization: 826; 248 database-gated tests skipped; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
 | Public retrieval acceptance | Passed: 10 evidence-exact conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
-| PostgreSQL boundary | Passed: clean migration plus 6 focused live-SQL tests on isolated loopback/tmpfs databases | Migration, roles, publication, readiness, or database-image changes |
+| PostgreSQL boundary | Passed after synchronization: one Alembic head; clean migration `0001` through `0057`; 6 focused live-SQL tests on isolated loopback/tmpfs databases; disposable containers removed afterward | Migration, roles, publication, readiness, or database-image changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
 | Production activation | Not executed | Requires explicit production authorization and completed release gates |

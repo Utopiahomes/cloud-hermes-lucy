@@ -29,7 +29,7 @@ def test_public_knowledge_migration_binds_identity_lifecycle_epoch_and_freshness
         ROOT / "migrations" / "versions" / "0057_public_conversation_retrieval.py"
     ).read_text(encoding="utf-8")
     assert 'revision: str = "0057_public_conversation"' in migration
-    assert 'down_revision: str | None = "0054_stage2_scoped_turn_commit"' in migration
+    assert 'down_revision: str | None = "0056_memory_import_budget"' in migration
     assert "session_user='lucy_' || replace(n.slug,'-','_') || '_public'" in migration
     assert "a.state='ready'" in migration
     assert "a.storage_epoch=p_storage_epoch" in migration
