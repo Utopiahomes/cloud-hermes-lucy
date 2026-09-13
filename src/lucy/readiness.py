@@ -17,6 +17,7 @@ R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
 STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
+WORKSPACES_SCHEMA_REVISION = "0066_workspaces_task_queue"
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",
@@ -118,12 +119,16 @@ class ServiceReadiness:
                     self._mode == "public"
                     and os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
                 ):
-                    expected_revisions = {PUBLIC_CONVERSATION_SCHEMA_REVISION}
+                    expected_revisions = {
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
+                    }
                 elif os.getenv("LUCY_TELEGRAM_STAGE") == "2":
                     expected_revisions = {
                         STAGE2_SCHEMA_REVISION,
                         MEMORY_IMPORT_SCHEMA_REVISION,
                         PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
                     }
                     # The bridge release must remain healthy before and after
                     # the additive private-memory and public-conversation migrations.
@@ -133,6 +138,7 @@ class ServiceReadiness:
                         STAGE2_SCHEMA_REVISION,
                         MEMORY_IMPORT_SCHEMA_REVISION,
                         PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
                     }
             if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")

@@ -232,6 +232,8 @@ def apply_manifest(
                     "evidence.delete",
                     "memory.read",
                     "memory.propose",
+                    "task.delegate",
+                    "task.execute",
                 ],
                 "binding_generation": manifest.binding_generation,
                 "node_authz_epoch": manifest.node_authz_epoch,

@@ -64,6 +64,7 @@ class SyntheticOperations:
 
     def delegate_task(self, **values: object) -> UUID:
         assert values["instruction"] == "Draft a viewing plan"
+        assert values["room_id"] == ONE
         return UUID("00000000-0000-4000-8000-000000000003")
 
 

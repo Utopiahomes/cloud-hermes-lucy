@@ -49,7 +49,10 @@ pytestmark = pytest.mark.skipif(not APP_URL, reason="requires PostgreSQL integra
 def clean_directory_tables() -> None:
     assert OWNER_URL is not None
     parsed = make_url(OWNER_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
+    if (parsed.database, parsed.host) != ("lucy_test", "127.0.0.1") or parsed.port not in {
+        54329,
+        54339,
+    }:
         raise RuntimeError("refusing to clear a non-synthetic database")
     engine = create_engine(OWNER_URL)
     with engine.begin() as connection:
@@ -174,7 +177,7 @@ def _provision_realm(
                 service_principal_id=service_principal_id,
                 content_scope_id=content_scope_id,
                 service_role="realm_routine",
-                allowed_actions=["memory.read", "memory.write"],
+                allowed_actions=["memory.read", "memory.write", "task.delegate"],
                 binding_generation=1,
                 node_authz_epoch=1,
                 policy_version=1,
@@ -204,7 +207,7 @@ def _provision_realm(
             identity_audience=f"lucy:{slug}:internal",
             context_issuer=f"lucy:{slug}:admission",
             database_url=runtime_url,
-            allowed_actions=frozenset({"memory.read", "memory.write"}),
+            allowed_actions=frozenset({"memory.read", "memory.write", "task.delegate"}),
             allowed_authentication_strengths=frozenset({AuthenticationStrength.MFA}),
             binding_generation=1,
             policy_version=1,
@@ -274,6 +277,24 @@ def _admit(service: RealmInternalAdmissionService, workspace_id: UUID, token: st
         resource_selector=ExactObjectSelectorV1(object_id=workspace_id, object_version=1),
         checked_at=datetime.now(UTC),
     )
+
+
+def test_directory_admits_task_delegation_as_read_bounded_authority(
+    realms: tuple[RealmFixture, RealmFixture, object, object],
+) -> None:
+    utopia, _raymond, _app_sessions, _owner_sessions = realms
+    context = _admission(utopia.runtime_binding, "utopia-token").admit(
+        credential=SecretStr("utopia-token"),
+        request_id=uuid4(),
+        action="task.delegate",
+        resource_selector=ExactObjectSelectorV1(
+            object_id=utopia.runtime_binding.workspace_id,
+            object_version=1,
+        ),
+        checked_at=datetime.now(UTC),
+    )
+    assert context.action == "task.delegate"
+    assert context.workspace_id == utopia.runtime_binding.workspace_id
 
 
 def test_utopia_and_raymond_resolve_separate_contexts_and_foreign_binding_fails(

@@ -1,8 +1,9 @@
 # Utopia Workspaces private admission adapter
 
-Status: implemented and locally verified on `codex/workspaces-room-admission`. This includes a
-private FastAPI factory but no deployed service. It does not expose a public endpoint, enable a
-runtime, enable capture, or change AWS, Render, database, identity, or channel configuration.
+Status: implemented on `codex/workspaces-room-admission`. This includes a fail-closed private
+service runtime and durable task-queue migration, but no deployed service or applied migration.
+It does not expose a public endpoint, enable capture, or change AWS, Render, database, identity,
+or channel configuration.
 
 ## Boundary
 
@@ -46,7 +47,17 @@ Approved-knowledge queries use `ApprovedProjectionWorkspacesOperations`, which r
 the existing epoch-gated public projection reader and verifies the configured snapshot digest.
 There is no fallback to private memory. Task delegation requires an explicitly injected queue;
 without one, it returns a content-free unavailable response. The request UUID is passed to that
-queue as the idempotency identity.
+queue as the idempotency identity. The durable queue binds the admitted service, content scope,
+workspace, channel, room correlation ID, request ID, and instruction digest. Exact retries return
+the original task ID; a changed payload under the same request ID fails closed.
+
+Workers claim tasks through an execute-only database function with `FOR UPDATE SKIP LOCKED`.
+Claims receive an opaque lease token, expire after a bounded interval, and can be heartbeated only
+with that exact live token. Completion is accepted once and exact terminal retries are replayed.
+Expired claims can be retried up to the stored attempt limit; exhausted tasks become failed. An
+immutable event table records enqueue, claim, heartbeat, completion, failure, and exhaustion.
+Database functions independently require the fixed realm login to carry `task.delegate` or
+`task.execute`; callers receive no direct task-table privileges.
 
 Workspaces room IDs are correlation identifiers. They do not select authority. A prospect adapter
 can be fixed to an approved sales/public knowledge projection without making the attendee a Cloud
@@ -62,16 +73,55 @@ service, while transcripts, documents, decisions, approvals, generated proposals
 items remain node-owned content. No raw audio, video, transcript, archive, or Cloud Lucy database
 credential crosses this admission request.
 
+Task instructions and results are node-owned meeting content. They remain inside the fixed realm
+database scope. The private service returns only a task ID and accepted status to Workspaces; it
+does not expose task results or queue inspection through the Workspaces transport API.
+
 Human LiveKit participation must remain independent of this adapter. Failure or withdrawal of
 Cloud Lucy admission disables Lucy operations but must not terminate the human room.
+
+## Private service configuration
+
+The existing container can run this isolated service with `python -m lucy.workspaces_runtime`.
+`deploy/render/workspaces-private-service.yaml.example` records the review-only private-service
+shape with auto-deploy disabled; it is not connected to a live Blueprint.
+Startup requires the following secret/configuration values and refuses to listen if capture is not
+disabled, the database login differs from the fixed binding, migration `0066` is absent, the login
+is elevated, required execute grants are missing, or direct task-table access exists:
+
+- `LUCY_WORKSPACES_RUNTIME_BINDING_JSON`
+- `LUCY_EXPECTED_DATABASE_LOGIN`
+- `LUCY_WORKSPACES_DIRECTORY_DATABASE_URL`
+- `LUCY_WORKSPACES_EXPECTED_DIRECTORY_LOGIN`
+- `LUCY_WORKSPACES_TRANSPORT_TOKEN`
+- `LUCY_WORKSPACES_AUTHORITY_TOKEN`
+- `LUCY_WORKSPACES_AUTHORITY_SUBJECT`
+- `LUCY_WORKSPACES_AUTHORITY_SESSION_ID`
+- `LUCY_WORKSPACES_ROOM_CAPABILITIES_JSON`
+- `LUCY_WORKSPACES_AUTHORITY_MODE=approved_knowledge`
+- `LUCY_WORKSPACES_AUTHORITY_REF`
+- `LUCY_WORKSPACES_PROJECTION_HOSTNAME`
+- `LUCY_WORKSPACES_PROJECTION_STORAGE_EPOCH`
+- `LUCY_WORKSPACES_PROJECTION_SNAPSHOT_DIGEST`
+- `LUCY_TRANSCRIPT_CAPTURE_ENABLED=false`
+
+The runtime binding must include `memory.read`, `task.delegate`, and `task.execute` for the current
+vertical slice. The production database role template grants only the required security-definer
+functions, including the approved projection reader. Migration `0066` adds both task actions only
+to active realm service bindings that already hold `memory.read`; the realm provisioner records
+the same actions for future bindings. Applying that migration, creating service secrets, or adding
+a Render service remains a separate reviewed deployment action.
 
 ## Verification ledger
 
 | Check | Result | Evidence | Invalidated by |
 | --- | --- | --- | --- |
-| Adapter lint | Passed | `ruff check src tests` on 2026-09-12 | Adapter or test change |
-| Adapter typing | Passed | Strict `mypy src` across 89 source files | Adapter or type configuration change |
-| Adapter security tests | 15 passed | Focused admission, private API, and operation tests | Adapter, API, operation, or test change |
-| Full Cloud Lucy suite | 803 passed, 248 environment-gated tests skipped | `pytest -q` on 2026-09-12; isolated databases were not configured | Any repository source or dependency change |
-| Workspaces-to-Cloud contract smoke | Passed | In-process ASGI request using the real client and private API models | Either side of the transport contract changes |
+| Cloud lint | Passed | `ruff check src tests migrations deploy` on 2026-09-12 | Relevant source, migration, deploy template, or test change |
+| Cloud typing | Passed | Strict `mypy src` across 103 source files on 2026-09-12 | Source or type configuration change |
+| Adapter security tests | 18 passed | Focused admission, private API, operation, task, and runtime unit tests | Adapter, API, operation, task, runtime, or test change |
+| Full Cloud Lucy suite | 904 passed, 258 environment-gated tests skipped | `pytest -q` on 2026-09-12 | Any repository source or dependency change |
+| Fresh PostgreSQL migration | Passed | Clean `0001 -> 0066_workspaces_task_queue` migration in an isolated PostgreSQL tmpfs container on 2026-09-12 | Migration or PostgreSQL image change |
+| Directory, queue lifecycle, and role boundary | 3 passed | Real PostgreSQL task admission, idempotency, claim/lease fencing, completion replay, execute grants, readiness, and direct-table denial | Directory, queue migration, queue client, runtime readiness, or realm role template change |
+| Workspaces backend suite | 83 passed | Full backend test suite plus Ruff on 2026-09-12 | Workspaces backend source or dependency change |
+| Workspaces-to-Cloud contract smoke | Passed | In-process ASGI admission, knowledge, and task calls using the real Workspaces client and Cloud API models | Either side of the transport contract changes |
 | Deployed Workspaces call | Not executed | Private API factory is intentionally not deployed | Requires approved realm construction and deployment gate |

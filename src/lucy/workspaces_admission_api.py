@@ -69,6 +69,7 @@ class WorkspacesOperationService(Protocol):
         *,
         context: ResolvedExecutionContextV1,
         request_id: UUID,
+        room_id: UUID,
         instruction: str,
     ) -> UUID: ...
 
@@ -197,6 +198,7 @@ def create_workspaces_admission_app(
             effect=lambda context: operations.delegate_task(
                 context=context,
                 request_id=request.request_id,
+                room_id=room_id,
                 instruction=request.instruction,
             ),
         )

@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from lucy.contracts.security_v1_3 import ResolvedExecutionContextV1
 from lucy.publication import PublicProjectionReader
 from lucy.tenancy import ScopeNotFound
+from lucy.workspaces_tasks import WorkspacesTaskUnavailable
 
 
 class WorkspacesOperationUnavailable(RuntimeError):
@@ -24,6 +25,7 @@ class WorkspacesTaskDelegator(Protocol):
         *,
         context: ResolvedExecutionContextV1,
         request_id: UUID,
+        room_id: UUID,
         instruction: str,
     ) -> UUID: ...
 
@@ -72,12 +74,17 @@ class ApprovedProjectionWorkspacesOperations:
         *,
         context: ResolvedExecutionContextV1,
         request_id: UUID,
+        room_id: UUID,
         instruction: str,
     ) -> UUID:
         if self._task_delegator is None:
             raise WorkspacesOperationUnavailable("task delegation is unavailable")
-        return self._task_delegator.delegate(
-            context=context,
-            request_id=request_id,
-            instruction=instruction,
-        )
+        try:
+            return self._task_delegator.delegate(
+                context=context,
+                request_id=request_id,
+                room_id=room_id,
+                instruction=instruction,
+            )
+        except WorkspacesTaskUnavailable as exc:
+            raise WorkspacesOperationUnavailable("task delegation is unavailable") from exc

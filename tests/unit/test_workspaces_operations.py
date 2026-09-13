@@ -28,6 +28,7 @@ class Reader:
 class Tasks:
     def delegate(self, **values: object) -> UUID:
         assert values["request_id"] == ONE
+        assert values["room_id"] == TWO
         assert values["instruction"] == "Draft a viewing plan"
         return TWO
 
@@ -63,12 +64,14 @@ def test_task_delegation_requires_an_injected_queue() -> None:
         _operations(Reader()).delegate_task(
             context=object(),  # type: ignore[arg-type]
             request_id=ONE,
+            room_id=TWO,
             instruction="Draft a viewing plan",
         )
     assert (
         _operations(Reader(), Tasks()).delegate_task(
             context=object(),  # type: ignore[arg-type]
             request_id=ONE,
+            room_id=TWO,
             instruction="Draft a viewing plan",
         )
         == TWO
