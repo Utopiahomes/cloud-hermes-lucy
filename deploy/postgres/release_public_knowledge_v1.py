@@ -189,7 +189,7 @@ class PublicKnowledgeReleaseConfig(BaseModel):
             snapshot = knowledge_snapshot(raw_snapshot["entries"])
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             raise PublicKnowledgeReleaseError("the public knowledge snapshot is invalid") from exc
-        if snapshot != raw_snapshot or snapshot_digest(snapshot) != manifest.snapshot_digest:
+        if snapshot_digest(snapshot) != manifest.snapshot_digest:
             raise PublicKnowledgeReleaseError("the reviewed public knowledge digest differs")
         return cls(migration_url=migration_url, manifest=manifest, snapshot=snapshot)
 

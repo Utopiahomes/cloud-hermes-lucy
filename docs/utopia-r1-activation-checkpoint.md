@@ -54,9 +54,9 @@ ready for separately authorized, fail-closed staging, approval, and activation. 
 
 ## Exact next action
 
-Review and approve the 25-entry Public Lucy R1 corpus and its canonical digest. Only then
-copy the exact approved bytes to the production artifact path and prepare the three
-identifier-only release manifests. Production migration, Render provisioning, snapshot
+Obtain explicit production-publication authorization for the already approved 25-entry
+test corpus, or approve a replacement digest, then prepare the three identifier-only
+release manifests. Production migration, Render provisioning, snapshot
 staging/approval/activation, website enablement, DNS changes, and live endpoint checks
 still require explicit authorization.
 
@@ -65,9 +65,13 @@ still require explicit authorization.
 - Public/Private synchronization: passed locally on 2026-09-12 at Public Lucy commit
   `b416d013a393d2f6573397245d7c3991bea7e292`; one Alembic head ends at `0057`, and a
   clean `0001`-through-`0057` migration plus six focused live-SQL boundary checks passed.
-- Conversational R1 corpus/retrieval: the 25-entry review candidate has canonical digest
+- Conversational R1 corpus/retrieval: Ray approved the 25-entry corpus for testing on
+  2026-09-12. Its website source and packaged Cloud artifact share canonical digest
   `95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422` and passed all
-  ten evidence-exact acceptance conversations. It is not approved or active.
+  ten evidence-exact acceptance conversations. It is not active, and testing approval is
+  not production-publication authorization. A fresh isolated PostgreSQL run also returned
+  all 25 entries and the exact digest through the execute-only admitted public identity,
+  then answered the multi-requirement property question from those returned records.
 - R1 release ordering: the local controller now requires separate stage, approve, and
   activate authorizations. Its synthetic live-SQL test staged and approved without route
   mutation, rejected publisher/approver substitution, atomically advanced version 1 to 2,

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
@@ -26,6 +28,7 @@ from lucy.db.models import (
     TenantAccountRow,
     WalletRegistrationRow,
 )
+from lucy.public_retrieval import PublicKnowledgeRetriever
 from lucy.publication import (
     PublicationRejected,
     PublicProjectionPublisher,
@@ -41,6 +44,8 @@ OWNER_DATABASE_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
 PUBLIC_DATABASE_URL = os.getenv("LUCY_TEST_PUBLIC_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires PostgreSQL integration database")
 SYNTHETIC_PORTS = {54329, 54339}
+ROOT = Path(__file__).parents[2]
+APPROVED_R1_DIGEST = "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
 
 
 @pytest.fixture(autouse=True)
@@ -464,6 +469,81 @@ def test_public_knowledge_release_is_three_step_exact_and_replay_safe() -> None:
             (foundation.channel_binding_id,),
         ).fetchone()
     assert active == (version_id, 2, snapshot_digest(snapshot))
+
+
+def test_owner_approved_corpus_round_trips_through_the_admitted_database_reader() -> None:
+    assert DATABASE_URL and OWNER_DATABASE_URL
+    raw = json.loads(
+        (ROOT / "deploy/render/utopia-public-knowledge.r1.json").read_text(encoding="utf-8")
+    )
+    sessions = create_session_factory(DATABASE_URL)
+    tenancy = TenancyService(sessions)
+    publisher = PublicProjectionPublisher(sessions)
+    actor = tenancy.create_principal(
+        issuer="https://synthetic-idp.invalid",
+        subject="approved-corpus-owner",
+        kind="human",
+        display_name="Approved Corpus Owner",
+    )
+    foundation = _foundation(tenancy, "utopia", "www.utopiahomes.com")
+    tenancy.grant_workspace_membership(
+        principal_id=actor,
+        workspace_id=foundation.workspace_id,
+        role="owner",
+    )
+    candidate_id, digest = publisher.stage_knowledge(
+        channel_binding_id=foundation.channel_binding_id,
+        entries=raw["entries"],
+        actor_id=actor,
+    )
+    assert digest == APPROVED_R1_DIGEST
+    publisher.approve(candidate_id=candidate_id, expected_digest=digest, actor_id=actor)
+    publisher.publish(candidate_id=candidate_id, actor_id=actor)
+
+    epoch = uuid4()
+    owner = create_engine(OWNER_DATABASE_URL)
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                render_realm_roles(
+                    realm_slug="utopia",
+                    routine_login="lucy_utopia_routine",
+                    policy_login="lucy_utopia_policy",
+                    workflow_login="lucy_utopia_sensitive_workflow",
+                    finality_login="lucy_utopia_finality",
+                    public_login="lucy_utopia_public",
+                )
+            )
+        )
+        connection.execute(text("UPDATE lucy.lifecycle SET state='ready'"))
+        connection.execute(
+            text("UPDATE lucy.runtime_admission SET state='ready',storage_epoch=:epoch"),
+            {"epoch": epoch},
+        )
+    public_url = make_url(OWNER_DATABASE_URL).set(
+        username="lucy_utopia_public",
+        password="synthetic-utopia-public-only",
+    ).render_as_string(hide_password=False)
+    reader = PublicProjectionReader(
+        admitted_session_factory(public_url, epoch, journal_required=False)
+    )
+    projection = reader.knowledge_admitted(
+        hostname="www.utopiahomes.com",
+        storage_epoch=epoch,
+    )
+    assert len(projection.entries) == 25
+    assert projection.snapshot_digest == APPROVED_R1_DIGEST
+    result = PublicKnowledgeRetriever().retrieve(
+        question="We have 20 people, four cars, and want a pool.",
+        entries=projection.entries,
+    )
+    assert result.outcome == "answered"
+    assert result.evidence_ids == (
+        "buttercup-capacity",
+        "buttercup-outdoors",
+        "buttercup-parking",
+    )
+    owner.dispose()
 
 
 def test_database_enforces_one_wallet_per_node_and_immutable_tenure() -> None:
