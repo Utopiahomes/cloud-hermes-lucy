@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -36,6 +36,10 @@ from lucy.internal_admission import (
 from lucy.realm_sessions import RealmRuntimeBindingV1, RealmSessionRegistry
 from lucy.scoped_memory import ScopedMemoryService, ScopedMemoryWrite
 from lucy.tenancy import NodeFoundation, TenancyService
+from lucy.workspaces_runtime import (
+    FixedWorkspacesAuthorityVerifier,
+    WorkspacesRuntimeConfiguration,
+)
 
 APP_URL = os.getenv("LUCY_TEST_DATABASE_URL")
 OWNER_URL = os.getenv("LUCY_TEST_OWNER_DATABASE_URL")
@@ -107,6 +111,7 @@ class AudienceVerifier:
 class RealmFixture:
     foundation: NodeFoundation
     membership_id: UUID
+    service_principal_id: UUID
     runtime_binding: RealmRuntimeBindingV1
 
 
@@ -129,7 +134,7 @@ def _provision_realm(
         realm_slug=f"{slug}-realm",
         workspace_slug="operations",
         hostname=f"internal.{slug}.test",
-        workspace_kind="private",
+        workspace_kind="private_realm",
         channel_kind="internal",
     )
     membership_id = tenancy.grant_workspace_membership(
@@ -188,6 +193,7 @@ def _provision_realm(
     return RealmFixture(
         foundation=foundation,
         membership_id=membership_id,
+        service_principal_id=service_principal_id,
         runtime_binding=RealmRuntimeBindingV1(
             workload_subject=f"render:{slug}:routine",
             service_principal_id=service_principal_id,
@@ -295,6 +301,81 @@ def test_directory_admits_task_delegation_as_read_bounded_authority(
     )
     assert context.action == "task.delegate"
     assert context.workspace_id == utopia.runtime_binding.workspace_id
+
+
+def test_workspaces_service_authority_requires_its_own_explicit_membership(
+    realms: tuple[RealmFixture, RealmFixture, object, object],
+) -> None:
+    utopia, _raymond, app_sessions, _owner_sessions = realms
+    binding = utopia.runtime_binding.model_copy(
+        update={
+            "identity_issuer": "https://workload.test",
+            "identity_audience": "lucy:utopia:workspaces",
+            "allowed_authentication_strengths": frozenset(
+                {AuthenticationStrength.WORKLOAD_IDENTITY}
+            ),
+        }
+    )
+    config = WorkspacesRuntimeConfiguration(
+        binding=binding,
+        expected_database_login="lucy_utopia_routine",
+        directory_database_url=SecretStr(DIRECTORY_URL or ""),
+        expected_directory_login="lucy_directory_admission",
+        transport_token=SecretStr("t" * 32),
+        authority_token=SecretStr("a" * 32),
+        authority_subject="render:utopia:routine",
+        authority_session_id=uuid4(),
+        room_capabilities=frozenset({"memory.read", "task.delegate"}),
+        authority_mode="approved_knowledge",
+        authority_ref="utopia-sales-approved-v1",
+        projection_hostname="www.utopiahomes.com",
+        projection_storage_epoch=uuid4(),
+        projection_snapshot_digest="a" * 64,
+    )
+    service = RealmInternalAdmissionService(
+        sessions=RealmSessionRegistry((binding,)),
+        verified_workload_subject=binding.workload_subject,
+        identity_verifier=FixedWorkspacesAuthorityVerifier(config),
+        directory=PostgresDirectoryAdmissionAuthorizer(
+            create_session_factory(DIRECTORY_URL or "")
+        ),
+    )
+
+    with pytest.raises(InternalAdmissionDenied, match="not authorized"):
+        _admit(service, binding.workspace_id, "a" * 32)
+
+    TenancyService(app_sessions).grant_workspace_membership(
+        principal_id=utopia.service_principal_id,
+        workspace_id=binding.workspace_id,
+        role="member",
+    )
+    context = _admit(service, binding.workspace_id, "a" * 32)
+    assert context.principal_id == utopia.service_principal_id
+    assert context.principal_type == PrincipalType.SERVICE
+    assert context.authn_strength == AuthenticationStrength.WORKLOAD_IDENTITY
+
+    other_service_id = TenancyService(app_sessions).create_principal(
+        issuer="https://workload.test",
+        subject="render:utopia:other-service",
+        kind="service",
+        display_name="Other Utopia service",
+    )
+    TenancyService(app_sessions).grant_workspace_membership(
+        principal_id=other_service_id,
+        workspace_id=binding.workspace_id,
+        role="member",
+    )
+    mismatched_config = replace(config, authority_subject="render:utopia:other-service")
+    mismatched_service = RealmInternalAdmissionService(
+        sessions=RealmSessionRegistry((binding,)),
+        verified_workload_subject=binding.workload_subject,
+        identity_verifier=FixedWorkspacesAuthorityVerifier(mismatched_config),
+        directory=PostgresDirectoryAdmissionAuthorizer(
+            create_session_factory(DIRECTORY_URL or "")
+        ),
+    )
+    with pytest.raises(InternalAdmissionDenied, match="not authorized"):
+        _admit(mismatched_service, binding.workspace_id, "a" * 32)
 
 
 def test_utopia_and_raymond_resolve_separate_contexts_and_foreign_binding_fails(

@@ -26,6 +26,7 @@ COPY deploy/postgres/replay_authorized_deletion_cloud_v1_2.py ./deploy/postgres/
 COPY deploy/postgres/replay_authorized_deletion_cloud_v1_3.py ./deploy/postgres/replay_authorized_deletion_cloud_v1_3.py
 COPY deploy/postgres/provision_realm_foundation_v1_3.py ./deploy/postgres/provision_realm_foundation_v1_3.py
 COPY deploy/postgres/provision_realm_bindings_v1_3.py ./deploy/postgres/provision_realm_bindings_v1_3.py
+COPY deploy/postgres/provision_workspaces_authority_v1.py ./deploy/postgres/provision_workspaces_authority_v1.py
 COPY deploy/postgres/provision_synthetic_authority_v1_3.py ./deploy/postgres/provision_synthetic_authority_v1_3.py
 COPY deploy/postgres/render_security_v1_2_sql.py ./deploy/postgres/render_security_v1_2_sql.py
 COPY deploy/postgres/render_security_v1_3_sql.py ./deploy/postgres/render_security_v1_3_sql.py
