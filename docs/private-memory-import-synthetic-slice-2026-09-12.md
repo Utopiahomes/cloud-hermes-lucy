@@ -225,6 +225,11 @@ accepted `0057` migration is merged at `2807dad`.
     `Cache-Control: no-store`. A deterministic zero-cost fake provider has no credential, network,
     or production fallback. Partial archive retry and full execution replay reuse stable identities
     and do not repeat the provider call. This remains synthetic/injected-boundary evidence only.
+36. A protected Windows uploader now sends exact batches sequentially over HTTPS, keeps the random
+    capability in memory, bounds response bytes, validates the returned campaign/batch/job identity,
+    and refuses review output outside the existing intake root. A lost response stops with an
+    explicit exact-identity retry requirement; retry sends identical canonical batch bytes. Existing
+    review artifacts can only be replayed byte-for-byte, never overwritten. No endpoint was contacted.
 
 ## Verification ledger
 
@@ -256,6 +261,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Pilot transport contracts and database admission | Passed, focused unit/integration checks on clean PostgreSQL through `0070`, plus Ruff and strict mypy | Locally verified exact batch compilation; plaintext-free registration; separate transfer HMAC and capability; wrong-key/wrong-capability/tamper denial; execute-only realm-evidence admission; table-enumeration denial; idempotent replay; durable revocation; a real two-connection admission/revocation race that fails closed; bounded HTTP body | Migration `0070`, transport contracts/CLI/API, compiler, realm role grants, canonicalization, or PostgreSQL image change |
 | Durable extraction dispatch ownership | Passed, 20 focused coordinator/pilot-runner tests plus Ruff and strict mypy | A fresh reservation paired with a replayed exact job recovers or reconciles without a second provider call; a recovered billed outcome retains its known cost if the pre-dispatch source fence closes | Extraction coordinator, job-registration semantics, outcome recovery, accounting settlement, or PostgreSQL job constraints change |
 | Verified transport execution | Passed, 38 focused transport/materialization/coordinator/HTTP checks plus Ruff and strict mypy | Original conversation provenance; local/transport archive-request equivalence; authority rechecks; partial archive recovery; cross-batch quote denial; one zero-cost fake-provider call across replay; content-free status; protected no-store review response | Transport record/executor, archive request, candidate materializer, coordinator, intake API, or fake-provider boundary change |
+| Protected sequential uploader | Passed, 3 focused uploader checks plus Ruff and strict mypy | HTTPS-only endpoint; sequential exact bytes; in-memory bearer capability; bounded, identity-checked response; protected-root confinement; content-free receipt; exact retry after lost response | Uploader, transport/response contracts, intake-root policy, or HTTP boundary change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
@@ -274,9 +280,8 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 1. Assemble the verified executor with the existing PostgreSQL, archive, and encrypted outcome
    adapters and prove the injected-boundary slice against PostgreSQL before any cloud deployment.
    Real OpenRouter remains disabled.
-2. Add the Windows uploader that rebuilds batches in memory from the untouched ZIP, sends them
-   sequentially over HTTPS, writes review artifacts only under the protected intake root, and uses
-   the same immutable batch identity to recover a lost response without repeating a provider call.
+2. Wire the sequential uploader into the local CLI so each run rebuilds batches in memory from the
+   untouched ZIP and writes review artifacts only under the protected intake root.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
