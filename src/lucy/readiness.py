@@ -17,7 +17,7 @@ R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
 STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
-WORKSPACES_SCHEMA_REVISION = "0066_workspaces_task_queue"
+WORKSPACES_SCHEMA_REVISION = "0067_memory_deletion_recovery"
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",

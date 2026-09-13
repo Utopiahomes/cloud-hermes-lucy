@@ -86,7 +86,7 @@ The existing container can run this isolated service with `python -m lucy.worksp
 `deploy/render/workspaces-private-service.yaml.example` records the review-only private-service
 shape with auto-deploy disabled; it is not connected to a live Blueprint.
 Startup requires the following secret/configuration values and refuses to listen if capture is not
-disabled, the database login differs from the fixed binding, migration `0066` is absent, the login
+disabled, the database login differs from the fixed binding, migration `0067` is absent, the login
 is elevated, required execute grants are missing, or direct task-table access exists:
 
 - `LUCY_WORKSPACES_RUNTIME_BINDING_JSON`
@@ -117,11 +117,11 @@ a Render service remains a separate reviewed deployment action.
 | Check | Result | Evidence | Invalidated by |
 | --- | --- | --- | --- |
 | Cloud lint | Passed | `ruff check src tests migrations deploy` on 2026-09-12 | Relevant source, migration, deploy template, or test change |
-| Cloud typing | Passed | Strict `mypy src` across 103 source files on 2026-09-12 | Source or type configuration change |
+| Cloud typing | Passed | Strict `mypy src` across 103 source files after the combined-head readiness correction on 2026-09-12 | Source or type configuration change |
 | Adapter security tests | 18 passed | Focused admission, private API, operation, task, and runtime unit tests | Adapter, API, operation, task, runtime, or test change |
-| Full Cloud Lucy suite | 904 passed, 258 environment-gated tests skipped | `pytest -q` on 2026-09-12 | Any repository source or dependency change |
-| Fresh PostgreSQL migration | Passed | Clean `0001 -> 0066_workspaces_task_queue` migration in an isolated PostgreSQL tmpfs container on 2026-09-12 | Migration or PostgreSQL image change |
-| Directory, queue lifecycle, and role boundary | 3 passed | Real PostgreSQL task admission, idempotency, claim/lease fencing, completion replay, execute grants, readiness, and direct-table denial | Directory, queue migration, queue client, runtime readiness, or realm role template change |
+| Cloud unit and affected suite | Passed | 906 unit tests on combined commit `3db1dc9`; 40 Workspaces runtime, task, and shared-readiness tests after requiring migration `0067` | Relevant source, test, or dependency change |
+| Fresh PostgreSQL migration | Passed | Clean `0001 -> 0067_memory_deletion_recovery` migration in an isolated PostgreSQL tmpfs container on 2026-09-12, including Workspaces migration `0066` | Migration or PostgreSQL image change |
+| Directory, queue lifecycle, and role boundary | 3 passed | Workspaces admission, queue lifecycle, shared and private-runtime readiness, execute grants, and direct-table denial at migration `0067` | Directory, queue migration, queue client, runtime readiness, or realm role template change |
 | Workspaces backend suite | 83 passed | Full backend test suite plus Ruff on 2026-09-12 | Workspaces backend source or dependency change |
 | Workspaces-to-Cloud contract smoke | Passed | In-process ASGI admission, knowledge, and task calls using the real Workspaces client and Cloud API models | Either side of the transport contract changes |
 | Deployed Workspaces call | Not executed | Private API factory is intentionally not deployed | Requires approved realm construction and deployment gate |

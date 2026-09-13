@@ -1,7 +1,8 @@
 # Review-only Render shape for the private Utopia Workspaces Cloud Lucy service.
 # It is not referenced by a live Blueprint and does not provision or deploy anything.
-# Apply migration 0066 before creating this service. The reviewed migration adds
-# task.delegate and task.execute only to active realm bindings that already hold memory.read.
+# Apply through migration 0067 before creating this service. Migration 0066 adds
+# task.delegate and task.execute only to active realm bindings that already hold memory.read;
+# 0067 is the required combined security head.
 
 services:
   - type: pserv

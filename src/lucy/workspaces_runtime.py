@@ -36,7 +36,7 @@ from lucy.workspaces_admission_api import (
 from lucy.workspaces_operations import ApprovedProjectionWorkspacesOperations
 from lucy.workspaces_tasks import PostgresWorkspacesTaskQueue
 
-WORKSPACES_SCHEMA_REVISION = "0066_workspaces_task_queue"
+WORKSPACES_SCHEMA_REVISION = "0067_memory_deletion_recovery"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LOGIN = re.compile(r"[a-z][a-z0-9_]{0,62}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
