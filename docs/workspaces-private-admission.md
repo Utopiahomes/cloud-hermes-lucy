@@ -1,8 +1,8 @@
 # Utopia Workspaces private admission adapter
 
-Status: implemented and locally verified on `codex/workspaces-room-admission`. This is an
-inactive library boundary. It does not expose a public endpoint, enable a runtime, enable capture,
-or change AWS, Render, database, identity, or channel configuration.
+Status: implemented and locally verified on `codex/workspaces-room-admission`. This includes a
+private FastAPI factory but no deployed service. It does not expose a public endpoint, enable a
+runtime, enable capture, or change AWS, Render, database, identity, or channel configuration.
 
 ## Boundary
 
@@ -18,6 +18,11 @@ The adapter is constructed inside a realm process with:
 - a fixed Cloud Lucy workspace selector; and
 - a deployment-owned Workspaces room capability allow-list.
 
+`create_workspaces_admission_app` wraps that adapter in a deliberately small private HTTP surface:
+`GET /health` and `POST /v1/workspaces/rooms/admit`. The endpoint authenticates the independent
+Workspaces transport token before parsing a bounded request body. The Cloud Lucy authority
+credential remains in this service's configuration and is never accepted from Workspaces.
+
 The requested capability set can only narrow that configuration. Every requested capability is
 then admitted against the server-selected Lucy/service authority credential and current directory
 authority. The attendee's invitation identity is never used as Cloud Lucy authority. Results from
@@ -26,9 +31,10 @@ and membership generations.
 
 ## Receipt and execution
 
-A successful preflight returns only a content-free correlation receipt. The receipt is marked
-`usable_as_bearer: false`, contains no resolved node or realm context, and is never accepted back
-by the adapter as authorization.
+A successful preflight returns only a content-free correlation receipt. It echoes the fixed
+authority mode and reference so Workspaces can reject a response from the wrong private service.
+The receipt is marked `usable_as_bearer: false`, contains no resolved node or realm context, and is
+never accepted back by the adapter as authorization.
 
 An operation invokes `WorkspacesExperienceGateway.execute`. It re-runs directory admission at the
 time of the effect and passes the resolved execution context only to an in-process effect handler.
@@ -56,8 +62,9 @@ Cloud Lucy admission disables Lucy operations but must not terminate the human r
 
 | Check | Result | Evidence | Invalidated by |
 | --- | --- | --- | --- |
-| Adapter lint | Passed | `ruff check src/lucy/workspaces_admission.py tests/unit/test_workspaces_admission.py` | Adapter or test change |
-| Adapter typing | Passed | `mypy src/lucy/workspaces_admission.py` | Adapter or type configuration change |
-| Adapter security tests | 6 passed | `pytest -q tests/unit/test_workspaces_admission.py` | Adapter, admission contracts, or test change |
-| Full Cloud Lucy suite | 794 passed, 248 environment-gated tests skipped | `pytest -q` on 2026-09-12; isolated databases were not configured | Any repository source or dependency change |
-| Deployed Workspaces call | Not executed | Adapter intentionally has no endpoint yet | Requires approved private service wiring and deployment gate |
+| Adapter lint | Passed | `ruff check src tests` on 2026-09-12 | Adapter or test change |
+| Adapter typing | Passed | Strict `mypy src` across 88 source files | Adapter or type configuration change |
+| Adapter security tests | 11 passed | Focused admission and private API tests | Adapter, API, admission contracts, or test change |
+| Full Cloud Lucy suite | 799 passed, 248 environment-gated tests skipped | `pytest -q` on 2026-09-12; isolated databases were not configured | Any repository source or dependency change |
+| Workspaces-to-Cloud contract smoke | Passed | In-process ASGI request using the real client and private API models | Either side of the transport contract changes |
+| Deployed Workspaces call | Not executed | Private API factory is intentionally not deployed | Requires approved realm construction and deployment gate |

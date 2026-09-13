@@ -98,6 +98,8 @@ def _gateway(admission: SyntheticAdmission) -> WorkspacesExperienceGateway:
         admission=admission,  # type: ignore[arg-type]
         workspace_id=FOUR,
         room_capabilities=frozenset({"memory.read", "task.delegate"}),
+        authority_mode="approved_knowledge",
+        authority_ref="utopia-sales-approved-v1",
     )
 
 
@@ -120,6 +122,8 @@ def test_preflight_intersects_fixed_room_policy_and_returns_non_bearer_receipt()
     assert [call[0] for call in admission.calls] == ["memory.read", "task.delegate"]
     assert all(call[1].object_id == FOUR for call in admission.calls)
     assert receipt.admitted_capabilities == ("memory.read", "task.delegate")
+    assert receipt.authority_mode == "approved_knowledge"
+    assert receipt.authority_ref == "utopia-sales-approved-v1"
     assert receipt.usable_as_bearer is False
     assert receipt.expires_at == NOW + timedelta(minutes=5)
 

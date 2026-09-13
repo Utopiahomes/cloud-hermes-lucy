@@ -18,6 +18,8 @@ from lucy.contracts.security_v1_3 import ExactObjectSelectorV1, ResolvedExecutio
 from lucy.internal_admission import InternalAdmissionDenied, RealmInternalAdmissionService
 
 CapabilityName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.:-]{0,127}$")]
+AuthorityMode = Literal["approved_knowledge", "project_node"]
+AuthorityReference = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")]
 EffectResult = TypeVar("EffectResult")
 
 
@@ -55,6 +57,8 @@ class WorkspacesRoomAdmissionReceiptV1(BaseModel):
     request_id: UUID
     room_id: UUID
     experience_mode: Literal["workspaces"] = "workspaces"
+    authority_mode: AuthorityMode
+    authority_ref: AuthorityReference
     admitted_capabilities: tuple[CapabilityName, ...]
     issued_at: datetime
     expires_at: datetime
@@ -75,12 +79,16 @@ class WorkspacesExperienceGateway:
         admission: RealmInternalAdmissionService,
         workspace_id: UUID,
         room_capabilities: frozenset[str],
+        authority_mode: AuthorityMode,
+        authority_ref: str,
         workspace_version: int = 1,
     ) -> None:
         if not room_capabilities:
             raise ValueError("Workspaces room policy must allow at least one capability")
         self._admission = admission
         self._room_capabilities = room_capabilities
+        self._authority_mode = authority_mode
+        self._authority_ref = AuthorityReference(authority_ref)
         self._workspace_selector = ExactObjectSelectorV1(
             object_id=workspace_id,
             object_version=workspace_version,
@@ -111,6 +119,8 @@ class WorkspacesExperienceGateway:
             admission_id=uuid4(),
             request_id=request.request_id,
             room_id=request.room_id,
+            authority_mode=self._authority_mode,
+            authority_ref=self._authority_ref,
             admitted_capabilities=request.requested_capabilities,
             issued_at=max(context.issued_at for context in contexts),
             expires_at=min(context.expires_at for context in contexts),
