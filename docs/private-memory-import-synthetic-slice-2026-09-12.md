@@ -268,6 +268,17 @@ accepted `0057` migration is merged at `2807dad`.
     limit compiles into 15 batches and reserves $1.50 when each attempt is capped at $0.10, within
     the existing $2 campaign ceiling. This measurement is not a revised owner authorization; a new
     immutable proposal and digest are required before manifest construction.
+42. The owner authorized exact pilot bundle
+    `7a1627621068987980aaa20f0be9cc3a85885bb9875f9ec522f56cdb1194a8d9` and separately
+    authorized commissioning Raymond's isolated realm. The local authorization and no-network
+    preflight are exact and content-free; no personal record has left the protected intake root.
+    Commissioning review found and corrected a pre-deployment compatibility gap: the reusable
+    V1.3 realm bootstrap stopped at migration `0053`, and recovery workloads rejected the pilot's
+    current `0071` schema. New realm bootstrap now targets `0071`; recovery services accept the
+    explicitly reviewed additive V1.3 milestone revisions, while unknown/intermediate revisions
+    remain fail-closed. Raymond still requires a separate protected Render environment/database,
+    eight private workload identities, and both per-realm AWS stacks before transport registration
+    or upload.
 
 ## Verification ledger
 
@@ -304,8 +315,9 @@ accepted `0057` migration is merged at `2807dad`.
 | Complete synthetic transport execution and replay | Passed, 55 focused checks on PostgreSQL through `0071`, plus Ruff and strict mypy | Exact transport admission; encrypted archive and provider-outcome persistence; provenance-linked pending candidate; one settlement; exact replay with one archive data-key generation and one synthetic provider dispatch; settled-reservation new-job denial retained by migration ordering | Migration `0071`, executor, coordinator, archive/outcome adapters, candidate materialization, transport authority, or PostgreSQL image change |
 | Raymond private-realm identity preparation | Passed, 3 focused contract/generator checks plus Ruff and strict mypy | Stable `planned_not_authorized` scope; 22 internally distinct UUIDs; zero UUID overlap with Utopia; exact service issuer and login namespace; overwrite refusal | Realm identity-plan contract/generator, Utopia binding, or planned Raymond identity artifact change |
 | Real-export pilot feasibility | Passed locally with one required proposal revision, 34 focused checks plus Ruff and strict mypy | Exact 11-conversation selection validation; campaign/per-request separation; 67,844-byte record admission to the manifest layer; no-fallback ZDR request; one credential-like record quarantined locally; corrected JSON-object request framing compiled to 13 exact batches at 76,000/4,000/80,000 with $1.30 reserved under the $2 cap; personal-data network calls: 0 | Selection, request limits, manifest/record contract, local quarantine, compiler, provider request, or model policy change |
+| Current-head realm bootstrap and recovery compatibility | Passed, 57 focused tests plus Ruff and strict mypy | New isolated realms advance to `0071`; ordinary and recovery startup accept that exact reviewed milestone; unknown revisions remain outside the allowlist | Migration head, readiness policy, realm bootstrap/commissioning, or recovery API change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
-| Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
+| Deployed cloud import | Commissioning authorized; not yet ready | Exact Raymond realm and pilot authorization recorded; no personal-data network call | Requires separate realm Render/AWS/PostgreSQL commissioning and deployed acceptance |
 
 The focused synthetic acceptance proves: exact manifest authorization; independent encrypted
 records; protected staging; separate ordinary and protected approval/recall; stale-candidate
@@ -319,11 +331,12 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
+1. Commission and verify Raymond's isolated realm with transcript capture and product ingress
+   disabled, then register the already-authorized exact campaign and transport commitments.
+2. Upload and execute only the exact authorized 13-batch pilot after a fresh local preflight.
+3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
-2. Prepare a measured 12–20 conversation pilot manifest for separate authorization. Passing
-   the synthetic gate does not authorize processing that export or spending money.
 
 After a separately accepted pilot, the untouched ZIP is reused for the proposed bounded bulk
 campaign. Inventory and reimport suppression happen locally; the bulk campaign still requires

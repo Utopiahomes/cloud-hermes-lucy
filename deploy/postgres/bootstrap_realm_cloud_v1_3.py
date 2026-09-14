@@ -52,8 +52,26 @@ EXPECTED_SOURCE_REVISIONS = {
     "0051_stage1_private_telegram",
     "0052_r1_public_answer_gate",
     "0053_r1_telegram_authority",
+    "0054_stage2_scoped_turn_commit",
+    "0055_memory_candidate_governance",
+    "0056_memory_import_budget",
+    "0057_public_conversation",
+    "0058_memory_import_eligibility",
+    "0059_memory_import_jobs",
+    "0060_memory_import_outcomes",
+    "0061_memory_import_revocation",
+    "0062_memory_deletion_closure",
+    "0063_memory_deletion_manifest",
+    "0064_memory_deletion_authority",
+    "0065_memory_deletion_execution",
+    "0066_workspaces_task_queue",
+    "0067_memory_deletion_recovery",
+    "0068_workspaces_service_auth",
+    "0069_memory_outcome_policy",
+    "0070_memory_pilot_transport",
+    "0071_memory_import_job_replay",
 }
-EXPECTED_REVISION = "0053_r1_telegram_authority"
+EXPECTED_REVISION = "0071_memory_import_job_replay"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

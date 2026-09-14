@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from lucy.authority_recovery import AuthorityJournalWriter, AuthorityTransitionService
 from lucy.cost_recovery import CostJournalPreparationService, CostJournalWriter
 from lucy.db import create_session_factory
-from lucy.readiness import R1_SCHEMA_REVISION
+from lucy.readiness import V13_RECOVERY_SCHEMA_REVISIONS
 from lucy.recovery_journal import (
     RecoveryAppendAcknowledgementV1,
     RecoveryJournalError,
@@ -99,7 +99,7 @@ def _verified_sessions(kind: RecoveryStreamKind) -> sessionmaker[Session]:
         ).scalar_one()
     if tuple(identity) != (expected_login, True, False, False, False, False, False, False):
         raise RecoveryJournalError("journal writer database identity is elevated or differs")
-    if revision != R1_SCHEMA_REVISION:
+    if revision not in V13_RECOVERY_SCHEMA_REVISIONS:
         raise RecoveryJournalError("journal writer schema revision differs")
     required_suffix = f"_{kind.value}_writer"
     if not expected_login.endswith(required_suffix):

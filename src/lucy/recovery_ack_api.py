@@ -27,7 +27,7 @@ from lucy.cost_admission import (
 )
 from lucy.cost_recovery import CostJournalPreparationService, PendingCostEventV1
 from lucy.db import create_session_factory
-from lucy.readiness import R1_SCHEMA_REVISION
+from lucy.readiness import V13_RECOVERY_SCHEMA_REVISIONS
 from lucy.recovery_acknowledgement import (
     AuthorityAcknowledgementReceiver,
     CostAcknowledgementReceiver,
@@ -107,7 +107,7 @@ def _verified_sessions(prefix: str) -> sessionmaker[Session]:
         ).scalar_one()
     if tuple(identity) != (expected_login, True, False, False, False, False, False, False):
         raise RecoveryJournalError("acknowledgement database identity is elevated or differs")
-    if revision != R1_SCHEMA_REVISION:
+    if revision not in V13_RECOVERY_SCHEMA_REVISIONS:
         raise RecoveryJournalError("acknowledgement schema revision differs")
     return sessions
 
