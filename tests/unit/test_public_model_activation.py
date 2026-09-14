@@ -223,6 +223,11 @@ def test_content_free_validator_reports_only_release_state(tmp_path: Path) -> No
     }
 
 
+def test_staging_commissioner_is_packaged_in_runtime_image() -> None:
+    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text(encoding="utf-8")
+    assert "deploy/postgres/commission_public_model_staging_v1.py" in dockerfile
+
+
 def test_cost_policy_requires_reviewed_identity_and_effective_time() -> None:
     candidate = valid_manifest()
     candidate["authority"]["database_login"] = "lucy_cost_admission"  # type: ignore[index]
