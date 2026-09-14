@@ -207,6 +207,7 @@ def test_production_image_contains_coordinator_without_installing_a_live_driver(
     )
 
     assert "deploy/render/workspaces_production_batch.py" in dockerfile
+    assert "deploy/render/workspaces_production_batch_journal.py" in dockerfile
     assert "class BatchDriver(Protocol)" in source
     assert "class RenderClient" not in source
 
@@ -361,6 +362,26 @@ def test_post_restore_failure_requires_existing_surfaces_restored() -> None:
         batch.validate_containment(plan, receipts, unsafe)
 
 
+def test_failure_during_restore_may_safely_return_to_contained_state() -> None:
+    plan = _plan()
+    receipts = _ledger(plan)[:4]
+    containment = batch.BatchContainmentReceiptV1(
+        batch_digest=plan.digest_hex(),
+        failed_stage=batch.Stage.EXISTING_SURFACES_RESTORED,
+        prior_receipt_sha256=receipts[-1].digest_hex(),
+        occurred_at=ISSUED + timedelta(minutes=25),
+        reason="operation_failed",
+        workspaces_transport_disabled=True,
+        affected_autodeploy_disabled=True,
+        existing_surfaces="contained",
+        admission_state="quarantined",
+        capture_boundary_safe=True,
+        private_service="absent",
+    )
+
+    batch.validate_containment(plan, receipts, containment)
+
+
 def test_runner_executes_all_remaining_stages_and_persists_each_receipt() -> None:
     plan = _plan()
     expected = _ledger(plan)
@@ -460,6 +481,8 @@ def test_receipt_from_another_batch_fails_closed() -> None:
 
 def test_expired_or_overlong_plan_is_rejected() -> None:
     plan = _plan()
+    with pytest.raises(batch.BatchContractError, match="not active yet"):
+        batch.validate_ledger(plan, [], now=plan.issued_at - timedelta(seconds=1))
     with pytest.raises(batch.BatchContractError, match="expired"):
         batch.validate_ledger(plan, [], now=plan.expires_at + timedelta(seconds=1))
 

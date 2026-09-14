@@ -80,13 +80,34 @@ expired, or cross-batch receipt fails closed. `run_remaining_stages` starts at t
 first unrecorded stage, persists each receipt before continuing, and invokes the
 driver's containment operation on an execution, verification, or persistence failure.
 
+## Durable execution journal
+
+`deploy/render/workspaces_production_batch_journal.py` provides the local durable
+store for a later approved maintenance job. It binds one journal to the exact plan
+digest, validates the complete receipt chain on every read and write, and replaces the
+journal atomically only after the candidate state passes the coordinator contract.
+The driver can pass `store.append_receipt` and `store.persist_containment` directly to
+`run_remaining_stages`, then reload `store.load().receipts` after a process restart.
+
+The journal uses an exclusive sibling `.lock` file. Concurrent use fails closed. A
+lock left by an interrupted process is not automatically removed because doing so
+could allow two operators to act on the same production batch. Inspect the job and
+journal state before manually clearing a stale lock. A containment receipt makes the
+journal terminal, and the store refuses later receipts or replacement containment.
+
+The execution window is enforced on both sides: a batch cannot start before its
+`issued_at` time or continue after `expires_at`. If restoration of the existing Lucy
+surfaces itself fails, containment may safely return them to the prior contained and
+quarantined state. Only a failure after a successful restoration receipt requires
+Telegram and Public Lucy to remain restored.
+
 ## Containment and recovery
 
 Before the existing surfaces have been restored, a failure is acceptable only after
 the driver leaves those surfaces contained, admission quarantined, capture safe,
-Workspaces transport disabled, and the private service absent or suspended. After the
-restore stage, Telegram and Public Lucy must remain restored while Workspaces transport
-stays disabled and any private service is absent or suspended.
+Workspaces transport disabled, and the private service absent or suspended. After a
+successful restore receipt, Telegram and Public Lucy must remain restored while
+Workspaces transport stays disabled and any private service is absent or suspended.
 
 Schema `0068` is additive and accepted by the Telegram and Public Lucy compatibility
 bridges. The rollback route therefore does not downgrade PostgreSQL. It restores or
@@ -98,5 +119,6 @@ the database quarantined whenever the next safe state cannot be proven.
 The batch cannot authorize transcript capture, paid inference, customer-memory import,
 node switching, recovery-database creation, changes to AWS infrastructure, changes to
 unrelated Render services, or use of one credential for both transport and Cloud Lucy
-authority. A reviewed plan is still not production authorization; the live driver and
-its exact batch digest require a separate action-time approval after the pause ends.
+authority. A reviewed plan or initialized journal is still not production
+authorization; the live driver and its exact batch digest require a separate
+action-time approval after the pause ends.

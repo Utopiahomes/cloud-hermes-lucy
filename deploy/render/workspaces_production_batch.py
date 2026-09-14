@@ -514,6 +514,8 @@ def validate_ledger(
     current = datetime.now(UTC) if now is None else now
     if current.tzinfo is None:
         raise BatchContractError("ledger validation time must be timezone-aware")
+    if current < plan.issued_at:
+        raise BatchContractError("production batch is not active yet")
     if current > plan.expires_at:
         raise BatchContractError("production batch has expired")
     if len(receipts) > len(STAGE_ORDER):
@@ -555,7 +557,7 @@ def validate_containment(
         raise BatchContractError("containment precedes the completed receipt chain")
     stage_index = STAGE_ORDER.index(next_stage)
     restored_index = STAGE_ORDER.index(Stage.EXISTING_SURFACES_RESTORED)
-    if stage_index >= restored_index:
+    if stage_index > restored_index:
         if containment.existing_surfaces != "restored":
             raise BatchContractError(
                 "post-restore containment must keep existing surfaces restored"
