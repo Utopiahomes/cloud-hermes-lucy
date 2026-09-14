@@ -49,6 +49,30 @@ def render_roles(
     return _render("production_roles_v1.2.sql.example", logins)
 
 
+def render_roles_at_revision_0021(
+    *,
+    routine_login: str,
+    policy_login: str,
+    evidence_login: str,
+    deletion_login: str,
+    finality_login: str,
+) -> str:
+    """Render the immutable grant surface that exists at the v1.2 schema head."""
+    logins = {
+        "__LUCY_ROUTINE_LOGIN__": routine_login,
+        "__LUCY_POLICY_LOGIN__": policy_login,
+        "__LUCY_EVIDENCE_LOGIN__": evidence_login,
+        "__LUCY_DELETION_LOGIN__": deletion_login,
+        "__LUCY_FINALITY_LOGIN__": finality_login,
+    }
+    if len(set(logins.values())) != len(logins):
+        raise ValueError("production service LOGIN identifiers must be distinct")
+    for login in logins.values():
+        if _LOGIN.fullmatch(login) is None:
+            raise ValueError(f"invalid PostgreSQL LOGIN identifier: {login!r}")
+    return _render("production_roles.v1.2-0021.sql.example", logins)
+
+
 def render_bindings(
     *,
     aws_account_id: str,

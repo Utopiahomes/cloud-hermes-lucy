@@ -307,7 +307,7 @@ def _run_migrations(config: BootstrapConfig) -> None:
 
 
 def _apply_reviewed_security(config: BootstrapConfig) -> tuple[str, str]:
-    roles_sql = renderer.render_roles(
+    roles_sql = renderer.render_roles_at_revision_0021(
         routine_login=LOGIN_NAMES["routine"],
         policy_login=LOGIN_NAMES["policy"],
         evidence_login=LOGIN_NAMES["evidence"],

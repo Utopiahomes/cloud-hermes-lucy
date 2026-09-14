@@ -33,6 +33,18 @@ def test_roles_renderer_replaces_only_valid_distinct_logins() -> None:
     assert 'TO "lucy_finality_login"' in rendered
 
 
+def test_revision_0021_renderer_is_frozen_to_functions_at_that_revision() -> None:
+    rendered = _renderer().render_roles_at_revision_0021(
+        routine_login="lucy_routine_login",
+        policy_login="lucy_policy_login",
+        evidence_login="lucy_evidence_login",
+        deletion_login="lucy_deletion_login",
+        finality_login="lucy_finality_login",
+    )
+    assert "record_finality_verification_v1(uuid,jsonb)" in rendered
+    assert "record_scoped_finality_inventory_v2" not in rendered
+
+
 @pytest.mark.parametrize("login", ["Lucy-Policy", "lucy;drop", "", "a" * 64])
 def test_roles_renderer_rejects_unsafe_login_identifiers(login: str) -> None:
     with pytest.raises(ValueError, match="invalid PostgreSQL LOGIN"):
