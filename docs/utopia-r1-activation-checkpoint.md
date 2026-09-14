@@ -50,9 +50,10 @@ Cloud commit `817230eb25ec0e8e66c265538757068a4e0597c0` on branch
 
 The service was manually suspended 26 seconds into its first build. Render confirms that
 the suspended service is not billed. Eighteen non-secret, fail-closed configuration values
-were stored, including transcript capture false, the exact source commit, the single
-approved snapshot, `google/gemini-3.1-flash-lite`, the `google-vertex` provider allowlist,
-and rate version `openrouter-2026-09-13`. No database URL, private service token,
+were stored, including transcript capture false, the reviewed Hermes upstream commit
+`fcbd1076a93841fa88855acce810e342a5b78101`, the single approved snapshot,
+`google/gemini-3.1-flash-lite`, the `google-vertex` provider allowlist, and rate version
+`openrouter-2026-09-13`. No database URL, private service token,
 commitment key, recovery token, or OpenRouter credential was installed. The existing
 `lucy-public` service still has model traffic disabled, so no visitor request or provider
 call could reach the staged process.
