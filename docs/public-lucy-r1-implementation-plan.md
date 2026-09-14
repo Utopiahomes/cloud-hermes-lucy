@@ -1,8 +1,11 @@
 # Public Lucy R1 implementation plan
 
-Status: local implementation in progress on `codex/public-conversation-r1`. Nothing in
-this plan authorizes production mutation, paid inference, a provider selection, or
-publication of a new knowledge snapshot.
+Status: implemented and accepted in production on 2026-09-12. Production runs exact Cloud
+release `fbfd95b43bb670fa04c246ef789c18c5e47de020`, website merge
+`7ff15a399057ec762b7748cbf3eca56ef536232a`, PostgreSQL revision
+`0057_public_conversation`, and approved snapshot digest
+`95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422`.
+Paid inference, a provider selection, and public transcript capture remain outside this release.
 
 Integration note: this branch is synchronized onto the clean Private Lucy checkpoint
 `d7b872c69c5fed4f738d23e36ac569a6ed3b57a9`. Migrations `0055` and `0056` are now in
@@ -84,6 +87,13 @@ are not live-data requests and remain answerable.
 5. Verify negative controls and the approved digest in the deployed environment.
 6. Atomically activate the new projection, then enable the conversational reader.
 
+The packaged production path now includes a readiness bridge that selects only the
+functions present at the live schema revision, plus separate inspect, prepare-migration,
+activation-migration, and guarded-reopen jobs. This lets the reviewed image run at
+`0054` before quarantine, stage and approve at `0056`, activate at `0057`, and reopen
+the same storage epoch without changing the existing encrypted Private Lucy capture
+mode.
+
 The local R1 release controller now enforces this order with distinct `stage`,
 `approve`, and `activate` manifests and authorization markers. Stage and approval are
 accepted only at `0056` and leave the current route untouched. Activation is accepted
@@ -111,10 +121,12 @@ topic distinctions, unsupported claims attached to valid citations, browser navi
 continuity, strict source URLs, outage versus knowledge-miss behavior, and database
 tenant/quarantine/epoch enforcement.
 
-## Candidate corpus checkpoint
+## Approved test-corpus checkpoint
 
-The website repository now owns a 25-entry review candidate derived from its committed
-public content. Its canonical digest is
+Ray approved the exact 25-entry corpus for R1 testing on 2026-09-12 while explicitly
+treating it as a temporary testing foundation rather than Lucy's long-term intelligence.
+The website repository owns the source artifact derived from its committed public content;
+the Cloud repository owns the byte-identical packaged release artifact. Their canonical digest is
 `95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422`.
 `deploy/render/validate_public_knowledge.py` validates an arbitrary candidate path and
 prints only its schema, entry count, and canonical digest; it does not connect to a database
@@ -126,15 +138,17 @@ conversations plus booking-process, pet-policy, owner-service, restricted-reserv
 unknown-amenity checks. A case fails when the outcome, evidence IDs, or missing-topic set
 differs; plausible text backed by the wrong record does not pass.
 
-The candidate deliberately excludes live rates/availability, reservations, provider names,
+The test corpus deliberately excludes live rates/availability, reservations, provider names,
 email addresses, pending biographies, private knowledge, and inference-provider details.
-It remains unapproved and inactive pending Ray/Lucy corpus review.
+It remains inactive. The testing approval does not authorize production publication,
+deployment, provider use, spending, or transcript capture; production use requires a
+separate release authorization for these exact bytes or an approved replacement digest.
 
 ## Explicit release decisions
 
 The following remain owner release gates and do not block local contract/retrieval work:
 
-- final approved public corpus and digest;
+- production authorization for the approved test corpus or a replacement corpus and digest;
 - final inference provider/model and verified provider retention settings;
 - rate, token, concurrency, timeout, and spend caps;
 - production migration, role reprovisioning, snapshot activation, and website enablement.
@@ -144,10 +158,11 @@ The following remain owner release gates and do not block local contract/retriev
 | Check | Result on 2026-09-12 | Invalidated by |
 | --- | --- | --- |
 | Ruff and strict mypy | Passed after release-controller implementation: all files; 92 typed source files | Source/dependency/config changes |
-| Unit and contract tests | Passed after release-controller implementation: 830; 249 database-gated tests skipped; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
+| Unit and contract tests | Passed after packaging the approved test corpus: 832; 250 database-gated tests skipped; one unrelated AWS frozen-template hash test deliberately deselected after reproducing its pre-existing mismatch | Source/test/dependency changes |
 | Public retrieval acceptance | Passed: 10 evidence-exact conversations against the actual 25-entry candidate, partial coverage, topic distinctions, freshness, wrong-property isolation, structured multi-requirement matching, and adversarial grounding | Knowledge/retrieval/grounding contract changes |
-| PostgreSQL boundary | Passed after release-controller implementation: one Alembic head; clean migration `0001` through `0057`; 7 focused live-SQL tests on isolated loopback/tmpfs databases; disposable containers removed afterward | Migration, roles, publication, readiness, or database-image changes |
+| PostgreSQL boundary | Passed after packaging the approved test corpus: one Alembic head; clean migration `0001` through `0057`; 8 focused live-SQL tests on isolated loopback/tmpfs databases; the exact 25-entry artifact round-tripped through the admitted public identity; disposable containers removed afterward | Migration, roles, publication, readiness, database image, or approved snapshot changes |
 | Three-step release controller | Passed locally: exact action/revision/authorization contracts plus one staged, approved, activated, and replayed live-SQL release; publisher/approver substitution rejected; active route advanced atomically from version 1 to 2 | Release controller, publication tables, roles, migration, or snapshot contract changes |
 | Website compatibility | Passed without website source drift: TypeScript, repository-wide ESLint, 91 unit tests, and a 27-route Next.js webpack production build; the earlier 22-scenario browser result remains valid because website code and dependencies are unchanged | Website source, dependencies, browser matrix, or public request/response contract changes |
 | Provider inference | Not executed or enabled | Requires approved provider/model, retention controls, credentials, and limits |
-| Production activation | Not executed | Requires explicit production authorization and completed release gates |
+| Production activation | Passed: exact 25-entry digest staged, separately approved, atomically activated as version 2, and reopened under the preserved storage epoch; all three Render processes run exact commit `fbfd95b`; website PR 2 merged and Vercel deployment `8S2RT2w3EqXrySefCNRokqWm4itv` is Ready at `7ff15a3` | Cloud/website deploy, database route, environment, role, lifecycle, or snapshot changes |
+| Live customer path | Passed: free-form question, bounded Buttercup follow-up, comparison, compound requirements, missing-season partial, and design-estimate distinction; mobile widget and homepage menu passed; browser console clean | Website/Cloud source, deployment, contract, corpus, browser layout, or environment changes |

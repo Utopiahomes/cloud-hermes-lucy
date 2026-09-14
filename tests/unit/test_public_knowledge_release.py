@@ -48,7 +48,9 @@ def _snapshot(*, effective_from: datetime | None = None) -> dict[str, object]:
 def _manifest(
     action: str = "stage", *, snapshot: dict[str, object] | None = None
 ) -> PublicKnowledgeReleaseManifestV1:
-    payload = snapshot or _snapshot()
+    source = snapshot or _snapshot()
+    assert isinstance(source["entries"], list)
+    payload = knowledge_snapshot(source["entries"])
     common = {
         "action": action,
         "source_commit": "a" * 40,
@@ -139,6 +141,19 @@ def test_config_binds_exact_canonical_snapshot_manifest_and_action(tmp_path: Pat
             )
 
 
+def test_packaged_owner_approved_corpus_passes_release_loader() -> None:
+    snapshot_path = ROOT / SNAPSHOT_RELATIVE_PATH
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    manifest = _manifest("stage", snapshot=snapshot)
+    config = PublicKnowledgeReleaseConfig.from_environment(
+        _environment(manifest, snapshot_path), repository_root=ROOT
+    )
+    assert config.manifest.snapshot_digest == (
+        "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
+    )
+    assert len(config.snapshot["entries"]) == 25
+
+
 def test_activation_rejects_future_or_withdrawn_knowledge() -> None:
     now = datetime(2026, 9, 12, tzinfo=UTC)
     _require_eligible(_snapshot(), now=now)
@@ -165,3 +180,6 @@ def test_release_source_is_split_append_only_and_packaged() -> None:
     assert "release_public_knowledge_v1.py" in (ROOT / "Dockerfile").read_text(
         encoding="utf-8"
     )
+    assert "deploy/render/utopia-public-knowledge.r1.json" in (
+        ROOT / "Dockerfile"
+    ).read_text(encoding="utf-8")

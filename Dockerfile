@@ -17,6 +17,9 @@ COPY deploy/postgres/commission_telegram_stage1_v1.py ./deploy/postgres/commissi
 COPY deploy/postgres/commission_realm_runtime_v1_3.py ./deploy/postgres/commission_realm_runtime_v1_3.py
 COPY deploy/postgres/commission_public_projection_v1.py ./deploy/postgres/commission_public_projection_v1.py
 COPY deploy/postgres/release_public_knowledge_v1.py ./deploy/postgres/release_public_knowledge_v1.py
+COPY deploy/postgres/inspect_public_conversation_v1.py ./deploy/postgres/inspect_public_conversation_v1.py
+COPY deploy/postgres/migrate_public_conversation_v1.py ./deploy/postgres/migrate_public_conversation_v1.py
+COPY deploy/postgres/reopen_public_conversation_v1.py ./deploy/postgres/reopen_public_conversation_v1.py
 COPY deploy/postgres/migrate_telegram_stage2_v1.py ./deploy/postgres/migrate_telegram_stage2_v1.py
 COPY deploy/postgres/activate_telegram_stage2_v1.py ./deploy/postgres/activate_telegram_stage2_v1.py
 COPY deploy/postgres/rebind_executors_cloud_v1_2.py ./deploy/postgres/rebind_executors_cloud_v1_2.py
@@ -37,6 +40,7 @@ COPY deploy/postgres/production_realm_roles_v1.3.sql.example ./deploy/postgres/p
 COPY deploy/postgres/production_recovery_roles_v1.3.sql.example ./deploy/postgres/production_recovery_roles_v1.3.sql.example
 COPY deploy/postgres/configure_security_v1.2.sql.example ./deploy/postgres/configure_security_v1.2.sql.example
 COPY deploy/render/utopia-public-projection.v0.json ./deploy/render/utopia-public-projection.v0.json
+COPY deploy/render/utopia-public-knowledge.r1.json ./deploy/render/utopia-public-knowledge.r1.json
 COPY alembic.ini hermes.lock ./
 COPY migrations ./migrations
 COPY src ./src

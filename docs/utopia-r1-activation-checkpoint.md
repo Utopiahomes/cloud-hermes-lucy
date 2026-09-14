@@ -1,14 +1,13 @@
 # Utopia R1 activation checkpoint
 
-Status: Private Telegram Stage 2 production acceptance passed on 2026-09-12 at exact
-application release `e6f66d3c2aa1b2b17bedcae1b67a4cd613346067` and PostgreSQL revision
-`0054_stage2_scoped_turn_commit`. Encrypted private-Telegram evidence capture is active;
-automatic memory writes and raw-evidence retrieval remain disabled. Public Lucy remains
-disabled. Its conversational R1 implementation is synchronized onto private checkpoint
-`d7b872c69c5fed4f738d23e36ac569a6ed3b57a9`, with migrations `0055` and `0056` in
-ancestry and Public Lucy migration `0057` attached to `0056`. Its local release path is
-ready for separately authorized, fail-closed staging, approval, and activation. The complete private record is
-`docs/private-telegram-stage2-implementation-2026-09-11.md`.
+Status: Public Lucy conversational R1 production acceptance passed on 2026-09-12 at
+exact Cloud release `fbfd95b43bb670fa04c246ef789c18c5e47de020`, website merge
+`7ff15a399057ec762b7748cbf3eca56ef536232a`, PostgreSQL revision
+`0057_public_conversation`, and approved snapshot digest
+`95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422`.
+Public transcript capture and OpenRouter remain disabled. The earlier Private Lucy storage
+epoch and capture-disabled state were preserved through the migration. The complete private
+record remains `docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
 ## Completed preparation
 
@@ -54,20 +53,48 @@ ready for separately authorized, fail-closed staging, approval, and activation. 
 
 ## Exact next action
 
-Review and approve the 25-entry Public Lucy R1 corpus and its canonical digest. Only then
-copy the exact approved bytes to the production artifact path and prepare the three
-identifier-only release manifests. Production migration, Render provisioning, snapshot
-staging/approval/activation, website enablement, DNS changes, and live endpoint checks
-still require explicit authorization.
+No release action remains. Monitor ordinary production operation without capturing visitor
+questions. A future corpus replacement, model-provider connection, Private Lucy change, or
+DNS change remains a separate release requiring its own review and authorization.
+
+## Public Lucy R1 production acceptance
+
+- Ray explicitly authorized publication of the exact 25-entry corpus, production migration,
+  Render activation, website activation, and validation while keeping OpenRouter and public
+  transcript capture off and making no DNS change.
+- Production migrated under quarantine from `0054` through `0056` and then `0057`; staging,
+  approval, and activation were separate identifier-bound operations. The active route moved
+  from version 1 to version 2 only after the compatible readers and exact digest were ready.
+- Guarded reopen passed with runtime admission ready, the original storage epoch preserved,
+  the Private Lucy capture-disabled state preserved, an execute-only public grant, zero
+  runtime sessions, and zero unresolved sensitive authorities.
+- The public, routine, and gateway Render services all run exact Cloud commit `fbfd95b`.
+  The first automatic deployment attempt referenced an obsolete linked-main commit and
+  failed without reopening the public path; explicit exact-commit deployments corrected it.
+- GitHub pull request 2 merged the website release into `main`. Vercel production deployment
+  `8S2RT2w3EqXrySefCNRokqWm4itv` became Ready at merge commit `7ff15a3` with the exact R1
+  digest configured for Production.
+- Live same-origin acceptance passed for natural language, bounded follow-up context, pool
+  comparison, compound capacity/parking/pool requirements, a supported partial answer for
+  missing November pool season, and the public Utopia Design estimate explanation. Sources
+  and useful links were property-specific. Mobile Lucy and the homepage mobile menu rendered
+  and operated correctly; the browser console reported no warnings or errors.
+- The temporary Render migration utility was deleted after acceptance. The isolated local
+  PostgreSQL test containers and network were also removed. No DNS, public transcript,
+  provider inference, private content, or production customer data was changed.
 
 ## Current Public Lucy reconciliation ledger
 
 - Public/Private synchronization: passed locally on 2026-09-12 at Public Lucy commit
   `b416d013a393d2f6573397245d7c3991bea7e292`; one Alembic head ends at `0057`, and a
   clean `0001`-through-`0057` migration plus six focused live-SQL boundary checks passed.
-- Conversational R1 corpus/retrieval: the 25-entry review candidate has canonical digest
+- Conversational R1 corpus/retrieval: Ray approved the 25-entry corpus for testing on
+  2026-09-12. Its website source and packaged Cloud artifact share canonical digest
   `95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422` and passed all
-  ten evidence-exact acceptance conversations. It is not approved or active.
+  ten evidence-exact acceptance conversations. It is not active, and testing approval is
+  not production-publication authorization. A fresh isolated PostgreSQL run also returned
+  all 25 entries and the exact digest through the execute-only admitted public identity,
+  then answered the multi-requirement property question from those returned records.
 - R1 release ordering: the local controller now requires separate stage, approve, and
   activate authorizations. Its synthetic live-SQL test staged and approved without route
   mutation, rejected publisher/approver substitution, atomically advanced version 1 to 2,
