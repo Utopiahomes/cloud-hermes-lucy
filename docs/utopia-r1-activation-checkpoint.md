@@ -53,10 +53,18 @@ the suspended service is not billed. Eighteen non-secret, fail-closed configurat
 were stored, including transcript capture false, the reviewed Hermes upstream commit
 `fcbd1076a93841fa88855acce810e342a5b78101`, the single approved snapshot,
 `google/gemini-3.1-flash-lite`, the `google-vertex` provider allowlist, and rate version
-`openrouter-2026-09-13`. No database URL, private service token,
-commitment key, recovery token, or OpenRouter credential was installed. The existing
-`lucy-public` service still has model traffic disabled, so no visitor request or provider
-call could reach the staged process.
+`openrouter-2026-09-13`. No database URL, private service token, commitment key, or recovery
+token was installed.
+
+On 2026-09-14, a dedicated `Utopia Public Lucy` OpenRouter key was created with a $1 daily
+reset limit and installed only on the suspended model service. Two earlier credentials that
+were rendered into browser automation output during setup were immediately treated as
+compromised, revoked from OpenRouter, and removed from Render; neither recorded any use.
+The final credential was transferred without reading or logging its value, the browser
+clipboard was cleared, and OpenRouter reported exactly one matching key with no use and the
+$1 daily limit. The existing `lucy-public` service has no `LUCY_PUBLIC_MODEL_ENABLED`
+variable; the application defaults that missing flag to false. No visitor request or
+provider call can therefore reach the staged process.
 
 ## Completed preparation
 
@@ -104,11 +112,9 @@ call could reach the staged process.
 
 Complete the ignored, identifier-bearing V2 manifest with the staged service ID, final
 artifact digests, `ray@utopiahomes.com` as operations contact and rollback owner, and the
-approved $1/day provider/site/node budget. A dedicated `Utopia Public Lucy` OpenRouter key
-may then be created with a $1 daily reset limit and installed only on the suspended model
-service. Resuming the service for synthetic staging calls and enabling visitor model traffic
-remain separate decisions. Until then, keep the service suspended and continue ordinary
-production operation without capturing visitor questions.
+approved $1/day provider/site/node budget. Resuming the service for synthetic staging calls
+and enabling visitor model traffic remain separate decisions. Until then, keep the service
+suspended and continue ordinary production operation without capturing visitor questions.
 
 ## Public Lucy R1 production acceptance
 
