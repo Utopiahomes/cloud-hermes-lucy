@@ -9,7 +9,7 @@ services:
     name: lucy-workspaces-private
     runtime: docker
     repo: https://github.com/Utopiahomes/cloud-hermes-lucy
-    branch: codex/workspaces-room-admission
+    branch: main
     region: virginia
     plan: 0.5c-512mb
     numInstances: 1

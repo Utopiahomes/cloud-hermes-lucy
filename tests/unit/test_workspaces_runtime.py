@@ -1,8 +1,10 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 import pytest
+import yaml
 from pydantic import SecretStr
 
 from lucy.workspaces_runtime import (
@@ -13,6 +15,7 @@ from lucy.workspaces_runtime import (
 
 ONE = UUID("00000000-0000-4000-8000-000000000001")
 TWO = UUID("00000000-0000-4000-8000-000000000002")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _binding() -> dict[str, object]:
@@ -122,3 +125,35 @@ def test_fixed_authority_verifier_accepts_only_server_held_token() -> None:
             expected_audience=config.binding.identity_audience,
             checked_at=now,
         )
+
+
+def test_reviewed_render_shape_is_private_capture_off_and_manual() -> None:
+    blueprint = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "workspaces-private-service.yaml.example").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(blueprint["services"]) == 1
+    service = blueprint["services"][0]
+    assert service["type"] == "pserv"
+    assert service["name"] == "lucy-workspaces-private"
+    assert service["branch"] == "main"
+    assert service["autoDeployTrigger"] == "off"
+    assert service["dockerCommand"] == "python -m lucy.workspaces_runtime"
+
+    environment = {item["key"]: item for item in service["envVars"]}
+    assert environment["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert environment["LUCY_WORKSPACES_ROOM_CAPABILITIES_JSON"]["value"] == (
+        '["memory.read","task.delegate"]'
+    )
+    for secret_name in {
+        "LUCY_WORKSPACES_RUNTIME_BINDING_JSON",
+        "LUCY_WORKSPACES_DIRECTORY_DATABASE_URL",
+        "LUCY_WORKSPACES_TRANSPORT_TOKEN",
+        "LUCY_WORKSPACES_AUTHORITY_TOKEN",
+        "LUCY_WORKSPACES_AUTHORITY_SUBJECT",
+        "LUCY_WORKSPACES_AUTHORITY_SESSION_ID",
+        "LUCY_WORKSPACES_PROJECTION_STORAGE_EPOCH",
+        "LUCY_WORKSPACES_PROJECTION_SNAPSHOT_DIGEST",
+    }:
+        assert environment[secret_name] == {"key": secret_name, "sync": False}

@@ -159,6 +159,7 @@ def test_private_request_is_strict_zdr_bounded_and_cost_accounted() -> None:
         "zdr": True,
         "data_collection": "deny",
         "require_parameters": True,
+        "allow_fallbacks": False,
     }
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"]["strict"] is True
