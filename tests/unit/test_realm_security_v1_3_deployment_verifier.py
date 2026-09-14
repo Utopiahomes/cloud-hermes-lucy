@@ -213,6 +213,7 @@ def _executor(
         variables["LUCY_AWS_EVIDENCE_KEY_ARN"] = outputs["EvidenceKeyArn"]
     else:
         variables["LUCY_AWS_DELETION_INTENT_TABLE"] = outputs["DeletionIntentTableName"]
+        variables["LUCY_ARCHIVE_REGISTRY_ID"] = outputs["ArchiveRegistryId"]
     version = outputs[f"{title}ExecutorVersion"]
     alias_arn = outputs[f"{title}ExecutorAliasArn"]
     configuration = {

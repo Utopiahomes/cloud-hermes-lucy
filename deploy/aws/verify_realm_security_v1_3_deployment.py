@@ -244,6 +244,7 @@ def verify_realm_executor(
         expected_variables["LUCY_AWS_DELETION_INTENT_TABLE"] = outputs.get(
             "DeletionIntentTableName"
         )
+        expected_variables["LUCY_ARCHIVE_REGISTRY_ID"] = outputs.get("ArchiveRegistryId")
         expected_handler = "lucy.executors.handlers_v1_3.realm_deletion_lambda_handler"
         expected_concurrency = 1
     trust_store = variables.get("LUCY_POLICY_TRUST_STORE_JSON")

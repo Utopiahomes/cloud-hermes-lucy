@@ -298,7 +298,7 @@ def _run_migrations(config: BootstrapConfig) -> None:
     try:
         alembic = Config(str(ROOT / "alembic.ini"))
         alembic.set_main_option("script_location", str(ROOT / "migrations"))
-        command.upgrade(alembic, "head")
+        command.upgrade(alembic, EXPECTED_REVISION)
     finally:
         if previous is None:
             os.environ.pop("LUCY_MIGRATION_DATABASE_URL", None)

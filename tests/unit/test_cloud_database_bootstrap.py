@@ -134,6 +134,8 @@ def test_bootstrap_uses_central_capture_boundary_and_new_migration_head() -> Non
     )
     assert module.EXPECTED_REVISION == "0021_recovery_capture_safety"
     assert SCHEMA_REVISION == module.EXPECTED_REVISION
+    assert "command.upgrade(alembic, EXPECTED_REVISION)" in source
+    assert 'command.upgrade(alembic, "head")' not in source
     assert "SELECT lucy.capture_boundary_safe_v1()" in source
     assert "OR EXISTS (SELECT 1 FROM lucy.capture_receipts WHERE capture_enabled)" not in source
 
