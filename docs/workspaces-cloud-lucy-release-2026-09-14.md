@@ -117,8 +117,9 @@ action-time approval after the read-only checks and rollback route are ready.
 
 ## Exact next action
 
-Finish the refreshed full release gates, publish the candidate updates to the existing
-Cloud Lucy pull request, and create the already prepared Workspaces deployment-config
-pull request. Do not merge, migrate, create the private service, write
-membership/configuration, or activate Workspaces without the later concrete
-action-time approval and rollback route.
+The Cloud Lucy and Workspaces release pull requests were merged, but Cloud Lucy
+production activation is paused. Build and review the content-free coordinated batch in
+`deploy/render/workspaces_production_batch.py` and
+`docs/workspaces-production-batch.md`. Do not install a live driver, migrate, create the
+private service, write membership/configuration, or activate Workspaces until the pause
+ends and the exact batch digest receives separate action-time approval.
