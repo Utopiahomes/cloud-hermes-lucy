@@ -39,6 +39,24 @@ enable visitor model traffic. The contract pins schema `0071`, privacy routing, 
 timeout envelopes, browser-memory history, snapshot eligibility/withdrawal, and both Cloud
 and website revisions.
 
+## Disabled Render staging checkpoint
+
+Ray explicitly authorized the charge-bearing creation of the isolated Render private
+service on 2026-09-14. Render created `lucy-public-model` as service
+`srv-dak10pjm8hqs73a28rug` in the protected `cloud-lucy` production environment, pinned to
+Cloud commit `817230eb25ec0e8e66c265538757068a4e0597c0` on branch
+`codex/public-model-milestone-a`, with auto-deploy off and command
+`python -m lucy.public_model_runtime`.
+
+The service was manually suspended 26 seconds into its first build. Render confirms that
+the suspended service is not billed. Eighteen non-secret, fail-closed configuration values
+were stored, including transcript capture false, the exact source commit, the single
+approved snapshot, `google/gemini-3.1-flash-lite`, the `google-vertex` provider allowlist,
+and rate version `openrouter-2026-09-13`. No database URL, private service token,
+commitment key, recovery token, or OpenRouter credential was installed. The existing
+`lucy-public` service still has model traffic disabled, so no visitor request or provider
+call could reach the staged process.
+
 ## Completed preparation
 
 - R1-0 through R1-5 technical acceptance passed at commit
@@ -83,11 +101,13 @@ and website revisions.
 
 ## Exact next action
 
-Populate the synchronized V2 manifest with final artifact digests, the reviewed OpenRouter
-provider slug/rate version, operational contacts, and approved production budgets. Validate
-and deploy only its `staged-disabled` state. Enabling staging provider calls and enabling
-visitor model traffic remain separate decisions. Until then, monitor ordinary production
-operation without capturing visitor questions.
+Complete the ignored, identifier-bearing V2 manifest with the staged service ID, final
+artifact digests, `ray@utopiahomes.com` as operations contact and rollback owner, and the
+approved $1/day provider/site/node budget. A dedicated `Utopia Public Lucy` OpenRouter key
+may then be created with a $1 daily reset limit and installed only on the suspended model
+service. Resuming the service for synthetic staging calls and enabling visitor model traffic
+remain separate decisions. Until then, keep the service suspended and continue ordinary
+production operation without capturing visitor questions.
 
 ## Public Lucy R1 production acceptance
 
