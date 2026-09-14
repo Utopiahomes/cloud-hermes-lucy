@@ -1,0 +1,40 @@
+{
+  "contract": "lucy.r1.protected-recovery-drill.evidence.v1",
+  "status": "passed",
+  "captured_at": "2026-09-11T00:13:34.434235-04:00",
+  "application_commit": "d294b38990aa6553b169bff76d14ed14db7cfb3e",
+  "restore_time": "2026-09-11T00:26:36Z",
+  "pre_replay": {
+    "member_status": "active",
+    "member_generation": 1,
+    "provider_attempt_present": false,
+    "evidence_reused": true
+  },
+  "post_replay": {
+    "member_status": "revoked",
+    "member_generation": 2,
+    "authority_head_sequence": 1,
+    "cost_head_sequence": 1,
+    "provider_attempt_present": false,
+    "recovered_exposure_kind": "reservation",
+    "unresolved_microusd": 1,
+    "source_policy_verified": true,
+    "cost_state": "finalized",
+    "operator_review_required": false,
+    "runtime_admission": "ready",
+    "capture_boundary_safe": true
+  },
+  "cleanup": {
+    "runtime_admission": "quarantined",
+    "runtime_epoch_removed": true,
+    "activation_login_present": false,
+    "isolated_restore_deleted": true,
+    "source_database_allow_list_empty": true,
+    "coordinator_restored": true,
+    "one_off_environment_removed": true
+  },
+  "transcript_capture_enabled": false,
+  "provider_called": false,
+  "resource_identifiers_exported": false,
+  "private_witness_digests_exported": false
+}

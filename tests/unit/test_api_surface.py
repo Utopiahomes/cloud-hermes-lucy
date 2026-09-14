@@ -37,10 +37,16 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ("GET", "/internal/v1/conversations/capture-mode"),
         ("GET", "/internal/v1/conversations/latest-retained-evidence"),
         ("POST", "/internal/v1/conversations/capture-mode"),
+        ("POST", "/internal/v1/conversations/capture-mode-and-accept"),
         ("POST", "/internal/v1/conversations/forget-last"),
         ("POST", "/internal/v1/conversations/messages"),
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
+        ("POST", "/internal/v1/telegram-stage1/events/claim"),
+        ("POST", "/internal/v1/telegram-stage1/events/transition"),
+        ("POST", "/internal/v1/telegram-stage1/lease/acquire"),
+        ("POST", "/internal/v1/telegram-stage1/lease/heartbeat"),
+        ("POST", "/internal/v1/telegram-stage1/lease/release"),
         ("POST", "/internal/v1/sensitive-action-permits"),
         ("POST", "/internal/v2/evidence/{operation_id}/delivery"),
         ("POST", "/internal/v2/security/deletion-manifests"),
@@ -49,7 +55,62 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
             "POST",
             "/internal/v2/security/operations/{operation_id}/receipt-attestation",
         ),
+        ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
+        (
+            "POST",
+            "/internal/v3/security/operations/{operation_id}/deletion-manifest",
+        ),
+        (
+            "POST",
+            "/internal/v3/security/operations/{operation_id}/receipt-attestation",
+        ),
     }
+
+
+def test_r1_owner_surface_is_exact_and_deferred_r2_r3_routes_are_absent() -> None:
+    paths = {route.path for route in app.routes}
+    assert {path for path in paths if path.startswith("/owner/")} == {
+        "/owner/v1/evidence/retrieve",
+        "/owner/v1/evidence/{evidence_id}/delete",
+        "/owner/v1/sensitive-action-permits",
+        "/owner/v2/evidence/retrieve",
+        "/owner/v2/evidence/{evidence_id}/delete",
+        "/owner/v2/security/permits",
+        "/owner/v3/evidence/retrieve",
+        "/owner/v3/evidence/{evidence_id}/delete",
+    }
+    deferred_route_fragments = {
+        "/jobs",
+        "/wallets",
+        "/credits",
+        "/consulting",
+        "/grants",
+        "/runners",
+        "/exports",
+        "/rehost",
+        "/transfer",
+        "/stoinnet",
+    }
+    assert not {
+        path
+        for path in paths
+        if any(fragment in path.lower() for fragment in deferred_route_fragments)
+    }
+
+
+def test_archive_service_selects_v13_realm_runtime_only_for_exact_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = object()
+    monkeypatch.setenv("LUCY_ARCHIVE_BACKEND", "aws-kms-dynamodb-v13")
+    monkeypatch.setattr(api, "realm_conversation_archive_from_environment", lambda: marker)
+    api._archive_service.cache_clear()
+    try:
+        assert api._archive_service() is marker
+        assert api._archive_service() is marker
+        assert api._archive_service.cache_info().misses == 1
+    finally:
+        api._archive_service.cache_clear()
 
 
 def test_memory_proposal_maps_missing_evidence_to_controlled_not_found(
@@ -145,6 +206,92 @@ def test_production_v12_hides_superseded_sensitive_v1_endpoints(
     with pytest.raises(HTTPException) as caught:
         api._require_legacy_sensitive_api_allowed()
     assert caught.value.status_code == 404
+
+
+def test_v13_hides_all_v12_sensitive_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_ENVIRONMENT", "development")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+
+    with pytest.raises(HTTPException) as legacy:
+        api._require_legacy_sensitive_api_allowed()
+    with pytest.raises(HTTPException) as v12:
+        api._require_v12_sensitive_api()
+
+    assert legacy.value.status_code == 404
+    assert v12.value.status_code == 404
+
+
+def test_v13_grant_route_is_hidden_from_v12_and_uses_policy_identity_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation_id = uuid4()
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.2")
+    with pytest.raises(HTTPException) as hidden:
+        api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token")
+    assert hidden.value.status_code == 404
+
+    marker = object()
+
+    class Grants:
+        def issue_grant(self, candidate: object) -> object:
+            assert candidate == operation_id
+            return marker
+
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
+    monkeypatch.setattr(
+        api, "_realm_policy_services", lambda: (Grants(), object(), object())
+    )
+    assert api.grant_sensitive_operation_v3(operation_id, "Bearer policy-token") is marker
+
+
+def test_v13_receipt_route_rejects_path_body_identity_mismatch_before_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "policy")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_POLICY_GATEWAY_TOKEN", "policy-token")
+    monkeypatch.setattr(
+        api,
+        "_realm_policy_services",
+        lambda: pytest.fail("mismatched receipt must not reach policy"),
+    )
+    receipt = type("Receipt", (), {"operation_id": uuid4()})()
+    with pytest.raises(HTTPException) as caught:
+        api.attest_executor_receipt_v3(
+            uuid4(), receipt, "Bearer policy-token"  # type: ignore[arg-type]
+        )
+    assert caught.value.status_code == 400
+
+
+def test_v13_deletion_route_rejects_path_permit_mismatch_before_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SERVICE_MODE", "deletion")
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.setenv("LUCY_OWNER_TOKEN", "owner-token")
+    monkeypatch.setattr(
+        api,
+        "_ready_sessions",
+        lambda: pytest.fail("mismatched evidence must not reach workflow storage"),
+    )
+    permit = type(
+        "Permit",
+        (),
+        {"resource_selector": type("Selector", (), {"object_id": uuid4()})()},
+    )()
+    request = type("Request", (), {"permit": permit})()
+    with pytest.raises(HTTPException) as caught:
+        api.owner_delete_evidence_v3(
+            uuid4(),
+            request,  # type: ignore[arg-type]
+            "Bearer owner-token",
+            "delete-once",
+        )
+    assert caught.value.status_code == 400
 
 
 def test_policy_storage_failure_logging_uses_only_an_allowlisted_code() -> None:

@@ -56,6 +56,16 @@ def _v12_render_environment() -> dict[str, Any]:
     return render["projects"][0]["environments"][0]
 
 
+def _v13_render_services() -> dict[str, dict[str, Any]]:
+    render = yaml.safe_load(
+        (ROOT / "deploy" / "render" / "security-baseline-v1.3.yaml.example").read_text(
+            encoding="utf-8"
+        )
+    )
+    configured = render["projects"][0]["environments"][0]["services"]
+    return {service["name"]: service for service in configured}
+
+
 def _environment_keys(service: dict[str, Any]) -> set[str]:
     return {item["key"] for item in service["envVars"]}
 
@@ -534,6 +544,167 @@ def test_v12_render_callers_can_invoke_only_their_qualified_alias() -> None:
             token in json.dumps(resources[policy_name])
             for token in ("kms:", "dynamodb:", "$LATEST", "UpdateFunction", "UpdateAlias")
         )
+
+
+def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch() -> None:
+    services = _v13_render_services()
+    assert set(services) == {
+        "lucy-public",
+        "lucy-routine",
+        "lucy-telegram-private",
+        "lucy-policy",
+        "lucy-evidence",
+        "lucy-deletion",
+        "lucy-finality-utility",
+        "lucy-authority-writer",
+        "lucy-cost-writer",
+        "lucy-recovery-coordinator",
+    }
+    forbidden = {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "LUCY_MIGRATION_DATABASE_URL",
+        "LUCY_MAINTENANCE_DATABASE_URL",
+    }
+    for service in services.values():
+        assert service["branch"] == "codex/r1-tenant-foundation"
+        assert service["autoDeployTrigger"] == "off"
+        assert forbidden.isdisjoint(_environment_keys(service))
+        environment = {item["key"]: item for item in service["envVars"]}
+        assert environment["LUCY_SECURITY_BASELINE"]["value"] == "v1.3"
+    routine = {item["key"]: item for item in services["lucy-routine"]["envVars"]}
+    public = {item["key"]: item for item in services["lucy-public"]["envVars"]}
+    assert services["lucy-public"]["type"] == "web"
+    assert services["lucy-public"]["dockerCommand"] == "python -m lucy.public_runtime"
+    assert services["lucy-public"]["healthCheckPath"] == "/health"
+    assert public["LUCY_SERVICE_MODE"]["value"] == "public"
+    assert public["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert public["LUCY_PUBLIC_ALLOWED_ORIGIN"]["value"] == (
+        "https://www.utopiahomes.com"
+    )
+    assert public["LUCY_PUBLIC_SITE_HOSTNAME"]["value"] == "www.utopiahomes.com"
+    assert public["LUCY_PUBLIC_SNAPSHOT_DIGEST"]["value"] == (
+        "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e"
+    )
+    assert not any(
+        key.startswith("AWS_")
+        or key.startswith("LUCY_AWS_")
+        or "OPENROUTER" in key
+        or key in {"LUCY_OWNER_TOKEN", "LUCY_POLICY_GATEWAY_TOKEN"}
+        for key in public
+    )
+    assert routine["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert "LUCY_ARCHIVE_COMMITMENT_KEY_B64" in routine
+    assert "LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64" in routine
+    gateway = {
+        item["key"]: item for item in services["lucy-telegram-private"]["envVars"]
+    }
+    assert services["lucy-telegram-private"]["type"] == "worker"
+    assert services["lucy-telegram-private"]["dockerfilePath"] == (
+        "./Dockerfile.hermes-telegram-stage1"
+    )
+    assert gateway["LUCY_TELEGRAM_STAGE"]["value"] == "1"
+    assert gateway["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert gateway["LUCY_COMPANION_HOSTPORT"]["fromService"] == {
+        "type": "pserv",
+        "name": "lucy-routine",
+        "property": "hostport",
+    }
+    assert not any(
+        key == "LUCY_DATABASE_URL"
+        or key == "AWS_ROLE_ARN"
+        or key.startswith("LUCY_AWS_")
+        for key in gateway
+    )
+    assert services["lucy-finality-utility"]["schedule"] == "0 0 1 1 *"
+    assert services["lucy-finality-utility"]["dockerCommand"].endswith(
+        "--scheduled-sentinel"
+    )
+    for name in (
+        "lucy-authority-writer",
+        "lucy-cost-writer",
+        "lucy-recovery-coordinator",
+    ):
+        environment = {item["key"]: item for item in services[name]["envVars"]}
+        assert environment["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+        assert "AWS_ROLE_ARN" in environment
+    assert services["lucy-authority-writer"]["dockerCommand"] == (
+        "python -m lucy.recovery_writer_runtime"
+    )
+    assert services["lucy-cost-writer"]["dockerCommand"] == (
+        "python -m lucy.recovery_writer_runtime"
+    )
+    assert services["lucy-recovery-coordinator"]["dockerCommand"] == (
+        "python -m lucy.recovery_ack_runtime"
+    )
+
+
+def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
+    services = _v13_render_services()
+    environments = {
+        name: {item["key"]: item for item in service["envVars"]}
+        for name, service in services.items()
+    }
+    expected_logins = {
+        "lucy-public": "lucy_utopia_public",
+        "lucy-routine": "lucy_utopia_routine",
+        "lucy-policy": "lucy_utopia_policy",
+        "lucy-evidence": "lucy_utopia_sensitive_workflow",
+        "lucy-deletion": "lucy_utopia_sensitive_workflow",
+        "lucy-finality-utility": "lucy_utopia_finality",
+    }
+    for name, login in expected_logins.items():
+        assert environments[name]["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == login
+
+    assert environments["lucy-authority-writer"][
+        "LUCY_RECOVERY_WRITER_DATABASE_LOGIN"
+    ]["value"] == "lucy_utopia_authority_writer"
+    assert environments["lucy-cost-writer"]["LUCY_RECOVERY_WRITER_DATABASE_LOGIN"][
+        "value"
+    ] == "lucy_utopia_cost_writer"
+    coordinator = environments["lucy-recovery-coordinator"]
+    assert coordinator["LUCY_AUTHORITY_RECOVERY_DATABASE_LOGIN"]["value"] == (
+        "lucy_utopia_authority_recovery"
+    )
+    assert coordinator["LUCY_COST_RECOVERY_DATABASE_LOGIN"]["value"] == (
+        "lucy_utopia_cost_recovery"
+    )
+    assert coordinator["LUCY_AUTHORITY_RECOVERY_ACK_TOKEN"] != coordinator[
+        "LUCY_COST_RECOVERY_ACK_TOKEN"
+    ]
+
+    assert "AWS_ROLE_ARN" not in environments["lucy-policy"]
+    assert not any(
+        key.startswith("AWS_") or key.startswith("LUCY_AWS_")
+        for key in environments["lucy-policy"]
+    )
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_EVIDENCE_KEY_ARN",
+        "LUCY_AWS_WRAPPED_KEY_TABLE",
+    } <= environments["lucy-routine"].keys()
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN",
+    } <= environments["lucy-evidence"].keys()
+    assert {
+        "AWS_ROLE_ARN",
+        "LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN",
+    } <= environments["lucy-deletion"].keys()
+    for name in ("lucy-evidence", "lucy-deletion"):
+        assert not any(
+            "KMS" in key or "WRAPPED_KEY" in key for key in environments[name]
+        )
+        assert environments[name]["LUCY_POLICY_HOSTPORT"] == {
+            "key": "LUCY_POLICY_HOSTPORT",
+            "fromService": {
+                "type": "pserv",
+                "name": "lucy-policy",
+                "property": "hostport",
+            },
+        }
 
 
 def test_v12_runtime_roles_have_disjoint_exact_data_and_signing_permissions() -> None:

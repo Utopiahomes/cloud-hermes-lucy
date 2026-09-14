@@ -1,0 +1,36 @@
+{
+  "auto_deploy": false,
+  "branch": "codex/r1-tenant-foundation",
+  "commit": "9cb8f28ccbc8d4c49e61e5a916351895706a041f",
+  "contract": "lucy.r1.recovery-services-rollout.v1",
+  "environment_changed": false,
+  "private_readiness": {
+    "asserted_services": [
+      "authority",
+      "coordinator",
+      "cost"
+    ],
+    "job_id": "job-dahk1hu1egvs738buvkg",
+    "job_status": "succeeded",
+    "log_indexed_at_collection": false
+  },
+  "services": {
+    "authority": {
+      "deployment_id": "dep-dahk0du1egvs738bqcu0",
+      "service_id": "srv-dahi58lg1s2s73bae65g",
+      "status": "live"
+    },
+    "coordinator": {
+      "deployment_id": "dep-dahk162fngtc73a22620",
+      "service_id": "srv-dahi5hss728c73b7bt70",
+      "status": "live"
+    },
+    "cost": {
+      "deployment_id": "dep-dahk0pu1egvs738brveg",
+      "service_id": "srv-dahi5hcs728c73b7bqsg",
+      "status": "live"
+    }
+  },
+  "status": "passed",
+  "transcript_capture_enabled": false
+}

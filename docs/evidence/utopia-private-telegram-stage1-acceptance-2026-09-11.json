@@ -1,0 +1,55 @@
+{
+  "contract": "lucy.telegram.private.stage1.acceptance.v1",
+  "status": "passed_with_documented_limitations",
+  "date": "2026-09-11",
+  "source_commit": "3563a9b2a1d847e043594a78948675130c760017",
+  "schema_revision": "0053_r1_telegram_authority",
+  "hermes": {
+    "release": "v2026.8.19",
+    "version": "0.20.5",
+    "upstream_commit": "fcbd1076a93841fa88855acce810e342a5b78101",
+    "manifest_digest": "sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09",
+    "platform_digest": "sha256:f3cba556e7b35dbe20a67d32b715090d9babd5907798c79721380757d9a12bb6",
+    "platform": "linux/amd64"
+  },
+  "render": {
+    "routine_service_id": "srv-daca8gafngtc73clva90",
+    "gateway_service_id": "srv-dai4k467bikc73bhs6r0",
+    "replaced_gateway_service_id": "srv-dai3hmu743jc73do9ebg",
+    "routine_live": true,
+    "gateway_live": true,
+    "replaced_gateway_suspended": true,
+    "auto_deploy": false,
+    "gateway_persistent_disk": false
+  },
+  "safety_state": {
+    "transcript_capture_enabled": false,
+    "automatic_memory_writes_enabled": false,
+    "raw_evidence_retrieval_enabled": false,
+    "static_aws_credentials_present": false,
+    "local_gateway_running": false
+  },
+  "checks": {
+    "owner_transport_and_inference": "passed",
+    "numeric_owner_allowlist": "passed_by_deployed_configuration_and_focused_unit_boundary",
+    "realm_and_channel_scope": "passed",
+    "restart_recovery": "passed",
+    "duplicate_update_replay": "passed",
+    "one_model_operation": "passed",
+    "one_budget_settlement": "passed",
+    "new_transcript_rows": 0,
+    "new_evidence_rows": 0,
+    "new_memory_rows": 0,
+    "sampled_render_log_messages": 600,
+    "conversation_content_absent_from_logs": true,
+    "secrets_absent_from_logs": true,
+    "rollback_route_exercised": true
+  },
+  "limitations": [
+    "The live owner canary was answered by Hermes first-run onboarding instead of echoing the requested phrase.",
+    "No second Telegram account was used for a live unauthorized-user attempt; rejection is supported by the deployed numeric allowlist and focused pre-inference test.",
+    "Render did not index the final output of two private assertion jobs; their terminal succeeded status proves the embedded assertions exited zero.",
+    "A replacement gateway can fail closed for up to the 30-second lease period before acquiring a new fence."
+  ],
+  "stage2_transcript_capture_authorized": false
+}

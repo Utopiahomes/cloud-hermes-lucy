@@ -1,0 +1,45 @@
+{
+  "schema": "lucy-public-faq-v1",
+  "faqs": [
+    {
+      "question": "how can utopia help manage my home?",
+      "answer": "Utopia combines local ownership, vacation-rental management, distinctive marketing, and hands-on property stewardship. Its owner model focuses on earning potential, operations, local oversight, and thoughtful improvements.",
+      "source": "https://www.utopiahomes.com/list-your-home"
+    },
+    {
+      "question": "how do i contact utopia homes?",
+      "answer": "Use the contact form to reach Utopia Homes about stays, property management, design, or general questions.",
+      "source": "https://www.utopiahomes.com/contact"
+    },
+    {
+      "question": "is utopia membership live today?",
+      "answer": "Membership is coming soon. Join the launch list to hear when it opens and what early members can expect.",
+      "source": "https://www.utopiahomes.com/membership"
+    },
+    {
+      "question": "what is utopia design?",
+      "answer": "Utopia Design serves both vacation rentals and personal homes. It offers a structured path from project vision to a nonbinding preliminary estimate, with final design judgment and consultation handled by the Utopia team.",
+      "source": "https://www.utopiahomes.com/design"
+    },
+    {
+      "question": "what makes a utopia stay different?",
+      "answer": "Utopia’s approach is owner-led: it begins with the home, carries through every interaction, and focuses on the details that turn an ordinary stay into one people remember.",
+      "source": "https://www.utopiahomes.com/about"
+    },
+    {
+      "question": "where are utopia homes located?",
+      "answer": "Utopia Homes currently features three distinctive large-group stays across Wildwood, North Wildwood, and Wildwood Crest, New Jersey.",
+      "source": "https://www.utopiahomes.com/stays"
+    },
+    {
+      "question": "where do i complete my booking?",
+      "answer": "Utopia property pages introduce each home, then send you to the property’s configured external booking page to check availability and book.",
+      "source": "https://www.utopiahomes.com/stays"
+    },
+    {
+      "question": "which homes can i explore?",
+      "answer": "The current collection includes Buttercup Beauty in Wildwood Crest, Central Ave Socialization in North Wildwood, and The Shamrock in Wildwood.",
+      "source": "https://www.utopiahomes.com/stays"
+    }
+  ]
+}

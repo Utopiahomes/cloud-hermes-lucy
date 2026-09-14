@@ -1,0 +1,38 @@
+# Review-only Render shape for the private Utopia Workspaces Cloud Lucy service.
+# It is not referenced by a live Blueprint and does not provision or deploy anything.
+# Apply through migration 0068 before creating this service. Migration 0066 adds
+# task.delegate and task.execute only to active realm bindings that already hold memory.read;
+# 0067 completes deletion recovery and 0068 binds Workspaces service admission.
+
+services:
+  - type: pserv
+    name: lucy-workspaces-private
+    runtime: docker
+    repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+    branch: main
+    region: virginia
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m lucy.workspaces_runtime
+    healthCheckPath: /health
+    envVars:
+      - {key: LUCY_ENVIRONMENT, value: production}
+      - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+      - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_routine}
+      - {key: LUCY_WORKSPACES_EXPECTED_DIRECTORY_LOGIN, value: lucy_directory_admission}
+      - {key: LUCY_WORKSPACES_RUNTIME_BINDING_JSON, sync: false}
+      - {key: LUCY_WORKSPACES_DIRECTORY_DATABASE_URL, sync: false}
+      - {key: LUCY_WORKSPACES_TRANSPORT_TOKEN, sync: false}
+      - {key: LUCY_WORKSPACES_AUTHORITY_TOKEN, sync: false}
+      - {key: LUCY_WORKSPACES_AUTHORITY_SUBJECT, sync: false}
+      - {key: LUCY_WORKSPACES_AUTHORITY_SESSION_ID, sync: false}
+      - key: LUCY_WORKSPACES_ROOM_CAPABILITIES_JSON
+        value: '["memory.read","task.delegate"]'
+      - {key: LUCY_WORKSPACES_AUTHORITY_MODE, value: approved_knowledge}
+      - {key: LUCY_WORKSPACES_AUTHORITY_REF, value: utopia-sales-approved-v1}
+      - {key: LUCY_WORKSPACES_PROJECTION_HOSTNAME, value: www.utopiahomes.com}
+      - {key: LUCY_WORKSPACES_PROJECTION_STORAGE_EPOCH, sync: false}
+      - {key: LUCY_WORKSPACES_PROJECTION_SNAPSHOT_DIGEST, sync: false}

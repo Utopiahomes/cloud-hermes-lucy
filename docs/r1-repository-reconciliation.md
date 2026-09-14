@@ -1,0 +1,938 @@
+# R1 repository reconciliation
+
+Status: R1-0 through R1-5 technical acceptance is complete for the commissioned Utopia
+realm. Private Telegram Stage 2 production acceptance passed on 2026-09-12 at schema
+`0054_stage2_scoped_turn_commit`; its exact accepted application release is
+`e6f66d3c2aa1b2b17bedcae1b67a4cd613346067`. Encrypted private-Telegram evidence capture
+is active, while automatic memory writes and raw-evidence retrieval remain disabled.
+The complete Stage 2 record is
+`docs/private-telegram-stage2-implementation-2026-09-11.md`. Public Lucy remains a
+separate fail-closed activation: its local website, runtime, database-role, projection,
+and manifest boundaries are implemented, but no public service, snapshot publication,
+website enablement, DNS change, or production release is authorized by this checkpoint.
+
+## Frozen baseline
+
+- Inspected source: `aa157bded743976e934887b996ea8d79a5ebacef`, a documentation-only
+  successor to accepted runtime `52527fa9d8eaa3be766986101b6a8f51c1b1c208`.
+- Accepted v1.2 PostgreSQL head: `0021_recovery_capture_safety`; current Utopia production
+  and local migration head: `0054_stage2_scoped_turn_commit`. Public paid inference remains
+  disabled.
+- Accepted AWS executor source: `0020aaaf1add48feb7e083c22d4770b3415a2e51`.
+- Signed contracts remain `SensitiveActionPermitV2`, `SensitiveExecutionGrantV1`, and
+  `ExecutorReceiptV1`, using Ed25519, `lucy-cjson-1`, a 30-second skew allowance, and
+  the existing ten-minute workflow execution window.
+- The deployed executor sequence remains PostgreSQL claim, policy-signed grant,
+  Lambda AWS effect, policy-attested receipt, PostgreSQL reconciliation. Lambdas do
+  not connect to PostgreSQL.
+- Private Telegram capture is active only through the separately accepted Stage 2 boundary.
+  Public transcript capture remains disabled.
+
+The complete v1.2 acceptance evidence and cloud identities are recorded in
+`docs/security-baseline-v1.2-final-acceptance-2026-09-08.md`. Evidence remains valid
+because R1-1 is additive and does not change the accepted contracts, executors,
+archive, deletion, recovery, or deployment templates.
+
+## Actual repository map
+
+| Boundary | Current authority | R1 disposition |
+| --- | --- | --- |
+| Signed sensitive operations | `contracts/security_v1_2.py`, `security_workflows.py`, migrations 0017-0021 | Frozen through R1-1 |
+| AWS effects | `executors/handlers.py`, v1.2 CloudFormation | Frozen; realm parameterization begins R1-2 |
+| Memory/evidence | `memory.py`, `archive.py`, `evidence.py`, `provenance.py` | Single-realm today; scope migration begins R1-2 |
+| Model cost | `model_execution.py`, `actions.py`, `budget_accounts` | Single fixed model/reservation today; replaced for paid traffic in R1-3 |
+| Runtime admission/recovery | `readiness.py`, `recovery.py`, `authorized_deletion_recovery.py` | Preserve v1.2; authority/cost overlays begin R1-4 |
+| Local PostgreSQL | digest-pinned pgvector/PostgreSQL 16 in `compose.test.yaml` | R1 migrations proven here |
+| Render PostgreSQL | PostgreSQL 18 in the reviewed Blueprint | Version/extensions and price must be verified before provisioning |
+| Tenant/public directory | None before R1 | Added by migration `0022_r1_tenant_public` |
+
+## Utopia public-first activation checkpoint
+
+Ray authorized the local, version-controlled public-first boundary on 2026-09-11.
+This authorization covers implementation and disposable verification only; it does
+not authorize a production migration, Render provisioning, snapshot publication,
+website activation, DNS changes, or opening database admission.
+
+- The website owns the browser-facing same-origin `/api/lucy` boundary and pins the
+  approved V0 snapshot digest
+  `6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e`.
+- The exact canonical eight-answer Cloud payload is retained at
+  `deploy/render/utopia-public-projection.v0.json`; it is a non-executing review
+  artifact and has not been staged or published.
+- `lucy.public_runtime` starts a separate ASGI surface with only `/health` and
+  `POST /v1/public/answer`. It requires capture off, the reviewed Hermes commit,
+  V1.3 readiness, the exact `lucy_utopia_public` database identity, storage epoch,
+  origin, hostname, bearer credential, bounded body, and opaque rate limits.
+- Migration `0052_r1_public_answer_gate` exposes only one security-definer answer
+  function to that login. The function rechecks the login-derived realm, active
+  public channel, lifecycle, runtime admission, and exact storage epoch. It has no
+  private-memory fallback and callers have no direct projection-table access.
+- The activation manifest now represents `public_only` explicitly: no customer
+  identity provider, no private hostname, paid inference off, and capture off.
+- The `lucy-public` Render blueprint entry remains a reviewed example only. Private
+  production operation does not itself enable or provision the public service.
+- Reconciliation at repository commit `a3a624211c389804ad707e87df866161f3afb6ad`
+  confirmed one Alembic head at `0054`, Ruff, strict mypy across 79 source files, and
+  the complete 748-test unit suite. After pinning the public activation manifest to
+  `0054`, 61 focused public/manifest/Render tests passed. The website passed TypeScript,
+  repository-wide ESLint, all 84 Vitest checks, and a 27-route production build. The
+  targeted Docker socket recovery restored the local engine; a fresh PostgreSQL
+  `0001`-to-`0054` migration and six focused public/realm-role integration checks then
+  passed on the loopback-only tmpfs test stack.
+
+Private Stage 2 reconciliation is complete. The next protected public action remains a
+digest-pinned public snapshot provisioning artifact for review. Do not execute it against
+production without a new explicit authorization.
+
+## R1-1 change record
+
+Migration `0022_r1_tenant_public` is additive. It introduces accounts, stable nodes,
+append-only tenures, realms and active realm bindings, issuer/subject principals,
+workspaces, memberships, trusted hostname bindings, Lucy instance identities, and
+one `REGISTERED_NONSPENDABLE` wallet registration per node. Composite foreign keys
+prevent a workspace or channel from mixing node and tenure identifiers.
+
+The public projection is physically distinct from private memory tables. A candidate
+contains canonical FAQ JSON and its digest. Approval binds the reviewed digest;
+publication copies those exact bytes into an immutable version and updates only a
+small active route pointer. Website lookup resolves scope from the registered,
+normalized hostname and queries only the active public version. It has no private
+memory fallback. Withdrawal immediately clears the pointer. Durable independent
+withdrawal acknowledgement and protected recovery handoff remain R1-4 gates, so
+withdrawal is currently a local implementation primitive rather than a production
+durability claim.
+
+## Authority and unresolved deployment facts
+
+- Production commissioning uses the offline `lucy_migration` schema owner only in an
+  ephemeral migration job. Protected restore activation instead creates a fresh,
+  non-elevated `_recovery_activation` LOGIN with exact metadata and column grants;
+  the restored schema owner is never supplied to the recovery service. Both function-owner roles temporarily receive schema
+  `CREATE` inside the migration transaction and lose it before commit. The four
+  continuously deployed realm logins are non-inheriting, execute-only identities;
+  their V1.3 Render configuration and deployed workflow exercise remain pending.
+- Customer authentication will bind stable issuer/subject pairs. AWS operator SSO is
+  not customer authentication. The production IdP, audience, and strong-auth claim
+  remain an activation decision.
+- The Utopia AWS realm resources and Render PostgreSQL foundation are deployed.
+  Production DNS, customer records, paid inference, and transcript capture remain
+  outside this gate and are not enabled.
+- The production hosting quote and exact continuously deployed realm set remain
+  R1-5 commissioning inputs. These do not block the synthetic slice.
+
+## Verification ledger
+
+| Check | Evidence | Invalidated by |
+| --- | --- | --- |
+| R1-5 commissioned acceptance rechecked the exact Utopia AWS stack (51 checks), all eight Render identities, PostgreSQL role/function/table/network boundaries, capture/admission state, privacy-safe logs, and the absence of deferred R2/R3 endpoints. The focused cumulative current run passed 74 tests with Ruff and strict mypy. | `docs/evidence/utopia-r1-5-commissioned-acceptance-2026-09-11.json`, `docs/security-baseline-v1.3-r1-final-acceptance-2026-09-11.md`, and `docs/r1-coverage-registry.md`; verification source commit `df8902acae8de8d74d4388310871af15d50ad133` | Utopia AWS stack/IAM/KMS/Lambda/DynamoDB/CloudTrail, Render identity/environment/commit, PostgreSQL schema/roles/ACL/network policy, API routes, capture/admission state, or accepted source/artifact change |
+| R1-3 cost-policy and provider-attempt contracts require complete numeric/model/rate limits and canonical content-free commitments; the additive schema exposes reservation/submission/unknown/settlement only through distinct cost-admission and recovery-writer functions; the coordinator cannot call a provider before durable acknowledgement and an exact one-time submission claim | `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and affected readiness/realm-role checks; the full 508-test unit suite passed before database execution, then 63 affected unit checks, a clean migration through `0043`, 2 cost PostgreSQL checks, 3 unchanged public-slice checks, and 2 realm-role integration checks passed after the integration fixes. Focused Ruff and strict mypy pass. | Cost contract/service, migration `0043`, cost roles/bootstrap, readiness revision, public coordinator, canonicalization, or provider-call integration change |
+| Utopia R1-2 deployed archive -> retrieval -> deletion slice passed with capture disabled; exact replays held, opposite-executor and wrapped-key enumeration attempts were denied, the synthetic owner was revoked, and temporary acceptance state was removed | `docs/evidence/utopia-r1-2-cloud-acceptance-2026-09-10.json`; application commit `9fb64891fa1703ba5ac526940d8a415e9e468a34`; run `d7f2ea0a-e920-4edd-b928-b555ae1cd941` | Application/runtime contract, migration head, realm stamp, AWS executors/IAM/KMS/DynamoDB, Render identities/environment, or capture/admission state change |
+| Metadata-only finality observation for the synthetic deletion found zero exceptional recovery copies and PostgreSQL derived `EXTENDED` because the 30-day PITR window remains open | Same evidence file; Render job `job-dahbq167bikc73d0ij2g`; inventory digest `57bc5833ae928d360eb50df847962b36b2964491771ac49cf9bcd45ed4ebb1ee` | Finality collector/database gate, AWS recovery inventory, deletion operation, PITR policy/window, or finality identity change |
+| Utopia V1.3 production PostgreSQL commissioning reached `0041`, preserved quarantine/capture-off, verified all four runtime logins, isolated directory admission, removed both function owners' temporary schema authority, and left the database inbound IP allowlist empty | `docs/evidence/utopia-render-bootstrap-v1.3-2026-09-10.json`; Render job `job-dah9rfh594qs73frt08g`; exact commit `0a03aedc99b67d6c1b7ed4812cb6d948d9d48b2c`; temporary service `crn-dah8tidbedkc739ku260` deleted after its environment was atomically cleared | Migration head, role renderer/bootstrap, realm stamp/foundation, database grants, capture/admission state, or Render database network policy change |
+| Clean migration 0001 through `0049` | Fresh disposable pgvector/PostgreSQL 16 tmpfs cluster on 2026-09-10; all 49 forward migrations completed | Migration or bootstrap change |
+| R1-4 independent recovery contracts bind authority/cost streams to an external store, epoch, identities, and manifest; typed content-free events advance only a contiguous head, lower prefixes require replay, rollback below a witness fails, and activation requires exact live/replayed heads under an unexpired writer pause. The atomic acceptance provider replays same-ID/same-digest without writes, rejects ID conflicts and competing heads, and fences appends during handoff. | `src/lucy/recovery_journal.py`, `tests/unit/test_recovery_journal.py`; 9 focused checks passed with Ruff and strict mypy | Recovery contract/provider, canonicalization, stream binding, witness comparison, or pause/handoff behavior change |
+| The R1-4 DynamoDB adapter performs one conditional append transaction over the event, permanent event-ID acknowledgement, exact expected head, and writer-pause fence; exact acknowledgement is recovered after an ambiguous response, all reads are strongly consistent and exact-key, and event/head/pause metadata substitution fails closed. Its production constructor pins `us-east-1`, account, table ARN/name, stream binding, and distinct same-account writer/recovery roles before client creation. Pause state uses a distinct `PAUSE#{kind}#{stream_id}` partition, allowing IAM to permit recovery pause writes without permitting writes to the `STREAM#...` head/event partition; the first pause request contains no unused expression values. | `src/lucy/recovery_journal_aws.py`, `tests/unit/test_recovery_journal_aws.py`; 6 adapter checks plus 15 unchanged recovery/coordinator checks passed with Ruff and strict mypy on 2026-09-10 | DynamoDB adapter/key layout/transaction shape, environment binding, event serialization, pause fencing, or recovery contracts change |
+| The deployed Utopia recovery path durably appended one synthetic authority restriction and one one-micro-USD cost reservation through the two private writers, then reconciled both through the separate acknowledgement receiver. Independent strongly consistent exact-key reads observed both DynamoDB heads at sequence 1; exact PostgreSQL inspection observed authority `DURABLY_RECORDED` at sequence 1 and cost `ADMITTED`, acknowledged at sequence 1, with one micro-USD unresolved. The utility returned to its secret-free sentinel, all four one-use tokens were rotated afterward, the ordinary services remained suspended, capture remained off, and the temporary PostgreSQL allow-list returned to empty. | Ignored operator evidence `utopia-recovery-baked-cron-execution-v1.3.json`, `utopia-recovery-witness-durable-v1.3.json`, and token-rotation record; application commit `3a35968250d325baf64f734e146dd48113bc4328`; 8 focused adapter tests, Ruff, and strict mypy passed on 2026-09-10 | Either journal head/event, synthetic PostgreSQL fixture, recovery writer/ack service, token/configuration, Render workload commit, database role/grant, or capture/admission/network state change |
+| The Utopia R1-4 protected recovery selected an isolated point after the synthetic fixture but before either durable event, then replayed the authority revocation and one-micro-USD reservation exactly once from independent DynamoDB heads. The restored member advanced from active generation 1 to revoked generation 2; no executable provider attempt was fabricated; the unresolved reservation remained charged to recovered capacity; cost finalization required no operator review; and the protected handoff reached a capture-safe ready epoch. Cleanup returned the restore to quarantine, removed the epoch and temporary non-elevated activation LOGIN, restored the normal coordinator, removed all one-off environment values, kept the source allow-list empty, and deleted the isolated database. No provider call or transcript capture occurred. | `docs/evidence/utopia-r1-4-protected-recovery-2026-09-11.json`; exact resource IDs retained only in ignored operator evidence; application commit `d294b38990aa6553b169bff76d14ed14db7cfb3e`; 31 focused runner/role tests passed with Ruff and strict mypy, and final read-only Render cleanup verification passed on 2026-09-11 | Recovery runner/coordinator, activation or recovery-role grants, schema revision, authority/cost journals or witnesses, source fixture, Render service/environment/network boundary, or restore lifecycle change |
+| Provider settlement and over-cap results remain unresolved and consume capacity until the exact independent outcome event is acknowledged by the recovery-writer identity; admission cannot self-acknowledge and recovery cannot fabricate settlement | Clean migration through `0044`; `tests/unit/test_cost_admission.py`, `tests/unit/test_public_inference.py`, `tests/integration/test_r1_provider_cost_admission.py`, and realm readiness checks; 55 affected unit/static checks and 6 PostgreSQL boundary checks passed with Ruff and strict mypy | Migration `0044`, cost service/coordinator, cost role grants, outcome journal adapter, or readiness head change |
+| Normal public-cost execution and independent cost acknowledgement use disjoint Python client interfaces as well as disjoint PostgreSQL roles. The admission client cannot acknowledge persistence; the recovery client cannot reserve, submit, mark unknown, or settle spend. | 11 focused unit checks and all 4 provider-cost PostgreSQL boundary checks passed with Ruff and strict mypy on 2026-09-10 | Cost client interfaces, public-inference orchestration, recovery service wiring, or database grants change |
+| Migration `0045` atomically blocks membership/publication authority before staging a content-free recovery event, closes ordinary Lucy's legacy direct-withdrawal path, and separates transition from exact acknowledgement identities. The intended journal sequence, previous digest, and event digest are frozen before the external append, allowing exact response-loss replay. | Clean migration 0001→0045; 21 focused authority/journal unit checks, 6 authority/public PostgreSQL checks, 7 unchanged internal-admission checks, and 2 V1.3 runtime-role/readiness checks passed with Ruff and strict mypy on 2026-09-10 | Migration/service/role/readiness/bootstrap change |
+| The accepted `0045` head preserves the existing sensitive-action and provider-cost boundaries; the deletion-recovery fixture now restores its required quarantined admission precondition so cumulative runs are order-independent. | 9 unaffected cumulative PostgreSQL checks passed; the one initially contaminated deletion-recovery check passed after the fixture correction; 66 focused unit/deployment checks, Ruff, strict mypy, and `git diff --check` passed on 2026-09-10 | Runtime-admission fixture, sensitive-operation/deletion/cost migration, or accepted schema-head change |
+| Migration `0046` freezes every reservation and provider-outcome journal sequence, prior digest, and event digest before independent append. PostgreSQL accepts only that prepared digest from the recovery identity; wrong, missing, and conflicting acknowledgements fail closed. The writer contains commitments and accounting metadata only, validates caller/attempt bindings before external writes, and exactly replays after ambiguous response loss. | Clean migration 0001→0046; 4 cost-writer contract checks, 4 PostgreSQL cost boundary checks, 60 affected unit/deployment checks, Ruff, strict mypy, and offline Alembic rendering passed on 2026-09-10 | Migration `0046`, cost event/preparation service, journal contracts/provider, public inference orchestration, readiness, or bootstrap change |
+| The protected recovery coordinator requires both authority and cost streams, rejects rollback below either witness, replays each exact suffix, catches up a stream that races the pause request, fences both writers, and verifies restored/live/paused heads before cost finalization. It refuses activation on cost operator review, then re-reads and re-verifies both heads and pause expiry after finalization before invoking activation. The concrete operator activator takes maintenance/admission locks, compares both restored heads again inside the activation transaction, requires ready lifecycle, capture-off storage and completed cost finalization, and changes only the target runtime epoch; exact retry is idempotent. Pause acquisition is exactly replayable by pause ID. | `src/lucy/recovery_coordinator.py`, `tests/unit/test_recovery_coordinator.py`, `tests/integration/test_r1_recovery_activation.py`, and `tests/unit/test_recovery_journal.py`; 6 coordinator checks and 2 PostgreSQL activation checks (including operator-review, post-finalization pause-expiry, and changed-head denial) passed with Ruff and strict mypy on 2026-09-10 | Replay coordinator/stream applier, cost finalizer, concrete activator, pause semantics, activation handoff contract, witness source, or journal provider change |
+| Migration `0047` gives the recovery identity an execute-only, restrictive authority applier for quarantined capture-off restores. It pins the configured authority stream before SQL, accepts only exact content-free membership-revocation or publication-withdrawal events, advances a contiguous immutable replay head transactionally with the restriction, and exactly replays ambiguous outcomes. Normal, transition, and cost identities cannot invoke or enumerate it. | Fresh migration 0001→0047; `tests/integration/test_r1_authority_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0047`, authority replay adapter, authority/capture tables or guards, recovery role grants, stream contracts, readiness, or bootstrap change |
+| Migration `0048` projects exact reservation and terminal cost events into a private per-attempt recovery ledger without fabricating executable provider-attempt rows. A matching base attempt is validated rather than double represented as new work; missing policy authority sets operator review. The first replay installs a durable paid-inference block, so replay alone cannot resubmit historical work or silently reopen spending. | Fresh migration 0001→0048; `tests/integration/test_r1_cost_replay.py`; 2 PostgreSQL boundary checks passed with focused Ruff and strict mypy on 2026-09-10 | Migration `0048`, cost replay adapter/projection, recovery admission guard, cost contracts, readiness, or bootstrap change |
+| Migration `0049` finalizes cost recovery only at the exact replayed head, converts surviving pre-restore executable attempts to non-executable `UNKNOWN`, applies terminal projections to surviving accounting rows, detects unexplained or contradictory attempts for operator review, and keeps paid admission closed for a database-clock 90-second cooldown. Canonical cap checks count either the surviving base attempt or its recovery projection, never both; recovered unresolved work still consumes concurrency. | Fresh migration 0001→0049; `tests/integration/test_r1_cost_replay.py` and `tests/integration/test_r1_provider_cost_admission.py`; 7 PostgreSQL boundary checks passed on 2026-09-10 | Migration `0049`, cost finalization/projection semantics, provider-attempt state machine, admission guard, cost roles, readiness, or bootstrap change |
+| The additive R1 recovery stack isolates authority and cost journals in separate retained, deletion-protected, 30-day-PITR tables. Exact Render OIDC subjects receive only their stream operations; the coordinator can pause and exact-read content-free stream/acknowledgement records but cannot update a head or write an event. Every key-scoped allow fails when `dynamodb:LeadingKeys` is absent. The operator initializer validates both bindings and uses create-only genesis writes; exact reruns are idempotent and conflicts fail closed. | `deploy/aws/r1-recovery-journals-v1.3.yaml`, `src/lucy/recovery_journal_aws.py`, and `deploy/aws/initialize_recovery_journals_v1_3.py`; 25 focused recovery/AWS-template checks passed with Ruff, strict mypy, and `git diff --check` on 2026-09-10 | Recovery stack/IAM/key layout, stream-binding contract, DynamoDB adapter, initializer, or manifest changes |
+| Migration `0050` and the acknowledgement receiver allow each recovery identity to fetch only a caller-supplied pending event and reconcile it only after independently exact-reading the permanent DynamoDB acknowledgement. Missing, wrong-stream, wrong-sequence, and substituted-digest acknowledgements fail before the database call. Its private runtime checks two distinct non-elevated database identities and both journal heads before listening; the endpoint rejects bodies so a caller cannot provide a digest or locator. The roles still cannot enumerate backing PostgreSQL tables, prepare events, append journal events, or update heads. | Fresh migration 0001→0050; `tests/unit/test_recovery_acknowledgement.py`, `tests/unit/test_recovery_acknowledgement_boundary.py`, `tests/unit/test_recovery_ack_api.py`, `tests/unit/test_recovery_journal_aws.py`, `tests/integration/test_r1_authority_recovery_staging.py`, and `tests/integration/test_r1_provider_cost_admission.py`; 7 PostgreSQL and the complete 554-test unit suite passed; migration `0050` rendered independently with Ruff and strict mypy on 2026-09-10 | Migration `0050`, pending-event functions/grants, acknowledgement receiver/API/runtime, exact DynamoDB acknowledgement read, recovery IAM, or journal key layout change |
+| Authority and cost writers use a bounded private HTTP client for acknowledgement. It transmits only the stream kind and event UUID in a zero-byte POST, validates the exact returned event/stream/terminal state, and never sends the attempt ID or caller-supplied journal digest to the receiver. The receiver requires distinct stream-specific bearer credentials, so one writer token cannot authorize the other path. Substituted, cross-stream-token, and wrong-state responses fail closed. | `src/lucy/recovery_acknowledgement.py`, `src/lucy/recovery_ack_api.py`, `src/lucy/public_inference.py`, `tests/unit/test_recovery_acknowledgement.py`, and `tests/unit/test_recovery_ack_api.py`; focused acknowledgement, API, and public-inference checks passed with Ruff and strict mypy on 2026-09-10 | Private host/token configuration, acknowledgement response contract, public-inference recovery gateway, request path/body, or expected terminal states change |
+| The existing per-realm CloudTrail is declaratively extended with both independent recovery-journal ARNs. The realm template requires exact ARN parameters; the deployed verifier rejects wrong account/region/namespace table bindings and confirms both live DynamoDB data-event selectors. The safe commissioning order is recovery stack first, then an explicit realm-stack update using its outputs. | Reproducible V1.3 render plus `tests/unit/test_aws_security_v1_3_template.py` and `tests/unit/test_realm_security_v1_3_deployment_verifier.py`; 12 focused checks passed with Ruff and strict mypy on 2026-09-10 | Realm template/renderer, recovery table names/ARNs, CloudTrail event selectors, expected account/region, or deployed verifier changes |
+| The authority and cost journal writers have a shared code shape but separate private service instances. Each instance is pinned to one stream, accepts only a caller-authenticated event UUID in an empty request, exact-reads/prepares through its dedicated non-elevated PostgreSQL LOGIN, and appends through one deployment-bound AWS journal role. The client sends no transition, accounting, prompt, response, digest, or AWS locator. The Render contract declares two writers plus the acknowledgement/recovery coordinator with capture false and auto-deploy disabled; it does not provision or bill them. | `src/lucy/recovery_writer_api.py`, `src/lucy/recovery_writer_runtime.py`, `src/lucy/recovery_writer_client.py`, `src/lucy/cost_recovery.py`, and `deploy/render/security-baseline-v1.3.yaml.example`; 44 focused writer/Render/recovery checks passed with Ruff and strict mypy on 2026-09-10 | Writer API/client/runtime, stream pin, DB identity suffix, AWS journal binding, private token, Render topology, or cost/authority preparation changes |
+| The four recovery PostgreSQL LOGINs are exact realm-prefixed, distinct, non-elevated and `NOINHERIT`. An additive SQL stamp revokes broad access and grants writer logins only their stream-specific pending/prepare functions. Recovery logins receive pending/acknowledge plus their own stream's exact restored-head/apply operations; cost recovery alone can finalize its projection. No recovery login receives generic role membership, direct Lucy table authority, or cross-stream execution. | `deploy/postgres/production_recovery_roles_v1.3.sql.example`, `deploy/postgres/render_recovery_roles_v1_3.py`, `src/lucy/recovery_ack_api.py`, and `tests/integration/test_r1_recovery_service_roles.py`; 20 renderer/bootstrap checks passed, then a fresh tmpfs PostgreSQL 16 database migrated through `0050` and the exact positive/negative LOGIN privilege matrix passed on 2026-09-10 | Recovery SQL template/renderer, function grants, LOGIN naming/flags/membership, acknowledgement identity verification, replay/finalization functions, or migration function ACLs change |
+| The quarantine-first realm bootstrap now requires, creates or rotates, grants, and reconnects through all four ordinary and all four recovery LOGINs in one controlled job. It applies the ordinary and recovery SQL stamps only after migration `0050`, includes both in the reviewed roles digest, verifies recovery schema-head visibility and absence of direct table authority, and never opens admission. | `deploy/postgres/bootstrap_realm_cloud_v1_3.py` and `tests/unit/test_realm_cloud_bootstrap_v1_3.py`; 20 focused bootstrap/renderer checks passed with Ruff and strict mypy on 2026-09-10; the underlying exact recovery grants separately passed disposable PostgreSQL execution | Bootstrap environment/URL validation, LOGIN set, role creation, grant application/digest, migration head, or post-bootstrap verification changes |
+| Utopia's additive recovery stack is deployed and termination-protected with two distinct retained, deletion-protected, 30-day-PITR journals and three exact Render OIDC subjects. Both create-only genesis heads exist; the main protected realm trail now audits both exact table ARNs. Live IAM simulation passed the intended exact-key reads and denied cross-stream/foreign-head reads, scan, query, delete, coordinator head update, and KMS decrypt. | `docs/evidence/utopia-r1-4-recovery-commissioning-2026-09-10.json`; recovery stack `lucy-utopia-recovery-v1-3`; main stack `lucy-utopia-security-v1-3`; deployed V1.3 verifier passed on 2026-09-10 | Either stack, recovery table/PITR/protection, OIDC subject, stream binding/genesis, CloudTrail selector, or IAM policy change |
+| Utopia production PostgreSQL advanced from `0042` to `0050` through the quarantine-first Render job. All four ordinary and four recovery LOGINs reconnected with exact non-elevated identities, both SQL role stamps were applied, and admission/capture remained quarantined/off. The three recovery Render identities exist in the protected network with auto-deploy off and are suspended; their sensitive environments have not yet been transmitted. | `docs/evidence/utopia-r1-4-recovery-commissioning-2026-09-10.json`; Render job `job-dahidjnlk1mc73a2h3eg`; application commit `bdef346d2ea539e372554bb0749f53e20e78d0cd` | Migration head, bootstrap/role renderer, database grants or URLs, Render identity/environment/command/suspension, admission, or capture state change |
+| Post-0034 cumulative V1.3 contracts, scoped deletion chain, and three-realm recall boundaries; 20 tests passed | Three focused unit/integration files on the clean PostgreSQL 16 cluster | V1.3 contracts, migrations 0030-0034, deletion chain, or scoped-memory search rules |
+| Cumulative V1.3 contracts, scoped permit/archive/grant/receipt/deletion, internal admission, and three-realm memory boundaries; 27 distinct tests passed | Four focused unit/integration files on the clean PostgreSQL 16 cluster; the initially omitted synthetic Alpha login variable was supplied and its two-test file passed | Any covered contract, migration 0022-0031, realm login bootstrap, or scoped service change |
+| Host normalization and snapshot digest | `tests/unit/test_r1_tenancy_publication.py` | Canonicalization/input change |
+| Utopia approved FAQ, Alpha isolation, spoof denial, immutable bytes, withdrawal | `tests/integration/test_r1_tenant_public_slice.py` | Tenancy/publication/schema change |
+| Wallet uniqueness and tenure immutability | same integration test | Identity/schema change |
+| V1.3 scope, KMS context, permit deadlines, purpose-pinned signature | `tests/unit/test_security_contracts_v1_3.py` | V1.3 contract/canonicalization change |
+| One process holds exactly one fixed private-realm credential; verified workload and scope conflicts fail closed | `tests/unit/test_realm_sessions.py` | Realm binding/session selection change |
+| Raymond/Utopia/Alpha execute-only memory isolation, direct-table denial, idempotent replay/conflict, unbound-login denial | `tests/integration/test_r1_scoped_memory.py` on disposable PostgreSQL 16; 2 passed | Scoped-memory schema/functions, bootstrap roles, or client change |
+| Realm-specific audience/strength admission, content-free directory contracts, foreign decision rejection, complete context digest | `tests/unit/test_internal_admission.py` | Identity verifier/directory interface, runtime binding, or context-digest change |
+| Utopia/Raymond authenticated workspace resolution, foreign channel/stale binding denial, monotonic membership/channel/service/node authority, directory SQL least privilege | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 6 passed | Directory function/grants, authority-generation schema, tenancy, or admission client change |
+| Authenticated Utopia memory write/read, Raymond isolation, and current-authority recheck before every effect | `tests/integration/test_r1_internal_admission.py` on disposable PostgreSQL 16; 7 passed total | Admission gateway, realm session binding, scoped-memory client/function, or authority transition change |
+| Policy-only V3 permit issue, workflow-only exact-once claim, canonical permit digest, cross-realm and direct-table denial, revocation before issue/claim | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16 | V3 permit contract, migration 0025, actor/service bindings, authority generations, or bootstrap roles |
+| Realm-scoped encrypted evidence registration and replay, archive/workflow direct-table denial, foreign-scope rejection, exact claimed-package freeze/replay, and Python/PostgreSQL package-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Encrypted evidence/package V2 contract, migration 0026, actor/service bindings, or authority generations |
+| Policy-only post-claim V2 grant storage/replay, exact executor/caller/package binding, wrong-alias rejection, current-authority recheck, and Python/PostgreSQL grant-digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Execution-grant V2 contract, migration 0027, executor/actor bindings, or authority generations |
+| Policy-only V2 receipt attestation/replay, exact grant/package/key-purpose binding, wrong-package denial, historical receipt acceptance after executor revocation, and digest parity | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Executor-receipt V2 contract, migration 0028, receipt trust/bindings, or deadline rules |
+| Workflow-only receipt reconciliation/replay, foreign-workflow denial, terminal state/digest persistence, and no caller-supplied receipt body | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0029, workflow binding, receipt attestation, or operation-state rules |
+| Same-scope evidence-derived memory provenance, exact replay, foreign/missing evidence denial, and execute-only backing-table isolation | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0030, scoped archive or memory provenance rules |
+| Exact deletion closure, incomplete-closure denial, manifest replay, durable evidence fence, and post-fence derivation denial | `tests/integration/test_r1_sensitive_permit_claim.py` on disposable PostgreSQL 16; 3 passed in the file | Migration 0031, deletion-manifest V2 contract, provenance, or fence locking |
+| Policy-signature verification before scoped deletion storage; invalid signature produces no store call | `tests/unit/test_security_contracts_v1_3.py`; 15 passed in the file | V1.3 verifier, policy trust keys, or scoped deletion admission service |
+| Manifest-bound deletion grant, wrong-manifest denial, exact qualified executor/caller binding, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on a clean PostgreSQL 16 database; 3 passed in the file | Migration 0032, deletion manifest, permit ceilings, or executor binding |
+| Deletion receipt exact grant/manifest/package binding, action-specific fields and key purpose, substitution denial, and replay | `tests/integration/test_r1_sensitive_permit_claim.py` on PostgreSQL 16; 3 passed in the file | Migration 0033, deletion receipt V2 contract, grant, manifest, or executor binding |
+| Receipt-only deletion reconciliation to 30-day `FINALITY_PENDING`, foreign/wrong-reconciler denial, recall suppression, and post-fence retrieval-package denial | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0034; 3 passed in the file | Migration 0034, reconciliation state, deletion effects, memory search, or package/grant fence guards |
+| Realm-bound metadata-only finality observation, database-derived `EXTENDED` result while PITR can recover the deleted key, exact replay, foreign-operation denial, and no direct deletion-effect access | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0035; 3 passed in the file; finality and deployment-boundary unit checks included in a separate 14-test pass | Migration 0035, finality collector, finality actor bindings, production grants, or recovery-inventory contract |
+| Historical V1.3 deletion recovery proof verifies retired-but-uncompromised policy/receipt keys and binds realm scope, permit, exact closure, grant, caller, executor, receipt, outcome, and digests; revoked keys and substituted callers fail closed | `tests/unit/test_security_contracts_v1_3.py` plus unchanged v1.2 recovery tests; 20 passed | V1.3 contracts/verifier, historical-key semantics, recovery-proof binding, canonicalization, or v1.2 recovery compatibility |
+| Quarantined V1.3 restore replay revalidates scope/target/recovery digests and exact restored artifacts, creates one immutable recovery fence, suppresses restored recall, blocks new derivation, and replays exactly once; wrong scope and ready storage fail closed | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0036; 3 passed in the file | Migration 0036, recovery contract/proof, capture-off admission, scoped archive/provenance, or recall/package fence logic |
+| Production-scoped recovery utility pins the expected realm/workspace, caller, qualified executor and historical trust inventories before acquiring maintenance/admission locks and invoking only the quarantined V2 database gate | `tests/unit/test_scoped_authorized_deletion_replay.py`, V1.3 contract tests and deployment-boundary tests; 28 passed; Ruff and mypy passed | Scoped recovery utility/configuration, V1.3 historical verifier, Docker deployment contents, or recovery database gate |
+| Realm-scoped OTR transitions and immutable per-turn decisions prevent both off-record turns and pre-transition accepted turns from entering the archive after capture is disabled; re-enabling capture does not revive old receipts, while a newly accepted turn archives successfully | `tests/integration/test_r1_sensitive_permit_claim.py` after clean migration 0001-0037; 4 passed; Ruff and mypy passed | Migration 0037, archive actor/service authority, scoped capture functions/tables, or capturable archive wrapper |
+| An issued grant may still produce one exact receipt after executor revocation; substitution fails and exact replay remains idempotent, while revocation prevents new grant admission | Existing retrieval chain in `tests/integration/test_r1_sensitive_permit_claim.py`; exercised in the same 4-test clean-schema pass | Executor binding/grant/receipt migrations 0027-0029 or revocation semantics |
+| Realm role renderer requires five distinct namespace-bound, non-elevated, membership-free LOGINs and replaces prior privileges with exact execute-only R1 grants; the public role receives only the admitted projection reader, while the routine role receives the staged capture protocol but cannot call the legacy direct registration function | `tests/unit/test_postgres_deployment_renderer_v1_3.py`, `tests/integration/test_r1_production_realm_roles.py`; rendered SQL applied to disposable PostgreSQL 16 | V1.3 role template/renderer, scoped function signatures, Docker contents, or PostgreSQL role attributes |
+| A canonical content-free realm security stamp pins one foundation, four PostgreSQL/service identities, and distinct qualified retrieval/deletion AWS bindings; its quarantined provisioner is atomic, rejects partial state, and replays exactly without writes | `tests/unit/test_realm_provisioning.py`, `tests/unit/test_realm_binding_provisioner.py`, `tests/integration/test_r1_realm_binding_provisioning.py`; clean migration 0001-0037; 12 focused checks passed plus Ruff and mypy | Realm-stamp contract/provisioner, directory/binding tables, role attributes, Docker contents, or migration head |
+| Additive V2 retrieval/deletion Lambda invocation and result types accept only V1.3 permit/grant/package/manifest/receipt objects, lock each route to its action, bind the receipt digest, and prohibit plaintext on deletion or replay | `tests/unit/test_security_contracts_v1_3.py`; 18 passed plus Ruff and mypy | V1.3 executor wire models, signed contracts, canonicalization, or result semantics |
+| The effect-free V1.3 executor admission boundary historically verifies the already-claimed permit, live-verifies the post-claim grant and deletion manifest, and pins exact realm/workspace/binding/caller/alias/version/package/closure/deadline/ceiling fields before any AWS operation | `tests/unit/test_security_contracts_v1_3.py`; 20 passed plus Ruff and mypy | V1.3 executor admission, contracts/verifier, identity configuration, canonical sizing, or grant timing semantics |
+| The additive V1.3 AWS adapter loads one exact strongly consistent receipt, signs scoped receipts with the configured purpose key, conditionally persists retrieval receipts, and atomically records deletion authority/outcome/quota while removing only archive targets' exact wrapped keys | V1.3 contract and unchanged V1.2 executor unit suites; 41 passed plus Ruff and mypy | AWS adapter, V1.3 contracts, DynamoDB transaction shape/limits, KMS signing, or V1.2 compatibility |
+| The additive V1.3 executor core admits scope before any effect, performs one authenticated retrieval decrypt with no plaintext on replay, produces exact scoped KMS-signed receipts, and commits deletion without evidence-key/decrypt authority | V1.3 contract/core and unchanged V1.2 executor unit suites; 43 passed plus Ruff and mypy | V1.3 executor admission/core, AWS backend protocol, receipt construction/replay, AES-GCM binding, quota semantics, or V1.2 compatibility |
+| Separate V1.3 Lambda entry points parse only V2 invocations, pin one realm/workspace/deployment/caller/qualified alias from environment, reject `$LATEST` or cross-scope configuration, emit content-free metrics, and scrub unexpected failure text | V1.3 handler and unchanged V1.2 executor unit suites; 45 passed plus Ruff and mypy | V1.3 handler/runtime configuration, environment contract, log/metric behavior, or V1.2 compatibility |
+| The repeatable V1.3 CloudFormation stamp is derived only from the exact accepted V1.2 template digest, requires one explicit realm identity, creates separate physical keys/tables/roles/executors per stack, pins realm scope and caller identity in Lambda configuration, and enforces the complete V2 realm context in KMS and IAM | `tests/unit/test_aws_security_v1_3_template.py`; 5 passed plus Ruff and mypy | Frozen V1.2 template, V1.3 renderer/template, executor environment, KMS context, IAM policies, or realm output contract |
+| The content-free stamp builder accepts exactly one complete termination-protected stack, cross-checks every realm parameter/output against the PostgreSQL binding description, rejects unknown fields and cross-account AWS bindings, and emits a validated canonical `RealmSecurityStampV1` with its digest | `tests/unit/test_realm_security_stamp_builder_v1_3.py`; 5 passed plus Ruff and mypy | CloudFormation realm outputs, stamp builder/model, AWS binding formats, or PostgreSQL realm-binding input contract |
+| The V1.3 realm archive encryptor pins one deployment-owned scope and exact evidence key, obtains a 256-bit DEK, authenticates bounded plaintext with the exact header, emits validated payload/wrapper contracts, and registers the wrapped DEK only after KMS response validation; it exposes no decrypt or delete capability | `tests/unit/test_realm_archive.py`; 5 passed plus Ruff and mypy | Realm archive encryptor/identity, V1.3 payload/wrapper/context contracts, AES-GCM binding, or commitment behavior |
+| The realm archive AWS adapter permits only exact-key `GenerateDataKey`, strongly consistent exact-key `GetItem`, and conditional wrapped-key/envelope `PutItem`; it exposes no scan, query, batch-read, decrypt, or delete surface | `tests/unit/test_realm_archive_aws.py`; focused adapter checks passed plus Ruff and mypy | Realm archive AWS adapter, KMS response validation, DynamoDB item/condition shape, or wrapped-key/envelope metadata |
+| Realm archive construction fails before AWS client creation unless the V1.3 backend, `us-east-1`, account-bound key ARN, exact scope JSON, positive record version, table, and 32-byte commitment key are deployment-pinned | `tests/unit/test_realm_archive_aws.py`; 10 cumulative checks passed plus Ruff and mypy | Realm archive environment factory, deployment variables, scope contract, or AWS client construction |
+| Archive capture durably separates PostgreSQL intent, AWS outcome, and PostgreSQL reconciliation; exact retries reuse stable IDs and a persisted DynamoDB envelope, a crash after DynamoDB does not generate a second DEK, withdrawal before reconciliation fails closed, and the production role cannot bypass the protocol | Clean migration 0001-0038; `tests/integration/test_r1_sensitive_permit_claim.py`, `tests/integration/test_r1_production_realm_roles.py`, and realm archive unit tests; 37 affected checks passed plus Ruff and mypy | Migration 0038, staged archive store/service, realm archive backend/envelope, scoped capture gate, or production realm grants |
+| The V1.3 realm runtime preserves the existing Hermes accept-turn, capture-mode, and message-ingestion contract while routing archive writes through the staged protocol; the global activation gate returns capture-disabled without database/AWS writes, and the exact backend selector cannot silently switch other deployments | Clean migration 0001-0039; runtime/API, archive, role-renderer, and scoped PostgreSQL tests; 56 affected checks passed plus Ruff and mypy. The clean schema now reaches 0044; the complete 56-check database slice has not been repeated after 0040-0044, while its application evidence remains valid. | Migration 0039, realm runtime adapter/factory, API backend selection, capture functions, or archive commit protocol |
+| The read-only V1.3 deployed-state verifier pins one realm's CloudFormation identity, termination protection, qualified executor versions and configuration, public-only trust stores, KMS keys, DynamoDB protections, and absence of static AWS credentials | `tests/unit/test_realm_security_v1_3_deployment_verifier.py` plus unchanged v1.2 verifier tests; 9 passed plus Ruff and mypy | V1.3 verifier, realm template parameters/outputs, executor environment, or inherited v1.2 deployed-resource rules |
+| V1.3 container admission selects the explicit R1 schema head, binds each HTTP process to its expected realm database LOGIN, permits only content-free admission/revision reads, rejects direct customer-table authority, and never consults the V1.2 deletion journal | `tests/unit/test_runtime_readiness.py` and `tests/integration/test_r1_production_realm_roles.py`; affected checks passed against clean head `0044`, including all four Utopia HTTP boundary logins and execute-only realm grants | Readiness/runtime selection, V1.3 realm grants, schema head, database LOGINs, or admission tables |
+| Per-realm V1.3 policy identity generation writes a private Ed25519 seed and public purpose-bound trust inventory to separate ignored files, refuses overwrite, and removes the private output if public-output creation fails | `tests/unit/test_generate_policy_identity_v1_3.py`; 1 focused check passed plus Ruff and mypy | Generator, V1.3 verification-key contract, purpose, or validity windows |
+| The Utopia V1.3 AWS realm stack is `CREATE_COMPLETE` with termination protection and capture-disabled tags; immutable executor aliases, reviewed artifact/trust digests, exact realm bindings, non-static credentials, three purpose-specific KMS keys, protected/PITR DynamoDB ledgers, and quota TTLs passed the read-only deployed verifier | `secrets/generated/utopia-aws-deployment-v1.3-2026-09-09-pass.json`; stack `lucy-utopia-security-v1-3`; 49 checks passed in `us-east-1` | Stack update, alias/version/configuration change, policy trust rotation, KMS state/policy change, DynamoDB protection/PITR/TTL change, or verifier change |
+| The deployed Utopia CloudFormation identity and the reviewed PostgreSQL binding produce one validated canonical realm security stamp | `secrets/generated/utopia-realm-security-stamp-v1.3.json`; digest `dd2fc2afb6134a2580af00b6b187b3912d57cb2f52244169862ec8b62e6e2959` | Stack realm outputs, PostgreSQL binding description, AWS account/region, or stamp contract/builder change |
+| The two deployed receipt-signing KMS keys expose public ECDSA P-256 material that is bound to distinct retrieval/deletion purposes and executor issuers; the builder rejects any non-`SIGN_VERIFY`, non-P-256, or non-`ECDSA_SHA_256` key metadata | `secrets/generated/utopia-receipt-trust-store-v1.3.json`; two public-only keys; canonical digest `426a66ea2766e510bc2f427263d64ed9133f59f1f870c7eaad1306820b6f20cd`; 2 focused tests passed plus Ruff and mypy | Either receipt KMS key, stack executor identity/output, trust builder, purpose/algorithm contract, or validity window |
+
+## R1-2 checkpoint
+
+`contracts/security_v1_3.py` adds new wire identities rather than extending or
+reinterpreting v1.2 JSON: origin scope, current execution binding, resolved execution
+context, owner assertion V2, permit V3, encrypted evidence package V2, deletion target
+manifest V2, sensitive execution grant V2, executor receipt V2, KMS encryption context V2, and v1.3
+verification keys. New signatures retain the
+already reviewed `lucy-cjson-1`
+canonicalizer, include their object type/version as a domain separator, and pin a
+distinct v1.3 key purpose. Permit admission is at most 60 seconds while execution
+completion remains a separate bounded deadline. A historical realm/storage mismatch
+requires an exact restore-mapping ID.
+
+`SensitiveExecutionGrantV2` preserves the corrected, deployed ordering: the workflow
+claims in PostgreSQL before policy signs a post-claim grant. It binds the permit
+digest, claim/admission times, operation and idempotency identity, target and active
+scope, exact qualified executor alias/version/caller, package digest, and action-
+specific record/byte ceilings. The additive database gates and local executor path
+now implement this contract; no v1.3 cloud route has been deployed.
+
+`ExecutorReceiptV2` preserves ECDSA P-256 for KMS-compatible executor signing while
+owner, permit, and grant contracts remain Ed25519. The v1.3 trust store pins the
+algorithm and action-specific receipt-key purpose. Receipts bind the exact permit and
+grant digests, scope/active execution binding, qualified executor and caller, package,
+deadline, outcome, content-free journal reference, and operational deletion state.
+Cryptographic finality remains a later independently verified record; an executor
+receipt cannot claim it.
+
+The executor wire boundary now has additive V2 invocation and result types. They
+accept only the V1.3 permit, post-claim grant, scoped package or deletion manifest,
+and scoped receipt contracts; action confusion, receipt-digest substitution,
+deletion plaintext, and replayed plaintext fail validation. The frozen V1 invocation
+and result types remain unchanged. Separate V1.3 Lambda entry points and a local
+per-realm CloudFormation stamp now exist; neither has been deployed.
+
+`executors/admission_v1_3.py` adds the pure pre-effect admission layer. A claimed
+permit is verified as historical authorization evidence because its 60-second
+admission deadline may legitimately precede Lambda execution; the post-claim grant
+is live-verified through the separate completion deadline. Retrieval then binds the
+exact current wrapper/KMS scope, record, canonical package digest, and byte size.
+Deletion additionally live-verifies the signed closure and binds its owner evidence,
+idempotency identity, target count, digest, and canonical size. No AWS operation is
+implemented by this layer, and the deployed handler remains V1-only.
+
+The shared AWS adapter now has additive V1.3 receipt and deletion operations while
+its accepted V1 methods remain unchanged. V1.3 receipts are exact-key, strongly
+consistent reads and conditional writes with realm/epoch metadata. Deletion stores
+the signed permit, post-claim grant, frozen closure and scoped receipt together with
+both quota reservations in one DynamoDB transaction, deleting only exact wrapped-key
+references carried by encrypted-archive targets. Derived-memory targets cannot name
+or delete AWS key material. The adapter exposes no scan, query, or batch-read method.
+
+`executors/core_v1_3.py` composes the pure admission boundary with those exact AWS
+operations. Retrieval admits the signed chain and realm identity before quota or KMS,
+authenticates the payload with its V2 header/context, bounds plaintext, persists a
+purpose-scoped receipt, and returns plaintext only for the winning first execution.
+An exact retry replays the durable receipt without decrypting or returning plaintext.
+Deletion constructs a content-free operational-deletion receipt and commits through
+the atomic adapter path; its core has no evidence key or decrypt capability.
+
+`executors/handlers_v1_3.py` exposes separate V1.3 retrieval and deletion entry
+points. Each runtime derives one target scope, workspace, deployment binding, caller,
+executor identity, published version, and qualified alias from deployment-owned
+environment. Request JSON cannot select those values. The handler accepts only V2
+invocations, rejects unqualified/moving execution, emits content-free V1.3 metrics,
+and never logs exception text. The derived per-realm CloudFormation stamp references
+these handlers through distinct functions and `realm-v13` aliases, but no Lambda
+version or realm stack has been deployed.
+
+`deploy/aws/security-baseline-v1.3.yaml` preserves the accepted V1.2 resource
+boundary while making one stack equal one realm security stamp. Its fail-closed
+renderer pins the exact V1.2 input digest and requires every expected transformation
+count. Deployment-owned scope JSON, execution binding, workspace, caller role,
+executor identity, and alias are injected into each executor. KMS and IAM require
+the full `KmsEncryptionContextV2` realm context, including the realm and tenant IDs;
+the evidence ID remains dynamic but mandatory. A validated handoff builder combines
+the stack's read-only outputs with the reviewed PostgreSQL realm description and
+produces the canonical `RealmSecurityStampV1` plus digest. Deployed verification and
+synthetic cloud acceptance remain open gates.
+
+`realm_archive.py`, `realm_archive_aws.py`, and `realm_archive_commit.py` provide
+the encryption-only new-capture ingestion path. The process receives one deployment-owned realm scope and
+exact KMS key, generates a data key, validates the KMS response, encrypts with
+AES-256-GCM and the supplied authenticated header, emits validated V2 payload and
+wrapper bindings, and conditionally stores the wrapped key with realm metadata. It
+has no decrypt or delete method. The environment factory requires the explicit V1.3
+backend and matches region/account/key before constructing AWS clients. Migration
+`0038_r1_archive_commit_protocol` durably separates the intent, AWS outcome, and
+reconciliation because PostgreSQL, KMS, and DynamoDB cannot share one transaction.
+It allocates stable object IDs before AWS, recovers an exact durable DynamoDB envelope
+after an ambiguous failure, and rechecks capture authorization during reconciliation.
+The request commitment is keyed, so PostgreSQL does not retain a guessable plaintext
+hash. The production realm login can execute only the staged functions and cannot
+call the legacy direct evidence-registration function.
+
+Migration `0039_r1_scoped_capture_runtime` adds a realm-derived, execute-only
+capture-state read and connects the staged archive service behind Hermes' existing
+internal conversation API contract when the backend is exactly
+`aws-kms-dynamodb-v13`. The global transcript-capture flag remains an independent
+fail-closed gate: while false, turn acceptance and message preservation perform no
+database or AWS write. This compatibility path has been exercised against disposable
+PostgreSQL with a synthetic KMS/DynamoDB effect boundary; it has not been activated
+or deployed.
+
+`EncryptedEvidencePackageV2` separates an immutable payload binding from its
+replaceable key-wrapper binding. The payload commits to original realm scope,
+ciphertext bytes, nonce, authenticated header, record version, and ciphertext digest.
+The wrapper commits to the current wrapping scope, exact wrapped-key reference and KMS
+context. New ingestion requires matching scopes; moving only the wrapper requires an
+exact migration-receipt ID while leaving the ciphertext digest unchanged. This is a
+local typed boundary and does not migrate the accepted v1.2 archive.
+
+`DeletionTargetManifestV2` freezes one canonical root-evidence closure across encrypted
+archive representations and derived artifacts. Archive targets require the exact
+representation and wrapped-key reference; memory, embedding, result and projection
+cleanup targets cannot carry wrapped-key destruction authority. The signed manifest
+binds the realm/workspace, permit and owner assertion, closure and policy versions,
+canonical target digest, and separate claim/execution deadlines. It reports
+operational deletion policy only; cryptographic finality remains independent.
+
+`realm_sessions.py` holds exactly one deployment-owned private-realm credential per
+process and selects it only after workload identity has been verified. A request may
+supply a realm/workspace hint only for conflict detection; it cannot select a
+credential. Unknown subjects/actions, conflicting hints, and any attempt to configure
+multiple realm bindings in one process fail closed. A content-free directory/admission
+interface may resolve metadata for several realms, but it cannot hold or return these
+content credentials.
+
+Migration `0023_r1_scoped_memory` adds immutable content-scope and service-binding
+rows plus append-only scoped claims/events. PostgreSQL resolves the caller from
+`session_user`; the application cannot supply a realm selector. Three synthetic
+logins receive execute-only access to named write/search functions and cannot select
+the backing tables. Cross-realm reads return no rows, unknown bindings fail closed,
+and idempotency conflicts do not write data. Legacy v1.2 rows remain in their
+explicit enclave.
+
+`internal_admission.py` now defines the realm-local side of authenticated admission.
+Only a verifier may produce identity facts; the verifier is required to bind the
+configured issuer and realm-specific audience. The directory request and decision
+contain authorization metadata only—no bearer token, database credential, prompt,
+query, response, or private content. The realm process cross-checks every returned
+scope/binding/action before constructing a server-only, canonically digest-bound
+`ResolvedExecutionContextV1`. No production IdP implementation or network broker is
+claimed yet.
+
+Migration `0024_r1_internal_admission` and
+`PostgresDirectoryAdmissionAuthorizer` implement the database-backed directory
+decision. A dedicated login has execute-only access to one security-definer function;
+its distinct function owner can read only authorization metadata and has no scoped-
+memory table or function authority. Utopia and Raymond use separate single-binding
+process fixtures and realm-specific audiences. Membership, channel, service-binding,
+principal, and node authority changes are monotonic: revocation/disable cannot be
+reversed, and generation or epoch changes invalidate stale admission.
+
+`authenticated_memory.py` places that admission decision directly in front of the
+scoped-memory effect. The caller supplies identity proof and operation content but no
+realm, workspace, or database selector. The workspace is fixed deployment
+configuration, and the memory session is derived from the same admission object's
+single realm binding rather than injected separately. A fresh directory decision is
+required before every read or write; a revoked membership therefore cannot reach the
+memory client. The resolved context remains server-only and is never accepted as a
+bearer credential.
+
+Migration `0025_r1_sensitive_permit_claim` begins sensitive-chain scope
+parameterization without changing the accepted v1.2 path. A policy-notary login may
+store only a signed V3 permit whose exact owner, channel, workspace, service binding,
+realm, storage epoch, deployment, and current authority generations match its fixed
+realm binding. The permit now binds both the channel ID and generation, and the
+target service-binding ID and generation. A separate workflow login can claim only
+that pre-issued permit in its own fixed realm. Claim is idempotent, rechecks current
+authority, and records an immutable scoped event; neither login can select or write
+the backing tables directly. PostgreSQL recomputes the same canonical unsigned
+contract digest used by the application. The policy process remains responsible for
+cryptographic signature verification before calling the issue gate; its scoped
+credential is therefore an explicit policy trust boundary.
+
+Migration `0026_r1_scoped_archive_package` makes the encrypted object referenced by a
+V3 permit concrete before an execution grant can exist. A fixed archive-writer login
+can register only new-capture payload/wrapper pairs in its own active content scope;
+PostgreSQL validates the AES-GCM payload digest, exact KMS context, lineage, realm and
+storage epochs, and idempotent replay. Neither the archive writer nor workflow login
+can enumerate the backing tables. After an exact V3 permit is claimed, the workflow
+can freeze only that active evidence version and current wrapper into an immutable
+`EncryptedEvidencePackageV2`; PostgreSQL and Python produce the same canonical
+package digest. Migration/rehost wrappers remain deliberately outside this initial
+slice and require their later receipt-gated path.
+
+Migration `0027_r1_execution_grant` adds an immutable realm executor registry and a
+policy-only post-claim V2 grant gate. The gate rechecks current owner, channel, node,
+tenure, realm, service, policy and executor authority immediately before admission;
+binds the exact claimed permit and frozen package; and pins the qualified Lambda
+alias, published version, caller identity, byte ceiling and completion deadline.
+Grant replay is exact and neither the policy nor workflow login can enumerate grant
+or package tables.
+
+Migration `0028_r1_executor_receipt` adds immutable, content-free V2 receipt
+attestations. Policy admits only a preverified receipt matching the exact stored
+grant, package, qualified executor, caller, receipt-key purpose, record version and
+deadline. Executor revocation blocks future grants but does not suppress an exact
+receipt for a grant already issued, preserving an auditable revocation race instead
+of losing its outcome.
+
+Migration `0029_r1_receipt_reconcile` adds the workflow-only terminal transition.
+The reconciliation function accepts only an operation ID, locks that exact scoped
+operation, and derives the outcome solely from the immutable policy-written receipt
+attestation. Foreign workflows fail closed; successful and rejected executor results
+become distinct terminal states; exact retries return the stored outcome without a
+second event.
+
+Migration `0030_r1_scoped_provenance` makes evidence-derived scoped memory explicit.
+Every derived claim commits its same-scope source evidence IDs atomically, and the
+archive service cannot enumerate either the evidence or provenance backing tables.
+Derivation and deletion use the same per-evidence transaction lock; a deletion fence
+therefore prevents a later derivation from committing, while any derivation that wins
+the lock is included in the closure computed by the following deletion increment.
+
+Migration `0031_r1_deletion_closure` freezes a policy-signed V2 manifest only when it
+exactly equals PostgreSQL's current same-scope closure: the active archive
+representation and every provenance-linked scoped memory claim. The fence, immutable
+manifest, normalized targets, and content-free event commit in the same transaction.
+An incomplete or stale representation fails closed, and exact replay cannot create a
+second fence or event. The policy application must cryptographically verify the
+manifest before invoking this execute-only database gate.
+
+`VerifiedScopedDeletionService` is that application-side admission gate. It verifies
+the policy-notary key purpose, issuer, environment, live key window, authorization
+deadline, and signature before any store call. It then compares the database result
+to the verified manifest identifiers and digests, rejecting a storage-binding
+mismatch.
+
+Migration `0032_r1_deletion_grant` admits deletion grants through a deletion-only
+function. The signed grant must bind the claimed permit, exact frozen manifest ID and
+digest, current realm authority, qualified deletion executor and caller identity,
+canonical manifest byte size, and permit record/byte ceilings. Its package digest is
+the frozen manifest digest, matching the established deletion-executor contract;
+retrieval grants remain on their narrower function and cannot name a manifest.
+
+Migration `0033_r1_deletion_receipt` adds the deletion-only attestation function.
+It accepts a policy-preverified receipt only when its deletion key purpose, executor,
+caller, permit, grant, manifest, package digest, transaction token, record version,
+deadline, result, and operational-finality fields exactly match stored authority.
+The receipt is content-free and immutable; the historical executor binding may have
+been revoked after grant admission without erasing the exact completed outcome.
+
+Migration `0034_r1_deletion_reconcile` separates deletion reconciliation from the
+retrieval terminal path. A successful or idempotent deletion receipt creates one
+immutable operational effect and advances the operation to `FINALITY_PENDING` with a
+fixed 30-day not-before time; a rejected receipt creates no deletion effect. Exact
+replay is read-only. Once the deletion fence exists, provenance-linked claims are
+excluded from ordinary scoped recall and no new retrieval package or retrieval grant
+can be admitted for that evidence. Cryptographic finality remains a later,
+independently verified record rather than a claim made by the executor receipt.
+
+Migration `0035_r1_scoped_finality` gives a realm-bound finality verifier one
+execute-only metadata operation. PostgreSQL resolves its scope from `session_user`,
+accepts no caller-supplied finality verdict, requires the scoped deletion to have an
+attested operational effect, and derives `EXTENDED` or `VERIFIED` from the actual
+PITR and exceptional-copy inventory. Observations are immutable and monotonic; an
+identical retry is replayed without another row, a foreign operation is invisible,
+and time alone cannot make a still-recoverable deletion cryptographically final.
+The operator finality utility now calls this scoped gate while the v1.2 gate remains
+granted for compatibility with the frozen enclave.
+
+`verify_authorized_deletion_recovery_v2` is the content-free recovery admission
+boundary for the scoped chain. It historically verifies every signature, allowing a
+retired verification key only for evidence issued during its valid issuance window;
+revoked keys and contracts in a declared suspected-compromise interval fail closed.
+It then binds the permit, canonical deletion closure, post-claim grant, exact
+realm-bound caller and qualified executor, and successful operational-deletion
+receipt into one recovery digest. The proof does not itself mutate a restored
+database; migration 0036 consumes it only through a quarantined replay gate.
+
+Migration `0036_r1_scoped_deletion_recovery` consumes that proof only while storage
+is quarantined and the centralized transcript-capture boundary is off. It rederives
+the realm, scope, manifest-target and recovery digests; requires every restored
+archive and derived-memory artifact to match the authorized closure; and writes one
+immutable recovery record, target set, and root-evidence fence. A simulated older
+restore made the derived claim visible after its newer ordinary fence was removed;
+the recovery replay suppressed it again, blocked subsequent derivation, and an exact
+retry made no second write. Ciphertext remains immutable in PostgreSQL, while the
+externally destroyed wrapped key and enforced fence preserve crypto-shredding and
+ordinary-recall deletion semantics.
+
+`deploy/postgres/replay_authorized_deletion_cloud_v1_3.py` is the production
+operator bridge for that gate. It accepts no command-line values, requires the exact
+reviewed authorization marker, production Render, capture-off state, the private
+migration login, an explicit realm/workspace scope, caller and qualified executor
+bindings, and historical V1.3 trust inventories. It verifies the signed chain before
+opening PostgreSQL, then requires TLS, quarantine, the database-owned capture boundary
+and both maintenance/admission locks. The container includes this utility, but no R1
+production deployment or replay has been performed.
+
+Migration `0037_r1_scoped_capture` separates capture state and immutable turn
+receipts by database-derived content scope. An off-record transition increments the
+conversation generation under a scope-specific lock. Archive admission requires a
+previously accepted, enabled receipt whose generation still equals the current
+conversation generation. Consequently, disabling capture invalidates both future
+turns and any earlier accepted-but-not-yet-archived turn; returning on-record never
+revives them. The archive login has execute-only access and cannot enumerate or
+rewrite the supporting tables. This is the local R1 path; live Telegram capture is
+still disabled.
+
+`render_security_v1_3_sql.py` and `production_realm_roles_v1.3.sql.example`
+provide the first production parameterized stamp. They bind five distinct LOGINs to
+one explicit realm namespace and remove all table/function authority before granting
+the exact routine/archive, policy, workflow, finality, and public-projection entry
+points. The rendered
+stamp was applied to the disposable PostgreSQL environment and its effective grants
+were queried. It does not create realm directory rows, AWS identities, Render
+services, or an activation decision.
+
+`realm_provisioning.py` and `provision_realm_bindings_v1_3.py` make the next
+commissioning boundary deterministic. One strict, content-free, canonical manifest
+pins the tenant/node/tenure/realm/workspace, four namespace-bound PostgreSQL and
+service identities, authority generations, and distinct same-account/same-region
+qualified retrieval/deletion executor aliases and receipt keys. The production
+utility requires the private migration identity, TLS, quarantined admission,
+capture-off state, and both maintenance locks. It applies the entire stamp in one
+transaction, rejects conflicting or partial prior state, and treats an exact replay
+as read-only. The path passed on production Render PostgreSQL 18 for the quarantined
+Utopia realm on 2026-09-10.
+
+`provision_realm_foundation_v1_3.py` closes the production seeding prerequisite
+without weakening that binding gate. Under the same capture-off, TLS, quarantine,
+maintenance-lock and admission-lock boundary, it inserts the exact stamped
+tenant/node/tenure/realm/private-workspace and four service principals plus one
+registered-nonspendable wallet. A separate canonical content-free seed supplies
+only labels, issuer, stable wallet ID and provisioning timestamp. It creates no
+public channel, owner membership, credential, content, or capture authorization;
+exact replay is read-only and any partial/conflicting foundation rolls back. Fourteen
+focused foundation/binding/deployment-boundary tests pass with Ruff and mypy. The
+disposable PostgreSQL integration extension was not rerun because Docker Desktop was
+unavailable; the equivalent production bootstrap passed on Render PostgreSQL 18.
+
+`bootstrap_realm_cloud_v1_3.py` now composes the production database commissioning
+steps into one quarantine-first, replay-safe operation. It accepts only the accepted
+V1.2 revision or the exact V1.3 head; acquires the maintenance and admission locks;
+proves TLS and the database-owned capture boundary; closes admission before role or
+schema mutation; creates or rotates four realm-qualified non-inheriting LOGINs;
+migrates through `0041`; applies the reviewed execute-only role stamp; provisions
+the content-free foundation and immutable realm bindings in one transaction; and
+reconnects through all four logins for content-free verification. It cannot open
+admission or enable capture, and its result omits database URLs and passwords. On
+2026-09-10 the operation passed on Render PostgreSQL 18 at exact commit `0a03aed`,
+after a production-discovered Alembic revision-length incompatibility was corrected
+and protected by a regression check. The temporary environment was cleared, the
+database inbound IP allowlist remained empty, and the migration service was deleted.
+The offline `lucy_migration` schema-owner boundary remains an accepted commissioning
+residual; no continuously running service receives that credential.
+
+`realm_security_workflows.py` now supplies the typed application-side boundary for
+the V1.3 execute-only PostgreSQL functions. The policy adapter verifies the exact
+policy or executor-receipt signing-key purpose before storing a permit, grant, or
+receipt, and compares the returned identifier or digest with the verified contract.
+The workflow adapter claims a permit, freezes and digest-checks the retrieval
+package, and selects retrieval versus deletion reconciliation without accepting a
+realm or database selector. Thirty focused workflow/contract/authorization tests
+pass with Ruff and strict mypy. HTTP routing and construction of post-claim grants
+remain the next increment; V1.3 sensitive endpoints remain unavailable until that
+path is complete.
+
+Migration `0040_r1_grant_authority_snapshot` supplies the one missing input to that
+adapter without widening table authority. A realm policy login may request one exact
+claimed operation and receive its signed permit, claim timestamp and idempotency key,
+canonical package digest/size, qualified executor binding, optional deletion-manifest
+binding, and any already-issued grant. It receives no ciphertext, wrapped key,
+transcript, memory, or enumerating operation. `RealmPolicyGrantService` verifies the
+permit, constructs and signs the exact post-claim V2 grant, and reuses an existing
+signed grant on retry rather than generating a conflicting identity. PostgreSQL still
+rechecks current authority when storing it. Migration `0040` remains the grant
+snapshot layer beneath the additive deletion snapshot; the Alembic graph now has one
+head at `0041`;
+36 focused tests plus Ruff and full-package strict mypy pass. The migration is now
+included in the verified production PostgreSQL 18 head; deployed workflow execution
+remains pending.
+
+The same migration now exposes an exact, content-free operation-status snapshot only
+to the realm-bound sensitive-workflow login. `RealmRetrievalCoordinator` uses that
+snapshot after every claim: a terminal retry returns the stored outcome without
+calling Lambda again, while a claimed operation freezes its single evidence package,
+obtains its signed grant through the separate policy-client boundary, invokes only a
+qualified non-version Lambda alias, attests the receipt, and reconciles PostgreSQL.
+It never accepts a caller-supplied realm or database role and never returns historical
+plaintext on terminal replay. Fifty-eight focused workflow, deployment-rendering,
+readiness, bootstrap, and API tests pass with Ruff and full-package strict mypy.
+Deletion choreography is documented below; deployed PostgreSQL execution remains pending.
+
+The V1.3 private HTTP transport is now locally wired without reusing V1.2 contract
+configuration. The policy process alone exposes exact-operation grant and receipt-
+attestation routes; the evidence process exposes the owner-authenticated retrieval
+route and calls policy only through a fixed Render-private host/port plus its existing
+gateway token. The evidence process invokes only its configured qualified retrieval
+alias. Path/body operation mismatches, wrong service mode, wrong baseline, malformed
+private endpoints, untrusted receipts, and all workflow failures fail closed. This
+does not create an owner-assertion broker or enable capture. The focused API,
+transport, workflow, and readiness checks pass locally; Render variables and deployed
+execution are still pending.
+
+Migration `0041_r1_deletion_auth_snapshot` adds the corresponding policy-side
+deletion input without granting table access. One exact claimed deletion operation
+returns only its signed permit, root/version identifiers, canonical closure targets,
+digests, fixed policy versions, and any already-stored manifest; it cannot enumerate
+operations or read ciphertext. New manifest admission goes through a V3 wrapper that
+acquires the established evidence-derivation lock, then rechecks operation state and
+the real current completion time before delegating to PostgreSQL's existing exact-
+closure validator. This closes the pre-lock clock/state race found during independent
+review while preserving the existing database-authoritative closure and fence.
+`RealmPolicyDeletionService` consumes that snapshot, live-verifies the stored permit,
+constructs and signs the exact V2 manifest, compares every returned freeze identifier
+and digest, and reuses the already-stored signed manifest on replay without generating
+a new identity, timestamp, nonce, or signature. The deletion process now claims the
+exact permit through its workflow-only login, requests that manifest and its subsequent
+grant through the fixed private policy endpoint, invokes only its configured qualified
+deletion alias, attests the content-free receipt, and reconciles into finality. A retry
+already in a terminal/finality state returns the stored content-free status without
+calling policy or Lambda again. The V1.3 owner deletion route checks the evidence path
+against the permit selector before opening workflow storage. Eighty-three focused API,
+workflow, contract, and executor tests pass with Ruff and full-package strict mypy.
+PostgreSQL migration execution now passes on Render PostgreSQL 18; deployed
+Render/Lambda workflow execution remains pending.
+
+The scoped retrieval, deletion, and new-capture chains are complete locally through
+reconciliation, finality observation, quarantined restore replay, scoped OTR
+enforcement, ambiguous archive-write recovery, and the documented post-grant
+revocation race. The Utopia AWS realm stamp is deployed and passes its read-only
+verification; its PostgreSQL foundation is commissioned at `0042` and verified in
+quarantine. The four existing Render identities now carry the complete V1.3
+configuration and the deployed synthetic archive, retrieval, deletion, replay, and
+negative-permission path passed with capture disabled. A metadata-only finality job
+recorded `EXTENDED`, with no exceptional recovery copies, because the 30-day recovery
+window is intentionally still open. This accepts R1-2; durable revocation
+acknowledgement and protected recovery handoff remain R1-4 gates and are not pulled
+forward into R1-2.
+
+The Render V1.3 topology is now explicit in
+`deploy/render/security-baseline-v1.3.yaml.example`. It pins the five existing
+Utopia identities to the commissioning branch with auto-deploy disabled, keeps
+capture false and finality's schedule inert, gives policy no AWS identity, gives
+routine only archive authority, and gives evidence/deletion distinct AWS caller
+roles and aliases while recording their approved shared execute-only workflow
+LOGIN. Thirty-four focused Render/AWS deployment-template tests pass. This is a
+configuration contract only: no live Render environment has been mutated and no
+migration credential is assigned to a continuously running service.
+
+On 2026-09-10, all five existing Utopia Render identities were staged on exact
+commit `38b6115604930c346140eb7f9184cadd73ae2361`. The four private services and
+the inert finality cron each reached `live`; all are pinned to
+`codex/r1-tenant-foundation` with auto-deploy off. A content-free API audit then
+confirmed the exact live commit and branch on every identity, capture false on
+routine, and no static AWS credential, migration URL, or maintenance URL on any
+service. They intentionally retain their accepted V1.2 environment until the
+isolated V1.3 database commissioning job and complete configuration bundles are
+ready; this staging evidence does not claim migration or V1.3 runtime admission.
+
+Before Render received any V1.3 policy secret, the initial local policy seed was
+invalidated after appearing in local command output. A replacement identity
+`utopia-policy-v13-2` was generated; CloudFormation reached `UPDATE_COMPLETE`
+with termination protection still enabled and public trust digest
+`593754a54103d9b9d9ac484175409df02b2bb0410cfda7d2a7f004fc3541f9bc`.
+The full read-only realm verifier passed all 49 AWS checks, and the realm stamp
+and two-key public receipt trust were rebuilt from the updated stack. The old
+private seed was not deployed and was removed locally after AWS stopped trusting
+its public key. The receipt-trust builder now accepts both successful create and
+successful update completion states; rollback-complete states remain rejected.
+
+Container admission now selects the security baseline explicitly. V1.3 requires the
+configured PostgreSQL login to match `session_user`, proves that the login has no
+direct customer-table privileges, and admits only its service-mode function surface.
+The request path uses the same admission boundary. Both generations of V1.2 sensitive
+HTTP endpoints return unavailable under V1.3, so commissioning cannot accidentally
+route a V1.3 identity through the older workflow while the dedicated V1.3 adapter is
+still pending. The focused API/readiness suite passed 35 tests with Ruff and mypy on
+commit parent `349ce09`; this evidence is invalidated by changes to API routing,
+readiness, baseline selection, or database-role admission.
+
+## R1-3 checkpoint
+
+`cost_admission.py` introduces immutable V1 contracts for a fully specified provider
+policy and a content-free request attempt. The policy cannot omit platform, node,
+site, provider, outstanding-exposure, concurrency, rate, token, byte, timeout,
+model, or rate-version limits. Attempts retain keyed/hashed commitments rather than
+request, session, IP, or provider-reference plaintext.
+
+Migration `0043_r1_provider_cost_admission` adds immutable policy/event records,
+attempts, exact exposure reservations, and an acknowledgement outbox. One global
+advisory lock serializes admission so concurrent requests cannot oversubscribe a
+cap. Daily accounting includes incurred plus unresolved exposure; the global
+outstanding limit includes unresolved attempts from older periods. Submission is
+unavailable while a reservation is `PERSISTENCE_PENDING`, an admitted attempt can
+be claimed only once, and an ambiguous provider outcome stays `UNKNOWN` without
+releasing exposure or authorizing an automatic retry. An actual charge above the
+reservation is stored as `OVER_CAP`; subsequent admission stays blocked until a
+newer reviewed policy becomes effective.
+
+The cost-admission identity can execute reservation, submission, unknown-outcome,
+and settlement transitions but cannot read backing tables. A separate recovery
+writer can acknowledge only an exact reservation event. The independent journal
+head and protected activation handoff are intentionally R1-4 work, so no production
+provider call is authorized by this checkpoint.
+
+`public_inference.py` adds the body-bearing coordinator without putting request or
+response content in the shared cost store. It requires an exact reservation, sends
+its event to the independent-journal interface, requires the corresponding durable
+acknowledgement, and claims submission exactly once before invoking a provider. A
+journal failure makes no provider call. A provider exception marks the attempt
+`UNKNOWN`; a retry of an admitted, submitted, unknown, settled, or over-cap attempt
+never invokes the provider again. Provider references are retained only as keyed
+commitments, and the body-bearing request must exactly match the admitted cost,
+token, byte, and timeout bounds.
+
+Contract, static boundary, coordinator, bootstrap, Ruff, strict-mypy, and all 508
+unit checks pass. Docker Desktop was recovered by moving only its inaccessible,
+runtime-generated socket directories to timestamped backup paths and allowing Docker
+to recreate them. A fresh disposable PostgreSQL 16 cluster migrated from 0001 through
+0044. The focused PostgreSQL tests prove serialized concurrent admission, retained
+unknown exposure across period rollover, exact retry without resubmission, and denial
+of direct attempt-table access; the unchanged public slice and all four V1.3 HTTP
+login/readiness boundaries also pass. Production R1-3 deployment has not been
+attempted.
+
+## R1-4 checkpoint
+
+`recovery_journal.py` defines the content-free stream binding, head, typed authority
+and cost effects, append acknowledgement, writer pause, and activation handoff. A
+restored valid lower prefix is replay work rather than activation evidence; rollback
+below an independently retained witness, a wrong store/stream/epoch/manifest, a
+missing required stream, an expired pause, or a head that advances during handoff
+fails closed. The in-memory provider is acceptance-only and proves atomic append,
+exact idempotent replay, conflicting-ID and concurrent-head rejection, and pause
+fencing; it is never a production backend.
+
+Migration `0044_r1_cost_outcome_recovery` corrects the cost lifecycle before an
+independent journal is connected. Provider results first become
+`SETTLEMENT_PENDING` or `OVER_CAP_PENDING`; the full maximum remains unresolved.
+Only the separate recovery writer can acknowledge the exact outcome event and move
+the attempt to its final state, release unused exposure, and record the acknowledged
+head. The coordinator does not return the model output before this acknowledgement.
+`recovery_journal_aws.py` now supplies the DynamoDB conditional adapter without a
+scan, query, automatic genesis, or caller-selected scope. Its production constructor
+requires an exact same-account table binding and separate writer/recovery roles and
+relies on the runtime's workload credentials rather than accepting static keys.
+The pause item has its own partition key, rather than sharing the stream-head partition;
+this is required so the recovery coordinator's IAM role can write a pause without being
+able to replace a head or event. Authority and cost will use separate per-realm tables.
+The remaining accepted Phase 1 residual is that compromise of either journal-writer
+credential can corrupt its own stream; it cannot cross into the other stream or realm.
+
+At this earlier implementation checkpoint, the remaining R1-4 work was
+cost-projection finalization and old-runtime fencing, infrastructure/IAM provisioning
+for the two journal streams, the independently deployed acknowledgement receiver, and
+protected activation integration. Those implementation and commissioning items are now
+complete; the isolated restored-database drill subsequently passed on 2026-09-11.
+
+Migration `0045_r1_authority_recovery` implements the first half
+of domain authority durability. A membership revocation or public withdrawal takes
+effect locally in the same transaction that creates its immutable recovery outbox row;
+the caller receives `PERSISTENCE_PENDING`. Only the separate recovery-writer identity
+may attach the exact journal sequence/event/head acknowledgement and advance the result
+to `DURABLY_RECORDED`. Ordinary Lucy's former direct publication-withdrawal API is closed,
+and database triggers reject equivalent direct runtime updates. Before DynamoDB append,
+the transition writer freezes the exact sequence, prior head, and canonical event digest;
+an ambiguous external response therefore reconstructs and retries the same event. Exact replay, conflicting
+replay, role separation, cross-workspace denial, last-owner protection, and immediate
+local blocking have focused PostgreSQL tests ready.
+
+The Python contracts, offline Alembic rendering, Ruff, strict mypy, 21 focused authority
+and journal checks, the complete 525-test unit suite, clean PostgreSQL migration through
+`0045`, 6 focused authority/public checks, 7 internal-admission checks, and 2 runtime-role
+checks pass. Migration `0046` adds the corresponding freeze-before-append path and exact
+acknowledgement enforcement for cost reservations and outcomes. Readiness and the
+quarantine-first bootstrap now accept `0049` and provision
+its three inert prerequisite roles without assigning them to normal realm runtimes.
+
+Migration `0047_r1_authority_replay` adds the execute-only PostgreSQL half of restore
+replay for restrictive authority. The adapter pins the independently reviewed stream
+binding before database access. PostgreSQL applies only membership revocation or public
+publication withdrawal while admission is quarantined and every capture scope is off;
+the restriction, immutable event, and restored head advance in one transaction. Missing
+restored subjects remain safely absent. This identity can cause denial of service for a
+known identifier if compromised, but it cannot grant membership or republish content.
+
+Migration `0048_r1_cost_replay` adds the paired cost stream applier. It follows the
+reviewed recovery-overlay design: the journal cannot reconstruct session/IP commitments,
+token bounds, or an executable request, so replay creates only a content-free accounting
+projection and never invents a provider-attempt row. The projection replaces—not adds to—a
+matching base attempt during the later accounting finalization. Until that finalization
+fences every pre-restore executable attempt and resolves the missing one-minute rate
+dimensions, a database trigger durably blocks new paid provider admission. This preserves
+normal recovery progress without pretending paid inference is safe to reopen.
+
+Migration `0049_r1_cost_recovery_finalize` completes that database boundary. Exact-head
+finalization fences any surviving pre-restore request from provider resubmission, projects
+authoritative terminal accounting onto a surviving base row, and sends unexplained or
+contradictory state to operator review. A canonical union prevents double counting between
+base rows and recovery projections. Successful finalization retains a 90-second
+database-clock cooldown so the unavailable session/IP rate dimensions expire before paid
+admission can reopen; over-cap recovery remains sticky and fail-closed.
+
+Docker Desktop 4.90.0 initially recreated and then could not rename its own
+`sailor-ingest.sock`; a bounded WSL reset after stopping every Docker helper recovered
+engine `29.7.2`. The recoverable runtime backups are
+`C:\Users\Forti\AppData\Local\Docker\run.stale-codex-20260910-123506` and
+`C:\Users\Forti\AppData\Local\docker-secrets-engine.stale-codex-20260910-123750`, plus
+`C:\Users\Forti\AppData\Local\Docker\run.stale-codex-20260910-125545`. These contain
+only failed runtime sockets, not images, volumes, or project data.
+
+The two-stream AWS/IAM boundary and create-only genesis path were first completed
+locally at this checkpoint. They have since been deployed with negative-permission
+checks, journal bindings, the CloudTrail selector, and independently deployed
+acknowledgement receiver. The protected recovery handoff against an isolated restore
+with synthetic state subsequently passed and closed the R1-4 exit item.
+
+The receiver core and its exact-record PostgreSQL grants are implemented at `0050`;
+the private path-only ASGI surface and fail-closed runtime are also implemented and
+commissioned. One coordinator process verifies two distinct
+non-elevated database identities and both independent journal heads at startup. A
+caller supplies only the stream kind and event UUID; request bodies are prohibited.
+The writer-side client is also implemented: it uses a fixed private Render endpoint,
+sends no workflow metadata in the body, and rejects a mismatched event, stream, or
+terminal state. The separate authority-writer, cost-writer, and recovery-coordinator
+workloads are commissioned with capture false and auto-deploy disabled. Their exact
+service IDs and LOGIN provisioning are recorded in the R1-4 evidence above.
+A completely compromised receiver process
+could use its database credential to falsely acknowledge a known prepared event without
+calling its own DynamoDB verifier. This is an explicit R1 known-identifier residual risk,
+not a claim that the process contains its own compromise. It cannot enumerate pending
+events through its granted SQL surface, create a journal event, or update a journal head.
+
+The three private recovery workloads are now commissioned in the protected Utopia
+Render environment. Their exact environment key sets, commands, branch, disabled
+auto-deploy setting, and capture-off gate were checked without emitting secret values.
+Each workload became live on reviewed commit `6d53b5711eeb016963209d9b96d635596e07ef19`
+and passed its fail-closed PostgreSQL/AWS dependency check. A secret-free one-off job
+inside the same isolated Render network then received `ready` from the authority writer,
+cost writer, and recovery coordinator. The ordinary Lucy services remain suspended and
+runtime admission remains quarantined; this evidence does not authorize paid inference,
+public publication, or transcript capture. The content-free deployment and probe record
+is `docs/evidence/utopia-r1-4-recovery-services-2026-09-10.json`. This evidence is
+invalidated by changes to any recovery service command, environment, credential,
+database role, OIDC trust, journal binding, network boundary, or tested application
+commit.
+
+The authority-transition coordinator now composes the production-shaped barrier:
+the restrictive change and outbox event commit locally first, the stream-pinned
+private writer appends only that event ID, and the separate acknowledgement service
+exact-reads and reconciles it before the caller receives `DURABLY_RECORDED`. A writer
+failure leaves the local restriction in `PERSISTENCE_PENDING`; replay of an already
+durable operation performs no external write. Eighteen focused authority, writer,
+acknowledgement, and public-inference checks passed with Ruff and strict mypy on
+2026-09-10. This evidence is invalidated by changes to the authority coordinator,
+transition result, writer/acknowledgement client contracts, or their ordering.
+
+The production recovery role stamp was reapplied on 2026-09-10 after the replay
+surface was completed. The trusted workstation connected over TLS through a temporary
+exact `/32` Render PostgreSQL allow-list entry; cleanup restored the allow-list to
+empty. No credential was rotated or copied into an additional Render service. All four
+ordinary Lucy services remained suspended, transcript capture remained disabled, and
+runtime admission remained quarantined. The four recovery LOGINs expose 16 exact
+stream-specific function grants in total, with no direct Lucy table authority or
+inherited role membership. The content-free result is
+`docs/evidence/utopia-r1-4-recovery-replay-restamp-2026-09-10.json`. This evidence is
+invalidated by a change to the recovery grant template, any recovery LOGIN membership
+or function ACL, the schema revision, admission/capture state, or the database network
+allow-list.
+
+The operator-only protected recovery runner now passed the Utopia isolated-restore
+drill. It binds two distinct journals, two independently retained witness heads, the
+exact authority/cost recovery LOGINs, and a fresh one-use activation LOGIN. It rejects
+static AWS keys and the restored elevated schema owner, verifies the actual Render OIDC
+assumed role through STS, and attests each exact login at revision `0050` over TLS.
+The runner replays both streams, obtains coordinated writer pauses, finalizes recovered
+cost state, rechecks the handoff, and activates a fresh runtime epoch. Cleanup returns
+the isolated database to quarantine, destroys the activation login, removes the
+one-off environment, restores the continuous coordinator, and deletes the restore.
+The passing evidence is
+`docs/evidence/utopia-r1-4-protected-recovery-2026-09-11.json`.
+
+All three commissioned recovery services were rolled forward without environment or
+command changes to exact commit `9cb8f28ccbc8d4c49e61e5a916351895706a041f`.
+Authority writer, cost writer, and recovery coordinator each reached `live`; a new
+secret-free private-network job then exited successfully only after asserting `ready`
+from all three fixed service endpoints. Render had not indexed the job's final log line
+when evidence was collected, so the record relies on the retained exact assertion
+command plus terminal job status rather than claiming that log text was observed.
+Auto-deploy and transcript capture remain off. The content-free record is
+`docs/evidence/utopia-r1-4-recovery-rollout-2026-09-10.json`.
+
+The recovery acknowledgement service now verifies its actual AWS assumed role through
+STS at dependency startup, rejects static AWS credentials, and requires both immutable
+journal bindings to name that same exact coordinator recovery role. Successful
+DynamoDB reads are no longer treated as a substitute for workload-identity attestation.
+Eighteen focused acknowledgement, API, boundary, and DynamoDB adapter tests passed with
+strict mypy on 2026-09-10; focused Ruff passed after formatting the role-ARN guard.
+The coordinator then reached `live` on exact commit
+`27170944f2e4a2514ab9414ae7ea9d85a2df488e`, proving the configured Render OIDC
+session passed the new STS and two-binding checks. A retained private-network assertion
+job again reached all three recovery readiness endpoints and succeeded. Render had not
+indexed its final log line at collection time; that limitation is explicit in
+`docs/evidence/utopia-r1-4-coordinator-identity-attestation-2026-09-10.json`.
+
+The independently retained Utopia recovery witness is now concrete rather than an
+operator placeholder. A read-only utility verifies account, region, two distinct
+stores/streams, and one binding manifest, then uses two strongly consistent exact-key
+DynamoDB reads and refuses to overwrite its output. The first live capture observed
+both create-only genesis heads at sequence zero; its canonical bundle digest is
+recorded only with that private artifact. Fifteen focused witness, DynamoDB adapter,
+and recovery-coordinator tests passed with strict mypy and focused Ruff on 2026-09-10.
+The complete witness and its digest remain in the ignored local evidence store; no
+derived private-state commitment is exported to Git. Any later accepted journal event
+requires a new witness rather than modifying this one.
+
+The synthetic protected-handoff fixture and staging boundaries are now implemented
+locally. The fixture creates only a synthetic owner/member, an unreachable `.invalid`
+channel, and a one-micro-USD immutable policy before the chosen PITR target. The event
+stager then uses the ephemeral offline migration session with `SET LOCAL ROLE` to the
+two existing function owners for one membership revocation and one reservation, closes
+those sessions, and stops at `PERSISTENCE_PENDING`. It cannot append, acknowledge,
+submit, settle, or call a provider. This deliberately avoids commissioning temporary
+caller credentials or implying that the deferred shared controller topology exists.
+The deployed writer and acknowledgement services durably completed both events, and
+their permanent production-stream history was not rewritten as test cleanup. The
+fixture was provisioned in the quarantined production database on
+2026-09-10 with temporary exact `/32` access restored to empty. The first staging
+attempt committed the exact revocation and exposed an overly strict second-transaction
+fixture check; no cost event or provider call occurred. The stager now accepts only
+the pristine member or its exact reviewed generation-1-to-2 revocation, and the
+manifest builder can refresh only the short-lived cost admission time while preserving
+every event identity and commitment. The same event resumed idempotently and both
+events are now `PERSISTENCE_PENDING`. Private reports and manifests remain in the
+ignored operator evidence directory. Twenty focused builder/stager checks pass with
+Ruff and strict mypy on 2026-09-10. Durable writer acknowledgement and PITR replay
+passed on 2026-09-11; R1-4 is complete.
+
+R2 jobs/wallet spending and R3 consulting, local runners, portability, transfer,
+rehosting, and StoinNet execution are explicitly deferred.

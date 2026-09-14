@@ -1,0 +1,26 @@
+{
+  "commit": "27170944f2e4a2514ab9414ae7ea9d85a2df488e",
+  "contract": "lucy.r1.recovery-coordinator-identity-attestation.v1",
+  "coordinator": {
+    "deployment_id": "dep-dahk3qm1egvs738clid0",
+    "service_id": "srv-dahi5hss728c73b7bt70",
+    "status": "live"
+  },
+  "private_readiness": {
+    "asserted_services": [
+      "authority",
+      "coordinator",
+      "cost"
+    ],
+    "job_id": "job-dahk47nqj5pc739aic9g",
+    "job_status": "succeeded",
+    "log_indexed_at_collection": false
+  },
+  "startup_guards": {
+    "both_journal_recovery_identities_match_role": true,
+    "static_aws_credentials_prohibited": true,
+    "sts_assumed_role_attested": true
+  },
+  "status": "passed",
+  "transcript_capture_enabled": false
+}

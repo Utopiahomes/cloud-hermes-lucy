@@ -9,10 +9,10 @@ PROFILE_ROOT = REPOSITORY_ROOT / "profiles" / "lucy"
 def test_profile_has_fail_closed_tool_surface() -> None:
     config = yaml.safe_load((PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8"))
     assert config["_config_version"] == 38
-    assert config["toolsets"] == ["clarify", "lucy_memory"]
+    assert config["toolsets"] == ["lucy_memory"]
     assert config["platform_toolsets"] == {
-        "cli": ["clarify", "lucy_memory"],
-        "telegram": ["clarify", "lucy_memory"],
+        "cli": ["lucy_memory"],
+        "telegram": ["lucy_memory"],
     }
     assert config["known_plugin_toolsets"] == {
         "cli": ["a2a", "lucy_memory", "spotify"],
@@ -72,8 +72,9 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     assert config["agent"] == {
         "max_turns": 4,
         "run_budget_seconds": 120,
-        "api_max_retries": 1,
+        "api_max_retries": 0,
         "reasoning_effort": "low",
+        "gateway_notify_interval": 0,
     }
     limits = config["model_overrides"]["custom:lucy-openrouter"][
         "openai/gpt-oss-20b"
@@ -88,12 +89,30 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     ]["extra_body"]["provider"]
     assert auxiliary["title_generation"]["enabled"] is False
     assert auxiliary["background_review"]["enabled"] is False
+    assert auxiliary["compression"]["enabled"] is False
+    assert config["memory"] == {
+        "memory_enabled": False,
+        "user_profile_enabled": False,
+        "write_approval": True,
+        "nudge_interval": 0,
+    }
+    assert config["curator"] == {"enabled": False, "backup": {"enabled": False}}
+    assert config["sessions"]["write_json_snapshots"] is False
+    assert config["gateway"] == {
+        "write_sessions_json": False,
+        "delivery_ledger": False,
+    }
+    assert config["streaming"]["enabled"] is False
+    assert config["telegram"] == {
+        "typing_indicator": False,
+        "gateway_restart_notification": False,
+    }
     assert config["plugins"] == {"enabled": ["lucy_control"]}
     plugin = PROFILE_ROOT / "plugins" / "lucy_control"
     assert (plugin / "plugin.yaml").is_file()
     assert (plugin / "__init__.py").is_file()
     manifest = yaml.safe_load((plugin / "plugin.yaml").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.0.0"
+    assert manifest["version"] == "2.1.0"
     assert manifest["provides_tools"] == [
         "lucy_memory_lookup",
         "lucy_memory_propose",

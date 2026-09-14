@@ -289,7 +289,7 @@ def record_finality_inventory(
     with sessions.begin() as session:
         result = session.scalar(
             text(
-                "SELECT lucy.record_finality_verification_v1("
+                "SELECT lucy.record_scoped_finality_inventory_v2("
                 ":operation_id,CAST(:metadata AS jsonb))"
             ),
             {
@@ -297,9 +297,12 @@ def record_finality_inventory(
                 "metadata": json.dumps(inventory.model_dump(mode="json"), separators=(",", ":")),
             },
         )
-    if result not in {"EXTENDED", "VERIFIED"}:
+    if not isinstance(result, Mapping) or result.get("status") not in {
+        "EXTENDED",
+        "VERIFIED",
+    }:
         raise FinalityInventoryError("database returned an invalid finality state")
-    return str(result)
+    return str(result["status"])
 
 
 def _required_environment(name: str) -> str:

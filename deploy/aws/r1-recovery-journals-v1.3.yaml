@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Lucy R1 recovery journals - isolated authority, cost, and pause identities
+
+Parameters:
+  ResourceNamespace: {Type: String, AllowedPattern: "[a-z0-9-]{3,32}"}
+  RenderOidcProviderArn: {Type: String}
+  RenderWorkspaceId: {Type: String, AllowedPattern: "tea-[A-Za-z0-9_-]+"}
+  RenderEnvironmentId: {Type: String, AllowedPattern: "evm-[A-Za-z0-9_-]+"}
+  RenderAuthorityWriterServiceId: {Type: String, AllowedPattern: "srv-[A-Za-z0-9_-]+"}
+  RenderCostWriterServiceId: {Type: String, AllowedPattern: "srv-[A-Za-z0-9_-]+"}
+  RenderRecoveryCoordinatorServiceId: {Type: String, AllowedPattern: "srv-[A-Za-z0-9_-]+"}
+  AuthorityStreamId: {Type: String, AllowedPattern: "[0-9a-fA-F-]{36}"}
+  CostStreamId: {Type: String, AllowedPattern: "[0-9a-fA-F-]{36}"}
+
+Rules:
+  DistinctWorkloadSubjects:
+    Assertions:
+      - Assert: !And
+          - !Not [!Equals [!Ref RenderAuthorityWriterServiceId, !Ref RenderCostWriterServiceId]]
+          - !Not [!Equals [!Ref RenderAuthorityWriterServiceId, !Ref RenderRecoveryCoordinatorServiceId]]
+          - !Not [!Equals [!Ref RenderCostWriterServiceId, !Ref RenderRecoveryCoordinatorServiceId]]
+        AssertDescription: Recovery journal workloads must have distinct Render service identities
+
+Resources:
+  AuthorityJournal:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-authority-journal
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true, RecoveryPeriodInDays: 30}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: pk, AttributeType: S}, {AttributeName: sk, AttributeType: S}]
+      KeySchema: [{AttributeName: pk, KeyType: HASH}, {AttributeName: sk, KeyType: RANGE}]
+      Tags: [{Key: lucy:Boundary, Value: r1-authority-recovery}]
+
+  CostJournal:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-cost-journal
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true, RecoveryPeriodInDays: 30}
+      SSESpecification: {SSEEnabled: true}
+      AttributeDefinitions: [{AttributeName: pk, AttributeType: S}, {AttributeName: sk, AttributeType: S}]
+      KeySchema: [{AttributeName: pk, KeyType: HASH}, {AttributeName: sk, KeyType: RANGE}]
+      Tags: [{Key: lucy:Boundary, Value: r1-cost-recovery}]
+
+  AuthorityWriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-authority-writer
+      AssumeRolePolicyDocument: !Sub
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}'
+        - {Provider: !Ref RenderOidcProviderArn, Workspace: !Ref RenderWorkspaceId, Environment: !Ref RenderEnvironmentId, Service: !Ref RenderAuthorityWriterServiceId}
+
+  CostWriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-cost-writer
+      AssumeRolePolicyDocument: !Sub
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}'
+        - {Provider: !Ref RenderOidcProviderArn, Workspace: !Ref RenderWorkspaceId, Environment: !Ref RenderEnvironmentId, Service: !Ref RenderCostWriterServiceId}
+
+  RecoveryCoordinatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-recovery-coordinator
+      AssumeRolePolicyDocument: !Sub
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${Provider}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"oidc.render.com/${Workspace}:aud":"sts.amazonaws.com","oidc.render.com/${Workspace}:sub":"workspace:${Workspace}:environment:${Environment}:service:${Service}"}}}]}'
+        - {Provider: !Ref RenderOidcProviderArn, Workspace: !Ref RenderWorkspaceId, Environment: !Ref RenderEnvironmentId, Service: !Ref RenderRecoveryCoordinatorServiceId}
+
+  AuthorityWriterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-authority-writer-only
+      Roles: [!Ref AuthorityWriterRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+
+  CostWriterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-cost-writer-only
+      Roles: [!Ref CostWriterRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:UpdateItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+
+  RecoveryCoordinatorPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-recovery-coordinator-only
+      Roles: [!Ref RecoveryCoordinatorRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}", !Sub "PAUSE#authority#${AuthorityStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringLike: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}", !Sub "PAUSE#cost#${CostStreamId}", "EVENT#*"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt CostJournal.Arn, Condition: {StringEquals: {"dynamodb:EnclosingOperation": TransactWriteItems}, ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "PAUSE#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt AuthorityJournal.Arn, Condition: {ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#authority#${AuthorityStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+          - {Effect: Allow, Action: dynamodb:ConditionCheckItem, Resource: !GetAtt CostJournal.Arn, Condition: {ForAllValues:StringEquals: {"dynamodb:LeadingKeys": [!Sub "STREAM#cost#${CostStreamId}"]}, "Null": {"dynamodb:LeadingKeys": "false"}}}
+
+Outputs:
+  AuthorityJournalTableName: {Value: !Ref AuthorityJournal}
+  AuthorityJournalTableArn: {Value: !GetAtt AuthorityJournal.Arn}
+  CostJournalTableName: {Value: !Ref CostJournal}
+  CostJournalTableArn: {Value: !GetAtt CostJournal.Arn}
+  AuthorityWriterRoleArn: {Value: !GetAtt AuthorityWriterRole.Arn}
+  CostWriterRoleArn: {Value: !GetAtt CostWriterRole.Arn}
+  RecoveryCoordinatorRoleArn: {Value: !GetAtt RecoveryCoordinatorRole.Arn}

@@ -1,0 +1,43 @@
+# Disposable R1-only verification databases. No persistent volumes.
+name: cloud-lucy-r1-tests
+
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: lucy_test
+      POSTGRES_USER: lucy_owner
+      POSTGRES_PASSWORD: synthetic-owner-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./deploy/postgres/test-init.sql:/docker-entrypoint-initdb.d/test-init.sql:ro
+    ports:
+      - "127.0.0.1:54339:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lucy_owner -d lucy_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+
+  postgres-roles:
+    image: docker.io/pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: lucy_roles_test
+      POSTGRES_USER: lucy_owner
+      POSTGRES_PASSWORD: synthetic-owner-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./deploy/postgres/test-roles-init.sql:/docker-entrypoint-initdb.d/test-init.sql:ro
+    ports:
+      - "127.0.0.1:54340:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lucy_owner -d lucy_roles_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: "no"

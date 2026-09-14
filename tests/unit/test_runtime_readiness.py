@@ -3,15 +3,57 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
+import psycopg
 import pytest
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
+import lucy.api as api
 import lucy.runtime as runtime
 from lucy.readiness import (
     ReadinessError,
+    expected_database_login_from_environment,
     expected_storage_epoch,
+    security_baseline_from_environment,
     service_mode_from_environment,
 )
 from lucy.rejoining import RejoiningService
+
+
+def test_stage2_routine_initializes_archive_before_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true")
+    marker = object()
+    monkeypatch.setattr(api, "_archive_service", lambda: marker)
+    monkeypatch.setattr(
+        "lucy.realm_archive_commit.RealmConversationArchiveService", type(marker)
+    )
+
+    runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
+
+
+def test_stage2_routine_refuses_listener_when_archive_configuration_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "true")
+    monkeypatch.setattr(api, "_archive_service", lambda: (_ for _ in ()).throw(ValueError()))
+
+    with pytest.raises(SystemExit, match="Stage 2 archive boundary unavailable"):
+        runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
+
+
+def test_stage1_does_not_initialize_stage2_archive_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    monkeypatch.setenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED", "false")
+    monkeypatch.setattr(
+        api, "_archive_service", lambda: pytest.fail("Stage 1 must not initialize capture")
+    )
+
+    runtime._initialize_stage2_archive_boundary(mode="routine", baseline="v1.3")
 
 
 @pytest.mark.parametrize("mode", ["routine", "policy", "evidence", "deletion", "all-local"])
@@ -62,6 +104,27 @@ def test_aws_backend_always_requires_isolated_identity(monkeypatch: pytest.Monke
     monkeypatch.delenv("LUCY_SERVICE_MODE", raising=False)
     with pytest.raises(ReadinessError):
         service_mode_from_environment()
+
+
+def test_v13_requires_an_explicit_expected_database_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "v1.3")
+    monkeypatch.delenv("LUCY_EXPECTED_DATABASE_LOGIN", raising=False)
+    assert security_baseline_from_environment() == "v1.3"
+    with pytest.raises(ReadinessError, match="database identity"):
+        expected_database_login_from_environment("v1.3")
+    monkeypatch.setenv("LUCY_EXPECTED_DATABASE_LOGIN", "lucy_utopia_routine")
+    assert (
+        expected_database_login_from_environment("v1.3")
+        == "lucy_utopia_routine"
+    )
+
+
+def test_unknown_security_baseline_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LUCY_SECURITY_BASELINE", "moving-main")
+    with pytest.raises(ReadinessError, match="security baseline"):
+        security_baseline_from_environment()
 
 
 def test_policy_startup_never_requests_an_aws_journal(
@@ -135,3 +198,115 @@ def test_failed_startup_check_never_starts_listener(monkeypatch: pytest.MonkeyPa
     )
     with pytest.raises(SystemExit, match="quarantined"):
         runtime.main()
+
+
+def test_startup_retries_only_transient_connection_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise OperationalError(
+                "connect", {}, psycopg.OperationalError("private DNS pending")
+            )
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 3
+    assert delays == [1, 2]
+
+
+def test_startup_does_not_retry_permission_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise ProgrammingError("select", {}, RuntimeError("permission denied"))
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(ProgrammingError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 1
+    assert delays == []
+
+
+def test_startup_does_not_retry_invalid_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        invalid_password = psycopg.errors.InvalidPassword("authentication failed")
+        raise OperationalError("connect", {}, invalid_password)
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 1
+    assert delays == []
+
+
+def test_startup_does_not_retry_unclassified_driver_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[int] = []
+    error = OperationalError(
+        "connect",
+        {},
+        psycopg.OperationalError("password authentication failed for user"),
+    )
+
+    def check() -> None:
+        raise error
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert delays == []
+
+
+def test_startup_exhausts_bounded_connection_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[int] = []
+
+    def check() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise OperationalError("connect", {}, psycopg.OperationalError("network pending"))
+
+    monkeypatch.setattr(runtime.time, "sleep", delays.append)
+    with pytest.raises(OperationalError):
+        runtime._check_with_connection_retries(SimpleNamespace(check=check))
+    assert attempts == 6
+    assert delays == [1, 2, 4, 8, 8]
+
+
+@pytest.mark.parametrize(
+    ("detail", "category"),
+    [
+        ("failed to resolve host 'private-host'", "dns"),
+        ("password authentication failed for user", "authentication"),
+        ("SSL certificate verify failed", "tls"),
+        ("connection refused", "connection"),
+        ("unexpected driver failure", "database"),
+    ],
+)
+def test_startup_database_failure_categories_are_content_free(
+    detail: str,
+    category: str,
+) -> None:
+    error = OperationalError("connect", {}, psycopg.OperationalError(detail))
+    assert runtime._database_failure_category(error) == category

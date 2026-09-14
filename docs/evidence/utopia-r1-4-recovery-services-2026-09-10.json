@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-09-10T23:11:22.361946+00:00",
+  "contract": "lucy.r1.recovery-services-commissioning-evidence.v1",
+  "private_readiness_job": {
+    "job_id": "job-dahjhcmk1f9s73fid0ig",
+    "services": {
+      "authority": "ready",
+      "coordinator": "ready",
+      "cost": "ready"
+    }
+  },
+  "services": {
+    "authority": {
+      "deployment_id": "dep-dahjefhe8v7c73d6oobg",
+      "service_id": "srv-dahi58lg1s2s73bae65g",
+      "startup_dependency_check": "passed"
+    },
+    "coordinator": {
+      "deployment_id": "dep-dahjgjtg1s2s73bf9p40",
+      "service_id": "srv-dahi5hss728c73b7bt70",
+      "startup_dependency_check": "passed"
+    },
+    "cost": {
+      "deployment_id": "dep-dahjfd67bikc73ef0ehg",
+      "service_id": "srv-dahi5hcs728c73b7bqsg",
+      "startup_dependency_check": "passed"
+    }
+  },
+  "tested_commit": "6d53b5711eeb016963209d9b96d635596e07ef19",
+  "transcript_capture_enabled": false
+}

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import Context
 from pathlib import Path
 from threading import Barrier
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
@@ -136,6 +139,28 @@ def _request() -> dict[str, Any]:
     }
 
 
+def test_archive_commit_uses_bounded_private_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_COMPANION_URL", "http://lucy.invalid")
+    monkeypatch.setenv("LUCY_ADAPTER_TOKEN", "synthetic-token")
+    deadlines: list[int] = []
+
+    def open_request(_request: Any, *, timeout: int) -> io.BytesIO:
+        deadlines.append(timeout)
+        return io.BytesIO(b'{"ok":true}')
+
+    monkeypatch.setattr(plugin, "urlopen", open_request)
+    plugin._request_json("/internal/v1/conversations/messages", method="POST", payload={})
+    plugin._request_json("/internal/v1/conversations/accept-turn", method="POST", payload={})
+    assert deadlines == [
+        plugin.PRIVATE_API_TIMEOUT_SECONDS,
+        plugin.PRIVATE_API_TIMEOUT_SECONDS,
+    ]
+    assert deadlines == [20, 20]
+
+
 def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _load_plugin()
     posts: list[tuple[str, dict[str, Any]]] = []
@@ -166,6 +191,46 @@ def test_middleware_reserves_calls_once_and_settles(monkeypatch: pytest.MonkeyPa
         "reasoning_tokens": 5,
         "provider_cost_microusd": 10,
     }
+
+
+def test_stage1_budget_identity_is_bound_to_the_claimed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    bridge = ModuleType("sitecustomize")
+    bridge.next_model_operation = lambda: (  # type: ignore[attr-defined]
+        "11111111-1111-4111-8111-111111111111",
+        1,
+    )
+    monkeypatch.setitem(sys.modules, "sitecustomize", bridge)
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    monkeypatch.setenv("LUCY_TELEGRAM_GATEWAY_HOLDER_ID", "22222222-2222-4222-8222-222222222222")
+    monkeypatch.setenv("LUCY_TELEGRAM_GATEWAY_FENCE", "7")
+    posts: list[tuple[str, dict[str, Any]]] = []
+
+    def post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        posts.append((path, payload))
+        if path.endswith("/begin"):
+            return {"action_id": "action-1", "status": "executing", "execute": True}
+        return {"action_id": "action-1", "status": "succeeded", "replayed": False}
+
+    monkeypatch.setattr(plugin, "_post_json", post)
+    response = plugin._execution_middleware(
+        _request(),
+        lambda _request: _response(),
+        **_middleware_kwargs(),
+        platform="telegram",
+        turn_id="transient-turn",
+    )
+    assert response is not None
+    assert posts[0][1]["idempotency_key"] == (
+        "hermes-model:telegram-event:11111111-1111-4111-8111-111111111111:model-step:1"
+    )
+    assert posts[0][1]["session_id"].startswith("telegram-event:")
+    assert posts[0][1]["api_request_id"] == "model-step:1"
+    assert posts[0][1]["telegram_event_id"] == "11111111-1111-4111-8111-111111111111"
+    assert posts[0][1]["telegram_model_step"] == 1
+    assert posts[1][1]["telegram_lease_fence"] == 7
 
 
 def test_middleware_fails_closed_without_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,6 +330,105 @@ def test_plugin_registers_memory_tools_and_execution_middleware() -> None:
     ]
 
 
+def test_stage1_registers_only_read_only_memory_and_budget_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "1")
+    plugin = _load_plugin()
+    registrations: list[tuple[str, Any]] = []
+    hooks: list[tuple[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    ctx = SimpleNamespace(
+        register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_hook=lambda kind, callback: hooks.append((kind, callback)),
+        register_tool=lambda **kwargs: tools.append(kwargs),
+    )
+    plugin.register(ctx)
+    assert [tool["name"] for tool in tools] == ["lucy_memory_lookup"]
+    assert [kind for kind, _callback in registrations] == [
+        "llm_request",
+        "llm_execution",
+        "tool_execution",
+    ]
+    assert hooks == []
+
+
+def test_stage2_registers_capture_hooks_but_no_sensitive_tools_or_fallback_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    registrations: list[tuple[str, Any]] = []
+    hooks: list[tuple[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    ctx = SimpleNamespace(
+        register_middleware=lambda kind, callback: registrations.append((kind, callback)),
+        register_hook=lambda kind, callback: hooks.append((kind, callback)),
+        register_tool=lambda **kwargs: tools.append(kwargs),
+    )
+    plugin.register(ctx)
+    assert [tool["name"] for tool in tools] == ["lucy_memory_lookup"]
+    assert [kind for kind, _callback in registrations] == [
+        "llm_request",
+        "llm_execution",
+        "tool_execution",
+    ]
+    assert [kind for kind, _callback in hooks] == [
+        "pre_llm_call",
+        "transform_llm_output",
+        "on_session_end",
+    ]
+
+
+def test_stage2_forget_phrase_never_calls_sensitive_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def request(path: str, **_kwargs: Any) -> dict[str, Any]:
+        calls.append(path)
+        if path.endswith("/accept-turn"):
+            return {"capture_enabled": True, "version": 0}
+        raise AssertionError("sensitive boundary must not be called")
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Lucy, forget the last message.",
+        session_id="session-stage2",
+        turn_id="turn-stage2",
+        platform="telegram",
+    )
+    assert context is not None and "not confirmed" in context["context"]
+    assert calls == ["/internal/v1/conversations/accept-turn"]
+
+
+def test_stage2_off_record_transition_and_receipt_are_one_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        return {"capture_enabled": False, "version": 1, "replayed": False}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    context = plugin._pre_llm_call(
+        user_message="Lucy, off the record.",
+        session_id="stage2-conversation",
+        turn_id="stage2-control-turn",
+        platform="telegram",
+    )
+    assert context is not None and "not archiving" in context["context"]
+    assert [path for path, _kwargs in calls] == [
+        "/internal/v1/conversations/capture-mode-and-accept"
+    ]
+    assert calls[0][1]["payload"]["source_turn_id"] == "stage2-control-turn"
+
+
 def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,6 +480,160 @@ def test_telegram_transcript_hooks_archive_both_roles_idempotently(
     ]
     assert message_calls[0][1]["extra_headers"] == message_calls[2][1]["extra_headers"]
     assert message_calls[1][1]["extra_headers"] == message_calls[3][1]["extra_headers"]
+    assert message_calls[1][1]["payload"]["current_input_evidence_id"] == "evidence-1"
+
+
+def test_archive_recovers_one_ambiguous_private_response_with_exact_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if len(calls) == 1:
+            raise TimeoutError("synthetic lost response")
+        return {
+            "archived": True,
+            "evidence_id": "evidence-1",
+            "operation_id": "operation-1",
+            "turn_committed": False,
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = plugin._archive_conversation_message(
+        role="user",
+        content="Synthetic retry-safe message.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert result is not None and result["archived"] is True
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
+def test_archive_does_not_retry_definitive_http_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plugin = _load_plugin()
+    calls = 0
+
+    def request(_path: str, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise HTTPError(
+            "http://lucy-routine",
+            409,
+            "Conflict",
+            {},
+            io.BytesIO(b'{"detail":"realm archive boundary unavailable"}'),
+        )
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = plugin._archive_conversation_message(
+        role="assistant",
+        content="Synthetic definitive failure.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert result is None
+    assert calls == 1
+    output = capsys.readouterr().out
+    assert '"code":"archive_http_error"' in output
+    assert '"http_status":409' in output
+    assert '"attempt":1' in output
+    assert '"reason":"archive_boundary_unavailable"' in output
+    assert "Synthetic definitive failure" not in output
+
+
+def test_capture_transition_recovers_one_ambiguous_response_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs))
+        if len(calls) == 1:
+            raise TimeoutError("synthetic lost transition response")
+        return {"capture_enabled": False, "version": 1, "replayed": True}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    assert plugin._set_capture_mode(
+        session_id="session-2", turn_id="turn-2", capture_enabled=False
+    )
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
+def test_blocked_delivery_notice_is_not_archived_as_the_assistant_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def archive(**kwargs: Any) -> dict[str, Any] | None:
+        calls.append(kwargs["content"])
+        return None
+
+    monkeypatch.setattr(plugin, "_archive_conversation_message", archive)
+    plugin._SESSION_TURN["session-1"] = {
+        "turn_id": "turn-1",
+        "capture_enabled": True,
+        "active": True,
+        "proposal_keys": {},
+    }
+    notice = plugin._transform_llm_output(
+        response_text="Synthetic substantive response.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+    assert notice is not None and "could not durably retain" in notice
+    plugin._post_llm_call(
+        user_message="Synthetic owner message.",
+        assistant_response=notice,
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+    assert calls == ["Synthetic substantive response."]
+
+
+def test_failed_inbound_retention_does_not_attempt_outbound_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    calls: list[str] = []
+
+    def archive(**kwargs: Any) -> dict[str, Any] | None:
+        calls.append(kwargs["role"])
+        return None
+
+    monkeypatch.setattr(plugin, "_archive_conversation_message", archive)
+    plugin._SESSION_TURN["session-1"] = {
+        "turn_id": "turn-1",
+        "capture_enabled": True,
+        "active": False,
+        "proposal_keys": {},
+        "source_evidence_ids": set(),
+        "current_input_evidence_id": None,
+    }
+
+    transformed = plugin._transform_llm_output(
+        response_text="Lucy blocked this model call because retention was unavailable.",
+        session_id="session-1",
+        turn_id="turn-1",
+        platform="telegram",
+    )
+
+    assert transformed is None
+    assert calls == []
 
 
 def test_off_record_is_visible_and_skips_archive(

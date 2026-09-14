@@ -1,0 +1,328 @@
+# Cloud Lucy Security Baseline v1.3 — one isolated realm on Render.
+#
+# This is a reviewed configuration contract, not an activation manifest. It
+# preserves the five existing private identities, adds one isolated public
+# projection identity, and declares three additional R1-4 recovery workloads. It
+# does not provision them. It
+# keeps every process on the exact development branch with auto-deploy off.
+# Populate sync:false values only through the protected Render environment.
+# Never add static AWS credentials or a migration-owner database URL.
+#
+# The evidence and deletion services intentionally share one execute-only SQL
+# workflow LOGIN in R1. Their AWS roles, Lambda aliases, HTTP endpoints, and
+# action-bound contract checks remain distinct. This is not SQL identity
+# separation and is an explicitly documented R1 compromise boundary.
+
+projects:
+  - name: cloud-lucy
+    environments:
+      - name: production
+        networking:
+          isolation: enabled
+        permissions:
+          protection: enabled
+        databases:
+          - name: lucy-postgres
+            region: virginia
+            plan: 0.5c-1g
+            diskSizeGB: 5
+            storageAutoscalingEnabled: false
+            postgresMajorVersion: "18"
+            databaseName: lucy_6tns
+            user: lucy_migration
+            connectionPool: none
+            ipAllowList: []
+        services:
+          - type: web
+            name: lucy-public
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.public_runtime
+            healthCheckPath: /health
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: public}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_public}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_PUBLIC_API_TOKEN, sync: false}
+              - {key: LUCY_PUBLIC_ALLOWED_ORIGIN, value: https://www.utopiahomes.com}
+              - {key: LUCY_PUBLIC_SITE_HOSTNAME, value: www.utopiahomes.com}
+              - {key: LUCY_PUBLIC_SNAPSHOT_DIGEST, value: 6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e}
+              - {key: LUCY_PUBLIC_MAX_REQUEST_BYTES, value: "8192"}
+              - {key: LUCY_PUBLIC_REQUESTS_PER_IP_PER_MINUTE, value: "20"}
+              - {key: LUCY_PUBLIC_REQUESTS_PER_SESSION_PER_MINUTE, value: "30"}
+              - {key: LUCY_PUBLIC_SESSION_TTL_SECONDS, value: "3600"}
+
+          - type: pserv
+            name: lucy-routine
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: routine}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_TELEGRAM_STAGE, value: "1"}
+              - {key: LUCY_TELEGRAM_NODE_ID, sync: false}
+              - {key: LUCY_TELEGRAM_REALM_ID, sync: false}
+              - {key: LUCY_TELEGRAM_CHANNEL_BINDING_ID, sync: false}
+              - {key: LUCY_TELEGRAM_BOT_ID, sync: false}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_routine}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_ADAPTER_TOKEN, sync: false}
+              - {key: LUCY_ARCHIVE_BACKEND, value: aws-kms-dynamodb-v13}
+              - {key: LUCY_ARCHIVE_RECORD_VERSION, value: "1"}
+              - {key: LUCY_ARCHIVE_COMMITMENT_KEY_B64, sync: false}
+              - {key: LUCY_ARCHIVE_REQUEST_COMMITMENT_KEY_B64, sync: false}
+              - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_EVIDENCE_KEY_ARN, sync: false}
+              - {key: LUCY_AWS_WRAPPED_KEY_TABLE, sync: false}
+              - {key: LUCY_V13_TARGET_SCOPE_JSON, sync: false}
+
+          # This is an isolated gateway process, not a fifth database/AWS trust
+          # boundary. It holds only the Telegram/OpenRouter credentials and the
+          # routine API bearer token. All durable operations go through
+          # lucy-routine over the private Render network.
+          - type: worker
+            name: lucy-telegram-private
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile.hermes-telegram-stage1
+            dockerContext: .
+            envVars:
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TELEGRAM_STAGE, value: "1"}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - key: LUCY_COMPANION_HOSTPORT
+                fromService: {type: pserv, name: lucy-routine, property: hostport}
+              - {key: LUCY_ADAPTER_TOKEN, sync: false}
+              - {key: LUCY_TELEGRAM_NODE_ID, sync: false}
+              - {key: LUCY_TELEGRAM_REALM_ID, sync: false}
+              - {key: LUCY_TELEGRAM_CHANNEL_BINDING_ID, sync: false}
+              - {key: TELEGRAM_BOT_TOKEN, sync: false}
+              - {key: TELEGRAM_ALLOWED_USERS, sync: false}
+              - {key: TELEGRAM_HOME_CHANNEL, sync: false}
+              - {key: OPENROUTER_API_KEY, sync: false}
+
+          - type: pserv
+            name: lucy-policy
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: policy}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_policy}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_OWNER_TOKEN, sync: false}
+              - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+              - {key: LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64, sync: false}
+              - {key: LUCY_V13_POLICY_KEY_ID, sync: false}
+              - {key: LUCY_V13_POLICY_TRUST_STORE_JSON, sync: false}
+              - {key: LUCY_V13_RECEIPT_TRUST_STORE_JSON, sync: false}
+
+          - type: pserv
+            name: lucy-evidence
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: evidence}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_sensitive_workflow}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_OWNER_TOKEN, sync: false}
+              - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+              - key: LUCY_POLICY_HOSTPORT
+                fromService: {type: pserv, name: lucy-policy, property: hostport}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN, sync: false}
+
+          - type: pserv
+            name: lucy-deletion
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: deletion}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_sensitive_workflow}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_OWNER_TOKEN, sync: false}
+              - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+              - key: LUCY_POLICY_HOSTPORT
+                fromService: {type: pserv, name: lucy-policy, property: hostport}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN, sync: false}
+
+          - type: cron
+            name: lucy-finality-utility
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            schedule: "0 0 1 1 *"
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.finality --scheduled-sentinel
+            envVars:
+              - {key: LUCY_SERVICE_MODE, value: finality}
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_finality}
+              - {key: LUCY_STORAGE_EPOCH, sync: false}
+              - {key: LUCY_DATABASE_URL, sync: false}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_WRAPPED_KEY_TABLE, sync: false}
+              - {key: LUCY_FINALITY_QUARANTINE_TABLE_PREFIX, sync: false}
+
+          - type: pserv
+            name: lucy-authority-writer
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.recovery_writer_runtime
+            envVars:
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_RECOVERY_WRITER_STREAM, value: authority}
+              - {key: LUCY_RECOVERY_WRITER_DATABASE_LOGIN, value: lucy_utopia_authority_writer}
+              - {key: LUCY_RECOVERY_WRITER_DATABASE_URL, sync: false}
+              - {key: LUCY_RECOVERY_WRITER_TOKEN, sync: false}
+              - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_RECOVERY_JOURNAL_TABLE, sync: false}
+              - {key: LUCY_RECOVERY_STREAM_BINDING_JSON, sync: false}
+
+          - type: pserv
+            name: lucy-cost-writer
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.recovery_writer_runtime
+            envVars:
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_RECOVERY_WRITER_STREAM, value: cost}
+              - {key: LUCY_RECOVERY_WRITER_DATABASE_LOGIN, value: lucy_utopia_cost_writer}
+              - {key: LUCY_RECOVERY_WRITER_DATABASE_URL, sync: false}
+              - {key: LUCY_RECOVERY_WRITER_TOKEN, sync: false}
+              - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AWS_RECOVERY_JOURNAL_TABLE, sync: false}
+              - {key: LUCY_RECOVERY_STREAM_BINDING_JSON, sync: false}
+
+          - type: pserv
+            name: lucy-recovery-coordinator
+            runtime: docker
+            repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+            branch: codex/r1-tenant-foundation
+            region: virginia
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./Dockerfile
+            dockerContext: .
+            dockerCommand: python -m lucy.recovery_ack_runtime
+            envVars:
+              - {key: LUCY_ENVIRONMENT, value: production}
+              - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+              - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+              - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+              - {key: LUCY_AUTHORITY_RECOVERY_DATABASE_LOGIN, value: lucy_utopia_authority_recovery}
+              - {key: LUCY_AUTHORITY_RECOVERY_DATABASE_URL, sync: false}
+              - {key: LUCY_COST_RECOVERY_DATABASE_LOGIN, value: lucy_utopia_cost_recovery}
+              - {key: LUCY_COST_RECOVERY_DATABASE_URL, sync: false}
+              - {key: LUCY_AUTHORITY_RECOVERY_ACK_TOKEN, sync: false}
+              - {key: LUCY_COST_RECOVERY_ACK_TOKEN, sync: false}
+              - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
+              - {key: AWS_REGION, value: us-east-1}
+              - {key: AWS_ROLE_ARN, sync: false}
+              - {key: LUCY_AUTHORITY_RECOVERY_JOURNAL_TABLE, sync: false}
+              - {key: LUCY_AUTHORITY_RECOVERY_STREAM_BINDING_JSON, sync: false}
+              - {key: LUCY_COST_RECOVERY_JOURNAL_TABLE, sync: false}
+              - {key: LUCY_COST_RECOVERY_STREAM_BINDING_JSON, sync: false}

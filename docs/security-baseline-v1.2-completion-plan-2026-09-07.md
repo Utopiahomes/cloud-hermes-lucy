@@ -1,8 +1,10 @@
 # Single-tenant Security Baseline v1.2 completion
 
-Status: execution in progress; cloud acceptance is not yet complete.
-Live Telegram transcript capture remains disabled. Customer isolation and
-multitenancy are outside this completion gate.
+Status: **single-tenant technical acceptance complete** on runtime commit
+`52527fa9d8eaa3be766986101b6a8f51c1b1c208`. The final deployed report is
+[`security-baseline-v1.2-final-acceptance-2026-09-08.md`](security-baseline-v1.2-final-acceptance-2026-09-08.md).
+Live Telegram transcript capture remains disabled and requires a separate owner
+activation decision. Customer isolation and multitenancy are outside this gate.
 
 ## Evidence recovered after the interruption
 

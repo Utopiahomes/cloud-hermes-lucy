@@ -112,6 +112,7 @@ def test_v12_database_grants_are_direct_execute_only_for_sensitive_logins() -> N
     assert "pg_auth_members" in sql
     assert "NOT rolinherit" in sql
     assert "record_finality_verification_v1" in sql
+    assert "record_scoped_finality_inventory_v2" in sql
 
 
 def test_local_maintenance_is_explicit_and_owner_credential_never_reaches_http() -> None:
@@ -159,12 +160,20 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
     assert "COPY deploy/postgres ./deploy/postgres" not in dockerfile
     for artifact in (
         "bootstrap_cloud_v1_2.py",
+        "bootstrap_realm_cloud_v1_3.py",
+        "commission_realm_runtime_v1_3.py",
         "inspect_unresolved_cloud_v1_2.py",
         "recover_expired_synthetic_retrieval_cloud_v1_2.py",
         "replay_authorized_deletion_cloud_v1_2.py",
+        "replay_authorized_deletion_cloud_v1_3.py",
+        "provision_realm_foundation_v1_3.py",
+        "provision_realm_bindings_v1_3.py",
+        "provision_synthetic_authority_v1_3.py",
         "render_security_v1_2_sql.py",
+        "render_security_v1_3_sql.py",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",
+        "production_realm_roles_v1.3.sql.example",
         "configure_security_v1.2.sql.example",
     ):
         assert f"COPY deploy/postgres/{artifact}" in dockerfile

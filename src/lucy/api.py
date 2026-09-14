@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lucy.archive import (
+    CaptureModeAndTurnInput,
     CaptureModeInput,
     CaptureModeResult,
     ConversationArchiveService,
@@ -53,6 +54,16 @@ from lucy.contracts.security_v1_2 import (
     SensitiveReasonCode,
     VerificationKeyV1,
 )
+from lucy.contracts.security_v1_3 import (
+    DeletionTargetManifestV3,
+    Ed25519V13Signer,
+    ExecutorReceiptV2,
+    SensitiveActionPermitV3,
+    SensitiveExecutionGrantV2,
+    V13ContractVerifier,
+    V13SigningKeyPurpose,
+    V13VerificationKeyV1,
+)
 from lucy.db import create_session_factory
 from lucy.deletion_journal import DeletionJournalError, deletion_journal_from_environment
 from lucy.evidence import (
@@ -79,8 +90,28 @@ from lucy.readiness import (
     ReadinessError,
     ServiceReadiness,
     admitted_session_factory,
+    expected_database_login_from_environment,
     expected_storage_epoch,
+    security_baseline_from_environment,
     service_mode_from_environment,
+)
+from lucy.realm_archive_commit import (
+    RealmConversationArchiveService,
+    realm_conversation_archive_from_environment,
+)
+from lucy.realm_security_workflows import (
+    HttpRealmPolicyClient,
+    PostgresRealmPolicyStore,
+    PostgresRealmWorkflowStore,
+    RealmDeletionCoordinatorV3,
+    RealmDeletionWorkflowResultV1,
+    RealmLambdaExecutorInvoker,
+    RealmPolicyDeletionServiceV3,
+    RealmPolicyGrantServiceV3,
+    RealmRetrievalCoordinator,
+    RealmRetrievalWorkflowResultV1,
+    RealmWorkflowUnavailable,
+    VerifiedRealmPolicyAdapter,
 )
 from lucy.secret_filter import MemorySecretDetected
 from lucy.security_workflows import (
@@ -95,6 +126,17 @@ from lucy.security_workflows import (
     SqlSecurityWorkflowStore,
     WorkflowRejected,
 )
+from lucy.telegram_stage1 import (
+    GatewayLeaseRequest,
+    GatewayLeaseResult,
+    TelegramEventClaimRequest,
+    TelegramEventClaimResult,
+    TelegramEventTransitionRequest,
+    TelegramEventTransitionResult,
+    TelegramGatewayBinding,
+    TelegramStage1Service,
+    TelegramStage1Unavailable,
+)
 
 app = FastAPI(title="Lucy Companion API", version="0.1.0")
 
@@ -103,6 +145,13 @@ app = FastAPI(title="Lucy Companion API", version="0.1.0")
 @app.exception_handler(DeletionJournalError)
 def admission_closed(_request: Request, _error: ReadinessError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "Lucy storage is not admitted"})
+
+
+@app.exception_handler(TelegramStage1Unavailable)
+def telegram_stage1_closed(
+    _request: Request, _error: TelegramStage1Unavailable
+) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Telegram Stage 1 is unavailable"})
 
 
 @app.get("/health", tags=["operations"])
@@ -160,7 +209,15 @@ def _require_mode(*allowed: str) -> None:
 
 
 def _require_legacy_sensitive_api_allowed() -> None:
-    if os.getenv("LUCY_SECURITY_ENVIRONMENT", "").strip() == "production":
+    if (
+        os.getenv("LUCY_SECURITY_ENVIRONMENT", "").strip() == "production"
+        or security_baseline_from_environment() == "v1.3"
+    ):
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+
+
+def _require_v12_sensitive_api() -> None:
+    if security_baseline_from_environment() != "v1.2":
         raise HTTPException(status_code=404, detail="endpoint unavailable")
 
 
@@ -170,13 +227,28 @@ def _ready_sessions() -> sessionmaker[Session]:
         raise HTTPException(status_code=503, detail="memory store unavailable")
     try:
         mode = _service_mode()
+        baseline = security_baseline_from_environment()
         epoch = expected_storage_epoch(mode)
         # Cache engines rather than creating a new connection pool per request.
         sessions = _readiness_sessions(database_url)
-        journal = deletion_journal_from_environment() if mode == "routine" else None
-        ServiceReadiness(sessions, mode=mode, storage_epoch=epoch, journal=journal).check()
+        journal = (
+            deletion_journal_from_environment()
+            if baseline == "v1.2" and mode == "routine"
+            else None
+        )
+        ServiceReadiness(
+            sessions,
+            mode=mode,
+            storage_epoch=epoch,
+            journal=journal,
+            baseline=baseline,
+            expected_database_login=expected_database_login_from_environment(baseline),
+        ).check()
         return admitted_session_factory(
-            database_url, epoch, journal, journal_required=mode == "routine"
+            database_url,
+            epoch,
+            journal,
+            journal_required=baseline == "v1.2" and mode == "routine",
         )
     except (ReadinessError, DeletionJournalError, SQLAlchemyError) as exc:
         raise HTTPException(status_code=503, detail="Lucy storage is not admitted") from exc
@@ -214,6 +286,19 @@ def _verification_keys(name: str) -> tuple[VerificationKeyV1, ...]:
         raise ValueError("verification-key inventory is invalid") from exc
     if not keys:
         raise ValueError("verification-key inventory is empty")
+    return keys
+
+
+def _v13_verification_keys(name: str) -> tuple[V13VerificationKeyV1, ...]:
+    try:
+        payload = json.loads(_required_environment(name))
+        if not isinstance(payload, list):
+            raise ValueError("verification-key inventory must be a list")
+        keys = tuple(V13VerificationKeyV1.model_validate(item) for item in payload)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("v1.3 verification-key inventory is invalid") from exc
+    if not keys:
+        raise ValueError("v1.3 verification-key inventory is empty")
     return keys
 
 
@@ -307,6 +392,77 @@ def _executor_invoker(mode: str) -> BotoLambdaExecutorInvoker:
     )
 
 
+@lru_cache(maxsize=1)
+def _realm_policy_services() -> tuple[
+    RealmPolicyGrantServiceV3,
+    RealmPolicyDeletionServiceV3,
+    VerifiedRealmPolicyAdapter,
+]:
+    try:
+        private_seed = base64.b64decode(
+            _required_environment("LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64"),
+            validate=True,
+        )
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_seed)
+    except ValueError as exc:
+        raise ValueError("v1.3 policy signing key is invalid") from exc
+    store = PostgresRealmPolicyStore(_ready_sessions())
+    signer = Ed25519V13Signer(
+        private_key,
+        key_id=_required_environment("LUCY_V13_POLICY_KEY_ID"),
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    verifier = V13ContractVerifier(
+        _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
+    )
+    return (
+        RealmPolicyGrantServiceV3(
+            store,
+            signer=signer,
+            verifier=verifier,
+        ),
+        RealmPolicyDeletionServiceV3(
+            store,
+            signer=signer,
+            verifier=verifier,
+        ),
+        VerifiedRealmPolicyAdapter(
+            store,
+            verifier=V13ContractVerifier(
+                _v13_verification_keys("LUCY_V13_RECEIPT_TRUST_STORE_JSON")
+            ),
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_policy_workflow_client() -> HttpRealmPolicyClient:
+    return HttpRealmPolicyClient(
+        _required_environment("LUCY_POLICY_HOSTPORT"),
+        _required_environment("LUCY_POLICY_GATEWAY_TOKEN"),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_retrieval_executor() -> RealmLambdaExecutorInvoker:
+    return RealmLambdaExecutorInvoker(
+        boto3.client("lambda", region_name=_required_environment("AWS_REGION")),
+        retrieval_alias_arn=_required_environment(
+            "LUCY_AWS_RETRIEVAL_EXECUTOR_ALIAS_ARN"
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_deletion_executor() -> RealmLambdaExecutorInvoker:
+    return RealmLambdaExecutorInvoker(
+        boto3.client("lambda", region_name=_required_environment("AWS_REGION")),
+        deletion_alias_arn=_required_environment(
+            "LUCY_AWS_DELETION_EXECUTOR_ALIAS_ARN"
+        ),
+    )
+
+
 def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
     try:
         return archive_dependencies_from_environment()
@@ -314,7 +470,17 @@ def _archive_crypto() -> tuple[ArchiveCipher, ArchiveKeyStore]:
         raise HTTPException(status_code=503, detail="archive encryption unavailable") from exc
 
 
-def _archive_service() -> ConversationArchiveService:
+@lru_cache(maxsize=1)
+def _archive_service() -> ConversationArchiveService | RealmConversationArchiveService:
+    """Build immutable archive clients once so SDK credential refresh stays stateful."""
+
+    if os.getenv("LUCY_ARCHIVE_BACKEND") == "aws-kms-dynamodb-v13":
+        try:
+            return realm_conversation_archive_from_environment()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503, detail="realm archive boundary unavailable"
+            ) from exc
     cipher, key_store = _archive_crypto()
     try:
         if key_store.registry_identity != deletion_journal_from_environment().head().registry_id:
@@ -432,6 +598,11 @@ def begin_model_execution(
     """Reserve once immediately before the Hermes provider call."""
     _require_mode("routine")
     _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") in {"1", "2"}:
+        try:
+            return _telegram_stage1_service().begin_model_execution(request)
+        except TelegramStage1Unavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ModelExecutionService(_ready_sessions()).begin(request)
 
 
@@ -447,7 +618,92 @@ def settle_model_execution(
     """Settle usage after the wrapped provider call completes."""
     _require_mode("routine")
     _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") in {"1", "2"}:
+        try:
+            return _telegram_stage1_service().settle_model_execution(request)
+        except TelegramStage1Unavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ModelExecutionService(_ready_sessions()).settle(request)
+
+
+def _telegram_stage1_service() -> TelegramStage1Service:
+    stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    if stage not in {"1", "2"}:
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    capture = os.getenv("LUCY_TRANSCRIPT_CAPTURE_ENABLED")
+    if (stage, capture) not in {("1", "false"), ("2", "true")}:
+        raise HTTPException(status_code=503, detail="Telegram stage/capture invariant failed")
+    return TelegramStage1Service(_ready_sessions(), TelegramGatewayBinding.from_environment())
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/acquire",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def acquire_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().acquire(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/heartbeat",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def heartbeat_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().heartbeat(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/lease/release",
+    tags=["internal"],
+    response_model=GatewayLeaseResult,
+)
+def release_telegram_stage1_lease(
+    request: GatewayLeaseRequest,
+    authorization: str | None = Header(default=None),
+) -> GatewayLeaseResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().release(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/events/claim",
+    tags=["internal"],
+    response_model=TelegramEventClaimResult,
+)
+def claim_telegram_stage1_event(
+    request: TelegramEventClaimRequest,
+    authorization: str | None = Header(default=None),
+) -> TelegramEventClaimResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().claim(request)
+
+
+@app.post(
+    "/internal/v1/telegram-stage1/events/transition",
+    tags=["internal"],
+    response_model=TelegramEventTransitionResult,
+)
+def transition_telegram_stage1_event(
+    request: TelegramEventTransitionRequest,
+    authorization: str | None = Header(default=None),
+) -> TelegramEventTransitionResult:
+    _require_mode("routine")
+    _authorize(authorization)
+    return _telegram_stage1_service().transition(request)
 
 
 @app.post(
@@ -540,6 +796,35 @@ def set_capture_mode(
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
         return _archive_service().set_capture_mode(idempotency_key.strip(), request)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="live capture is not authorized") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="idempotency conflict") from exc
+
+
+@app.post(
+    "/internal/v1/conversations/capture-mode-and-accept",
+    tags=["internal"],
+    response_model=TurnCaptureResult,
+)
+def set_capture_mode_and_accept_turn(
+    request: CaptureModeAndTurnInput,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TurnCaptureResult:
+    """Atomically persist a Stage 2 capture transition and its control-turn receipt."""
+
+    _require_mode("routine")
+    _authorize(authorization)
+    if os.getenv("LUCY_TELEGRAM_STAGE") != "2":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    service = _archive_service()
+    if not isinstance(service, RealmConversationArchiveService):
+        raise HTTPException(status_code=503, detail="realm archive boundary unavailable")
+    try:
+        return service.set_capture_mode_and_accept(idempotency_key.strip(), request)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail="live capture is not authorized") from exc
     except ValueError as exc:
@@ -737,6 +1022,16 @@ class DeliveryOutcomeV2Input(BaseModel):
     accepted: bool
 
 
+class RetrievalExecuteV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    permit: SensitiveActionPermitV3
+
+
+class DeletionExecuteV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    permit: SensitiveActionPermitV3
+
+
 _POLICY_PERMIT_STORAGE_FAILURE_CODES = {
     "invalid permit issuance idempotency key": "invalid_idempotency_key",
     "signed authorization contracts must be JSON objects": "invalid_contract_container",
@@ -805,6 +1100,7 @@ def issue_sensitive_action_permit_v2(
     """Accept only a fresh broker-signed owner interaction and issue an exact V2 permit."""
 
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
@@ -854,6 +1150,7 @@ def prepare_deletion_manifest_v2(
     authorization: str | None = Header(default=None),
 ) -> DeletionTargetManifestV1:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return _policy_notary().prepare_deletion_manifest(
@@ -877,6 +1174,7 @@ def notarize_sensitive_operation_v2(
     authorization: str | None = Header(default=None),
 ) -> SensitiveExecutionGrantV1:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return _policy_notary().notarize_operation(operation_id)
@@ -894,6 +1192,7 @@ def attest_executor_receipt_v2(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     _require_mode("policy")
+    _require_v12_sensitive_api()
     _authorize_policy_gateway(authorization)
     try:
         return {"receipt_digest": _policy_notary().attest_receipt(operation_id, receipt)}
@@ -912,6 +1211,7 @@ def owner_retrieve_evidence_v2(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RetrievalWorkflowResultV1:
     _require_mode("evidence")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if idempotency_key is None or not idempotency_key.strip():
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
@@ -938,6 +1238,7 @@ def record_evidence_delivery_v2(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     _require_mode("evidence")
+    _require_v12_sensitive_api()
     _authorize(authorization)
     try:
         state = SqlSecurityWorkflowStore(_ready_sessions()).record_delivery(
@@ -961,6 +1262,7 @@ def owner_delete_evidence_v2(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> DeletionWorkflowResultV1:
     _require_mode("deletion")
+    _require_v12_sensitive_api()
     _authorize_owner(authorization)
     if request.permit.evidence_id != evidence_id:
         raise HTTPException(status_code=400, detail="evidence identity mismatch")
@@ -986,4 +1288,121 @@ def owner_delete_evidence_v2(
         status = 409 if exc.code == "bulk_required" else 403
         raise HTTPException(status_code=status, detail=exc.code) from exc
     except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=409, detail="deletion failed closed") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/grant",
+    tags=["internal"],
+    response_model=SensitiveExecutionGrantV2,
+)
+def grant_sensitive_operation_v3(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> SensitiveExecutionGrantV2:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        grants, _deletions, _receipts = _realm_policy_services()
+        return grants.issue_grant(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/receipt-attestation",
+    tags=["internal"],
+)
+def attest_executor_receipt_v3(
+    operation_id: UUID,
+    receipt: ExecutorReceiptV2,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    if receipt.operation_id != operation_id:
+        raise HTTPException(status_code=400, detail="operation identity mismatch")
+    try:
+        _grants, _deletions, receipts = _realm_policy_services()
+        return {"receipt_digest": receipts.attest_receipt_v3(receipt)}
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="executor receipt not trusted") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/deletion-manifest",
+    tags=["internal"],
+    response_model=DeletionTargetManifestV3,
+)
+def prepare_deletion_manifest_v3(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> DeletionTargetManifestV3:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        _grants, deletions, _receipts = _realm_policy_services()
+        return deletions.prepare_manifest(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for deletion") from exc
+
+
+@app.post(
+    "/owner/v3/evidence/retrieve",
+    tags=["owner"],
+    response_model=RealmRetrievalWorkflowResultV1,
+)
+def owner_retrieve_evidence_v3(
+    request: RetrievalExecuteV3Input,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RealmRetrievalWorkflowResultV1:
+    _require_mode("evidence")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_owner(authorization)
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    try:
+        return RealmRetrievalCoordinator(
+            PostgresRealmWorkflowStore(_ready_sessions()),
+            _realm_policy_workflow_client(),
+            _realm_retrieval_executor(),
+        ).execute(request.permit, idempotency_key=idempotency_key.strip())
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=409, detail="retrieval failed closed") from exc
+
+
+@app.post(
+    "/owner/v3/evidence/{evidence_id}/delete",
+    tags=["owner"],
+    response_model=RealmDeletionWorkflowResultV1,
+)
+def owner_delete_evidence_v3(
+    evidence_id: UUID,
+    request: DeletionExecuteV3Input,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RealmDeletionWorkflowResultV1:
+    _require_mode("deletion")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_owner(authorization)
+    if request.permit.resource_selector.object_id != evidence_id:
+        raise HTTPException(status_code=400, detail="evidence identity mismatch")
+    if idempotency_key is None or not idempotency_key.strip():
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    try:
+        return RealmDeletionCoordinatorV3(
+            PostgresRealmWorkflowStore(_ready_sessions()),
+            _realm_policy_workflow_client(),
+            _realm_deletion_executor(),
+        ).execute(request.permit, idempotency_key=idempotency_key.strip())
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=409, detail="deletion failed closed") from exc

@@ -9,16 +9,24 @@ from uuid import UUID
 from sqlalchemy import Connection, create_engine, event, text
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
+from lucy.db.session import _psycopg_url
 from lucy.deletion_journal import DeletionJournal, check_journal_admission
 
 SCHEMA_REVISION = "0021_recovery_capture_safety"
+R1_SCHEMA_REVISION = "0053_r1_telegram_authority"
+STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
+MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
+PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
+WORKSPACES_SCHEMA_REVISION = "0068_workspaces_service_auth"
 SERVICE_ROLES = {
+    "public": "lucy_public_runtime",
     "routine": "lucy_routine",
     "policy": "lucy_policy",
     "evidence": "lucy_evidence_reader",
     "deletion": "lucy_evidence_deleter",
 }
 SERVICE_MODES = {*SERVICE_ROLES, "all-local"}
+SECURITY_BASELINES = {"v1.2", "v1.3"}
 ADMISSION_LOCK = 0x4C5543594144
 
 
@@ -35,6 +43,22 @@ def service_mode_from_environment() -> str:
     if mode not in SERVICE_MODES or (production and mode == "all-local"):
         raise ReadinessError("explicit isolated service identity required")
     return mode
+
+
+def security_baseline_from_environment() -> str:
+    baseline = os.getenv("LUCY_SECURITY_BASELINE", "v1.2").strip()
+    if baseline not in SECURITY_BASELINES:
+        raise ReadinessError("security baseline is missing or invalid")
+    return baseline
+
+
+def expected_database_login_from_environment(baseline: str) -> str | None:
+    value = os.getenv("LUCY_EXPECTED_DATABASE_LOGIN", "").strip()
+    if baseline == "v1.2":
+        return value or None
+    if not value or len(value) > 63:
+        raise ReadinessError("expected realm database identity is missing or invalid")
+    return value
 
 
 def expected_storage_epoch(mode: str) -> UUID | None:
@@ -55,13 +79,23 @@ class ServiceReadiness:
         mode: str,
         storage_epoch: UUID | None,
         journal: DeletionJournal | None = None,
+        baseline: str = "v1.2",
+        expected_database_login: str | None = None,
     ) -> None:
         if mode not in SERVICE_MODES or (mode != "all-local" and storage_epoch is None):
             raise ReadinessError("service admission configuration is incomplete")
+        if mode == "public" and baseline != "v1.3":
+            raise ReadinessError("public service requires security baseline v1.3")
         self._sessions = sessions
         self._mode = mode
         self._epoch = storage_epoch
         self._journal = journal
+        if baseline not in SECURITY_BASELINES:
+            raise ReadinessError("security baseline is missing or invalid")
+        if baseline == "v1.3" and not expected_database_login:
+            raise ReadinessError("expected realm database identity is missing or invalid")
+        self._baseline = baseline
+        self._expected_database_login = expected_database_login
 
     def check(self) -> None:
         with self._sessions.begin() as session:
@@ -70,8 +104,6 @@ class ServiceReadiness:
             session.execute(
                 text("SELECT pg_advisory_xact_lock_shared(:key)"), {"key": ADMISSION_LOCK}
             )
-            if self._mode != "all-local":
-                self._check_identity(session)
             revisions = list(
                 session.scalars(
                     text(
@@ -79,8 +111,37 @@ class ServiceReadiness:
                     )
                 )
             )
-            if revisions != [SCHEMA_REVISION]:
+            expected_revisions = {SCHEMA_REVISION}
+            if self._baseline == "v1.3":
+                if (
+                    self._mode == "public"
+                    and os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
+                ):
+                    expected_revisions = {
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
+                    }
+                elif os.getenv("LUCY_TELEGRAM_STAGE") == "2":
+                    expected_revisions = {
+                        STAGE2_SCHEMA_REVISION,
+                        MEMORY_IMPORT_SCHEMA_REVISION,
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
+                    }
+                    # The bridge release must remain healthy before and after
+                    # the additive private-memory and public-conversation migrations.
+                else:
+                    expected_revisions = {
+                        R1_SCHEMA_REVISION,
+                        STAGE2_SCHEMA_REVISION,
+                        MEMORY_IMPORT_SCHEMA_REVISION,
+                        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+                        WORKSPACES_SCHEMA_REVISION,
+                    }
+            if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
+            if self._mode != "all-local":
+                self._check_identity(session, schema_revision=revisions[0])
             admission = session.execute(
                 text(
                     "SELECT state, storage_epoch FROM lucy.runtime_admission "
@@ -100,10 +161,14 @@ class ServiceReadiness:
                 raise ReadinessError("control-plane recovery row is unavailable")
             if lifecycle.state != "ready":
                 raise ReadinessError("control-plane recovery is not ready")
-            if self._mode in {"routine", "all-local"}:
+            if self._baseline == "v1.2" and self._mode in {"routine", "all-local"}:
                 check_journal_admission(session.connection(), self._journal)
 
-    def _check_identity(self, session: Session) -> None:
+    def _check_identity(self, session: Session, *, schema_revision: str) -> None:
+        if self._expected_database_login is not None:
+            actual_login = session.scalar(text("SELECT session_user"))
+            if actual_login != self._expected_database_login:
+                raise ReadinessError("service database identity mismatch")
         elevated = session.scalar(
             text(
                 "SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls "
@@ -133,6 +198,9 @@ class ServiceReadiness:
         )
         if elevated_storage:
             raise ReadinessError("service login can administer storage")
+        if self._baseline == "v1.3":
+            self._check_v13_identity(session, schema_revision=schema_revision)
+            return
         forbidden = [
             ("lucy.deletion_journal_binding", "INSERT,UPDATE,DELETE,TRUNCATE"),
             ("lucy.deletion_journal_receipts", "UPDATE,DELETE,TRUNCATE"),
@@ -271,6 +339,138 @@ class ServiceReadiness:
             ):
                 raise ReadinessError("service login lacks readiness permissions")
 
+    def _check_v13_identity(self, session: Session, *, schema_revision: str) -> None:
+        # V1.3 realm logins are execute-only. The two gate tables and Alembic
+        # revision contain no customer content and are the sole direct reads.
+        allowed_reads = {
+            "lucy.lifecycle",
+            "lucy.runtime_admission",
+            "public.alembic_version",
+        }
+        tables = session.execute(
+            text(
+                "SELECT n.nspname || '.' || c.relname AS relation "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname IN ('lucy','public') AND c.relkind IN ('r','p')"
+            )
+        ).scalars()
+        for table in tables:
+            privileges = "INSERT,UPDATE,DELETE,TRUNCATE"
+            if table not in allowed_reads:
+                privileges = "SELECT," + privileges
+            if session.scalar(
+                text("SELECT has_table_privilege(session_user, :table, :privileges)"),
+                {"table": table, "privileges": privileges},
+            ):
+                raise ReadinessError("realm service login exceeds execute-only capabilities")
+        for table in allowed_reads:
+            if not session.scalar(
+                text("SELECT has_table_privilege(session_user, :table, 'SELECT')"),
+                {"table": table},
+            ):
+                raise ReadinessError("realm service login lacks readiness permissions")
+        required_functions = _v13_required_functions(
+            mode=self._mode,
+            schema_revision=schema_revision,
+            public_conversation_enabled=(
+                os.getenv("LUCY_PUBLIC_CONVERSATION_ENABLED", "false") == "true"
+            ),
+            telegram_stage2=os.getenv("LUCY_TELEGRAM_STAGE") == "2",
+        )
+        for function in required_functions:
+            if not session.scalar(
+                text("SELECT has_function_privilege(session_user, :function, 'EXECUTE')"),
+                {"function": function},
+            ):
+                raise ReadinessError("realm service login lacks its exact function grants")
+
+
+def _v13_required_functions(
+    *,
+    mode: str,
+    schema_revision: str,
+    public_conversation_enabled: bool,
+    telegram_stage2: bool,
+) -> tuple[str, ...]:
+    """Return the exact grants required on either side of the 0054 -> 0056 bridge."""
+
+    if mode == "public":
+        return (
+            (
+                "lucy.public_projection_knowledge_v1(text,uuid)"
+                if public_conversation_enabled
+                else "lucy.public_projection_answer_v2(text,text,uuid)"
+            ),
+        )
+
+    post_memory_import = schema_revision in {
+        MEMORY_IMPORT_SCHEMA_REVISION,
+        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+        WORKSPACES_SCHEMA_REVISION,
+    }
+    routine_memory_functions = (
+        (
+                "lucy.stage_memory_import_candidate_v1(jsonb)",
+                "lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb)",
+                "lucy.search_governed_scoped_memory_v1(text,integer)",
+                "lucy.reserve_memory_import_attempt_v1(uuid,text,bigint)",
+                "lucy.settle_memory_import_attempt_v1(uuid,bigint,text)",
+        )
+        if post_memory_import
+        else (
+            "lucy.write_scoped_memory_claim_v1(text,text,text,text,bigint)",
+            "lucy.search_scoped_memory_v1(text,integer)",
+        )
+    )
+    policy_memory_functions = (
+        (
+            "lucy.approve_scoped_memory_candidate_v1(uuid,bigint,text,uuid,text)",
+            "lucy.promote_scoped_memory_candidate_v1(uuid,text)",
+            "lucy.search_protected_scoped_memory_v1(text,integer,uuid,text)",
+            "lucy.authorize_memory_import_campaign_v1("
+            "uuid,jsonb,text,bigint,bigint,timestamptz,text,text,text)",
+        )
+        if post_memory_import
+        else ()
+    )
+    required_functions = {
+        "routine": routine_memory_functions
+        + (
+                "lucy.claim_capturable_scoped_archive_v1(text,text,text,text,text,jsonb)",
+                "lucy.record_scoped_archive_aws_outcome_v1(uuid,jsonb,text)",
+                "lucy.reconcile_capturable_scoped_archive_v1(uuid)",
+            ),
+        "policy": policy_memory_functions
+        + (
+                "lucy.issue_sensitive_action_permit_v3(jsonb,text)",
+                "lucy.read_sensitive_permit_authority_v1(uuid,uuid,text,uuid,bigint)",
+                "lucy.read_claimed_sensitive_authority_v1(uuid)",
+                "lucy.read_claimed_deletion_authority_v1(uuid)",
+                "lucy.store_scoped_deletion_manifest_v3(uuid,jsonb)",
+                "lucy.store_sensitive_execution_grant_v2(uuid,jsonb)",
+                "lucy.attest_executor_receipt_v2(uuid,jsonb)",
+            ),
+            "evidence": (
+                "lucy.read_sensitive_action_permit_v3(uuid,text)",
+                "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.read_sensitive_operation_status_v1(uuid)",
+                "lucy.freeze_claimed_evidence_package_v2(uuid)",
+                "lucy.reconcile_sensitive_operation_v2(uuid)",
+            ),
+            "deletion": (
+                "lucy.read_sensitive_action_permit_v3(uuid,text)",
+                "lucy.claim_sensitive_operation_v2(uuid,text)",
+                "lucy.read_sensitive_operation_status_v1(uuid)",
+                "lucy.reconcile_scoped_deletion_v2(uuid)",
+            ),
+    }
+    if mode == "routine" and telegram_stage2:
+            required_functions["routine"] += (
+                "lucy.set_and_accept_scoped_capture_turn_v1(text,text,boolean,text)",
+                "lucy.commit_capturable_scoped_turn_v1(uuid,uuid)",
+            )
+    return required_functions.get(mode, ())
+
 
 class AdmittedSession(Session):
     """Only HTTP service operations use this class; maintenance never does."""
@@ -316,7 +516,11 @@ def admitted_session_factory(
     journal_required: bool = True,
 ) -> sessionmaker[Session]:
     return sessionmaker(
-        create_engine(database_url, pool_pre_ping=True, isolation_level="READ COMMITTED"),
+        create_engine(
+            _psycopg_url(database_url),
+            pool_pre_ping=True,
+            isolation_level="READ COMMITTED",
+        ),
         class_=AdmittedSession,
         expire_on_commit=False,
         info={

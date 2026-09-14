@@ -1,0 +1,35 @@
+{
+  "contract": "lucy.utopia.public-r1-production-acceptance.v1",
+  "accepted_at": "2026-09-13T02:12:12Z",
+  "status": "passed",
+  "cloud_commit": "fbfd95b43bb670fa04c246ef789c18c5e47de020",
+  "website_merge_commit": "7ff15a399057ec762b7748cbf3eca56ef536232a",
+  "website_pull_request": 2,
+  "vercel_deployment_id": "8S2RT2w3EqXrySefCNRokqWm4itv",
+  "schema_revision": "0057_public_conversation",
+  "active_version": 2,
+  "snapshot_digest": "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422",
+  "runtime_admission": "ready",
+  "storage_epoch_preserved": true,
+  "private_capture_state_preserved": true,
+  "public_execute_only_grant": true,
+  "unresolved_sensitive_authority": 0,
+  "public_transcript_capture": false,
+  "openrouter_enabled": false,
+  "dns_changed": false,
+  "live_acceptance": {
+    "natural_language": "passed",
+    "bounded_follow_up": "passed",
+    "property_comparison": "passed",
+    "compound_requirements": "passed",
+    "missing_detail_partial": "passed",
+    "topic_distinction": "passed",
+    "mobile_widget": "passed",
+    "mobile_navigation": "passed",
+    "browser_console": "clean"
+  },
+  "cleanup": {
+    "temporary_render_migration_utility_deleted": true,
+    "isolated_postgresql_test_stack_removed": true
+  }
+}

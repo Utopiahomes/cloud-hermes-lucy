@@ -1,0 +1,88 @@
+{
+  "contract_version": "1",
+  "conversation_id": "synthetic-memory-pilot-1",
+  "title": "Synthetic decision, reversal, branches, and sensitivity",
+  "messages": [
+    {
+      "message_id": "m1",
+      "parent_message_id": null,
+      "role": "owner",
+      "occurred_at": "2026-01-10T14:00:00Z",
+      "content": "For the synthetic project, choose Plan A.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m2",
+      "parent_message_id": "m1",
+      "role": "assistant",
+      "occurred_at": "2026-01-10T14:01:00Z",
+      "content": "Understood. Plan A is the current decision.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m2-alt",
+      "parent_message_id": "m1",
+      "role": "assistant",
+      "occurred_at": "2026-01-10T14:01:10Z",
+      "content": "I recommend Plan C instead.",
+      "displayed": false,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m3",
+      "parent_message_id": "m2",
+      "role": "assistant",
+      "occurred_at": "2026-01-10T14:02:00Z",
+      "content": "I also propose buying a synthetic satellite.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m4",
+      "parent_message_id": "m3",
+      "role": "owner",
+      "occurred_at": "2026-02-01T09:00:00Z",
+      "content": "Do not treat the satellite proposal as accepted.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m5",
+      "parent_message_id": "m4",
+      "role": "owner",
+      "occurred_at": "2026-03-15T16:30:00Z",
+      "content": "Reverse the earlier decision: Plan B is now current.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m6",
+      "parent_message_id": "m5",
+      "role": "assistant",
+      "occurred_at": "2026-03-15T16:31:00Z",
+      "content": "Plan B supersedes Plan A as of March 15.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m7",
+      "parent_message_id": "m6",
+      "role": "owner",
+      "occurred_at": "2026-03-15T16:32:00Z",
+      "content": "The budget and schedule together support Plan B.",
+      "displayed": true,
+      "source_revision": 1
+    },
+    {
+      "message_id": "m8",
+      "parent_message_id": "m7",
+      "role": "owner",
+      "occurred_at": "2026-03-15T16:33:00Z",
+      "content": "Synthetic sensitive passage: recovery phrase violet-orbit-73 must remain protected.",
+      "displayed": true,
+      "source_revision": 1
+    }
+  ]
+}
