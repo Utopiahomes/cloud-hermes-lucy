@@ -11,7 +11,7 @@
     "website_rollback_commit": "replace-with-40-lowercase-hex-characters",
     "image_digest": "replace-with-64-lowercase-hex-characters",
     "base_image_digest": "replace-with-64-lowercase-hex-characters",
-    "schema_revision": "0071_memory_import_job_replay",
+    "schema_revision": "0057_public_conversation",
     "aws_realm_template_sha256": "replace-with-64-lowercase-hex-characters",
     "aws_recovery_template_sha256": "replace-with-64-lowercase-hex-characters"
   },
@@ -27,6 +27,11 @@
     "requests_per_ip_per_minute": 20,
     "requests_per_session_per_minute": 30
   },
+  "authority": {
+    "node_id": "replace-with-utopia-node-uuid",
+    "channel_binding_id": "replace-with-public-channel-binding-uuid",
+    "database_login": "lucy_utopia_cost_admission"
+  },
   "routing": {
     "provider": "openrouter",
     "model": "google/gemini-3.1-flash-lite",
@@ -40,6 +45,9 @@
     "max_completion_usd_per_million": 4.0
   },
   "cost_policy": {
+    "policy_id": "replace-with-reviewed-policy-uuid",
+    "version": 1,
+    "effective_at": "replace-with-reviewed-timezone-aware-timestamp",
     "kill_state": "disabled",
     "platform_daily_cap_microusd": 10000000,
     "node_daily_cap_microusd": 1000000,

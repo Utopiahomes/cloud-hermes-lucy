@@ -86,7 +86,7 @@ def test_public_render_service_is_the_only_external_identity() -> None:
     assert environment["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
     assert environment["LUCY_PUBLIC_SITE_HOSTNAME"]["value"] == "www.utopiahomes.com"
     assert environment["LUCY_PUBLIC_SNAPSHOT_DIGEST"]["value"] == (
-        "6232b5fa0b382346fba692f29e74d2b3fdbcd9a19ee960d2e609fd0b2ce2b99e"
+        "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422"
     )
     assert not any(
         key.startswith("AWS_")

@@ -95,7 +95,7 @@ projects:
               - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
               - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
               - {key: LUCY_PUBLIC_MODEL_DATABASE_URL, sync: false}
-              - {key: LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN, value: lucy_cost_admission}
+              - {key: LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN, value: lucy_utopia_cost_admission}
               - {key: LUCY_PUBLIC_MODEL_TOKEN, sync: false}
               - {key: LUCY_PUBLIC_MODEL_ALLOWED_SNAPSHOT_DIGESTS, sync: false}
               - {key: LUCY_PUBLIC_MODEL_NODE_ID, sync: false}

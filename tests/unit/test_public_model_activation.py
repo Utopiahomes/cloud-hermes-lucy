@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from deploy.postgres.commission_public_model_staging_v1 import (
+    AUTHORIZATION,
+    PublicModelCommissioningConfig,
+    PublicModelCommissioningError,
+    _policy,
+)
 from deploy.render.validate_public_model_activation_v2 import validate
 from lucy.public_model_activation import UtopiaPublicModelActivationManifestV2
 
@@ -24,7 +30,7 @@ def valid_manifest() -> dict[str, object]:
             "website_rollback_commit": "d" * 40,
             "image_digest": "1" * 64,
             "base_image_digest": "2" * 64,
-            "schema_revision": "0071_memory_import_job_replay",
+            "schema_revision": "0057_public_conversation",
             "aws_realm_template_sha256": "3" * 64,
             "aws_recovery_template_sha256": "4" * 64,
         },
@@ -40,6 +46,11 @@ def valid_manifest() -> dict[str, object]:
             "requests_per_ip_per_minute": 20,
             "requests_per_session_per_minute": 30,
         },
+        "authority": {
+            "node_id": "0dfe09f8-82a9-4548-9dae-f30bd00138d6",
+            "channel_binding_id": "b201a268-e744-4fdf-ae61-ce23a9335392",
+            "database_login": "lucy_utopia_cost_admission",
+        },
         "routing": {
             "provider": "openrouter",
             "model": "google/gemini-3.1-flash-lite",
@@ -53,6 +64,9 @@ def valid_manifest() -> dict[str, object]:
             "max_completion_usd_per_million": 4.0,
         },
         "cost_policy": {
+            "policy_id": "9fe8b503-78de-4ac3-8fac-36ca048152ea",
+            "version": 1,
+            "effective_at": "2026-09-14T20:00:00-04:00",
             "kill_state": "disabled",
             "platform_daily_cap_microusd": 10_000_000,
             "node_daily_cap_microusd": 1_000_000,
@@ -109,7 +123,15 @@ def test_disabled_staging_manifest_is_accepted() -> None:
     assert manifest.release_state == "staged-disabled"
     assert manifest.model_traffic_enabled is False
     assert manifest.cost_policy.kill_state == "disabled"
+    assert manifest.artifacts.schema_revision == "0057_public_conversation"
+
+
+def test_private_head_schema_remains_a_reviewed_manifest_option() -> None:
+    candidate = valid_manifest()
+    candidate["artifacts"]["schema_revision"] = "0071_memory_import_job_replay"  # type: ignore[index]
+    manifest = UtopiaPublicModelActivationManifestV2.model_validate(candidate)
     assert manifest.artifacts.schema_revision == "0071_memory_import_job_replay"
+    assert len(manifest.digest_hex()) == 64
 
 
 def test_staging_test_and_active_are_distinct_states() -> None:
@@ -199,3 +221,78 @@ def test_content_free_validator_reports_only_release_state(tmp_path: Path) -> No
         "contract": "lucy.public-model-activation-validation.v2",
         "status": "failed",
     }
+
+
+def test_cost_policy_requires_reviewed_identity_and_effective_time() -> None:
+    candidate = valid_manifest()
+    candidate["authority"]["database_login"] = "lucy_cost_admission"  # type: ignore[index]
+    with pytest.raises(ValidationError):
+        UtopiaPublicModelActivationManifestV2.model_validate(candidate)
+
+    candidate = valid_manifest()
+    candidate["cost_policy"]["effective_at"] = "2026-09-14T20:00:00"  # type: ignore[index]
+    with pytest.raises(ValidationError, match="timezone"):
+        UtopiaPublicModelActivationManifestV2.model_validate(candidate)
+
+
+def test_staging_commissioning_derives_exact_execute_only_policy() -> None:
+    candidate = valid_manifest()
+    candidate["release_state"] = "staging-test"
+    candidate["cost_policy"]["kill_state"] = "enabled"  # type: ignore[index]
+    manifest = UtopiaPublicModelActivationManifestV2.model_validate(candidate)
+    environment = {
+        "RENDER": "true",
+        "LUCY_ENVIRONMENT": "production",
+        "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
+        "LUCY_PUBLIC_MODEL_COMMISSIONING_AUTHORIZATION": AUTHORIZATION,
+        "LUCY_MIGRATION_DATABASE_URL": (
+            "postgresql://lucy_migration:owner@dpg-example-a/lucy_example"
+        ),
+        "LUCY_PUBLIC_MODEL_DATABASE_URL": (
+            "postgresql://lucy_utopia_cost_admission:runtime@dpg-example-a/lucy_example"
+        ),
+        "LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_JSON": manifest.model_dump_json(),
+        "LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_SHA256": manifest.digest_hex(),
+    }
+    config = PublicModelCommissioningConfig.from_environment(environment)
+    policy = _policy(config.manifest)
+    assert policy.policy_id == manifest.cost_policy.policy_id
+    assert policy.node_id == manifest.authority.node_id
+    assert policy.channel_binding_id == manifest.authority.channel_binding_id
+    assert policy.provider == "openrouter"
+    assert policy.kill_state == "enabled"
+    assert policy.per_request_cap_microusd == 30_000
+    assert policy.max_output_tokens == 700
+    assert policy.digest_hex()
+
+
+def test_staging_commissioning_rejects_disabled_or_generic_identity() -> None:
+    candidate = valid_manifest()
+    manifest = UtopiaPublicModelActivationManifestV2.model_validate(candidate)
+    environment = {
+        "RENDER": "true",
+        "LUCY_ENVIRONMENT": "production",
+        "LUCY_TRANSCRIPT_CAPTURE_ENABLED": "false",
+        "LUCY_PUBLIC_MODEL_COMMISSIONING_AUTHORIZATION": AUTHORIZATION,
+        "LUCY_MIGRATION_DATABASE_URL": (
+            "postgresql://lucy_migration:owner@dpg-example-a/lucy_example"
+        ),
+        "LUCY_PUBLIC_MODEL_DATABASE_URL": (
+            "postgresql://lucy_utopia_cost_admission:runtime@dpg-example-a/lucy_example"
+        ),
+        "LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_JSON": manifest.model_dump_json(),
+        "LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_SHA256": manifest.digest_hex(),
+    }
+    with pytest.raises(PublicModelCommissioningError, match="staging-test"):
+        PublicModelCommissioningConfig.from_environment(environment)
+
+    candidate["release_state"] = "staging-test"
+    candidate["cost_policy"]["kill_state"] = "enabled"  # type: ignore[index]
+    staged = UtopiaPublicModelActivationManifestV2.model_validate(candidate)
+    environment["LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_JSON"] = staged.model_dump_json()
+    environment["LUCY_PUBLIC_MODEL_ACTIVATION_MANIFEST_SHA256"] = staged.digest_hex()
+    environment["LUCY_PUBLIC_MODEL_DATABASE_URL"] = (
+        "postgresql://lucy_cost_admission:runtime@dpg-example-a/lucy_example"
+    )
+    with pytest.raises(PublicModelCommissioningError, match="identity"):
+        PublicModelCommissioningConfig.from_environment(environment)

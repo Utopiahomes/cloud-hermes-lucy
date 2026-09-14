@@ -39,7 +39,7 @@ from lucy.recovery_journal import RecoveryStreamKind
 from lucy.recovery_writer_client import HttpRecoveryJournalWriterClient
 
 _HOSTPORT = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?:[0-9]{2,5}\Z")
-_LOGIN = re.compile(r"lucy_cost_admission\Z")
+_LOGIN = re.compile(r"lucy_[a-z][a-z0-9]{0,30}_cost_admission\Z")
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 _MODEL = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}/[a-zA-Z0-9][a-zA-Z0-9._:-]{0,159}\Z")

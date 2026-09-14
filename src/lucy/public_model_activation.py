@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from lucy.contracts.canonical import canonical_sha256
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _GIT_SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -24,7 +28,10 @@ class PublicModelArtifactPinsV2(StrictModel):
     website_rollback_commit: str
     image_digest: str
     base_image_digest: str
-    schema_revision: Literal["0071_memory_import_job_replay"]
+    schema_revision: Literal[
+        "0057_public_conversation",
+        "0071_memory_import_job_replay",
+    ]
     aws_realm_template_sha256: str
     aws_recovery_template_sha256: str
 
@@ -62,6 +69,18 @@ class PublicModelIngressV2(StrictModel):
     requests_per_session_per_minute: int = Field(ge=1, le=600)
 
 
+class PublicModelAuthorityV2(StrictModel):
+    node_id: UUID
+    channel_binding_id: UUID
+    database_login: Literal["lucy_utopia_cost_admission"]
+
+    @model_validator(mode="after")
+    def identifiers_are_distinct(self) -> PublicModelAuthorityV2:
+        if self.node_id == self.channel_binding_id:
+            raise ValueError("model authority identifiers must be distinct")
+        return self
+
+
 class OpenRouterRoutingV2(StrictModel):
     provider: Literal["openrouter"]
     model: str = Field(min_length=3, max_length=240)
@@ -87,6 +106,9 @@ class OpenRouterRoutingV2(StrictModel):
 
 
 class PublicModelCostPolicyV2(StrictModel):
+    policy_id: UUID
+    version: Literal[1]
+    effective_at: datetime
     kill_state: Literal["disabled", "enabled"]
     platform_daily_cap_microusd: int = Field(ge=1)
     node_daily_cap_microusd: int = Field(ge=1)
@@ -102,6 +124,8 @@ class PublicModelCostPolicyV2(StrictModel):
 
     @model_validator(mode="after")
     def caps_are_nested(self) -> PublicModelCostPolicyV2:
+        if self.effective_at.utcoffset() is None:
+            raise ValueError("cost-policy effective time must include a timezone")
         enclosing = (
             self.platform_daily_cap_microusd,
             self.node_daily_cap_microusd,
@@ -192,6 +216,7 @@ class UtopiaPublicModelActivationManifestV2(StrictModel):
     release_decision_id: str = Field(min_length=1, max_length=256)
     artifacts: PublicModelArtifactPinsV2
     ingress: PublicModelIngressV2
+    authority: PublicModelAuthorityV2
     routing: OpenRouterRoutingV2
     cost_policy: PublicModelCostPolicyV2
     execution: PublicModelExecutionV2
@@ -207,6 +232,20 @@ class UtopiaPublicModelActivationManifestV2(StrictModel):
     )
     operations_contact: str = Field(min_length=3, max_length=320)
     rollback_owner: str = Field(min_length=3, max_length=320)
+
+    def digest_hex(self) -> str:
+        payload = self.model_dump(mode="python")
+        routing = dict(payload["routing"])
+        for key in (
+            "max_prompt_usd_per_million",
+            "max_completion_usd_per_million",
+        ):
+            routing[key] = format(routing[key], ".15g")
+        payload["routing"] = routing
+        return canonical_sha256(
+            payload,
+            prefix=b"LUCY-UTOPIA-PUBLIC-MODEL-ACTIVATION-V2\0",
+        )
 
     @model_validator(mode="after")
     def state_is_fail_closed(self) -> UtopiaPublicModelActivationManifestV2:

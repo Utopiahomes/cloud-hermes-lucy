@@ -18,6 +18,14 @@ STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
 WORKSPACES_SCHEMA_REVISION = "0068_workspaces_service_auth"
+RECOVERY_SCHEMA_REVISIONS = frozenset(
+    {
+        R1_SCHEMA_REVISION,
+        STAGE2_SCHEMA_REVISION,
+        MEMORY_IMPORT_SCHEMA_REVISION,
+        PUBLIC_CONVERSATION_SCHEMA_REVISION,
+    }
+)
 SERVICE_ROLES = {
     "public": "lucy_public_runtime",
     "routine": "lucy_routine",

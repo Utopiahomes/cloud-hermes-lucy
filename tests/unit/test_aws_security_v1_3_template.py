@@ -43,7 +43,7 @@ def _template() -> tuple[str, dict[str, Any]]:
 def test_v13_template_is_reproducibly_derived_from_frozen_v12() -> None:
     source = (AWS_DEPLOY / "security-baseline-v1.2.yaml").read_bytes()
     rendered = (AWS_DEPLOY / "security-baseline-v1.3.yaml").read_text(encoding="utf-8")
-    assert hashlib.sha256(source).hexdigest() == V12_SHA256
+    assert hashlib.sha256(source.replace(b"\r\n", b"\n")).hexdigest() == V12_SHA256
     assert derive_v1_3(source) == rendered
 
     with pytest.raises(ValueError, match="digest mismatch"):

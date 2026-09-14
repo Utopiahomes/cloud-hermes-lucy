@@ -151,9 +151,11 @@ deterministic launch and intentionally forbids paid inference in `public_only` m
 model release instead uses
 `deploy/render/utopia-public-model-activation-manifest.v2.json.example`. Its validator
 distinguishes `staged-disabled`, `staging-test`, and `active`; only the last state permits
-visitor model traffic. It pins schema `0071`, both repositories, privacy routing, an exact
-provider allowlist, cost and timeout envelopes, browser-only history, eligible and withdrawn
-snapshot sets, and the transcript-capture-off boundary.
+visitor model traffic. Each populated manifest pins one exact schema; the reviewed contract
+accepts both the deployed public bridge `0057_public_conversation` and synchronized private
+head `0071_memory_import_job_replay`. It also pins both repositories, privacy routing, an
+exact provider allowlist, cost and timeout envelopes, browser-only history, eligible and
+withdrawn snapshot sets, and the transcript-capture-off boundary.
 
 ## Remaining activation gates
 

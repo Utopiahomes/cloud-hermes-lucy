@@ -610,7 +610,7 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_model_release_branch(
     assert model["LUCY_SERVICE_MODE"]["value"] == "public-model"
     assert model["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
     assert model["LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN"]["value"] == (
-        "lucy_cost_admission"
+        "lucy_utopia_cost_admission"
     )
     assert "OPENROUTER_API_KEY" in model
     assert not any(
@@ -688,7 +688,7 @@ def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
         assert environments[name]["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == login
     assert environments["lucy-public-model"][
         "LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN"
-    ]["value"] == "lucy_cost_admission"
+    ]["value"] == "lucy_utopia_cost_admission"
 
     assert environments["lucy-authority-writer"][
         "LUCY_RECOVERY_WRITER_DATABASE_LOGIN"

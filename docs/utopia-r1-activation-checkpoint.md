@@ -35,9 +35,11 @@ checkpoint without conflicts. Its rebased model commit is
 A separate Public Lucy model activation V2 contract now preserves the historical V1
 manifest while permitting public-only paid inference under explicit model-release controls.
 It has distinct `staged-disabled`, `staging-test`, and `active` states; only `active` can
-enable visitor model traffic. The contract pins schema `0071`, privacy routing, cost and
-timeout envelopes, browser-memory history, snapshot eligibility/withdrawal, and both Cloud
-and website revisions.
+enable visitor model traffic. Each populated manifest pins one exact reviewed schema. The
+contract accepts the deployed public bridge `0057_public_conversation` and the synchronized
+private head `0071_memory_import_job_replay`; it does not treat them as interchangeable at
+runtime. It also pins privacy routing, cost and timeout envelopes, browser-memory history,
+snapshot eligibility/withdrawal, and both Cloud and website revisions.
 
 ## Disabled Render staging checkpoint
 
@@ -65,6 +67,15 @@ clipboard was cleared, and OpenRouter reported exactly one matching key with no 
 $1 daily limit. The existing `lucy-public` service has no `LUCY_PUBLIC_MODEL_ENABLED`
 variable; the application defaults that missing flag to false. No visitor request or
 provider call can therefore reach the staged process.
+
+On 2026-09-14 a zero-output assertion executed through the existing execute-only
+`lucy_utopia_public` database binding confirmed that production remains exactly at
+`0057_public_conversation`. No migration was performed. The model staging implementation
+therefore adds a dedicated `lucy_utopia_cost_admission` login instead of making the generic
+`lucy_cost_admission` capability login-capable. A commissioning utility grants that login
+only readiness reads and the four exact cost functions, denies direct cost-table access,
+and installs an immutable identifier-bound policy. It cannot enable public model traffic
+or call OpenRouter.
 
 ## Completed preparation
 
@@ -110,11 +121,13 @@ provider call can therefore reach the staged process.
 
 ## Exact next action
 
-Complete the ignored, identifier-bearing V2 manifest with the staged service ID, final
-artifact digests, `ray@utopiahomes.com` as operations contact and rollback owner, and the
-approved $1/day provider/site/node budget. Resuming the service for synthetic staging calls
-and enabling visitor model traffic remain separate decisions. Until then, keep the service
-suspended and continue ordinary production operation without capturing visitor questions.
+Complete the ignored, identifier-bearing V2 manifest with final artifact digests,
+`ray@utopiahomes.com` as operations contact and rollback owner, and the approved $1/day
+provider/site/node budget. Deploy schema-compatible recovery readers and the exact model
+image, commission the dedicated cost identity without a provider credential present, then
+resume the model service only for synthetic staging calls. Enabling visitor model traffic
+remains a separate product-activation decision. Until then, continue ordinary production
+operation without capturing visitor questions.
 
 ## Public Lucy R1 production acceptance
 

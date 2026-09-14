@@ -24,6 +24,7 @@ def _replace(text: str, old: str, new: str, *, count: int) -> str:
 
 
 def derive_v1_3(source: bytes) -> str:
+    source = source.replace(b"\r\n", b"\n")
     digest = hashlib.sha256(source).hexdigest()
     if digest != V12_SHA256:
         raise ValueError(f"V1.2 template digest mismatch: {digest}")

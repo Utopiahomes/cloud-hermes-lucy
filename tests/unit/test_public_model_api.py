@@ -25,9 +25,9 @@ def _environment() -> dict[str, str]:
     return {
         "LUCY_ENVIRONMENT": "production",
         "LUCY_PUBLIC_MODEL_DATABASE_URL": (
-            "postgresql://lucy_cost_admission:synthetic@dpg-example-a/lucy_example"
+            "postgresql://lucy_utopia_cost_admission:synthetic@dpg-example-a/lucy_example"
         ),
-        "LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN": "lucy_cost_admission",
+        "LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN": "lucy_utopia_cost_admission",
         "LUCY_PUBLIC_MODEL_TOKEN": TOKEN,
         "LUCY_PUBLIC_MODEL_ALLOWED_SNAPSHOT_DIGESTS": "a" * 64,
         "LUCY_PUBLIC_MODEL_NODE_ID": "eb181c78-1314-456b-b5c9-675495ddc896",
@@ -102,7 +102,7 @@ def reset_dependencies() -> None:
 
 def test_configuration_requires_exact_cost_identity_and_private_provider_pin() -> None:
     config = api.PublicModelApiConfiguration.from_environment(_environment())
-    assert config.expected_database_login == "lucy_cost_admission"
+    assert config.expected_database_login == "lucy_utopia_cost_admission"
     assert config.model == "google/gemini-3.1-flash-lite"
     assert config.allowed_providers == ("Google",)
 
@@ -122,6 +122,16 @@ def test_configuration_requires_exact_cost_identity_and_private_provider_pin() -
     }
     with pytest.raises(api.PublicModelApiConfigurationError, match="identity"):
         api.PublicModelApiConfiguration.from_environment(wrong_login)
+
+    generic_cost_role = {
+        **_environment(),
+        "LUCY_PUBLIC_MODEL_DATABASE_URL": (
+            "postgresql://lucy_cost_admission:synthetic@dpg-example-a/lucy_example"
+        ),
+        "LUCY_PUBLIC_MODEL_EXPECTED_DATABASE_LOGIN": "lucy_cost_admission",
+    }
+    with pytest.raises(api.PublicModelApiConfigurationError, match="identity"):
+        api.PublicModelApiConfiguration.from_environment(generic_cost_role)
 
 
 def test_private_api_authenticates_bounds_and_returns_no_store(
