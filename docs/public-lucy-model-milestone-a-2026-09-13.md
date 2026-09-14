@@ -1,8 +1,9 @@
 # Public Lucy model Milestone A
 
-Status: implemented and evaluated locally on 2026-09-13. Production remains on the
-deterministic Public Lucy R1 path. No Render resource, production setting, snapshot,
-database, transcript policy, DNS record, or website deployment was changed by this work.
+Status: implemented, locally evaluated on 2026-09-13, and accepted in isolated Render
+staging on 2026-09-14. Production remains on the deterministic Public Lucy R1 path. The
+model service is suspended, visitor model routing and transcript capture are disabled, and
+no DNS record or website production deployment was changed by this work.
 
 ## Delivered boundary
 
@@ -73,6 +74,16 @@ route then accepted all 12 scenarios with no provider error, 3,167 ms average en
 latency, and 8,782 ms approximate p95 latency. Repeated staging trials remain necessary to
 measure production-like tail behavior.
 
+The exact containerized Render candidate subsequently passed the same 12-turn rubric as a
+content-free one-off gate inside the protected network. Job
+`job-dak2k40jo6nc73b8t39g` ran commit
+`d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197` and suite digest
+`7abb8332a9c19290cfa4f106024dfac3c490acbd7cce8e78be01ad36e5cfc6c0`. The gate failed
+the job on any non-200 response, response-binding mismatch, or rubric failure; it completed
+12/12. The model service was then suspended. Per-turn staging tail latency remains an
+activation-soak measurement because Render retained no logs for the earlier output-bearing
+smoke job.
+
 The final scenarios cover ordinary wording, a follow-up, correction after a poor answer,
 multi-property comparison, multiple requirements, missing seasonal information, published
 Design estimate behavior, relevant travel guidance, identity/private access, live
@@ -112,6 +123,12 @@ Primary evidence files are stored outside the repository beside this isolated wo
 - After rebasing onto Private migration `0071` and adding the V2 activation contract, the
   complete merged Python suite passed 1,005 tests with 263 PostgreSQL/Docker-dependent
   skips. Alembic reported exactly one head: `0071_memory_import_job_replay`.
+- After commissioning hardening and Docker packaging, the complete unit suite passed 1,009
+  tests; Ruff passed repository-wide and strict mypy passed across 118 source files. The 17
+  focused Docker/commissioner packaging checks and the dedicated disposable PostgreSQL
+  commissioning integration test passed. The candidate Docker image built successfully for
+  `linux/amd64` with immutable image ID
+  `977efed4c73fefe605239c257f2dc89c8d0d1861a108f06fa6f00185a1283e37`.
 
 ## Activation configuration and order
 
@@ -159,13 +176,13 @@ withdrawn snapshot sets, and the transcript-capture-off boundary.
 
 ## Remaining activation gates
 
-- Recheck the current `google-vertex` endpoint privacy/retention behavior immediately before
-  activation, then create a dedicated key with an account-level spending cap.
-- Set the production per-request and daily spending policies.
-- Provision the private model service and secrets, run migration and PostgreSQL identity
-  checks, and execute staging acceptance with repeated trials and measured tail latency.
-- Replace the V2 manifest placeholders with reviewed image/template digests, the final
-  rebased commits, exact provider slug/rate version, operational contacts, and approved
-  budgets; validate it first in `staged-disabled` state.
-- Obtain explicit product activation authorization. This implementation authorization does
-  not itself publish the model path.
+- The 2026-09-14 pre-activation recheck found five matching endpoints in OpenRouter's live
+  ZDR inventory, current rates below the configured ceilings, and the dedicated key at its
+  exact $1 daily-reset limit with $1 remaining. Re-read those volatile values at the actual
+  traffic transition and measure per-turn tail latency during the activation soak.
+- Convert the fully populated, validated `staging-test` manifest into a separately reviewed
+  exact `active` manifest. Do not reuse staging authorization as traffic authority.
+- Obtain explicit product activation authorization, install the public reader's private
+  model credential and enable flag, and verify live same-origin behavior plus immediate
+  deterministic rollback. This implementation and staging authorization does not publish
+  the model path.

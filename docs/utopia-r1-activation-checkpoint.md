@@ -9,6 +9,12 @@ Public transcript capture and OpenRouter remain disabled. The earlier Private Lu
 epoch and capture-disabled state were preserved through the migration. The complete private
 record remains `docs/private-telegram-stage2-implementation-2026-09-11.md`.
 
+Public Lucy model Milestone A completed isolated Render staging on 2026-09-14 at exact
+Cloud commit `d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197`. The 12-turn model
+acceptance suite passed while visitor model traffic and transcript capture remained off.
+The model service returned to suspended state afterward; deterministic R1 remains the
+customer-facing production path.
+
 ## Milestone A model-development checkpoint
 
 Ray authorized local implementation and bounded model evaluation on 2026-09-13, but not
@@ -30,7 +36,8 @@ Private Lucy paused cleanly at
 `beaa2031b6ef69bd8b50177b6771469a5253c836`, migration
 `0071_memory_import_job_replay`, without creating `0072`. Public Lucy rebased onto that
 checkpoint without conflicts. Its rebased model commit is
-`a6473c26ea1fa34ca19d0a809698150f367be37f`, and the worktree is clean.
+`a6473c26ea1fa34ca19d0a809698150f367be37f`; staging hardening and the
+container-packaged commissioner end at `d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197`.
 
 A separate Public Lucy model activation V2 contract now preserves the historical V1
 manifest while permitting public-only paid inference under explicit model-release controls.
@@ -41,32 +48,33 @@ private head `0071_memory_import_job_replay`; it does not treat them as intercha
 runtime. It also pins privacy routing, cost and timeout envelopes, browser-memory history,
 snapshot eligibility/withdrawal, and both Cloud and website revisions.
 
-## Disabled Render staging checkpoint
+## Render staging checkpoint
 
-Ray explicitly authorized the charge-bearing creation of the isolated Render private
-service on 2026-09-14. Render created `lucy-public-model` as service
-`srv-dak10pjm8hqs73a28rug` in the protected `cloud-lucy` production environment, pinned to
-Cloud commit `817230eb25ec0e8e66c265538757068a4e0597c0` on branch
+Ray explicitly authorized the charge-bearing creation and synthetic staging of the isolated
+Render private service on 2026-09-14. `lucy-public-model`, service
+`srv-dak10pjm8hqs73a28rug`, ran exact deploy `dep-dak2brgjo6nc73b7tdi0` from Cloud commit
+`d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197` on branch
 `codex/public-model-milestone-a`, with auto-deploy off and command
-`python -m lucy.public_model_runtime`.
+`python -m lucy.public_model_runtime`. It was re-suspended after acceptance.
 
-The service was manually suspended 26 seconds into its first build. Render confirms that
-the suspended service is not billed. Eighteen non-secret, fail-closed configuration values
-were stored, including transcript capture false, the reviewed Hermes upstream commit
-`fcbd1076a93841fa88855acce810e342a5b78101`, the single approved snapshot,
-`google/gemini-3.1-flash-lite`, the `google-vertex` provider allowlist, and rate version
-`openrouter-2026-09-13`. No database URL, private service token, commitment key, or recovery
-token was installed.
+The locally inspected `linux/amd64` candidate has immutable image ID
+`977efed4c73fefe605239c257f2dc89c8d0d1861a108f06fa6f00185a1283e37`, base image
+`47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f`, and exact
+source/revision labels. The ignored `staging-test` manifest has digest
+`5dc79c8fe3f3982902aebfab4ea3fdfdc9f92c4f59d8d6f6748644e8129effdf`; it pins the
+production bridge schema `0057_public_conversation`, website candidate `6b01d64`, rollback
+`7ff15a3`, both AWS template digests, the approved snapshot, the `google-vertex` route, and
+the $1 daily provider/site/node ceilings. Model traffic and transcript capture are false.
 
 On 2026-09-14, a dedicated `Utopia Public Lucy` OpenRouter key was created with a $1 daily
 reset limit and installed only on the suspended model service. Two earlier credentials that
 were rendered into browser automation output during setup were immediately treated as
 compromised, revoked from OpenRouter, and removed from Render; neither recorded any use.
 The final credential was transferred without reading or logging its value, the browser
-clipboard was cleared, and OpenRouter reported exactly one matching key with no use and the
-$1 daily limit. The existing `lucy-public` service has no `LUCY_PUBLIC_MODEL_ENABLED`
-variable; the application defaults that missing flag to false. No visitor request or
-provider call can therefore reach the staged process.
+clipboard was cleared, and OpenRouter reported exactly one matching key with no use at that
+checkpoint and the $1 daily limit. The existing `lucy-public` service has neither an enabled
+`LUCY_PUBLIC_MODEL_ENABLED` variable nor `LUCY_PUBLIC_MODEL_TOKEN`; no visitor request can
+therefore reach the staged process.
 
 On 2026-09-14 a zero-output assertion executed through the existing execute-only
 `lucy_utopia_public` database binding confirmed that production remains exactly at
@@ -76,6 +84,32 @@ therefore adds a dedicated `lucy_utopia_cost_admission` login instead of making 
 only readiness reads and the four exact cost functions, denies direct cost-table access,
 and installs an immutable identifier-bound policy. It cannot enable public model traffic
 or call OpenRouter.
+
+Schema-compatible recovery readers were deployed at exact commit `5afb2ed`: authority
+writer deploy `dep-dak1uqmq1p3s73cah4f0`, cost writer deploy
+`dep-dak1v9942hec73bn02tg`, and recovery coordinator deploy
+`dep-dak1vo942hec73bn20l0`. Their private readiness assertion
+`job-dak205gjo6nc73b6ka4g` succeeded. The temporary commissioner received the authorized
+database credentials but no OpenRouter credential. Commission job
+`job-dak2b8gjo6nc73b7rj9g` and exact replay job `job-dak2bcqd0e5s738eg0jg` succeeded; its
+environment was cleared and the temporary service was deleted.
+
+The first seven-turn smoke job `job-dak2degjo6nc73b83830` completed, but Render retained no
+queryable log rows, so it was not counted as answer evidence. A replacement content-free
+gate scored responses inside the protected network and made any HTTP, binding, or rubric
+failure fail the job. `job-dak2k40jo6nc73b8t39g` passed all 12 turns in suite digest
+`7abb8332a9c19290cfa4f106024dfac3c490acbd7cce8e78be01ad36e5cfc6c0`. The exact
+`google-vertex` local evaluation also passed 12/12, cost 29,328 microusd, and recorded
+2.243-second minimum, 2.698-second median, 3.205-second second-highest, and 8.782-second
+maximum latency. Detailed content-free staging evidence is in
+`docs/evidence/utopia-public-model-staging-acceptance-2026-09-14.json`.
+
+Immediately after staging, OpenRouter's live ZDR endpoint inventory listed five matching
+Gemini 3.1 Flash Lite Google Vertex endpoints. Their highest listed prompt/completion rates
+were $0.45/$2.70 per million tokens, below the configured $0.80/$4.00 ceilings. The
+dedicated key metadata still reported its exact $1 daily-reset limit, $1 remaining, and zero
+reported usage. Request-level ZDR, data-collection denial, provider-only routing, and
+fallback denial remain enforced in the candidate.
 
 ## Completed preparation
 
@@ -121,13 +155,12 @@ or call OpenRouter.
 
 ## Exact next action
 
-Complete the ignored, identifier-bearing V2 manifest with final artifact digests,
-`ray@utopiahomes.com` as operations contact and rollback owner, and the approved $1/day
-provider/site/node budget. Deploy schema-compatible recovery readers and the exact model
-image, commission the dedicated cost identity without a provider credential present, then
-resume the model service only for synthetic staging calls. Enabling visitor model traffic
-remains a separate product-activation decision. Until then, continue ordinary production
-operation without capturing visitor questions.
+The staging implementation, commissioning, and acceptance gates are complete. The next
+action is a separate product-activation decision. Until that decision is made, keep
+`lucy-public-model` suspended, leave the public service without the model token/enable flag,
+and continue deterministic R1 without capturing visitor questions. Activation must create
+and validate an exact `active` manifest, install compatible public-reader configuration,
+then move visitor traffic independently with immediate rollback to deterministic R1.
 
 ## Public Lucy R1 production acceptance
 

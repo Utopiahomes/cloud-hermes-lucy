@@ -1,0 +1,149 @@
+{
+  "contract": "lucy.utopia.public-model-staging-acceptance.v1",
+  "recorded_at": "2026-09-14T17:13:33.9624608Z",
+  "release_state": "staging-test",
+  "production_traffic_changed": false,
+  "public_model_traffic_enabled": false,
+  "transcript_capture_enabled": false,
+  "synthetic_public_content_only": true,
+  "source": {
+    "branch": "codex/public-model-milestone-a",
+    "cloud_commit": "d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197",
+    "cloud_rollback_commit": "f2ada54699f2c8a4c88f3a462ceacfc22e6579d8",
+    "website_commit": "6b01d64f4354c7c0f9940f274fa942d2268e7023",
+    "website_rollback_commit": "7ff15a399057ec762b7748cbf3eca56ef536232a",
+    "schema_revision": "0057_public_conversation"
+  },
+  "candidate_image": {
+    "platform": "linux/amd64",
+    "image_id": "977efed4c73fefe605239c257f2dc89c8d0d1861a108f06fa6f00185a1283e37",
+    "base_image_id": "47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+    "source_and_revision_labels_verified": true
+  },
+  "activation_manifest": {
+    "canonical_digest": "5dc79c8fe3f3982902aebfab4ea3fdfdc9f92c4f59d8d6f6748644e8129effdf",
+    "file_sha256": "0e8981a50aa966984a806e848ba806a1652c0be6274e2cd81e38d93a402f5487",
+    "active_snapshot_sha256": "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422",
+    "model": "google/gemini-3.1-flash-lite",
+    "allowed_provider": "google-vertex",
+    "rate_version": "openrouter-2026-09-13",
+    "zero_data_retention": true,
+    "data_collection": "deny",
+    "provider_fallbacks": false,
+    "daily_provider_cap_microusd": 1000000,
+    "daily_site_cap_microusd": 1000000,
+    "daily_node_cap_microusd": 1000000
+  },
+  "provider_pre_activation_recheck": {
+    "observed_at": "2026-09-14T17:17:49.6123225Z",
+    "source": "https://openrouter.ai/api/v1/endpoints/zdr",
+    "model_id": "google/gemini-3.1-flash-lite",
+    "matching_zdr_endpoints": 5,
+    "matching_provider": "Google",
+    "matching_tag_prefix": "google-vertex/",
+    "maximum_prompt_usd_per_million": 0.45,
+    "maximum_completion_usd_per_million": 2.7,
+    "configured_prompt_ceiling_usd_per_million": 0.8,
+    "configured_completion_ceiling_usd_per_million": 4.0,
+    "request_zdr_enforced": true,
+    "data_collection_denied": true,
+    "provider_fallbacks_disabled": true,
+    "result": "passed"
+  },
+  "dedicated_provider_key": {
+    "observed_at": "2026-09-14T17:17:49.6123225Z",
+    "metadata_endpoint": "https://openrouter.ai/api/v1/key",
+    "daily_limit_usd": 1,
+    "reported_usage_usd": 0,
+    "reported_daily_usage_usd": 0,
+    "reported_limit_remaining_usd": 1,
+    "result": "passed"
+  },
+  "production_schema_assertion": {
+    "revision": "0057_public_conversation",
+    "migration_performed": false,
+    "result": "passed"
+  },
+  "recovery_services": {
+    "commit": "5afb2edb55abf25d2659bc364f580114f1470b0b",
+    "authority_writer": {
+      "service_id": "srv-dahi58lg1s2s73bae65g",
+      "deploy_id": "dep-dak1uqmq1p3s73cah4f0",
+      "state": "not_suspended"
+    },
+    "cost_writer": {
+      "service_id": "srv-dahi5hcs728c73b7bqsg",
+      "deploy_id": "dep-dak1v9942hec73bn02tg",
+      "state": "not_suspended"
+    },
+    "coordinator": {
+      "service_id": "srv-dahi5hss728c73b7bt70",
+      "deploy_id": "dep-dak1vo942hec73bn20l0",
+      "state": "not_suspended"
+    },
+    "private_readiness_job": "job-dak205gjo6nc73b6ka4g",
+    "private_readiness_result": "passed"
+  },
+  "commissioning": {
+    "database_credentials_transferred_to_temporary_service": true,
+    "openrouter_credential_transferred_to_temporary_service": false,
+    "commission_job": "job-dak2b8gjo6nc73b7rj9g",
+    "exact_replay_job": "job-dak2bcqd0e5s738eg0jg",
+    "commission_result": "passed",
+    "replay_result": "passed",
+    "temporary_environment_cleared": true,
+    "temporary_service_deleted": true
+  },
+  "model_service": {
+    "service_id": "srv-dak10pjm8hqs73a28rug",
+    "deploy_id": "dep-dak2brgjo6nc73b7tdi0",
+    "commit": "d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197",
+    "auto_deploy": false,
+    "final_state": "suspended"
+  },
+  "public_service": {
+    "service_id": "srv-daingifqj5pc73arkbjg",
+    "deploy_id": "dep-daj07ch5efls73f50qe0",
+    "commit": "fbfd95b43bb670fa04c246ef789c18c5e47de020",
+    "state": "not_suspended",
+    "model_enable_flag": false,
+    "model_token_installed": false,
+    "customer_facing_path": "deterministic-r1"
+  },
+  "model_acceptance": {
+    "unscored_smoke_job": "job-dak2degjo6nc73b83830",
+    "unscored_smoke_status": "succeeded",
+    "unscored_reason": "Render returned no retained log rows, so output was not treated as evidence",
+    "scored_job": "job-dak2k40jo6nc73b8t39g",
+    "suite_sha256": "7abb8332a9c19290cfa4f106024dfac3c490acbd7cce8e78be01ad36e5cfc6c0",
+    "turns_passed": 12,
+    "turns_total": 12,
+    "failure_behavior": "non-200, response-binding mismatch, or rubric failure exits nonzero",
+    "result": "passed"
+  },
+  "local_exact_route_evaluation": {
+    "evidence_file": "public-model-eval-google-vertex-final.json",
+    "evidence_sha256": "305162883e98e8405c2a66b5d1e1c11d6a517bb76ad5243e9bc51d6e10612481",
+    "turns_passed": 12,
+    "turns_total": 12,
+    "provider_reported_cost_microusd": 29328,
+    "ambiguous_reserved_cost_microusd": 0,
+    "latency_ms": {
+      "minimum": 2243,
+      "median": 2698,
+      "second_highest": 3205,
+      "maximum": 8782
+    },
+    "result": "passed"
+  },
+  "local_verification": {
+    "unit_tests_passed": 1009,
+    "ruff": "passed",
+    "mypy_source_files": 118,
+    "mypy": "passed",
+    "docker_packaging_tests_passed": 17,
+    "disposable_postgresql_commissioning_test": "passed",
+    "candidate_image_build": "passed"
+  },
+  "remaining_gate": "separate explicit product activation authorization"
+}
