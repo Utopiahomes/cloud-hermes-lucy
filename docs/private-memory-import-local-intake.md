@@ -46,6 +46,27 @@ It performs no network calls and does not fetch referenced URLs.
 
 ## Review a pilot selection locally
 
+The destination scope must come from a stable, separately prepared private-realm identity plan;
+do not reuse another tenant's scope or invent an ephemeral console-only UUID. A plan can be
+created without any cloud or database effect using:
+
+```powershell
+.\.venv\Scripts\python.exe deploy\prepare_realm_identity_v1_3.py `
+  --realm-slug raymond `
+  --resource-namespace lucy-raymond-v13 `
+  --aws-account-id 429870640638 `
+  --account-slug raymond `
+  --account-display-name "Raymond DeLuca" `
+  --node-slug raymond `
+  --node-display-name "Raymond DeLuca" `
+  --node-kind person `
+  --workspace-slug private `
+  --output secrets\generated\raymond-realm-identity-plan.v1.json
+```
+
+The generator refuses to overwrite an existing plan. Its `planned_not_authorized` output fixes
+the content scope and other non-secret identities but cannot provision or activate the realm.
+
 Create a random local console token once and keep it out of the repository:
 
 ```powershell

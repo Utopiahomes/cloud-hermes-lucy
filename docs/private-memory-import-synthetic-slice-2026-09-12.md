@@ -245,6 +245,14 @@ accepted `0057` migration is merged at `2807dad`.
     job after all current realm, campaign, source, and deletion checks pass; it still cannot create
     a new job. The provider output remains absent from the PostgreSQL envelope plaintext. No real
     provider, AWS operation, personal data, or cloud endpoint was used.
+39. Raymond's personal import now has a stable pre-commissioning realm identity rather than
+    borrowing Utopia's production scope or using an ephemeral console UUID. The content-free,
+    `planned_not_authorized` plan allocates 22 distinct tenant/node/realm/scope/workspace/service,
+    executor, registry, journal, and wallet identities under the Raymond namespace. None overlap
+    the commissioned Utopia binding. The reusable generator refuses overwrite and performs no
+    AWS, Render, database, credential, capture, inference, upload, or activation effect. The local
+    selection console may bind to the planned Raymond scope; cloud execution remains unavailable
+    until a separately authorized and validated realm security stamp is commissioned.
 
 ## Verification ledger
 
@@ -279,6 +287,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Protected sequential uploader | Passed, 3 focused uploader checks plus Ruff and strict mypy | HTTPS-only endpoint; sequential exact bytes; in-memory bearer capability; bounded, identity-checked response; protected-root confinement; content-free receipt; exact retry after lost response | Uploader, transport/response contracts, intake-root policy, or HTTP boundary change |
 | Exact CLI upload reconstruction | Passed, focused end-to-end local CLI check plus Ruff and strict mypy | Untouched-ZIP rebuild; exact registered-plan equality; digest-specific confirmation; protected review directory; content-free receipt; injected HTTPS boundary | Import CLI, manifest builder, transport preparation/registration, uploader, or intake-root policy change |
 | Complete synthetic transport execution and replay | Passed, 55 focused checks on PostgreSQL through `0071`, plus Ruff and strict mypy | Exact transport admission; encrypted archive and provider-outcome persistence; provenance-linked pending candidate; one settlement; exact replay with one archive data-key generation and one synthetic provider dispatch; settled-reservation new-job denial retained by migration ordering | Migration `0071`, executor, coordinator, archive/outcome adapters, candidate materialization, transport authority, or PostgreSQL image change |
+| Raymond private-realm identity preparation | Passed, 3 focused contract/generator checks plus Ruff and strict mypy | Stable `planned_not_authorized` scope; 22 internally distinct UUIDs; zero UUID overlap with Utopia; exact service issuer and login namespace; overwrite refusal | Realm identity-plan contract/generator, Utopia binding, or planned Raymond identity artifact change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 
