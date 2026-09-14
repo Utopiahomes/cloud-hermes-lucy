@@ -4,6 +4,7 @@ Date: 2026-09-12
 Branch: `codex/r1-tenant-foundation`
 Starting revision: `207d3af6c782747e104fa24f2b72a2a2c4eea8ff`
 Status: exact personal pilot authorized; protected cloud intake commissioning in progress
+Current implementation checkpoint: `a70cb63` (protected intake plus read-only head verifier)
 Current private-memory revisions: `d747509` (schema/import foundation), `d973d41`
 (bounded extraction coordinator), `204c38c` (isolated provider adapter), and `a655292`
 (atomic completion fence), plus the pilot-completion, executable-budget, immutable-request,
@@ -297,6 +298,15 @@ accepted `0057` migration is merged at `2807dad`.
     through the same capability-scoped, realm-bound transport admission operation. That lets the
     executor recover an ambiguous provider outcome for the admitted campaign without storing the
     large authorization artifact in Render configuration or granting table enumeration.
+47. Raymond's forward migration job reported `succeeded` at the protected-intake revision and
+    rotated the still-unused realm runtime database passwords, but Render did not return its JSON
+    receipt through the log API before the evidence timeout. Subsequent read-only verifier jobs
+    exposed and corrected three verifier assumptions (one service binding versus four actor
+    bindings, `offline` lifecycle while quarantined, and Render's omitted default port) but still
+    exited failed without retained diagnostic output. All temporary runners were deleted. This is
+    an unresolved cloud-evidence gate: no campaign was registered, no provider was called, and no
+    personal record was uploaded. Do not retry another opaque job; the next diagnostic must retain
+    failure evidence or isolate individual predicates without changing realm state.
 
 ## Verification ledger
 
@@ -306,7 +316,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Synthetic memory-import integration | Passed, 12 tests on current revision | `tests/integration/test_memory_import_slice.py` against PostgreSQL at `0067`; proves present and absent derived-row restore, exact replay/conflicting replay rejection, durable candidate/outcome targets, recall/outcome/derivation fencing, plus V3 grant/receipt/reconciliation | Import, recovery, grant, receipt, migration, or scoped-memory change |
 | Historical V3 recovery contract | Passed, focused unit test | Historical policy/receipt keys, exact permit/manifest/grant/receipt binding, provider-outcome key registry preservation, changed-scope rejection | Contract, canonicalization, trust-store, or recovery change |
 | Integrated Workspaces queue | Passed, 1 PostgreSQL integration test | `tests/integration/test_workspaces_task_queue.py` at migration `0067`; exact enqueue/claim/complete/replay boundary from Public Lucy checkpoint | Workspaces runtime, task queue, or migration change |
-| Python suite | Passed, 921 tests; 258 environment-gated skips | Full `pytest` after the permit-bound exact-job outcome recovery implementation, 2026-09-13 | Relevant Python, dependency, migration, or environment change |
+| Python unit suite | Passed, 981 tests; one known Starlette deprecation warning | Full `tests/unit` after protected intake, executor, migration `0072`, and Render head-verifier changes, 2026-09-14 | Relevant Python, dependency, migration, or runtime configuration change |
 | Ruff | Passed | Full `src`, `tests`, and `migrations` tree after V3 recovery | Relevant source change |
 | Mypy strict | Passed, 104 source files | Full strict source and production recovery-utility check after V3 recovery | Python source or type-config change |
 | Candidate materialization | Passed, 4 focused tests | Strict output parsing, stable IDs, UTF-8 spans, exact evidence binding, ambiguous-quote rejection, and secret quarantine | Candidate contract, manifest, provenance, or secret-filter change |
@@ -337,6 +347,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Protected public-proxy/private-executor runtime | Passed locally, 52 focused tests plus Ruff and strict mypy | Canonical no-redirect proxy; separate hop/campaign credentials; fail-closed environment gates; exact authorization context; archive/outcome/recovery/provider composition | Proxy/executor runtime, Render service topology, admission contract, provider policy, or credential placement change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Commissioning authorized; not yet ready | Exact Raymond realm and pilot authorization recorded; no personal-data network call | Requires separate realm Render/AWS/PostgreSQL commissioning and deployed acceptance |
+| Raymond cloud head evidence | Blocked without activation | Forward migration job reported succeeded, but no retained content-free state receipt; three temporary read-only verifier runs failed and were deleted; no personal payload/provider call | Requires a non-opaque diagnostic that preserves sanitized failure evidence; do not repeat the same job |
 
 The focused synthetic acceptance proves: exact manifest authorization; independent encrypted
 records; protected staging; separate ordinary and protected approval/recall; stale-candidate
