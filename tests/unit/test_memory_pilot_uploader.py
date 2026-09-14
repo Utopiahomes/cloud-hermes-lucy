@@ -35,27 +35,29 @@ class Transport:
         self.fail_once = fail_once
         self.calls: list[tuple[str, bytes, str, int]] = []
 
-    def __call__(
-        self, url: str, body: bytes, authorization: str, timeout_seconds: int
-    ) -> bytes:
+    def __call__(self, url: str, body: bytes, authorization: str, timeout_seconds: int) -> bytes:
         self.calls.append((url, body, authorization, timeout_seconds))
         if self.fail_once:
             self.fail_once = False
             raise TimeoutError("synthetic lost response")
         batch = MemoryPilotTransportBatchV1.model_validate_json(body)
-        return MemoryPilotExecutionResponseV1(
-            receipt=MemoryPilotTransportExecutionReceiptV1(
-                campaign_id=batch.campaign_id,
-                batch_id=batch.batch_id,
-                extraction_job_id=batch.dispatch.extraction_job_id,
-                reservation_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-                state="succeeded",
-                archived_source_count=len(batch.records),
-                billed_microusd=0,
-                candidate_count=0,
-            ),
-            review_artifact=None,
-        ).model_dump_json().encode()
+        return (
+            MemoryPilotExecutionResponseV1(
+                receipt=MemoryPilotTransportExecutionReceiptV1(
+                    campaign_id=batch.campaign_id,
+                    batch_id=batch.batch_id,
+                    extraction_job_id=batch.dispatch.extraction_job_id,
+                    reservation_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    state="succeeded",
+                    archived_source_count=len(batch.records),
+                    billed_microusd=0,
+                    candidate_count=0,
+                ),
+                review_artifact=None,
+            )
+            .model_dump_json()
+            .encode()
+        )
 
 
 def test_sequential_https_upload_is_content_free_and_exact(tmp_path: Path) -> None:
@@ -108,6 +110,14 @@ def test_lost_response_requires_same_identity_retry(tmp_path: Path) -> None:
 def test_uploader_rejects_plain_http_and_output_outside_intake(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="HTTPS"):
         SequentialMemoryPilotUploader(endpoint="http://private-lucy.example")
+    for endpoint in (
+        "https://private-lucy.example/path",
+        "https://user@private-lucy.example",
+        "https://private-lucy.example?realm=other",
+        "https://private-lucy.example#fragment",
+    ):
+        with pytest.raises(ValueError, match="HTTPS origin"):
+            SequentialMemoryPilotUploader(endpoint=endpoint)
     reviews = tmp_path.parent / "outside-reviews"
     reviews.mkdir(exist_ok=True)
     with pytest.raises(ValueError, match="inside the intake root"):

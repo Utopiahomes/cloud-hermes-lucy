@@ -70,8 +70,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0069_memory_outcome_policy",
     "0070_memory_pilot_transport",
     "0071_memory_import_job_replay",
+    "0072_memory_pilot_auth_context",
 }
-EXPECTED_REVISION = "0071_memory_import_job_replay"
+EXPECTED_REVISION = "0072_memory_pilot_auth_context"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

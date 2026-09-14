@@ -18,7 +18,7 @@ STAGE2_SCHEMA_REVISION = "0054_stage2_scoped_turn_commit"
 MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
 WORKSPACES_SCHEMA_REVISION = "0068_workspaces_service_auth"
-PRIVATE_MEMORY_SCHEMA_REVISION = "0071_memory_import_job_replay"
+PRIVATE_MEMORY_SCHEMA_REVISION = "0072_memory_pilot_auth_context"
 V13_RECOVERY_SCHEMA_REVISIONS = frozenset(
     {
         R1_SCHEMA_REVISION,

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+import secrets
 from collections.abc import Callable
 from typing import Annotated, Protocol
 from uuid import UUID
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from starlette.middleware.base import RequestResponseEndpoint
 
+from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_candidate_review import CandidateReviewBundleArtifactV1
 from lucy.memory_pilot_transport import (
     MemoryPilotTransportAdmissionReceiptV1,
@@ -48,6 +51,7 @@ class MemoryPilotIntakeConfigurationV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     maximum_request_bytes: int = Field(default=2_000_000, ge=1, le=10_000_000)
+    gateway_bearer_token: SecretStr | None = Field(default=None, exclude=True)
 
 
 def create_memory_pilot_intake_app(
@@ -65,6 +69,7 @@ def create_memory_pilot_intake_app(
         redoc_url=None,
         openapi_url=None,
     )
+    _install_common_intake_routes(app)
 
     @app.post(
         "/v1/private-memory/pilot/batches/{batch_id}",
@@ -75,10 +80,13 @@ def create_memory_pilot_intake_app(
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> MemoryPilotTransportAdmissionReceiptV1:
+        _validate_wire_headers(request)
         capability = _bearer_capability(authorization)
         body = await _bounded_body(request, maximum_bytes=settings.maximum_request_bytes)
         try:
             batch = MemoryPilotTransportBatchV1.model_validate_json(body)
+            if body != canonical_json_bytes(batch):
+                raise ValueError("request body is not exact canonical JSON")
             if batch.batch_id != batch_id:
                 raise ValueError("path and payload batch IDs differ")
             return admission.admit(batch, capability_token=capability)
@@ -103,6 +111,7 @@ def create_memory_pilot_execution_app(
         redoc_url=None,
         openapi_url=None,
     )
+    _install_common_intake_routes(app)
 
     @app.post(
         "/v1/private-memory/pilot/batches/{batch_id}",
@@ -113,12 +122,25 @@ def create_memory_pilot_execution_app(
         request: Request,
         response: Response,
         authorization: Annotated[str | None, Header()] = None,
+        x_lucy_pilot_capability: Annotated[str | None, Header()] = None,
     ) -> MemoryPilotExecutionResponseV1:
-        response.headers["Cache-Control"] = "no-store"
-        capability = _bearer_capability(authorization)
+        _validate_wire_headers(request)
+        capability_authorization = authorization
+        if settings.gateway_bearer_token is not None:
+            gateway_token = settings.gateway_bearer_token.get_secret_value()
+            if not 32 <= len(gateway_token) <= 512:
+                raise HTTPException(status_code=503, detail="gateway configuration invalid")
+            if authorization is None or not secrets.compare_digest(
+                authorization, f"Bearer {gateway_token}"
+            ):
+                raise HTTPException(status_code=401, detail="gateway credential invalid")
+            capability_authorization = x_lucy_pilot_capability
+        capability = _bearer_capability(capability_authorization)
         body = await _bounded_body(request, maximum_bytes=settings.maximum_request_bytes)
         try:
             batch = MemoryPilotTransportBatchV1.model_validate_json(body)
+            if body != canonical_json_bytes(batch):
+                raise ValueError("request body is not exact canonical JSON")
             if batch.batch_id != batch_id:
                 raise ValueError("path and payload batch IDs differ")
             result = executor.execute(batch, capability_token=capability)
@@ -132,6 +154,27 @@ def create_memory_pilot_execution_app(
             raise HTTPException(status_code=503, detail="pilot execution unavailable") from exc
 
     return app
+
+
+def _install_common_intake_routes(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def no_store(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/health", include_in_schema=False)
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+
+def _validate_wire_headers(request: Request) -> None:
+    content_type = request.headers.get("content-type", "")
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        raise HTTPException(status_code=415, detail="application/json required")
+    content_encoding = request.headers.get("content-encoding")
+    if content_encoding is not None and content_encoding.strip().lower() != "identity":
+        raise HTTPException(status_code=415, detail="content encoding unsupported")
 
 
 async def _bounded_body(request: Request, *, maximum_bytes: int) -> bytes:

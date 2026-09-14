@@ -127,9 +127,7 @@ def _selection(report: ChatGPTExportInventoryV1) -> PilotSelectionProposalV1:
         inventory_archive_commitment=report.archive_commitment,
         destination_content_scope_id=_SCOPE,
         selected_conversations=(
-            PilotConversationSelectionV1.model_validate(
-                selected.model_dump(exclude={"selected"})
-            ),
+            PilotConversationSelectionV1.model_validate(selected.model_dump(exclude={"selected"})),
         ),
         selected_record_count=selected.message_count,
         selected_attachment_reference_count=selected.attachment_reference_count,
@@ -151,9 +149,7 @@ def test_exact_pilot_manifest_preserves_graph_and_excludes_unsupported_records(
     intake.mkdir()
     archive = intake / "export.zip"
     _write_export(archive)
-    inventory = inventory_chatgpt_export(
-        archive, intake_root=intake, fingerprint_key=b"f" * 32
-    )
+    inventory = inventory_chatgpt_export(archive, intake_root=intake, fingerprint_key=b"f" * 32)
 
     result = build_exact_pilot_manifests(
         archive,
@@ -200,16 +196,13 @@ def test_exact_pilot_manifest_preserves_graph_and_excludes_unsupported_records(
 
     requests = build_exact_archive_requests(result, fingerprint_key=b"f" * 32)
     assert len(requests) == 3
-    assert {request.source_conversation_id for request in requests} == {
-        "conversation-1"
-    }
-    assert all(
-        request.content_classification == "memory_import.protected"
-        for request in requests
-    )
+    assert {request.source_conversation_id for request in requests} == {"conversation-1"}
+    assert all(request.content_classification == "memory_import.protected" for request in requests)
     assert len({request.idempotency_key for request in requests}) == 3
-    owner_message = result.conversations[0].messages[0].model_copy(
-        update={"content": "changed after manifest review"}
+    owner_message = (
+        result.conversations[0]
+        .messages[0]
+        .model_copy(update={"content": "changed after manifest review"})
     )
     changed_build = LocalPilotBuildV1(
         bundle=result.bundle,
@@ -229,9 +222,7 @@ def test_exact_pilot_manifest_rejects_changed_archive_or_selection(tmp_path: Pat
     intake.mkdir()
     archive = intake / "export.zip"
     _write_export(archive)
-    inventory = inventory_chatgpt_export(
-        archive, intake_root=intake, fingerprint_key=b"f" * 32
-    )
+    inventory = inventory_chatgpt_export(archive, intake_root=intake, fingerprint_key=b"f" * 32)
     selection = _selection(inventory)
     changed_conversation = selection.selected_conversations[0].model_copy(
         update={"title": "changed after review"}
@@ -271,39 +262,39 @@ def test_manifest_cli_writes_only_plaintext_free_non_authorizing_bundle(
     selection = _selection(inventory)
     inventory_path.write_bytes(canonical_json_bytes(inventory) + b"\n")
     selection_path.write_bytes(
-        canonical_json_bytes(
-            {"proposal": selection, "proposal_digest": selection.digest}
-        )
-        + b"\n"
+        canonical_json_bytes({"proposal": selection, "proposal_digest": selection.digest}) + b"\n"
     )
 
-    assert main(
-        [
-            "manifest",
-            "--zip",
-            str(archive),
-            "--intake-root",
-            str(intake),
-            "--fingerprint-key-file",
-            str(key),
-            "--inventory",
-            str(inventory_path),
-            "--selection",
-            str(selection_path),
-            "--output",
-            str(output),
-            "--campaign-id",
-            str(_CAMPAIGN),
-            "--extractor-version",
-            "extractor-v1",
-            "--prompt-version",
-            "prompt-v1",
-            "--provider-policy-id",
-            "private-v1",
-            "--model-route",
-            "none",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "manifest",
+                "--zip",
+                str(archive),
+                "--intake-root",
+                str(intake),
+                "--fingerprint-key-file",
+                str(key),
+                "--inventory",
+                str(inventory_path),
+                "--selection",
+                str(selection_path),
+                "--output",
+                str(output),
+                "--campaign-id",
+                str(_CAMPAIGN),
+                "--extractor-version",
+                "extractor-v1",
+                "--prompt-version",
+                "prompt-v1",
+                "--provider-policy-id",
+                "private-v1",
+                "--model-route",
+                "none",
+            ]
+        )
+        == 0
+    )
     serialized = output.read_text(encoding="utf-8")
     document = json.loads(serialized)
     assert document["bundle_digest"]
@@ -337,38 +328,36 @@ def test_selection_revision_preserves_scope_and_records_without_authorizing(
     intake.mkdir()
     archive = intake / "export.zip"
     _write_export(archive)
-    inventory = inventory_chatgpt_export(
-        archive, intake_root=intake, fingerprint_key=b"f" * 32
-    )
+    inventory = inventory_chatgpt_export(archive, intake_root=intake, fingerprint_key=b"f" * 32)
     selection = _selection(inventory)
     source = intake / "pilot-selection.v1.json"
     output = intake / "pilot-selection.v2.json"
     source.write_bytes(
-        canonical_json_bytes(
-            {"proposal": selection, "proposal_digest": selection.digest}
-        )
-        + b"\n"
+        canonical_json_bytes({"proposal": selection, "proposal_digest": selection.digest}) + b"\n"
     )
 
-    assert main(
-        [
-            "revise-selection",
-            "--intake-root",
-            str(intake),
-            "--selection",
-            str(source),
-            "--expected-selection-digest",
-            selection.digest,
-            "--max-request-input-tokens",
-            "76000",
-            "--max-request-output-tokens",
-            "4000",
-            "--max-request-total-tokens",
-            "80000",
-            "--output",
-            str(output),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "revise-selection",
+                "--intake-root",
+                str(intake),
+                "--selection",
+                str(source),
+                "--expected-selection-digest",
+                selection.digest,
+                "--max-request-input-tokens",
+                "76000",
+                "--max-request-output-tokens",
+                "4000",
+                "--max-request-total-tokens",
+                "80000",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
     document = json.loads(output.read_bytes())
     revised = PilotSelectionProposalV1.model_validate(document["proposal"])
     assert document["proposal_digest"] == revised.digest
@@ -404,8 +393,7 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     selection = _selection(inventory)
     inventory_path.write_bytes(canonical_json_bytes(inventory) + b"\n")
     selection_path.write_bytes(
-        canonical_json_bytes({"proposal": selection, "proposal_digest": selection.digest})
-        + b"\n"
+        canonical_json_bytes({"proposal": selection, "proposal_digest": selection.digest}) + b"\n"
     )
     manifest_args = [
         "manifest",
@@ -484,6 +472,7 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
     report = json.loads(preflight_path.read_bytes())
     assert report["ready_for_execution"] is True
     assert report["network_calls"] == 0
+    assert report["maximum_archive_plaintext_bytes"] == len(b"private canary")
     assert report["bundle_digest"] == digest
     assert "private canary" not in preflight_path.read_text(encoding="utf-8")
     assert "execution performed: no" in capsys.readouterr().out
@@ -503,10 +492,12 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
             return type(
                 "Result",
                 (),
-                {"scalar_one": lambda self: {
-                    "owner_approval_ref": str(approval_ref),
-                    "replayed": False,
-                }},
+                {
+                    "scalar_one": lambda self: {
+                        "owner_approval_ref": str(approval_ref),
+                        "replayed": False,
+                    }
+                },
             )()
 
     class RegistrationSessions:
@@ -614,21 +605,24 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
         lambda _url: TransportRegistrationSessions(),
     )
     transport_receipt_path = intake / "transport-registration-receipt.v1.json"
-    assert main(
-        [
-            "transport-register",
-            "--intake-root",
-            str(intake),
-            "--registration",
-            str(transport_plan_path),
-            "--expected-bundle-digest",
-            digest,
-            "--confirmation",
-            f"REGISTER PRIVATE LUCY TRANSPORT {digest}",
-            "--output",
-            str(transport_receipt_path),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "transport-register",
+                "--intake-root",
+                str(intake),
+                "--registration",
+                str(transport_plan_path),
+                "--expected-bundle-digest",
+                digest,
+                "--confirmation",
+                f"REGISTER PRIVATE LUCY TRANSPORT {digest}",
+                "--output",
+                str(transport_receipt_path),
+            ]
+        )
+        == 0
+    )
     transport_receipt = json.loads(transport_receipt_path.read_bytes())
     assert transport_receipt["batch_count"] == len(transport_plan["batches"])
     assert transport_receipt["provider_calls"] == 0
@@ -656,43 +650,46 @@ def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(
             )
 
     monkeypatch.setattr(memory_import_cli, "SequentialMemoryPilotUploader", SyntheticUploader)
-    assert main(
-        [
-            "transport-upload",
-            "--zip",
-            str(archive),
-            "--intake-root",
-            str(intake),
-            "--fingerprint-key-file",
-            str(key),
-            "--transfer-key-file",
-            str(transfer_key),
-            "--capability-token-file",
-            str(capability_token),
-            "--inventory",
-            str(inventory_path),
-            "--selection",
-            str(selection_path),
-            "--authorization",
-            str(authorization_path),
-            "--registration",
-            str(transport_plan_path),
-            "--expected-bundle-digest",
-            digest,
-            "--maximum-microusd-per-attempt",
-            "0",
-            "--timeout-seconds",
-            "30",
-            "--endpoint",
-            "https://private-lucy.example",
-            "--review-directory",
-            str(review_directory),
-            "--confirmation",
-            f"UPLOAD PRIVATE LUCY PILOT {digest}",
-            "--output",
-            str(upload_receipt_path),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "transport-upload",
+                "--zip",
+                str(archive),
+                "--intake-root",
+                str(intake),
+                "--fingerprint-key-file",
+                str(key),
+                "--transfer-key-file",
+                str(transfer_key),
+                "--capability-token-file",
+                str(capability_token),
+                "--inventory",
+                str(inventory_path),
+                "--selection",
+                str(selection_path),
+                "--authorization",
+                str(authorization_path),
+                "--registration",
+                str(transport_plan_path),
+                "--expected-bundle-digest",
+                digest,
+                "--maximum-microusd-per-attempt",
+                "0",
+                "--timeout-seconds",
+                "30",
+                "--endpoint",
+                "https://private-lucy.example",
+                "--review-directory",
+                str(review_directory),
+                "--confirmation",
+                f"UPLOAD PRIVATE LUCY PILOT {digest}",
+                "--output",
+                str(upload_receipt_path),
+            ]
+        )
+        == 0
+    )
     assert len(uploaded) == 1
     upload_receipt = json.loads(upload_receipt_path.read_bytes())
     assert upload_receipt["candidate_count"] == 1

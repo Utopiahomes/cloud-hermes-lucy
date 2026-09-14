@@ -6,7 +6,8 @@ import base64
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,8 +47,17 @@ class SequentialMemoryPilotUploader:
         maximum_response_bytes: int = 10_000_000,
     ) -> None:
         normalized = endpoint.rstrip("/")
-        if not normalized.startswith("https://"):
-            raise ValueError("pilot upload endpoint must use HTTPS")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in ("", "/")
+        ):
+            raise ValueError("pilot upload endpoint must be an HTTPS origin")
         if not 1 <= maximum_response_bytes <= 10_000_000:
             raise ValueError("pilot response ceiling is invalid")
         self._endpoint = normalized
@@ -122,9 +132,7 @@ def _write_or_verify_exact(path: Path, value: object) -> None:
             stream.write(payload)
     except FileExistsError as exc:
         if path.read_bytes() != payload:
-            raise PilotUploadUnavailable(
-                "existing review artifact conflicts with replay"
-            ) from exc
+            raise PilotUploadUnavailable("existing review artifact conflicts with replay") from exc
 
 
 def _https_post(url: str, body: bytes, authorization: str, timeout_seconds: int) -> bytes:
@@ -140,7 +148,13 @@ def _https_post(url: str, body: bytes, authorization: str, timeout_seconds: int)
         },
     )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+        opener = build_opener(HTTPSHandler(), _RejectRedirects())
+        with opener.open(request, timeout=timeout_seconds) as response:  # noqa: S310
             return bytes(response.read(10_000_001))
     except (HTTPError, URLError, TimeoutError) as exc:
         raise PilotUploadUnavailable("pilot HTTPS request failed") from exc
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None

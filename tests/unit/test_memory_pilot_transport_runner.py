@@ -125,14 +125,19 @@ def _prepared():
         expires_at=NOW + timedelta(minutes=30),
         now=NOW,
     )
-    return prepared, manifest, build
+    return prepared, manifest, build, authorization
 
 
 class Dependencies:
     def __init__(
-        self, manifest: ImportManifestV2, *, fail_second_archive_once: bool = False
+        self,
+        manifest: ImportManifestV2,
+        authorization: AuthorizedPilotManifestV1,
+        *,
+        fail_second_archive_once: bool = False,
     ) -> None:
         self.manifest = manifest
+        self.authorization = authorization
         self.events: list[str] = []
         self.archived: set[str] = set()
         self.reserved = False
@@ -148,6 +153,7 @@ class Dependencies:
             receipt=MemoryPilotTransportAdmissionReceiptV1(
                 batch_id=batch.batch_id, admitted_at=NOW, replayed=True
             ),
+            authorization=self.authorization,
             manifest=self.manifest,
             batch=batch,
         )
@@ -243,10 +249,10 @@ class Dependencies:
 
 
 def test_verified_transport_executes_and_replays_without_second_provider_call() -> None:
-    prepared, exact_manifest, _build = _prepared()
+    prepared, exact_manifest, _build, authorization = _prepared()
     batch = prepared.batches[0]
     manifest = prepared.registration
-    dependencies = Dependencies(exact_manifest)
+    dependencies = Dependencies(exact_manifest, authorization)
     executor = VerifiedMemoryPilotBatchExecutor(
         admission=dependencies,
         archive=dependencies,
@@ -274,9 +280,11 @@ def test_verified_transport_executes_and_replays_without_second_provider_call() 
 
 
 def test_partial_archive_retry_reuses_first_record_and_calls_provider_once() -> None:
-    prepared, manifest, _build = _prepared()
+    prepared, manifest, _build, authorization = _prepared()
     batch = prepared.batches[0]
-    dependencies = Dependencies(manifest, fail_second_archive_once=True)
+    dependencies = Dependencies(
+        manifest, authorization, fail_second_archive_once=True
+    )
     executor = VerifiedMemoryPilotBatchExecutor(
         admission=dependencies,
         archive=dependencies,
@@ -299,7 +307,7 @@ def test_partial_archive_retry_reuses_first_record_and_calls_provider_once() -> 
 
 
 def test_transport_archive_requests_equal_verified_local_requests() -> None:
-    prepared, manifest, build = _prepared()
+    prepared, manifest, build, _authorization = _prepared()
     local = {
         request.source_turn_id: request
         for request in build_exact_archive_requests(build, fingerprint_key=b"f" * 32)
@@ -315,7 +323,7 @@ def test_transport_archive_requests_equal_verified_local_requests() -> None:
 
 
 def test_materializer_rejects_quote_from_another_batch() -> None:
-    prepared, manifest, _build = _prepared()
+    prepared, manifest, _build, _authorization = _prepared()
     batch = prepared.batches[0]
     other_source = manifest.records[-1].source_record_id
     with pytest.raises(ValueError, match="outside the exact archived manifest"):

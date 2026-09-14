@@ -22,6 +22,7 @@ from lucy.chatgpt_manifest import (
     AuthorizedPilotManifestV1,
     PilotManifestBundleArtifactV1,
     authorize_pilot_manifest,
+    build_exact_archive_requests,
     build_exact_pilot_manifests,
 )
 from lucy.contracts.canonical import canonical_json_bytes
@@ -49,6 +50,7 @@ class PilotExecutionPreflightV1(BaseModel):
     excluded_record_count: int = Field(ge=0)
     maximum_model_spend_microusd: int = Field(ge=0)
     maximum_attempts: int = Field(ge=1)
+    maximum_archive_plaintext_bytes: int = Field(ge=1)
     expires_at: datetime
     checked_at: datetime
     network_calls: int = 0
@@ -234,9 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         selection_document = json.loads(selection_path.read_bytes())
         if not isinstance(selection_document, dict):
             raise ValueError("pilot selection document is invalid")
-        selection = PilotSelectionProposalV1.model_validate(
-            selection_document.get("proposal")
-        )
+        selection = PilotSelectionProposalV1.model_validate(selection_document.get("proposal"))
         if (
             selection_document.get("proposal_digest") != selection.digest
             or args.expected_selection_digest != selection.digest
@@ -266,12 +266,8 @@ def main(argv: list[str] | None = None) -> int:
             repository_roots=(repository,),
             synchronization_roots=sync_roots,
         )
-        artifact = PilotManifestBundleArtifactV1.model_validate_json(
-            manifest_path.read_bytes()
-        )
-        expected_confirmation = (
-            f"AUTHORIZE PRIVATE LUCY PILOT {args.expected_bundle_digest}"
-        )
+        artifact = PilotManifestBundleArtifactV1.model_validate_json(manifest_path.read_bytes())
+        expected_confirmation = f"AUTHORIZE PRIVATE LUCY PILOT {args.expected_bundle_digest}"
         if args.confirmation != expected_confirmation:
             raise PermissionError("pilot authorization confirmation is not exact")
         authorization = authorize_pilot_manifest(
@@ -307,14 +303,13 @@ def main(argv: list[str] | None = None) -> int:
         preflight_report = PilotExecutionPreflightV1.model_validate_json(
             preflight_path.read_bytes()
         )
-        expected_confirmation = (
-            f"REGISTER PRIVATE LUCY PILOT {args.expected_bundle_digest}"
-        )
+        expected_confirmation = f"REGISTER PRIVATE LUCY PILOT {args.expected_bundle_digest}"
         now = datetime.now(UTC)
         if args.confirmation != expected_confirmation:
             raise PermissionError("pilot registration confirmation is not exact")
         if not (
-            args.expected_bundle_digest == authorization.bundle_digest
+            args.expected_bundle_digest
+            == authorization.bundle_digest
             == preflight_report.bundle_digest
             and preflight_report.ready_for_execution
             and preflight_report.network_calls == 0
@@ -338,9 +333,7 @@ def main(argv: list[str] | None = None) -> int:
                     "SELECT lucy.register_memory_import_pilot_authorization_v1("
                     "CAST(:authorization AS jsonb))"
                 ),
-                {
-                    "authorization": canonical_json_bytes(authorization).decode("utf-8")
-                },
+                {"authorization": canonical_json_bytes(authorization).decode("utf-8")},
             ).scalar_one()
         if registered.get("owner_approval_ref") != str(authorization.owner_approval_ref):
             raise RuntimeError("pilot registration acknowledgement changed owner approval")
@@ -370,9 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         registration = MemoryPilotTransportRegistrationV1.model_validate_json(
             registration_path.read_bytes()
         )
-        expected_confirmation = (
-            f"REGISTER PRIVATE LUCY TRANSPORT {args.expected_bundle_digest}"
-        )
+        expected_confirmation = f"REGISTER PRIVATE LUCY TRANSPORT {args.expected_bundle_digest}"
         now = datetime.now(UTC)
         if args.confirmation != expected_confirmation:
             raise PermissionError("pilot transport registration confirmation is not exact")
@@ -388,8 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         with sessions.begin() as session:
             registered = session.execute(
                 text(
-                    "SELECT lucy.register_memory_pilot_transport_v1("
-                    "CAST(:registration AS jsonb))"
+                    "SELECT lucy.register_memory_pilot_transport_v1(CAST(:registration AS jsonb))"
                 ),
                 {"registration": canonical_json_bytes(registration).decode("utf-8")},
             ).scalar_one()
@@ -533,9 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         registration = MemoryPilotTransportRegistrationV1.model_validate_json(
             registration_path.read_bytes()
         )
-        expected_confirmation = (
-            f"UPLOAD PRIVATE LUCY PILOT {args.expected_bundle_digest}"
-        )
+        expected_confirmation = f"UPLOAD PRIVATE LUCY PILOT {args.expected_bundle_digest}"
         if args.confirmation != expected_confirmation:
             raise PermissionError("pilot transport upload confirmation is not exact")
         transfer_key_path = verified_intake_path(
@@ -586,6 +574,7 @@ def main(argv: list[str] | None = None) -> int:
             now=checked_at,
         )
         manifest = built.bundle.manifest
+        archive_requests = build_exact_archive_requests(built, fingerprint_key=key)
         preflight_report = PilotExecutionPreflightV1(
             campaign_id=built.bundle.campaign_id,
             destination_content_scope_id=built.bundle.destination_content_scope_id,
@@ -595,6 +584,9 @@ def main(argv: list[str] | None = None) -> int:
             excluded_record_count=built.bundle.excluded_record_count,
             maximum_model_spend_microusd=manifest.max_model_spend_microusd,
             maximum_attempts=manifest.max_attempts,
+            maximum_archive_plaintext_bytes=max(
+                len(request.plaintext) for request in archive_requests
+            ),
             expires_at=manifest.expires_at,
             checked_at=checked_at,
         )

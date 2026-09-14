@@ -1,0 +1,88 @@
+# Review-only commissioning shape for Raymond's temporary private-memory pilot.
+# It does not provision or deploy anything. The existing private routine service
+# temporarily runs the executor command; the new public web service is a
+# database-free, credential-minimal proxy. Both remain disabled by default.
+
+services:
+  - type: pserv
+    name: lucy-raymond-routine
+    runtime: docker
+    branch: codex/r1-tenant-foundation
+    autoDeployTrigger: "off"
+    dockerCommand: python -m lucy.memory_pilot_executor_runtime
+    healthCheckPath: /health
+    envVars:
+      - {key: LUCY_ENVIRONMENT, value: production}
+      - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+      - {key: LUCY_SERVICE_MODE, value: routine}
+      - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+      - {key: LUCY_PRODUCT_INGRESS_ENABLED, value: "false"}
+      - {key: LUCY_MEMORY_PILOT_EXECUTOR_ENABLED, value: "false"}
+      - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_raymond_routine}
+      - {key: LUCY_STORAGE_EPOCH, sync: false}
+      - {key: LUCY_DATABASE_URL, sync: false}
+      - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+      - {key: LUCY_MEMORY_PILOT_TRANSFER_KEY_B64, sync: false}
+      - {key: LUCY_MEMORY_PILOT_GATEWAY_TOKEN, sync: false}
+      - {key: LUCY_MEMORY_IMPORT_ARCHIVE_REQUEST_KEY_B64, sync: false}
+      - {key: LUCY_ARCHIVE_BACKEND, value: aws-kms-dynamodb-v13}
+      - {key: LUCY_ARCHIVE_RECORD_VERSION, value: "1"}
+      - {key: LUCY_ARCHIVE_COMMITMENT_KEY_B64, sync: false}
+      - {key: LUCY_AWS_ACCOUNT_ID, value: "429870640638"}
+      - {key: AWS_REGION, value: us-east-1}
+      - {key: AWS_ROLE_ARN, sync: false}
+      - {key: LUCY_AWS_EVIDENCE_KEY_ARN, sync: false}
+      - {key: LUCY_AWS_WRAPPED_KEY_TABLE, sync: false}
+      - {key: LUCY_V13_TARGET_SCOPE_JSON, sync: false}
+      - {key: LUCY_MEMORY_OUTCOME_COMMITMENT_KEY_B64, sync: false}
+      - {key: LUCY_AWS_OUTCOME_KEY_ARN, sync: false}
+      - {key: LUCY_AWS_OUTCOME_KEY_TABLE, sync: false}
+      - {key: LUCY_OUTCOME_REGISTRY_ID, sync: false}
+      - {key: LUCY_OUTCOME_REGISTRY_EPOCH, value: "1"}
+      - {key: LUCY_OUTCOME_KEY_EPOCH, value: "1"}
+      - {key: LUCY_OUTCOME_RECORD_VERSION, value: "1"}
+      - {key: LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN, sync: false}
+      - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+      - key: LUCY_POLICY_HOSTPORT
+        fromService: {type: pserv, name: lucy-raymond-policy, property: hostport}
+      - {key: OPENROUTER_API_KEY, sync: false}
+      - {key: LUCY_MEMORY_PROVIDER_REFERENCE_KEY_B64, sync: false}
+      - {key: LUCY_MEMORY_PROVIDER_POLICY_ID, sync: false}
+      - {key: LUCY_MEMORY_MODEL_ROUTE, sync: false}
+      - {key: LUCY_MEMORY_EXTRACTOR_VERSION, sync: false}
+      - {key: LUCY_MEMORY_PROMPT_VERSION, sync: false}
+      - {key: LUCY_MEMORY_MAX_OUTPUT_TOKENS, sync: false}
+      - {key: LUCY_MEMORY_MAX_RESPONSE_BYTES, value: "1000000"}
+
+  - type: web
+    name: lucy-raymond-memory-pilot-intake
+    runtime: docker
+    repo: https://github.com/Utopiahomes/cloud-hermes-lucy
+    branch: codex/r1-tenant-foundation
+    region: virginia
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m lucy.memory_pilot_proxy_runtime
+    healthCheckPath: /health
+    envVars:
+      - {key: LUCY_ENVIRONMENT, value: production}
+      - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+      - {key: LUCY_SERVICE_MODE, value: memory-pilot-intake}
+      - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+      - {key: LUCY_PRODUCT_INGRESS_ENABLED, value: "false"}
+      - {key: LUCY_MEMORY_PILOT_INTAKE_ENABLED, value: "false"}
+      - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+      - key: LUCY_MEMORY_PILOT_EXECUTOR_HOSTPORT
+        fromService: {type: pserv, name: lucy-raymond-routine, property: hostport}
+      - {key: LUCY_MEMORY_PILOT_GATEWAY_TOKEN, sync: false}
+
+# Commissioning order:
+# 1. migrate the quarantined Raymond database through 0072;
+# 2. deploy both services with enable flags false;
+# 3. enable the private executor and prove synthetic replay;
+# 4. enable the public proxy and prove wrong-token/redirect/logging failures;
+# 5. register and upload only the exact owner-authorized pilot;
+# 6. disable/delete the proxy and restore the routine service command.

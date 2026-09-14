@@ -11,6 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lucy.chatgpt_manifest import AuthorizedPilotManifestV1
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_candidate_extraction import (
     MemoryExtractionOutputV1,
@@ -132,7 +133,12 @@ class VerifiedMemoryPilotBatchExecutor:
         candidate_store: MemoryCandidateBatchStore,
         now: Callable[[], datetime],
         outcome_recovery: MemoryExtractionOutcomeRecovery | None = None,
+        outcome_recovery_factory: (
+            Callable[[AuthorizedPilotManifestV1], MemoryExtractionOutcomeRecovery] | None
+        ) = None,
     ) -> None:
+        if outcome_recovery is not None and outcome_recovery_factory is not None:
+            raise ValueError("configure one memory outcome recovery boundary")
         self._admission = admission
         self._archive = archive
         self._accounting = accounting
@@ -142,6 +148,7 @@ class VerifiedMemoryPilotBatchExecutor:
         self._candidate_store = candidate_store
         self._now = now
         self._outcome_recovery = outcome_recovery
+        self._outcome_recovery_factory = outcome_recovery_factory
 
     def execute(
         self, batch: MemoryPilotTransportBatchV1, *, capability_token: bytes
@@ -149,6 +156,9 @@ class VerifiedMemoryPilotBatchExecutor:
         context = self._admission.admit_for_execution(
             batch, capability_token=capability_token
         )
+        outcome_recovery = self._outcome_recovery
+        if self._outcome_recovery_factory is not None:
+            outcome_recovery = self._outcome_recovery_factory(context.authorization)
         manifest = context.manifest
         records = {item.source_record_id: item for item in manifest.records}
         evidence: dict[str, UUID] = {}
@@ -178,7 +188,7 @@ class VerifiedMemoryPilotBatchExecutor:
             self._provider,
             self._outcomes,
             completion,
-            outcome_recovery=self._outcome_recovery,
+            outcome_recovery=outcome_recovery,
             now=self._now,
         ).execute(manifest=manifest, dispatch=batch.dispatch)
         return MemoryPilotTransportExecutionResult(

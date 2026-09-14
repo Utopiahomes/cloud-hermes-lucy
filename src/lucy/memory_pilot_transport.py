@@ -157,6 +157,7 @@ class MemoryPilotTransportAdmissionViewV1(BaseModel):
     manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     transfer_key_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
     expires_at: datetime
+    authorization: AuthorizedPilotManifestV1
     manifest: ImportManifestV2
     batch: MemoryPilotTransportBatchCommitmentV1
 
@@ -180,6 +181,7 @@ class AdmittedMemoryPilotTransportBatch:
     """Sensitive in-process context; never serialize this as a status response."""
 
     receipt: MemoryPilotTransportAdmissionReceiptV1
+    authorization: AuthorizedPilotManifestV1
     manifest: ImportManifestV2
     batch: MemoryPilotTransportBatchV1
 
@@ -227,6 +229,10 @@ class PostgresMemoryPilotTransportAdmission:
                 or expected.bundle_digest != batch.bundle_digest
                 or expected.manifest_digest != batch.manifest_digest
                 or expected.manifest.digest != expected.manifest_digest
+                or expected.authorization.owner_approval_ref
+                != expected.owner_approval_ref
+                or expected.authorization.bundle_digest != expected.bundle_digest
+                or expected.authorization.bundle.manifest != expected.manifest
                 or not hmac.compare_digest(
                     expected.transfer_key_commitment,
                     transfer_key_commitment(self._transfer_key),
@@ -267,6 +273,7 @@ class PostgresMemoryPilotTransportAdmission:
             ) from exc
         return AdmittedMemoryPilotTransportBatch(
             receipt=MemoryPilotTransportAdmissionReceiptV1.model_validate(admitted),
+            authorization=expected.authorization,
             manifest=expected.manifest,
             batch=batch,
         )

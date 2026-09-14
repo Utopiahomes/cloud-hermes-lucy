@@ -341,6 +341,7 @@ def test_admission_sends_only_content_free_values_to_postgres() -> None:
         "manifest_digest": registration.manifest_digest,
         "transfer_key_commitment": registration.transfer_key_commitment,
         "expires_at": registration.expires_at.isoformat(),
+        "authorization": authorization.model_dump(mode="json"),
         "manifest": authorization.bundle.manifest.model_dump(mode="json"),
         "batch": registration.batches[0].model_dump(mode="json"),
     }
@@ -385,6 +386,7 @@ def test_admission_rejects_wrong_runtime_transfer_key_before_claim() -> None:
         "manifest_digest": registration.manifest_digest,
         "transfer_key_commitment": registration.transfer_key_commitment,
         "expires_at": registration.expires_at.isoformat(),
+        "authorization": authorization.model_dump(mode="json"),
         "manifest": authorization.bundle.manifest.model_dump(mode="json"),
         "batch": registration.batches[0].model_dump(mode="json"),
     }
@@ -424,6 +426,7 @@ def test_admission_rejects_cross_campaign_payload_before_claim() -> None:
         "manifest_digest": registration.manifest_digest,
         "transfer_key_commitment": registration.transfer_key_commitment,
         "expires_at": registration.expires_at.isoformat(),
+        "authorization": authorization.model_dump(mode="json"),
         "manifest": authorization.bundle.manifest.model_dump(mode="json"),
         "batch": registration.batches[0].model_dump(mode="json"),
     }

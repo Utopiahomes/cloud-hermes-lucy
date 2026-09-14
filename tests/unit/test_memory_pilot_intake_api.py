@@ -5,6 +5,7 @@ import base64
 from fastapi.testclient import TestClient
 from test_memory_pilot_transport import NOW, _authorization
 
+from lucy.contracts.canonical import canonical_json_bytes
 from lucy.memory_pilot_intake_api import (
     MemoryPilotIntakeConfigurationV1,
     create_memory_pilot_execution_app,
@@ -12,6 +13,7 @@ from lucy.memory_pilot_intake_api import (
 )
 from lucy.memory_pilot_transport import (
     MemoryPilotTransportAdmissionReceiptV1,
+    MemoryPilotTransportBatchV1,
     prepare_memory_pilot_transport,
 )
 from lucy.memory_pilot_transport_runner import (
@@ -69,21 +71,22 @@ def _request() -> tuple[str, dict[str, object]]:
     return str(batch.batch_id), batch.model_dump(mode="json")
 
 
+def _post(client: TestClient, path: str, body: dict[str, object], token: str):
+    batch = MemoryPilotTransportBatchV1.model_validate(body)
+    return client.post(
+        path,
+        content=canonical_json_bytes(batch),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+
+
 def test_exact_batch_admits_synchronously_and_replays() -> None:
     admission = _Admission()
     client = TestClient(create_memory_pilot_intake_app(admission))  # type: ignore[arg-type]
     batch_id, body = _request()
     token = base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
-    first = client.post(
-        f"/v1/private-memory/pilot/batches/{batch_id}",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    replay = client.post(
-        f"/v1/private-memory/pilot/batches/{batch_id}",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    first = _post(client, f"/v1/private-memory/pilot/batches/{batch_id}", body, token)
+    replay = _post(client, f"/v1/private-memory/pilot/batches/{batch_id}", body, token)
     assert first.status_code == 200 and first.json()["replayed"] is False
     assert replay.status_code == 200 and replay.json()["replayed"] is True
 
@@ -95,22 +98,19 @@ def test_missing_capability_wrong_path_and_oversized_body_fail_closed() -> None:
     token = base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
     assert client.post(f"/v1/private-memory/pilot/batches/{batch_id}", json=body).status_code == 401
     wrong = "00000000-0000-4000-8000-000000000001"
-    assert client.post(
-        f"/v1/private-memory/pilot/batches/{wrong}",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-    ).status_code == 403
+    assert (
+        _post(client, f"/v1/private-memory/pilot/batches/{wrong}", body, token).status_code == 403
+    )
     limited = TestClient(
         create_memory_pilot_intake_app(
             admission,  # type: ignore[arg-type]
             configuration=MemoryPilotIntakeConfigurationV1(maximum_request_bytes=200),
         )
     )
-    assert limited.post(
-        f"/v1/private-memory/pilot/batches/{batch_id}",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-    ).status_code == 413
+    assert (
+        _post(limited, f"/v1/private-memory/pilot/batches/{batch_id}", body, token).status_code
+        == 413
+    )
     assert admission.calls == 0
 
 
@@ -118,14 +118,74 @@ def test_execution_intake_returns_no_store_content_free_status() -> None:
     client = TestClient(create_memory_pilot_execution_app(_Executor()))  # type: ignore[arg-type]
     batch_id, body = _request()
     token = base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
-    response = client.post(
-        f"/v1/private-memory/pilot/batches/{batch_id}",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    response = _post(client, f"/v1/private-memory/pilot/batches/{batch_id}", body, token)
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert response.json()["receipt"]["state"] == "succeeded"
     assert response.json()["review_artifact"] is None
     assert "private synthetic history" not in response.text
+
+
+def test_wire_body_headers_and_errors_are_fail_closed_and_no_store() -> None:
+    admission = _Admission()
+    client = TestClient(create_memory_pilot_intake_app(admission))  # type: ignore[arg-type]
+    batch_id, body = _request()
+    token = base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    noncanonical = client.post(
+        f"/v1/private-memory/pilot/batches/{batch_id}", json=body, headers=headers
+    )
+    compressed = client.post(
+        f"/v1/private-memory/pilot/batches/{batch_id}",
+        content=canonical_json_bytes(MemoryPilotTransportBatchV1.model_validate(body)),
+        headers={**headers, "Content-Encoding": "gzip"},
+    )
+    wrong_type = client.post(
+        f"/v1/private-memory/pilot/batches/{batch_id}",
+        content=canonical_json_bytes(MemoryPilotTransportBatchV1.model_validate(body)),
+        headers={**headers, "Content-Type": "text/plain"},
+    )
+
+    assert noncanonical.status_code == 403
+    assert compressed.status_code == 415
+    assert wrong_type.status_code == 415
+    assert all(
+        response.headers["cache-control"] == "no-store"
+        for response in (noncanonical, compressed, wrong_type)
+    )
+    assert client.get("/health").json() == {"status": "ok"}
+    assert admission.calls == 0
+
+
+def test_private_executor_requires_gateway_and_separate_campaign_capability() -> None:
+    client = TestClient(
+        create_memory_pilot_execution_app(
+            _Executor(),  # type: ignore[arg-type]
+            configuration=MemoryPilotIntakeConfigurationV1(
+                gateway_bearer_token="g" * 32
+            ),
+        )
+    )
+    batch_id, body = _request()
+    batch = MemoryPilotTransportBatchV1.model_validate(body)
+    capability = "Bearer " + base64.urlsafe_b64encode(b"c" * 32).decode().rstrip("=")
+    path = f"/v1/private-memory/pilot/batches/{batch_id}"
+    headers = {"Content-Type": "application/json"}
+
+    assert client.post(
+        path,
+        content=canonical_json_bytes(batch),
+        headers={**headers, "Authorization": capability},
+    ).status_code == 401
+    accepted = client.post(
+        path,
+        content=canonical_json_bytes(batch),
+        headers={
+            **headers,
+            "Authorization": "Bearer " + "g" * 32,
+            "X-Lucy-Pilot-Capability": capability,
+        },
+    )
+    assert accepted.status_code == 200

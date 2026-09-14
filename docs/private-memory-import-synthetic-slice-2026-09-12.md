@@ -3,7 +3,7 @@
 Date: 2026-09-12
 Branch: `codex/r1-tenant-foundation`
 Starting revision: `207d3af6c782747e104fa24f2b72a2a2c4eea8ff`
-Status: local synthetic slice implemented and passing; not deployed
+Status: exact personal pilot authorized; protected cloud intake commissioning in progress
 Current private-memory revisions: `d747509` (schema/import foundation), `d973d41`
 (bounded extraction coordinator), `204c38c` (isolated provider adapter), and `a655292`
 (atomic completion fence), plus the pilot-completion, executable-budget, immutable-request,
@@ -279,6 +279,24 @@ accepted `0057` migration is merged at `2807dad`.
     remain fail-closed. Raymond still requires a separate protected Render environment/database,
     eight private workload identities, and both per-realm AWS stacks before transport registration
     or upload.
+43. A protected recheck rebuilt every exact archive request from the untouched local export. The
+    largest actual archive plaintext is 39,410 bytes, below the unchanged 65,536-byte archive
+    ceiling. The earlier 67,844-byte observation measured a broader manifest-layer record and does
+    not require widening the encryption contract, splitting a message, or changing the owner's
+    exact authorization. The recheck made zero network calls.
+44. The public pilot surface is now a database-free proxy with a fixed private Render destination.
+    It rejects redirects, compression, non-canonical JSON, changed response identity, database/AWS/
+    provider credentials, and product or transcript ingress. A separate gateway credential protects
+    the proxy-to-executor hop while the original random campaign capability remains end-to-end.
+45. The private routine/archive service has a temporary pilot-only executor runtime. It composes the
+    existing realm archive, cumulative PostgreSQL budget, strict OpenRouter ZDR provider, write-only
+    encrypted outcome journal, policy-issued exact-job recovery, and protected candidate staging.
+    It cannot start with Telegram credentials, transcript capture, product ingress, an unpinned
+    Hermes revision, or the wrong realm database identity.
+46. Migration `0072` returns the already-registered, plaintext-free exact owner authorization only
+    through the same capability-scoped, realm-bound transport admission operation. That lets the
+    executor recover an ambiguous provider outcome for the admitted campaign without storing the
+    large authorization artifact in Render configuration or granting table enumeration.
 
 ## Verification ledger
 
@@ -314,8 +332,9 @@ accepted `0057` migration is merged at `2807dad`.
 | Exact CLI upload reconstruction | Passed, focused end-to-end local CLI check plus Ruff and strict mypy | Untouched-ZIP rebuild; exact registered-plan equality; digest-specific confirmation; protected review directory; content-free receipt; injected HTTPS boundary | Import CLI, manifest builder, transport preparation/registration, uploader, or intake-root policy change |
 | Complete synthetic transport execution and replay | Passed, 55 focused checks on PostgreSQL through `0071`, plus Ruff and strict mypy | Exact transport admission; encrypted archive and provider-outcome persistence; provenance-linked pending candidate; one settlement; exact replay with one archive data-key generation and one synthetic provider dispatch; settled-reservation new-job denial retained by migration ordering | Migration `0071`, executor, coordinator, archive/outcome adapters, candidate materialization, transport authority, or PostgreSQL image change |
 | Raymond private-realm identity preparation | Passed, 3 focused contract/generator checks plus Ruff and strict mypy | Stable `planned_not_authorized` scope; 22 internally distinct UUIDs; zero UUID overlap with Utopia; exact service issuer and login namespace; overwrite refusal | Realm identity-plan contract/generator, Utopia binding, or planned Raymond identity artifact change |
-| Real-export pilot feasibility | Passed locally with one required proposal revision, 34 focused checks plus Ruff and strict mypy | Exact 11-conversation selection validation; campaign/per-request separation; 67,844-byte record admission to the manifest layer; no-fallback ZDR request; one credential-like record quarantined locally; corrected JSON-object request framing compiled to 13 exact batches at 76,000/4,000/80,000 with $1.30 reserved under the $2 cap; personal-data network calls: 0 | Selection, request limits, manifest/record contract, local quarantine, compiler, provider request, or model policy change |
-| Current-head realm bootstrap and recovery compatibility | Passed, 57 focused tests plus Ruff and strict mypy | New isolated realms advance to `0071`; ordinary and recovery startup accept that exact reviewed milestone; unknown revisions remain outside the allowlist | Migration head, readiness policy, realm bootstrap/commissioning, or recovery API change |
+| Real-export pilot feasibility | Passed locally with one required proposal revision, 34 focused checks plus exact protected archive preflight | Exact 11-conversation selection validation; campaign/per-request separation; largest actual archive plaintext 39,410 bytes under the unchanged 65,536-byte ceiling; no-fallback ZDR request; one credential-like record quarantined locally; corrected JSON-object request framing compiled to 13 exact batches at 76,000/4,000/80,000 with $1.30 reserved under the $2 cap; personal-data network calls: 0 | Selection, request limits, manifest/record contract, local quarantine, compiler, provider request, or model policy change |
+| Current-head realm bootstrap and recovery compatibility | Passed locally through `0072`; 32 focused schema/transport tests and 14 PostgreSQL import integration tests, plus Ruff and strict mypy | New isolated realms advance to `0072`; bounded admission returns the exact registered authorization; ordinary and recovery startup accept that exact reviewed milestone; unknown revisions remain outside the allowlist | Migration head, readiness policy, realm bootstrap/commissioning, transport admission, or recovery API change |
+| Protected public-proxy/private-executor runtime | Passed locally, 52 focused tests plus Ruff and strict mypy | Canonical no-redirect proxy; separate hop/campaign credentials; fail-closed environment gates; exact authorization context; archive/outcome/recovery/provider composition | Proxy/executor runtime, Render service topology, admission contract, provider policy, or credential placement change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Commissioning authorized; not yet ready | Exact Raymond realm and pilot authorization recorded; no personal-data network call | Requires separate realm Render/AWS/PostgreSQL commissioning and deployed acceptance |
 
@@ -331,8 +350,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Commission and verify Raymond's isolated realm with transcript capture and product ingress
-   disabled, then register the already-authorized exact campaign and transport commitments.
+1. Advance and verify Raymond's already-commissioned, quarantined realm through migration `0072`;
+   deploy the disabled public proxy and temporary private executor; then pass the synthetic cloud
+   acceptance before registering the exact campaign and transport commitments.
 2. Upload and execute only the exact authorized 13-batch pilot after a fresh local preflight.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
