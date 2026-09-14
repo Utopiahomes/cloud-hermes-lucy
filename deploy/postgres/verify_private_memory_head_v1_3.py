@@ -54,7 +54,7 @@ class VerificationConfiguration:
             or url.username != "lucy_migration"
             or not url.password
             or _PRIVATE_RENDER_HOST.fullmatch(url.host or "") is None
-            or url.port != 5432
+            or url.port not in {None, 5432}
             or not (url.database or "").startswith("lucy_")
             or url.query.get("sslmode") != "require"
         ):

@@ -30,6 +30,15 @@ def test_configuration_accepts_only_the_private_read_only_gate() -> None:
     assert configuration.database_url.username == "lucy_migration"
 
 
+def test_configuration_accepts_render_omitted_default_postgres_port() -> None:
+    environment = _environment()
+    environment["LUCY_MIGRATION_DATABASE_URL"] = environment[
+        "LUCY_MIGRATION_DATABASE_URL"
+    ].replace(":5432", "")
+    configuration = VerificationConfiguration.from_environment(environment)
+    assert configuration.database_url.port is None
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     (
