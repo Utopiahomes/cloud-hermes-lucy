@@ -19,6 +19,7 @@ COPY deploy/postgres/commission_public_projection_v1.py ./deploy/postgres/commis
 COPY deploy/postgres/release_public_knowledge_v1.py ./deploy/postgres/release_public_knowledge_v1.py
 COPY deploy/postgres/inspect_public_conversation_v1.py ./deploy/postgres/inspect_public_conversation_v1.py
 COPY deploy/postgres/migrate_public_conversation_v1.py ./deploy/postgres/migrate_public_conversation_v1.py
+COPY deploy/postgres/migrate_workspaces_v1.py ./deploy/postgres/migrate_workspaces_v1.py
 COPY deploy/postgres/reopen_public_conversation_v1.py ./deploy/postgres/reopen_public_conversation_v1.py
 COPY deploy/postgres/migrate_telegram_stage2_v1.py ./deploy/postgres/migrate_telegram_stage2_v1.py
 COPY deploy/postgres/activate_telegram_stage2_v1.py ./deploy/postgres/activate_telegram_stage2_v1.py

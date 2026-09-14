@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -103,3 +104,51 @@ def test_production_image_contains_both_stage2_database_gates() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "deploy/postgres/migrate_telegram_stage2_v1.py" in dockerfile
     assert "deploy/postgres/activate_telegram_stage2_v1.py" in dockerfile
+
+
+def test_activation_accepts_original_and_additive_workspaces_revisions() -> None:
+    assert {
+        "0054_stage2_scoped_turn_commit",
+        "0068_workspaces_service_auth",
+    } == activation.ACCEPTED_REVISIONS
+
+
+@pytest.mark.parametrize("revision", sorted(activation.ACCEPTED_REVISIONS))
+def test_activation_reports_the_verified_schema_revision(
+    monkeypatch: pytest.MonkeyPatch, revision: str
+) -> None:
+    class Result:
+        def __init__(self, row: tuple[object, ...] | None = None) -> None:
+            self.row = row
+
+        def fetchone(self) -> tuple[object, ...] | None:
+            return self.row
+
+    class Connection:
+        def __enter__(self) -> Connection:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, query: object, *_args: object) -> Result:
+            if "alembic_version" in str(query):
+                return Result((revision,))
+            return Result()
+
+    monkeypatch.setattr(activation.psycopg, "connect", lambda *_args: Connection())
+    monkeypatch.setattr(activation.commission, "_conninfo", lambda *_args: "private")
+    monkeypatch.setattr(
+        activation.commission, "_verify_target_boundary", lambda *_args: ("quarantined", None)
+    )
+    monkeypatch.setattr(activation.commission, "_capture_blockers", lambda *_args: ())
+    monkeypatch.setattr(activation.commission, "_verify_open_boundary", lambda *_args: None)
+    monkeypatch.setattr(activation.commission, "_work_in_flight", lambda *_args: False)
+    monkeypatch.setattr(activation.commission, "_runtime_sessions", lambda *_args: 0)
+    monkeypatch.setattr(activation.commission, "_finality_pending", lambda *_args: False)
+    config = SimpleNamespace(migration_url="private", runtime_epoch=uuid4())
+
+    receipt = activation.activate(config, SimpleNamespace(transcript_capture_enabled=True))  # type: ignore[arg-type]
+
+    assert receipt["schema_revision"] == revision
+    assert receipt["runtime_admission"] == "ready"

@@ -115,8 +115,11 @@ task actions only to active realm service bindings that already hold `memory.rea
 `0068` requires a service caller to be that exact bound service principal and admits the production
 `private_realm` workspace kind. `provision_workspaces_authority_v1.py` creates the explicit service
 membership only from a digest-bound manifest while admission is quarantined and capture remains
-disabled. Applying migrations, provisioning that membership, creating service secrets, or adding a
-Render service remains a separate reviewed deployment action.
+disabled. `migrate_workspaces_v1.py` is the separate quarantine-first production bridge: it accepts
+only the reviewed `0054`, `0057`, or replayed `0068` head, advances to `0068`, reapplies and verifies
+the execute-only Telegram, Public Lucy, and Workspaces grants, and leaves admission closed. Applying
+that migration, provisioning membership, creating service secrets, or adding a Render service
+remains a separate reviewed deployment action.
 
 ## Verification ledger
 
@@ -128,6 +131,7 @@ Render service remains a separate reviewed deployment action.
 | Cloud unit and affected suite | Passed | Prior 906-unit combined suite plus 12 current Workspaces admission/runtime/provisioner tests; the full Windows rerun passed 906 tests and hit only the frozen AWS template's checkout newline hash | Relevant source, test, dependency, or checkout newline policy change |
 | Fresh PostgreSQL migration | Passed | Clean `0001 -> 0068_workspaces_service_auth` migration plus `0068 -> 0067 -> 0068` reversal in an isolated PostgreSQL tmpfs container on 2026-09-12 | Migration or PostgreSQL image change |
 | Directory, membership, queue, and role boundary | 6 passed | Exact service membership, service-principal equality, missing-membership denial, production `private_realm` admission, queue lifecycle, shared/private readiness, execute grants, and direct-table denial at migration `0068` | Directory, membership provisioner, queue migration/client, runtime readiness, or realm role template change |
+| Production migration compatibility | Passed locally | 43 focused checks plus a refreshed 936-pass broad suite cover the quarantine-first `0054`/`0057`/`0068` bridge, Telegram reopen at `0068`, Public Lucy grants, Workspaces queue grants, and admission staying closed. A fresh disposable PostgreSQL `0001 -> 0068` migration and 16 live-SQL authority/role/queue checks also passed on 2026-09-14; containers and data were removed. | Migration utility, readiness, activation, grants, deployment image, or PostgreSQL image change |
 | Workspaces backend suite | 83 passed | Full backend test suite plus Ruff on 2026-09-12 | Workspaces backend source or dependency change |
 | Workspaces-to-Cloud contract smoke | Passed | In-process ASGI admission, knowledge, and task calls using the real Workspaces client and Cloud API models | Either side of the transport contract changes |
 | Deployed Workspaces call | Not executed | Private API factory is intentionally not deployed | Requires approved realm construction and deployment gate |

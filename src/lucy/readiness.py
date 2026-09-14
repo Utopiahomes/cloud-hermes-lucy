@@ -406,6 +406,7 @@ def _v13_required_functions(
     post_memory_import = schema_revision in {
         MEMORY_IMPORT_SCHEMA_REVISION,
         PUBLIC_CONVERSATION_SCHEMA_REVISION,
+        WORKSPACES_SCHEMA_REVISION,
     }
     routine_memory_functions = (
         (

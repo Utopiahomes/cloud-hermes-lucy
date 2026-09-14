@@ -26,6 +26,7 @@ def test_post_import_bridge_requires_governed_memory_functions() -> None:
     for revision in (
         "0056_memory_import_budget",
         "0057_public_conversation",
+        "0068_workspaces_service_auth",
     ):
         routine = _required("routine", revision)
         policy = _required("policy", revision)

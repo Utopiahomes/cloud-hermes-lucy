@@ -1,10 +1,11 @@
 """Open one quarantined realm for approved private Telegram Stage 2.
 
 Run only as a temporary Render migration job.  The job itself keeps capture
-disabled; it verifies the reviewed Stage 2 activation manifest, the exact 0054
-schema, realm bindings, capture-safe storage, and stopped runtime identities
-before reopening admission.  Encrypted capture begins only after the routine
-and sole gateway are separately started with their Stage 2 configuration.
+disabled; it verifies the reviewed Stage 2 activation manifest, an accepted
+additive schema, realm bindings, capture-safe storage, and stopped runtime
+identities before reopening admission.  Encrypted capture begins only after
+the routine and sole gateway are separately started with their Stage 2
+configuration.
 """
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ import psycopg
 from pydantic import ValidationError
 
 from deploy.postgres import commission_realm_runtime_v1_3 as commission
-from lucy.readiness import ADMISSION_LOCK
+from lucy.readiness import ADMISSION_LOCK, WORKSPACES_SCHEMA_REVISION
 from lucy.telegram_activation import TelegramStage2ActivationManifest
 
 AUTHORIZATION = "telegram-stage2-activate-v1"
 TARGET_REVISION = "0054_stage2_scoped_turn_commit"
+ACCEPTED_REVISIONS = {TARGET_REVISION, WORKSPACES_SCHEMA_REVISION}
 
 
 class Stage2ActivationError(RuntimeError):
@@ -88,8 +90,11 @@ def activate(
             "SELECT pg_advisory_xact_lock(%s)", (ADMISSION_LOCK,)
         )
         state, epoch = commission._verify_target_boundary(connection)
-        if _scalar(connection, "SELECT version_num FROM public.alembic_version") != TARGET_REVISION:
-            raise Stage2ActivationError("database is not at the reviewed Stage 2 revision")
+        schema_revision = str(
+            _scalar(connection, "SELECT version_num FROM public.alembic_version")
+        )
+        if schema_revision not in ACCEPTED_REVISIONS:
+            raise Stage2ActivationError("database is not at an accepted Stage 2 revision")
         blockers = commission._capture_blockers(connection, config)
         commission._verify_open_boundary(connection, config, blockers)
         pending = commission._work_in_flight(connection, config)
@@ -111,7 +116,7 @@ def activate(
         return {
             "contract": "lucy.telegram.private.stage2.activation-receipt.v1",
             "status": "passed",
-            "schema_revision": TARGET_REVISION,
+            "schema_revision": schema_revision,
             "runtime_admission": "ready",
             "runtime_epoch_present": True,
             "capture_enabled": False,
