@@ -129,6 +129,8 @@ def _provider(
         or OpenRouterMemoryPolicyV1(
             provider_policy_id="private-zdr-v1",
             model_route="openai/gpt-oss-20b",
+            extractor_version="extractor-v1",
+            prompt_version="prompt-v1",
             maximum_output_tokens=200,
             maximum_response_bytes=100_000,
         ),
@@ -161,8 +163,10 @@ def test_private_request_is_strict_zdr_bounded_and_cost_accounted() -> None:
         "require_parameters": True,
         "allow_fallbacks": False,
     }
-    assert body["response_format"]["type"] == "json_schema"
-    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["response_format"] == {"type": "json_object"}
+    system_prompt = body["messages"][0]["content"]
+    assert "confidence_millionths" in system_prompt
+    assert "source_record_id and exact_quote" in system_prompt
     assert "tools" not in body and "plugins" not in body
     assert "synthetic-openrouter-key" not in json.dumps(body)
 
@@ -171,6 +175,8 @@ def test_manifest_policy_or_output_cap_mismatch_never_dispatches() -> None:
     for manifest, dispatch in (
         (_manifest(provider_policy_id="other-policy"), _dispatch()),
         (_manifest(model_route="other/model"), _dispatch()),
+        (_manifest(extractor_version="other-extractor"), _dispatch()),
+        (_manifest(prompt_version="other-prompt"), _dispatch()),
         (_manifest(), _dispatch(output_tokens=201)),
     ):
         transport = TransportSpy(_response())
@@ -197,7 +203,7 @@ def test_complete_request_accounting_rejects_forged_counts_before_network() -> N
         output_tokens=100,
     )
     assert request.input_token_upper_bound > len("café".encode())
-    assert b"json_schema" in request.serialized_body
+    assert b"json_object" in request.serialized_body
     assert b"untrusted historical text" in request.serialized_body
 
 
