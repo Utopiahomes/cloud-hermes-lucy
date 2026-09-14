@@ -155,12 +155,40 @@ fallback denial remain enforced in the candidate.
 
 ## Exact next action
 
-The staging implementation, commissioning, and acceptance gates are complete. The next
-action is a separate product-activation decision. Until that decision is made, keep
-`lucy-public-model` suspended, leave the public service without the model token/enable flag,
-and continue deterministic R1 without capturing visitor questions. Activation must create
-and validate an exact `active` manifest, install compatible public-reader configuration,
-then move visitor traffic independently with immediate rollback to deterministic R1.
+Model-backed Public Lucy is active in production under canonical manifest digest
+`1393c26d483d3f359eb15fe7917f8b83862e6e805af274a07c9ff813e53abe70`.
+The next action is routine observation of availability, answer quality, and the existing
+$1 daily cost boundary. Any model, provider, policy version, snapshot eligibility,
+transcript-capture, customer-identity, PMS, or Private Lucy change remains a separate
+reviewed release. Deterministic R1 remains the immediate rollback path.
+
+## Public model production activation — 2026-09-14
+
+- Ray authorized exact website commit `c4554b5c5b8b5e2ccf63039571c87c2ad0866a5a`,
+  exact Cloud runtime commit `d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197`,
+  the canonical active manifest digest above, and the tested $1 daily cap.
+- GitHub `main` advanced to the website commit and Vercel deployment
+  `DKe19jukAdSuioe28cyVWLjrchqg` became Ready.
+- Render public deployment `dep-dak5qk2d0e5s73b4157g` and isolated-model deployment
+  `dep-dak5qge613ac73bgdsag` are live at the exact Cloud runtime commit. The model service
+  is private-network-only; public traffic reaches it only through the authenticated public
+  reader.
+- The activation-time private-network suite passed all 12 synthetic turns in job
+  `job-dak5qglg1s2s738berc0` before visitor model traffic was enabled.
+- Live same-origin checks passed the previously failing ordinary-language question and a
+  property-dependent follow-up. “How long are Utopia stays?” now returns an honest
+  missing-policy answer, and “Tell me about Buttercup” followed by “How many cars fit?”
+  returns the supported four-car fact.
+- The dedicated provider key still enforces a $1 limit. Post-acceptance read-only metadata
+  reported $0.014871 used and $0.985129 remaining. Transcript capture remains disabled;
+  Google Vertex/ZDR/data-collection denial/no fallbacks remain pinned.
+- Two intermediate safety checks proved rollback behavior. A public-URL health assumption
+  was rejected for the private-only service, and Render's automatic branch-head deployment
+  on resume was detected. Each time visitor traffic was restored to deterministic mode;
+  the exact model commit was then reapplied and acceptance rerun before final activation.
+- No DNS, Private Lucy, or production customer-data change occurred. Full content-free
+  evidence is recorded in
+  `docs/evidence/utopia-public-model-production-activation-2026-09-14.json`.
 
 ## Public Lucy R1 production acceptance
 

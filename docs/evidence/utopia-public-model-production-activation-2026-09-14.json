@@ -1,0 +1,92 @@
+{
+  "contract": "lucy.utopia.public-model.production-activation-evidence.v1",
+  "recorded_at": "2026-09-14T20:49:32.5593709Z",
+  "status": "passed",
+  "release_decision_id": "ray-authorized-public-model-active-2026-09-14",
+  "activation_manifest": {
+    "canonical_digest": "1393c26d483d3f359eb15fe7917f8b83862e6e805af274a07c9ff813e53abe70",
+    "file_sha256": "3f40ef96e8c998b58fcd43618674c8aa41b7c0784607618ddcb886c327c7b1f3",
+    "release_state": "active",
+    "active_snapshot_sha256": "95e2e20a9e4a3786e3daa63a73bb5ff2866b5bae295e6dc138bf432e4361c422",
+    "schema_revision": "0057_public_conversation",
+    "model": "google/gemini-3.1-flash-lite",
+    "allowed_provider": "google-vertex",
+    "zero_data_retention": true,
+    "data_collection": "deny",
+    "provider_fallbacks": false,
+    "transcript_capture_enabled": false
+  },
+  "website": {
+    "commit": "c4554b5c5b8b5e2ccf63039571c87c2ad0866a5a",
+    "branch": "main",
+    "vercel_deployment_id": "DKe19jukAdSuioe28cyVWLjrchqg",
+    "vercel_status": "Ready",
+    "production_origin": "https://www.utopiahomes.com"
+  },
+  "render": {
+    "cloud_commit": "d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197",
+    "public_service": {
+      "service_id": "srv-daingifqj5pc73arkbjg",
+      "deploy_id": "dep-dak5qk2d0e5s73b4157g",
+      "state": "not_suspended",
+      "model_traffic_enabled": true,
+      "transcript_capture_enabled": false
+    },
+    "model_service": {
+      "service_id": "srv-dak10pjm8hqs73a28rug",
+      "deploy_id": "dep-dak5qge613ac73bgdsag",
+      "state": "not_suspended",
+      "private_network_only": true,
+      "transcript_capture_enabled": false
+    },
+    "recovery_services_commit": "5afb2edb55abf25d2659bc364f580114f1470b0b",
+    "authority_writer_deploy_id": "dep-dak1uqmq1p3s73cah4f0",
+    "cost_writer_deploy_id": "dep-dak1v9942hec73bn02tg",
+    "recovery_coordinator_deploy_id": "dep-dak1vo942hec73bn20l0"
+  },
+  "activation_acceptance": {
+    "private_network_job_id": "job-dak5qglg1s2s738berc0",
+    "suite_sha256": "7abb8332a9c19290cfa4f106024dfac3c490acbd7cce8e78be01ad36e5cfc6c0",
+    "turns_passed": 12,
+    "turns_total": 12,
+    "synthetic_public_content_only": true,
+    "public_traffic_enabled_during_suite": false,
+    "result": "passed"
+  },
+  "live_website_acceptance": {
+    "same_origin_api": "https://www.utopiahomes.com/api/lucy",
+    "ordinary_question": "How long are Utopia stays?",
+    "ordinary_question_result": "passed_honest_missing-policy_answer",
+    "follow_up_sequence": [
+      "Tell me about Buttercup.",
+      "How many cars fit?"
+    ],
+    "follow_up_result": "passed_four-car_property-bound-answer",
+    "source_links_same_origin_https": true,
+    "result": "passed"
+  },
+  "cost_boundary": {
+    "policy_version": 1,
+    "node_daily_cap_microusd": 1000000,
+    "site_daily_cap_microusd": 1000000,
+    "provider_daily_cap_microusd": 1000000,
+    "dedicated_key_limit_usd": 1,
+    "post_acceptance_usage_usd": 0.014871,
+    "post_acceptance_limit_remaining_usd": 0.985129,
+    "result": "passed"
+  },
+  "fail_closed_evidence": {
+    "private_service_public_health_assumption_rejected": true,
+    "render_resume_branch_head_drift_detected": true,
+    "public_deterministic_rollback_deploy_id": "dep-dak5p1h42hec739l962g",
+    "exact_model_commit_reapplied_before_final_activation": true,
+    "visitor_model_traffic_remained_disabled_during_correction": true,
+    "result": "passed"
+  },
+  "unchanged_boundaries": {
+    "dns_changed": false,
+    "private_lucy_changed": false,
+    "production_customer_data_changed": false,
+    "transcript_capture_enabled": false
+  }
+}
