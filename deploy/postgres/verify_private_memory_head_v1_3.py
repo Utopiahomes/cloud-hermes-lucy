@@ -88,7 +88,7 @@ def verify(configuration: VerificationConfiguration) -> dict[str, object]:
                 transaction.rollback()
     finally:
         engine.dispose()
-    if state != (PRIVATE_MEMORY_SCHEMA_REVISION, "quarantined", "ready", True, 1, 4):
+    if state != (PRIVATE_MEMORY_SCHEMA_REVISION, "quarantined", "ready", True, 1, 1):
         raise VerificationError("private-memory realm state is not accepted")
     return {
         "contract": "lucy.private-memory-head-verification.v1.3",
