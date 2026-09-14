@@ -1,0 +1,123 @@
+"""Read-only verification of a quarantined private-memory realm schema head."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.pool import NullPool
+
+from lucy.readiness import PRIVATE_MEMORY_SCHEMA_REVISION
+
+AUTHORIZATION = "private-memory-head-read-only-v1.3"
+_PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
+
+
+class VerificationError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class VerificationConfiguration:
+    database_url: URL
+    content_scope_id: UUID
+
+    @classmethod
+    def from_environment(
+        cls, values: Mapping[str, str] | None = None
+    ) -> VerificationConfiguration:
+        environment = os.environ if values is None else values
+        if (
+            environment.get("RENDER") != "true"
+            or environment.get("LUCY_ENVIRONMENT") != "production"
+            or environment.get("LUCY_TRANSCRIPT_CAPTURE_ENABLED") != "false"
+            or environment.get("LUCY_PRODUCT_INGRESS_ENABLED") != "false"
+            or environment.get("LUCY_REALM_HEAD_VERIFICATION_AUTHORIZATION")
+            != AUTHORIZATION
+        ):
+            raise VerificationError("private-memory head verification gate failed")
+        try:
+            url = make_url(environment["LUCY_MIGRATION_DATABASE_URL"])
+            scope = UUID(environment["LUCY_CONTENT_SCOPE_ID"])
+        except (KeyError, ValueError):
+            raise VerificationError(
+                "private-memory head verification configuration is invalid"
+            ) from None
+        if (
+            url.drivername not in {"postgresql", "postgresql+psycopg"}
+            or url.username != "lucy_migration"
+            or not url.password
+            or _PRIVATE_RENDER_HOST.fullmatch(url.host or "") is None
+            or url.port != 5432
+            or not (url.database or "").startswith("lucy_")
+            or url.query.get("sslmode") != "require"
+        ):
+            raise VerificationError(
+                "private-memory head verification database boundary is invalid"
+            )
+        return cls(url.set(drivername="postgresql+psycopg"), scope)
+
+
+def verify(configuration: VerificationConfiguration) -> dict[str, object]:
+    engine = create_engine(configuration.database_url, poolclass=NullPool)
+    try:
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("SET TRANSACTION READ ONLY"))
+                state = connection.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT version_num FROM public.alembic_version),"
+                        "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
+                        "(SELECT state FROM lucy.lifecycle WHERE singleton),"
+                        "lucy.capture_boundary_safe_v1(),"
+                        "(SELECT count(*) FROM lucy.realm_content_scopes_v1 WHERE id=:scope),"
+                        "(SELECT count(*) FROM lucy.realm_service_bindings_v1 "
+                        " WHERE content_scope_id=:scope AND active)"
+                    ),
+                    {"scope": configuration.content_scope_id},
+                ).one()
+            finally:
+                transaction.rollback()
+    finally:
+        engine.dispose()
+    if state != (PRIVATE_MEMORY_SCHEMA_REVISION, "quarantined", "ready", True, 1, 4):
+        raise VerificationError("private-memory realm state is not accepted")
+    return {
+        "contract": "lucy.private-memory-head-verification.v1.3",
+        "status": "passed",
+        "migration_revision": state[0],
+        "runtime_admission": state[1],
+        "lifecycle": state[2],
+        "capture_boundary_safe": state[3],
+        "content_scope_count": state[4],
+        "active_service_binding_count": state[5],
+        "transcript_capture_enabled": False,
+        "product_ingress_enabled": False,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    if argv:
+        raise VerificationError("verification utility accepts no arguments")
+    try:
+        report = verify(VerificationConfiguration.from_environment())
+    except VerificationError as exc:
+        print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True))
+        return 1
+    except Exception as exc:
+        print(json.dumps({"status": "failed", "error_type": type(exc).__name__}, sort_keys=True))
+        return 1
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
