@@ -99,12 +99,14 @@ def test_review_page_embeds_neither_token_nor_inventory_content(tmp_path: Path) 
     assert "does not authorize or upload data" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert "script-src 'self'" in response.headers["content-security-policy"]
+    assert 'id="session-token" type="password"' in response.text
 
     script = client.get("/imports/app.js")
     assert script.status_code == 200
     assert "textContent" in script.text
     assert "innerHTML" not in script.text
     assert "localStorage" not in script.text
+    assert "window.prompt" not in script.text
     assert _TOKEN not in script.text
 
 

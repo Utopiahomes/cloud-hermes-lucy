@@ -275,6 +275,8 @@ def _console_html() -> str:
 <body><main><h1>Private Lucy import review</h1>
 <p>This local page proposes a pilot. It does not authorize or upload data.</p>
 <p>Attachment contents are excluded from the initial pilot.</p>
+<label>Local session token
+<input id="session-token" type="password" autocomplete="off" spellcheck="false"></label>
 <button id="load" type="button">Load local inventory</button><div id="status"></div>
 <form id="proposal" hidden><fieldset><legend>Select 1–20 conversations</legend>
 <div id="conversations"></div></fieldset>
@@ -298,12 +300,25 @@ def _console_script() -> str:
 let token = "";
 let inventory = null;
 document.getElementById("load").addEventListener("click", async () => {
-  token = token || window.prompt("Local session token") || "";
+  const tokenInput = document.getElementById("session-token");
+  token = token || tokenInput.value.trim();
+  if (!token) {
+    document.getElementById("status").textContent = "Enter the local session token.";
+    tokenInput.focus();
+    return;
+  }
   const response = await fetch("/api/inventory", {headers: {Authorization: `Bearer ${token}`}});
   const status = document.getElementById("status");
   const container = document.getElementById("conversations");
   container.replaceChildren();
-  if (!response.ok) { status.textContent = "Inventory access denied."; return; }
+  if (!response.ok) {
+    token = "";
+    status.textContent = "Inventory access denied.";
+    tokenInput.focus();
+    return;
+  }
+  tokenInput.value = "";
+  tokenInput.disabled = true;
   inventory = await response.json();
   status.textContent = `${inventory.conversations.length} conversations; no data uploaded.`;
   for (const conversation of inventory.conversations) {
