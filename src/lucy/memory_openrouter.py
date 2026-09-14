@@ -65,6 +65,7 @@ def build_openrouter_memory_request(
                 "zdr": True,
                 "data_collection": "deny",
                 "require_parameters": True,
+                "allow_fallbacks": False,
             },
         },
         model_route=model_route,

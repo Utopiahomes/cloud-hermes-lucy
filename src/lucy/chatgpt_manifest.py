@@ -21,6 +21,7 @@ from lucy.contracts.canonical import canonical_json_bytes, canonical_sha256
 from lucy.memory_import import ImportManifestRecordV1, ImportManifestV1, ImportManifestV2
 from lucy.memory_import_console import PilotSelectionProposalV1
 from lucy.realm_archive_commit import RealmArchiveCommitInputV1
+from lucy.secret_filter import detect_memory_secrets
 
 _BUNDLE_PREFIX = b"LUCY-CHATGPT-PILOT-MANIFEST-BUNDLE-V1\x00"
 _RECORD_PREFIX = b"LUCY-CHATGPT-RECORD-CONTENT-V1\x00"
@@ -205,6 +206,7 @@ def build_exact_pilot_manifests(
     all_records: list[ImportManifestRecordV1] = []
     for selected in selection.selected_conversations:
         parsed = _parse_conversation(raw_by_id[selected.conversation_id])
+        parsed = _quarantine_credential_like_messages(parsed)
         records = tuple(
             manifest_record_for_local_message(message, fingerprint_key)
             for message in parsed.messages
@@ -261,6 +263,32 @@ def build_exact_pilot_manifests(
     return LocalPilotBuildV1(
         bundle=bundle, conversations=tuple(parsed_conversations)
     )
+
+
+def _quarantine_credential_like_messages(
+    conversation: LocalChatGPTConversationV1,
+) -> LocalChatGPTConversationV1:
+    """Keep likely credentials local and make their exclusion explicit."""
+
+    messages: list[LocalChatGPTMessageV1] = []
+    for message in conversation.messages:
+        findings = (
+            detect_memory_secrets(message.content)
+            if message.inclusion_state == "included" and message.content is not None
+            else ()
+        )
+        if findings:
+            categories = ",".join(sorted({item.category for item in findings}))
+            message = message.model_copy(
+                update={
+                    "inclusion_state": "excluded",
+                    "exclusion_reason": (
+                        "credential-like content quarantined locally: " + categories
+                    ),
+                }
+            )
+        messages.append(message)
+    return conversation.model_copy(update={"messages": tuple(messages)})
 
 
 def build_exact_archive_requests(

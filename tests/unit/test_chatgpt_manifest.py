@@ -12,7 +12,9 @@ import lucy.memory_import_cli as memory_import_cli
 from lucy.chatgpt_import import ChatGPTExportInventoryV1, inventory_chatgpt_export
 from lucy.chatgpt_manifest import (
     LocalChatGPTConversationV1,
+    LocalChatGPTMessageV1,
     LocalPilotBuildV1,
+    _quarantine_credential_like_messages,
     build_exact_archive_requests,
     build_exact_pilot_manifests,
 )
@@ -26,6 +28,35 @@ from lucy.memory_pilot_uploader import MemoryPilotUploadReceiptV1
 
 _SCOPE = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 _CAMPAIGN = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+
+def test_credential_like_message_is_explicitly_quarantined_locally() -> None:
+    conversation = LocalChatGPTConversationV1(
+        conversation_id="conversation-secret",
+        messages=(
+            LocalChatGPTMessageV1(
+                source_record_id="conversation-secret:node:message",
+                conversation_id="conversation-secret",
+                native_node_id="node",
+                native_message_id="message",
+                parent_source_record_id=None,
+                native_role="user",
+                role="owner",
+                occurred_at=datetime(2026, 9, 1, tzinfo=UTC),
+                displayed=True,
+                content="api key: synthetic-secret-value-12345",
+                inclusion_state="included",
+            ),
+        ),
+    )
+
+    quarantined = _quarantine_credential_like_messages(conversation)
+
+    assert quarantined.messages[0].inclusion_state == "excluded"
+    assert quarantined.messages[0].exclusion_reason == (
+        "credential-like content quarantined locally: labelled_secret"
+    )
+    assert conversation.messages[0].inclusion_state == "included"
 
 
 def _export() -> list[object]:
@@ -297,6 +328,58 @@ def test_manifest_cli_writes_only_plaintext_free_non_authorizing_bundle(
             provider_policy_id="private-v1",
             model_route="none",
         )
+
+
+def test_selection_revision_preserves_scope_and_records_without_authorizing(
+    tmp_path: Path,
+) -> None:
+    intake = tmp_path / "intake"
+    intake.mkdir()
+    archive = intake / "export.zip"
+    _write_export(archive)
+    inventory = inventory_chatgpt_export(
+        archive, intake_root=intake, fingerprint_key=b"f" * 32
+    )
+    selection = _selection(inventory)
+    source = intake / "pilot-selection.v1.json"
+    output = intake / "pilot-selection.v2.json"
+    source.write_bytes(
+        canonical_json_bytes(
+            {"proposal": selection, "proposal_digest": selection.digest}
+        )
+        + b"\n"
+    )
+
+    assert main(
+        [
+            "revise-selection",
+            "--intake-root",
+            str(intake),
+            "--selection",
+            str(source),
+            "--expected-selection-digest",
+            selection.digest,
+            "--max-request-input-tokens",
+            "76000",
+            "--max-request-output-tokens",
+            "4000",
+            "--max-request-total-tokens",
+            "80000",
+            "--output",
+            str(output),
+        ]
+    ) == 0
+    document = json.loads(output.read_bytes())
+    revised = PilotSelectionProposalV1.model_validate(document["proposal"])
+    assert document["proposal_digest"] == revised.digest
+    assert revised.selected_conversations == selection.selected_conversations
+    assert revised.destination_content_scope_id == selection.destination_content_scope_id
+    assert revised.authorization_state == "proposed_not_authorized"
+    assert (
+        revised.max_request_input_tokens,
+        revised.max_request_output_tokens,
+        revised.max_request_total_tokens,
+    ) == (76_000, 4_000, 80_000)
 
 
 def test_authorize_and_preflight_cli_require_the_exact_rebuilt_bundle(

@@ -253,6 +253,21 @@ accepted `0057` migration is merged at `2807dad`.
     AWS, Render, database, credential, capture, inference, upload, or activation effect. The local
     selection console may bind to the planned Raymond scope; cloud execution remains unavailable
     until a separately authorized and validated realm security stamp is commissioned.
+40. The owner accepted a local 11-conversation pilot selection containing 628 inventoried records
+    and approximately 258,985 source tokens. The exact selection digest is
+    `ed25e8f6719ea3cc15a64bee2d303bbc289dcfe47cc8de4e51b0c8692da97aff`; it remains
+    `proposed_not_authorized`. Real-data feasibility inspection made no network call and exposed
+    two synthetic-limit assumptions before manifest authorization: campaign source volume was
+    incorrectly required to fit one request, and a 67,844-byte message exceeded the old record
+    bound. Campaign and per-request limits are now independent, while the compiler still rejects
+    any individual request or total batch count outside the owner-selected limits. The local scan
+    found one credential-like record; exact manifest construction now quarantines such records
+    locally with a content-free reason so they cannot be uploaded or sent to a model.
+41. A measured diagnostic build shows that the accepted records need a request ceiling above
+    60,000 conservative byte-counted input tokens. A proposed 76,000-input/4,000-output/80,000-total
+    limit compiles into 15 batches and reserves $1.50 when each attempt is capped at $0.10, within
+    the existing $2 campaign ceiling. This measurement is not a revised owner authorization; a new
+    immutable proposal and digest are required before manifest construction.
 
 ## Verification ledger
 
@@ -288,6 +303,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Exact CLI upload reconstruction | Passed, focused end-to-end local CLI check plus Ruff and strict mypy | Untouched-ZIP rebuild; exact registered-plan equality; digest-specific confirmation; protected review directory; content-free receipt; injected HTTPS boundary | Import CLI, manifest builder, transport preparation/registration, uploader, or intake-root policy change |
 | Complete synthetic transport execution and replay | Passed, 55 focused checks on PostgreSQL through `0071`, plus Ruff and strict mypy | Exact transport admission; encrypted archive and provider-outcome persistence; provenance-linked pending candidate; one settlement; exact replay with one archive data-key generation and one synthetic provider dispatch; settled-reservation new-job denial retained by migration ordering | Migration `0071`, executor, coordinator, archive/outcome adapters, candidate materialization, transport authority, or PostgreSQL image change |
 | Raymond private-realm identity preparation | Passed, 3 focused contract/generator checks plus Ruff and strict mypy | Stable `planned_not_authorized` scope; 22 internally distinct UUIDs; zero UUID overlap with Utopia; exact service issuer and login namespace; overwrite refusal | Realm identity-plan contract/generator, Utopia binding, or planned Raymond identity artifact change |
+| Real-export pilot feasibility | Passed locally with one required proposal revision, 34 focused checks plus Ruff and strict mypy | Exact 11-conversation selection validation; campaign/per-request separation; 67,844-byte record admission to the manifest layer; no-fallback ZDR request; one credential-like record quarantined locally; measured 15-batch fit at 76,000/4,000/80,000 with $1.50 reserved under the $2 cap; network calls: 0 | Selection, request limits, manifest/record contract, local quarantine, compiler, provider request, or model policy change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Not executed | Intentionally outside this gate | Requires reviewed deployment plan and authorization |
 

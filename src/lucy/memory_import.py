@@ -154,7 +154,7 @@ class ImportManifestRecordV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     source_record_id: str
     content_commitment: str = Field(pattern=r"^[0-9a-f]{64}$")
-    byte_length: int = Field(ge=0, le=65_536)
+    byte_length: int = Field(ge=0, le=1_000_000)
     estimated_tokens: int = Field(ge=0)
     source_revision: int = Field(ge=1)
     role: str = Field(pattern=r"^(owner|assistant|system|unsupported)$")
@@ -256,8 +256,6 @@ class ImportManifestV2(BaseModel):
             raise ValueError("manifest exceeds its byte limit")
         if source_tokens > self.max_source_estimated_tokens:
             raise ValueError("manifest exceeds its source-token limit")
-        if self.max_source_estimated_tokens > self.max_request_input_tokens:
-            raise ValueError("request input ceiling is below the source-token ceiling")
         if (
             self.max_request_input_tokens + self.max_request_output_tokens
             > self.max_request_total_tokens

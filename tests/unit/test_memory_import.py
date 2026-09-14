@@ -287,6 +287,59 @@ def test_v2_manifest_binds_separate_source_and_complete_request_budgets() -> Non
         ImportManifestV2.model_validate({**values, "max_request_total_tokens": 149})
 
 
+def test_v2_campaign_source_budget_may_span_multiple_bounded_requests() -> None:
+    manifest = ImportManifestV2.model_validate(
+        {
+            "campaign_id": CANDIDATE,
+            "destination_content_scope_id": SCOPE,
+            "source_namespace": "raymond-private/chatgpt-export",
+            "source_conversation_id": "pilot:selection",
+            "parser_version": "parser-v1",
+            "extractor_version": "extractor-v1",
+            "prompt_version": "prompt-v1",
+            "provider_policy_id": "private-zdr-v1",
+            "model_route": "openai/gpt-oss-20b",
+            "token_accounting_version": "canonical-json-byte-upper-bound-v1",
+            "records": (
+                ImportManifestRecordV1(
+                    source_record_id="conversation:node:message",
+                    content_commitment="a" * 64,
+                    byte_length=60_000,
+                    estimated_tokens=20_000,
+                    source_revision=1,
+                    role="owner",
+                    displayed=True,
+                ),
+            ),
+            "max_records": 1,
+            "max_bytes": 60_000,
+            "max_source_estimated_tokens": 258_985,
+            "max_request_input_tokens": 60_000,
+            "max_request_output_tokens": 4_000,
+            "max_request_total_tokens": 64_000,
+            "max_model_spend_microusd": 2_000_000,
+            "max_attempts": 20,
+            "expires_at": datetime(2026, 9, 21, tzinfo=UTC),
+        }
+    )
+
+    assert manifest.max_source_estimated_tokens > manifest.max_request_input_tokens
+
+
+def test_manifest_record_size_is_bounded_by_campaign_and_request_compilation() -> None:
+    record = ImportManifestRecordV1(
+        source_record_id="conversation:large-node:large-message",
+        content_commitment="a" * 64,
+        byte_length=67_844,
+        estimated_tokens=22_615,
+        source_revision=1,
+        role="assistant",
+        displayed=True,
+    )
+
+    assert record.byte_length == 67_844
+
+
 def test_synthetic_fixture_builds_exact_protected_archive_requests() -> None:
     fixture = Path(__file__).parents[1] / "fixtures" / "synthetic_memory_conversation.v1.json"
     conversation = load_synthetic_conversation(fixture)

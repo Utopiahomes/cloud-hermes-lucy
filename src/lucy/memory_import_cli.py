@@ -108,6 +108,17 @@ def _parser() -> argparse.ArgumentParser:
     inventory.add_argument("--intake-root", type=Path, required=True)
     inventory.add_argument("--fingerprint-key-file", type=Path, required=True)
     inventory.add_argument("--output", type=Path, required=True)
+    revise_selection = commands.add_parser(
+        "revise-selection",
+        help="derive a new non-authorizing proposal with revised request ceilings",
+    )
+    revise_selection.add_argument("--intake-root", type=Path, required=True)
+    revise_selection.add_argument("--selection", type=Path, required=True)
+    revise_selection.add_argument("--expected-selection-digest", required=True)
+    revise_selection.add_argument("--max-request-input-tokens", type=int, required=True)
+    revise_selection.add_argument("--max-request-output-tokens", type=int, required=True)
+    revise_selection.add_argument("--max-request-total-tokens", type=int, required=True)
+    revise_selection.add_argument("--output", type=Path, required=True)
     manifest = commands.add_parser(
         "manifest", help="expand a reviewed selection into exact local records"
     )
@@ -213,6 +224,41 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("import output must remain inside the verified intake root")
     output.parent.mkdir(parents=True, exist_ok=True)
     sync_roots = configured_sync_roots(dict(os.environ))
+    if args.command == "revise-selection":
+        selection_path = verified_intake_path(
+            args.selection,
+            intake_root=root,
+            repository_roots=(repository,),
+            synchronization_roots=sync_roots,
+        )
+        selection_document = json.loads(selection_path.read_bytes())
+        if not isinstance(selection_document, dict):
+            raise ValueError("pilot selection document is invalid")
+        selection = PilotSelectionProposalV1.model_validate(
+            selection_document.get("proposal")
+        )
+        if (
+            selection_document.get("proposal_digest") != selection.digest
+            or args.expected_selection_digest != selection.digest
+        ):
+            raise ValueError("pilot selection digest does not match its exact proposal")
+        revised = selection.model_copy(
+            update={
+                "max_request_input_tokens": args.max_request_input_tokens,
+                "max_request_output_tokens": args.max_request_output_tokens,
+                "max_request_total_tokens": args.max_request_total_tokens,
+            }
+        )
+        revised = PilotSelectionProposalV1.model_validate(revised.model_dump())
+        _write_new_artifact(
+            output,
+            {"proposal": revised, "proposal_digest": revised.digest},
+        )
+        print(
+            f"Revised non-authorizing pilot selection {revised.digest}; "
+            "conversation selection changed: no; network calls: 0"
+        )
+        return 0
     if args.command == "authorize":
         manifest_path = verified_intake_path(
             args.manifest,
