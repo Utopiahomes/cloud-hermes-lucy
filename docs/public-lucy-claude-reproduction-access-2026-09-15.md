@@ -1,6 +1,6 @@
 # Public Lucy Claude reproduction access
 
-Status: local Cloud implementation complete; hosted staging not yet commissioned
+Status: local Cloud implementation complete; hosted staging blocked pending an isolated runtime
 
 Authorized by Ray: 2026-09-15
 
@@ -15,7 +15,8 @@ either side activates them.
 
 The website production checkpoint is
 `c4554b5c5b8b5e2ccf63039571c87c2ad0866a5a`. The Cloud evidence checkpoint is
-`c2c8a292885223e17a6a2e4b88e1fe171f707a13`; the currently deployed Cloud runtime remains
+`c2c8a292885223e17a6a2e4b88e1fe171f707a13`; the diagnostic implementation checkpoint is
+`2dda6f150859ffabc4458e672c56544281b58f17`; the currently deployed Cloud runtime remains
 `d2a76b2e82fa390bf8c5d0afc2d6c81b9f5de197`. This implementation creates no migration and
 does not consume migration `0072`.
 
@@ -152,17 +153,29 @@ production capacity.
 
 ## Verification ledger
 
-Executed locally against the Cloud evidence checkpoint plus this uncommitted implementation:
+Executed locally against Cloud diagnostic commit
+`2dda6f150859ffabc4458e672c56544281b58f17`:
 
-- 2026-09-15: 20 focused unit tests passed for public API, private model API/service, diagnostic
+- 2026-09-15: 21 focused unit tests passed for public API, private model API/service, diagnostic
   receipt storage, expiry/eviction, response bindings, and staging limiter behavior.
 - 2026-09-15: the complete unit suite passed: 1,015 tests.
 - 2026-09-15: repository-wide Ruff passed.
 - 2026-09-15: strict mypy passed across all 119 source files.
-- 2026-09-15: Docker client was present, but Docker Desktop had no running engine. No local
-  container acceptance was claimed.
+- 2026-09-15: Docker Desktop 4.90.0 on Windows build 26200 reproduced the known stale AF_UNIX
+  socket startup defect. Preserving and moving aside the `Docker/run` and
+  `docker-secrets-engine` parent directories advanced between the Ingest and Secrets Engine
+  failures but did not recover the daemon; a subsequent start recreated the Ingest socket
+  failure. No factory reset, uninstall, or destructive cleanup was attempted. A local-only
+  diagnostic bundle was gathered and not uploaded.
+- 2026-09-15: the current Render Hobby workspace has 23 of 25 service slots occupied and the
+  existing project already uses its two-environment limit. The remaining two service slots are
+  insufficient for the separately credentialed public, model, database, cost-writer, and
+  recovery boundaries required by this plan. No production service was deleted, shared, or
+  repurposed, and no paid plan change was initiated.
 
 This evidence is invalidated by changes to the diagnostic models, public/model API paths,
 exercise accounting, provider admission, cost policy, or deployment configuration. Hosted
 staging, the dedicated provider key, Claude's website harness, two live runs, and the controlled
-limit-exhaustion check remain unexecuted.
+limit-exhaustion check remain unexecuted. Commissioning can resume only after Docker Desktop is
+recovered or Ray explicitly authorizes a separately isolated hosted environment with enough
+resources; production capacity remains ineligible.
