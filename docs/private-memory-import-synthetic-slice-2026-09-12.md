@@ -315,6 +315,13 @@ accepted `0057` migration is merged at `2807dad`.
     database capture fence, the exact Raymond content scope, and its single active service binding.
     The temporary runner was deleted. No personal data, provider request, campaign registration,
     product ingress, or transcript capture was involved.
+49. Raymond's separate provider-outcome recovery boundary is commissioned and termination
+    protected. It reuses the exact previously accepted outcome-recovery Lambda artifact, but has
+    its own rotating KMS key, outcome registry identity, write-only key registry, recovery receipt
+    ledger, recovery runtime role, and qualified Lambda alias. Both DynamoDB tables are on-demand,
+    deletion protected, and have point-in-time recovery enabled. This adds one customer-managed
+    KMS key (approximately $1/month before request charges). No provider call, personal data,
+    product ingress, or transcript capture was involved.
 
 ## Verification ledger
 
@@ -340,6 +347,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Write-only provider-outcome path | Passed, focused unit and coordinator tests | First write completes without wrapped-key read/decrypt; conflict and missing recovery stop for exact-job reconciliation with zero repeated provider calls | Outcome cipher/store, extraction coordinator, recovery interface, or provider retry change |
 | Permit-bound exact-job outcome recovery | Passed, 10 focused contract/runtime/IAM paths plus full-suite rerun | Outcome-only KMS context; write-only worker; exact package/grant/deployment binding; one release; content-free replay; pre-grant/pre-completion eligibility; no scan/query/delete/provider/evidence permission | Outcome recovery contract, signer, cipher, registry, executor, IAM template, or eligibility adapter change |
 | Utopia outcome-recovery AWS boundary | Passed | `docs/evidence/utopia-memory-outcome-recovery-aws-2026-09-13.json`; CloudFormation `CREATE_COMPLETE` with termination protection, artifact checksum/version, KMS rotation, table deletion protection/PITR, qualified version 1, positive/negative IAM simulation, and a content-free fail-closed canary | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or realm binding change |
+| Raymond outcome-recovery AWS boundary | Passed; IAM simulation and fail-closed canary remain part of deployed synthetic acceptance | `docs/evidence/raymond-memory-outcome-recovery-aws-2026-09-15.json`; CloudFormation `CREATE_COMPLETE` with termination protection, accepted artifact checksum/version, KMS rotation, table deletion protection/PITR, and qualified version 1 | Stack/template, artifact/version, role or key policy, KMS/table/Lambda configuration, trust store, or Raymond realm binding change |
 | Recovery grant expiry and issuer seam | Passed, 22 focused checks plus Ruff and strict mypy | Grant claim/completion never outlive campaign authorization; recovery consumes an abstract issuer so the policy signer can remain isolated | Recovery policy, issuer protocol, campaign expiry, or coordinator construction change |
 | Isolated outcome-policy bridge | Passed, 89 focused checks on clean PostgreSQL through `0069`, plus Ruff and strict mypy | Independent exact authorization registration; database-recomputed request/package/grant digests; private authenticated endpoint; exact realm/job/key bindings; durable replay; policy ciphertext-table denial; deleted-source denial; Render identity separation | Migration `0069`, policy endpoint/client, grant issuer, realm role grants, Render blueprint, or relevant contract change |
 | Operator registration and routine recovery assembly | Passed, 14 focused tests plus Ruff and strict mypy | Exact fresh preflight, digest-specific operator confirmation, content-free receipt, routine/v1.3 mode restriction, private policy client, qualified Lambda alias, and no signing key in routine configuration | Import CLI, preflight/authorization contracts, recovery environment assembly, or deployment variables change |

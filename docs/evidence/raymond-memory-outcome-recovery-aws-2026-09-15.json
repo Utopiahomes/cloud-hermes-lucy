@@ -1,0 +1,40 @@
+{
+  "artifact": {
+    "code_sha256_base64": "uYBhRXhfgKE8uUYgwpEi/9eaK6OcBKhSTcStV5ZusNs=",
+    "source_commit": "63067605e9d5aa9d1bbf88cac590262c66c3df2b",
+    "version_id": "BEZHF5WTvJaN40iTkGvoVKQMWmd_bbWL"
+  },
+  "checked_at": "2026-09-15T14:58:55.505584+00:00",
+  "contract": "lucy.raymond-memory-outcome-aws-receipt.v1",
+  "kms_rotation": true,
+  "lambda_alias": "arn:aws:lambda:us-east-1:429870640638:function:lucy-raymond-v13-memory-outcome-recovery-v1:outcome-v1",
+  "lambda_version": "1",
+  "outcome_key_arn": "arn:aws:kms:us-east-1:429870640638:key/b8b6c423-6c20-48f8-ab3b-368d253dc29b",
+  "outcome_key_table": "lucy-raymond-v13-memory-outcome-keys",
+  "outcome_receipt_table": "lucy-raymond-v13-memory-outcome-recovery-receipts",
+  "outcome_registry_id": "bfdfd1cd-146f-4520-a865-54f011ee844e",
+  "policy_trust_store_sha256": "53c2cb93f7a8b18613963327df0cda73df6f96d5d3809e4de3f8141c06385f3c",
+  "scope_exclusions": {
+    "personal_import_executed": false,
+    "product_ingress_changed": false,
+    "provider_called": false,
+    "transcript_capture_changed": false
+  },
+  "stack": "lucy-raymond-memory-outcome-recovery-v1",
+  "stack_status": "CREATE_COMPLETE",
+  "tables": {
+    "key_registry": {
+      "billing": "PAY_PER_REQUEST",
+      "deletion_protection": true,
+      "pitr": "ENABLED",
+      "status": "ACTIVE"
+    },
+    "receipt_ledger": {
+      "billing": "PAY_PER_REQUEST",
+      "deletion_protection": true,
+      "pitr": "ENABLED",
+      "status": "ACTIVE"
+    }
+  },
+  "termination_protection": true
+}
