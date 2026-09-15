@@ -307,6 +307,14 @@ accepted `0057` migration is merged at `2807dad`.
     an unresolved cloud-evidence gate: no campaign was registered, no provider was called, and no
     personal record was uploaded. Do not retry another opaque job; the next diagnostic must retain
     failure evidence or isolate individual predicates without changing realm state.
+48. The Raymond cloud-head blocker is closed. The verifier was changed from one opaque tuple to
+    six allowlisted, read-only predicates and a CLI-selection defect was covered by regression
+    tests. The repeated common failure was then traced to the verifier not being copied into the
+    explicitly allowlisted Render image. After adding that packaging boundary, one disabled job at
+    source commit `ee52a20` passed migration `0072`, quarantined admission, offline lifecycle, the
+    database capture fence, the exact Raymond content scope, and its single active service binding.
+    The temporary runner was deleted. No personal data, provider request, campaign registration,
+    product ingress, or transcript capture was involved.
 
 ## Verification ledger
 
@@ -347,7 +355,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Protected public-proxy/private-executor runtime | Passed locally, 52 focused tests plus Ruff and strict mypy | Canonical no-redirect proxy; separate hop/campaign credentials; fail-closed environment gates; exact authorization context; archive/outcome/recovery/provider composition | Proxy/executor runtime, Render service topology, admission contract, provider policy, or credential placement change |
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Commissioning authorized; not yet ready | Exact Raymond realm and pilot authorization recorded; no personal-data network call | Requires separate realm Render/AWS/PostgreSQL commissioning and deployed acceptance |
-| Raymond cloud head evidence | Blocked without activation | Forward migration job reported succeeded, but no retained content-free state receipt; three temporary read-only verifier runs failed and were deleted; no personal payload/provider call | Requires a non-opaque diagnostic that preserves sanitized failure evidence; do not repeat the same job |
+| Raymond cloud head evidence | Passed without activation | `docs/evidence/raymond-private-memory-head-2026-09-15.json`; exact commit `ee52a20`, six read-only predicates, temporary runner deleted, no personal payload/provider call | Migration, realm foundation/binding, capture fence, verifier, Dockerfile, or Raymond database-state change |
 
 The focused synthetic acceptance proves: exact manifest authorization; independent encrypted
 records; protected staging; separate ordinary and protected approval/recall; stale-candidate
@@ -361,9 +369,9 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 
 ## Remaining work before the 12–20 conversation pilot
 
-1. Advance and verify Raymond's already-commissioned, quarantined realm through migration `0072`;
-   deploy the disabled public proxy and temporary private executor; then pass the synthetic cloud
-   acceptance before registering the exact campaign and transport commitments.
+1. Deploy the disabled public proxy and temporary private executor against Raymond's verified
+   `0072` realm; then pass the synthetic cloud acceptance before registering the exact campaign
+   and transport commitments.
 2. Upload and execute only the exact authorized 13-batch pilot after a fresh local preflight.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims

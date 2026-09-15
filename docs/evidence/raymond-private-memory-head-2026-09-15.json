@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "revision",
+    "runtime_admission",
+    "lifecycle",
+    "capture_boundary",
+    "content_scope",
+    "service_binding"
+  ],
+  "contract": "lucy.raymond-private-memory-head.v1.3",
+  "job_id": "job-dakljfgu01pc73fijprg",
+  "product_ingress_enabled": false,
+  "source_commit": "ee52a20",
+  "status": "passed",
+  "temporary_runner_deleted": true,
+  "transcript_capture_enabled": false
+}
