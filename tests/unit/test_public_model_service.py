@@ -7,8 +7,10 @@ from uuid import UUID
 import pytest
 
 from lucy.public_contracts import PublicKnowledgeEntry, PublicRetrievalResult
+from lucy.public_model import PublicModelCompletion, PublicModelResult, PublicModelUsage
 from lucy.public_model_service import (
     HttpPublicModelClient,
+    PublicModelDiagnosticConfiguration,
     PublicModelServiceHandler,
     PublicModelServiceRequest,
     PublicModelServiceResponse,
@@ -89,6 +91,57 @@ def test_handler_revalidates_digest_before_model_execution() -> None:
         PublicModelServiceHandler(("c" * 64,), engine_factory).answer(request)
     assert calls == ["factory"]
 
+
+def test_handler_emits_content_free_diagnostic_when_explicitly_configured() -> None:
+    request = _request()
+    generator = PublicModelCompletion(
+        content='{"segments":[]}',
+        model="google/gemini-3.1-flash-lite",
+        provider="Google-Vertex",
+        provider_reference="provider-reference-is-not-exported",
+        prompt_tokens=100,
+        completion_tokens=20,
+        incurred_microusd=123,
+    )
+    verifier = PublicModelCompletion(
+        content='{"supported":true}',
+        model="google/gemini-3.1-flash-lite",
+        provider="Google-Vertex",
+        provider_reference="second-reference-is-not-exported",
+        prompt_tokens=50,
+        completion_tokens=5,
+        incurred_microusd=45,
+    )
+    engine = SimpleNamespace(
+        answer=lambda **_kwargs: PublicModelResult(
+            answer=_answer(),
+            usage=PublicModelUsage(generator=generator, verifier=verifier),
+        )
+    )
+    handler = PublicModelServiceHandler(
+        (request.snapshot_digest,),
+        lambda _request: engine,
+        PublicModelDiagnosticConfiguration(
+            model_release_id="d" * 40,
+            configured_model="google/gemini-3.1-flash-lite",
+            configured_providers=("Google",),
+            rate_version="openrouter-2026-09-13",
+            generator_maximum_microusd=30_000,
+            verifier_maximum_microusd=15_000,
+        ),
+    )
+
+    diagnostic = handler.answer(request).diagnostic
+
+    assert diagnostic is not None
+    assert diagnostic.request_id == request.request_id
+    assert diagnostic.validation_outcome == "supported"
+    assert [call.purpose for call in diagnostic.calls] == ["answer", "verify"]
+    assert sum(call.incurred_microusd for call in diagnostic.calls) == 168
+    encoded = diagnostic.model_dump_json()
+    assert "provider-reference" not in encoded
+    assert request.question not in encoded
+    assert _answer().answer not in encoded
 
 class FakeHttpResponse:
     def __init__(self, status: int, body: bytes) -> None:

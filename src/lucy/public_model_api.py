@@ -29,6 +29,7 @@ from lucy.public_model_admission import (
     OpenRouterInferenceProvider,
 )
 from lucy.public_model_service import (
+    PublicModelDiagnosticConfiguration,
     PublicModelServiceHandler,
     PublicModelServiceRequest,
     PublicModelServiceUnavailable,
@@ -44,6 +45,7 @@ _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
 _MODEL = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}/[a-zA-Z0-9][a-zA-Z0-9._:-]{0,159}\Z")
 _RATE_VERSION = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}\Z")
+_RELEASE_ID = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class PublicModelApiConfigurationError(ValueError):
@@ -76,6 +78,8 @@ class PublicModelApiConfiguration:
     cost_writer_token: str
     recovery_ack_hostport: str
     recovery_ack_token: str
+    diagnostics_enabled: bool
+    release_id: str | None
 
     @classmethod
     def from_environment(
@@ -136,6 +140,17 @@ class PublicModelApiConfiguration:
             raise PublicModelApiConfigurationError("public model scope is invalid") from None
         writer_hostport = _hostport(values, "LUCY_COST_WRITER_HOSTPORT")
         ack_hostport = _hostport(values, "LUCY_RECOVERY_ACK_HOSTPORT")
+        diagnostics_enabled = _strict_bool(
+            values.get("LUCY_PUBLIC_DIAGNOSTICS_ENABLED", "false"),
+            "LUCY_PUBLIC_DIAGNOSTICS_ENABLED",
+        )
+        release_id = values.get("LUCY_PUBLIC_MODEL_RELEASE_ID", "").strip() or None
+        if diagnostics_enabled and (
+            release_id is None or _RELEASE_ID.fullmatch(release_id) is None
+        ):
+            raise PublicModelApiConfigurationError(
+                "public model diagnostic release is invalid"
+            )
         return cls(
             database_url=database_url,
             expected_database_login=login,
@@ -181,6 +196,8 @@ class PublicModelApiConfiguration:
             cost_writer_token=_private_token(values, "LUCY_COST_WRITER_TOKEN"),
             recovery_ack_hostport=ack_hostport,
             recovery_ack_token=_private_token(values, "LUCY_RECOVERY_ACK_TOKEN"),
+            diagnostics_enabled=diagnostics_enabled,
+            release_id=release_id,
         )
 
 
@@ -235,6 +252,14 @@ def _positive_float(values: Mapping[str, str], name: str) -> float:
     if not 0 < value <= 1_000:
         raise PublicModelApiConfigurationError(f"public model price is invalid: {name}")
     return value
+
+
+def _strict_bool(value: str, name: str) -> bool:
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise PublicModelApiConfigurationError(f"public model flag is invalid: {name}")
 
 
 @dataclass(frozen=True)
@@ -294,10 +319,25 @@ def _dependencies() -> PublicModelApiDependencies:
             verifier_maximum_microusd=config.verifier_maximum_microusd,
         )
 
+    diagnostic_configuration = None
+    if config.diagnostics_enabled:
+        assert config.release_id is not None
+        diagnostic_configuration = PublicModelDiagnosticConfiguration(
+            model_release_id=config.release_id,
+            configured_model=config.model,
+            configured_providers=config.allowed_providers,
+            rate_version=config.rate_version,
+            generator_maximum_microusd=config.generator_maximum_microusd,
+            verifier_maximum_microusd=config.verifier_maximum_microusd,
+        )
     return PublicModelApiDependencies(
         config=config,
         sessions=sessions,
-        handler=PublicModelServiceHandler(config.allowed_snapshot_digests, engine_factory),
+        handler=PublicModelServiceHandler(
+            config.allowed_snapshot_digests,
+            engine_factory,
+            diagnostic_configuration,
+        ),
     )
 
 

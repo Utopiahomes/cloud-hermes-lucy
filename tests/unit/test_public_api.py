@@ -10,7 +10,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import lucy.public_api as api
 from lucy.public_contracts import PublicKnowledgeEntry, PublicReference
-from lucy.public_model_service import PublicModelServiceResponse
+from lucy.public_model_service import (
+    PublicModelCallDiagnostic,
+    PublicModelDiagnostic,
+    PublicModelServiceResponse,
+)
 from lucy.publication import PublicAnswer, PublicKnowledgeProjection
 from lucy.readiness import ReadinessError
 from lucy.tenancy import ScopeNotFound
@@ -59,18 +63,25 @@ def reset_api(monkeypatch: pytest.MonkeyPatch) -> None:
     api._configuration.cache_clear()
     api._reader.cache_clear()
     cached_model_client.cache_clear()
+    api._diagnostic_store.cache_clear()
     monkeypatch.setattr(api, "_limiter", api._OpaqueRateLimiter(commitment_key=b"k" * 32))
+    monkeypatch.setattr(api, "_exercise_limiter", api._ExerciseLimiter())
     yield
     api._configuration.cache_clear()
     cached_reader.cache_clear()
     cached_model_client.cache_clear()
+    api._diagnostic_store.cache_clear()
 
 
 def test_public_api_exposes_only_health_and_exact_answer_route() -> None:
     surface = {
         (method, route.path) for route in api.app.routes for method in (route.methods or set())
     }
-    assert surface == {("GET", "/health"), ("POST", "/v1/public/answer")}
+    assert surface == {
+        ("GET", "/health"),
+        ("GET", "/v1/operations/public-diagnostic/{trace_id}"),
+        ("POST", "/v1/public/answer"),
+    }
 
 
 def test_configuration_binds_exact_public_login_origin_hostname_and_epoch() -> None:
@@ -303,6 +314,130 @@ def test_model_route_receives_only_approved_projection_and_keyed_commitments(
     assert len(sent.session_commitment) == len(sent.ip_commitment) == 64
 
 
+def test_diagnostic_trace_is_header_visible_and_operator_receipt_is_content_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnostic_token = "diagnostic-operator-token-that-is-long-enough"
+    for key, value in {
+        "LUCY_PUBLIC_CONVERSATION_ENABLED": "true",
+        "LUCY_PUBLIC_MODEL_ENABLED": "true",
+        "LUCY_PUBLIC_MODEL_HOSTPORT": "lucy-public-model-staging:10000",
+        "LUCY_PUBLIC_MODEL_TOKEN": "model-service-token-that-is-long-enough",
+        "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64": base64.b64encode(b"m" * 32).decode(),
+        "LUCY_PUBLIC_DIAGNOSTICS_ENABLED": "true",
+        "LUCY_PUBLIC_DIAGNOSTIC_TOKEN": diagnostic_token,
+        "LUCY_PUBLIC_RELEASE_ID": "c" * 40,
+        "LUCY_PUBLIC_DEPLOYMENT_TIER": "staging",
+        "LUCY_PUBLIC_EXERCISE_MODE": "true",
+        "LUCY_PUBLIC_EXERCISE_CONCURRENCY_LIMIT": "2",
+        "LUCY_PUBLIC_EXERCISE_SESSION_REQUEST_LIMIT": "20",
+        "LUCY_PUBLIC_EXERCISE_TOTAL_REQUEST_LIMIT": "40",
+    }.items():
+        monkeypatch.setenv(key, value)
+    api._configuration.cache_clear()
+    api._diagnostic_store.cache_clear()
+    source = PublicReference(
+        id="about-source",
+        label="About Utopia Homes",
+        href="https://www.utopiahomes.com/about",
+    )
+    entry = PublicKnowledgeEntry.model_validate(
+        {
+            "id": "about-utopia",
+            "service_line": "general",
+            "kind": "description",
+            "title": "About Utopia",
+            "approved_text": "Utopia Homes creates distinctive group stays.",
+            "aliases": [],
+            "topics": ["about"],
+            "route": "about",
+            "property_slug": None,
+            "property_facts": None,
+            "source": source,
+            "links": [],
+            "effective_from": "2026-01-01T00:00:00Z",
+            "effective_until": None,
+            "direct_answer": True,
+        }
+    )
+    projection = PublicKnowledgeProjection(
+        entries=(entry,), version=2, snapshot_digest=DIGEST
+    )
+    monkeypatch.setattr(
+        api,
+        "_reader",
+        lambda: SimpleNamespace(knowledge_admitted=lambda **_kwargs: projection),
+    )
+
+    def model_answer(request):
+        calls = tuple(
+            PublicModelCallDiagnostic(
+                purpose=purpose,
+                attempt_id=UUID(
+                    "24512180-a368-4ad0-a167-44082ae66c66"
+                    if purpose == "answer"
+                    else "f5050bb0-766e-48d9-bf7b-2986e2e1443f"
+                ),
+                configured_model="google/gemini-3.1-flash-lite",
+                observed_model="google/gemini-3.1-flash-lite",
+                configured_providers=("Google",),
+                observed_provider="Google-Vertex",
+                rate_version="openrouter-2026-09-13",
+                prompt_tokens=100,
+                completion_tokens=20,
+                maximum_microusd=30_000 if purpose == "answer" else 15_000,
+                incurred_microusd=100 if purpose == "answer" else 50,
+            )
+            for purpose in ("answer", "verify")
+        )
+        return PublicModelServiceResponse(
+            contract="lucy.public-model-response.v1",
+            request_id=request.request_id,
+            snapshot_digest=request.snapshot_digest,
+            answer={
+                "outcome": "answered",
+                "answer": "Utopia Homes creates distinctive group stays.",
+                "sources": [source.model_dump(mode="json")],
+                "evidence_ids": ["about-utopia"],
+            },
+            diagnostic=PublicModelDiagnostic(
+                contract="lucy.public-model-diagnostic.v1",
+                request_id=request.request_id,
+                model_release_id="d" * 40,
+                answer_policy_digest="e" * 64,
+                verifier_policy_digest="f" * 64,
+                validation_outcome="supported",
+                model_latency_ms=200,
+                calls=calls,
+            ),
+        )
+
+    monkeypatch.setattr(api, "_model_client", lambda: SimpleNamespace(answer=model_answer))
+    client = TestClient(api.app)
+    question = "What makes a Utopia stay different?"
+    response = client.post(
+        "/v1/public/answer", json={"question": question}, headers=_headers()
+    )
+
+    assert response.status_code == 200
+    trace_id = response.headers["x-lucy-trace-id"]
+    assert UUID(trace_id).version == 4
+    assert response.headers["x-lucy-cloud-release"] == "c" * 40
+    assert response.headers["x-lucy-snapshot-version"] == "2"
+    assert response.headers["x-lucy-snapshot-digest"] == DIGEST
+    assert client.get(f"/v1/operations/public-diagnostic/{trace_id}").status_code == 401
+
+    receipt = client.get(
+        f"/v1/operations/public-diagnostic/{trace_id}",
+        headers={"Authorization": f"Bearer {diagnostic_token}"},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json()["model"]["validation_outcome"] == "supported"
+    assert receipt.json()["model"]["calls"][0]["incurred_microusd"] == 100
+    assert question not in receipt.text
+    assert response.json()["answer"] not in receipt.text
+
+
 def test_model_configuration_rejects_a_non_private_hostport_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -420,6 +555,40 @@ def test_limiter_retains_only_commitments_and_enforces_both_ceilings() -> None:
     assert not limiter.allow("203.0.113.8", second, config)
     assert "203.0.113.8" not in repr(limiter._windows)
     assert SESSION not in repr(limiter._sessions)
+
+
+def test_exercise_limiter_enforces_concurrency_session_and_total_bounds() -> None:
+    now = [0.0]
+    limiter = api._ExerciseLimiter(clock=lambda: now[0])
+    config = api.PublicApiConfiguration.from_environment(
+        {
+            **_environment(),
+            "LUCY_PUBLIC_CONVERSATION_ENABLED": "true",
+            "LUCY_PUBLIC_MODEL_ENABLED": "true",
+            "LUCY_PUBLIC_MODEL_HOSTPORT": "lucy-public-model-staging:10000",
+            "LUCY_PUBLIC_MODEL_TOKEN": "model-service-token-that-is-long-enough",
+            "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64": base64.b64encode(b"m" * 32).decode(),
+            "LUCY_PUBLIC_DIAGNOSTICS_ENABLED": "true",
+            "LUCY_PUBLIC_DIAGNOSTIC_TOKEN": "diagnostic-token-that-is-long-enough",
+            "LUCY_PUBLIC_RELEASE_ID": "c" * 40,
+            "LUCY_PUBLIC_DEPLOYMENT_TIER": "staging",
+            "LUCY_PUBLIC_EXERCISE_MODE": "true",
+            "LUCY_PUBLIC_EXERCISE_CONCURRENCY_LIMIT": "2",
+            "LUCY_PUBLIC_EXERCISE_SESSION_REQUEST_LIMIT": "2",
+            "LUCY_PUBLIC_EXERCISE_TOTAL_REQUEST_LIMIT": "3",
+        }
+    )
+    first = UUID(SESSION)
+    second = UUID("f8092d4c-3514-428a-887f-73e5a6ad033b")
+
+    assert limiter.acquire(first, config)
+    assert limiter.acquire(second, config)
+    assert not limiter.acquire(first, config)
+    limiter.release()
+    limiter.release()
+    assert limiter.acquire(first, config)
+    limiter.release()
+    assert not limiter.acquire(second, config)
 
 
 def test_declared_and_streamed_oversize_requests_are_rejected() -> None:

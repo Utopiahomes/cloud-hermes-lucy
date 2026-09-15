@@ -1,5 +1,21 @@
 # Utopia R1 activation checkpoint
 
+## Claude website-ownership handoff — 2026-09-15
+
+Ray transferred website implementation, merge, deployment, and rollback ownership to Claude
+while retaining Cloud Lucy implementation and deployment with Lyra. Ray approved a separate
+public-only reproduction environment, content-free trace receipts without transcript capture,
+and an initial non-resetting $5 provider exercise bounded to two simultaneous requests, 20
+attempts per temporary session, 40 attempts total, and no production-budget sharing.
+
+The local Cloud diagnostic contract and staging-only request limiter are implemented without a
+migration. The complete 1,015-test unit suite, repository-wide Ruff, and strict mypy across 119
+source files pass. Hosted staging, provider-key
+creation, Claude's website harness, and live reproduction remain unexecuted. No production or
+Private Lucy change has been made. The executable boundary, evidence requirements, deployment
+order, and current verification ledger are in
+`docs/public-lucy-claude-reproduction-access-2026-09-15.md`.
+
 Status: Public Lucy conversational R1 production acceptance passed on 2026-09-12 at
 exact Cloud release `fbfd95b43bb670fa04c246ef789c18c5e47de020`, website merge
 `7ff15a399057ec762b7748cbf3eca56ef536232a`, PostgreSQL revision

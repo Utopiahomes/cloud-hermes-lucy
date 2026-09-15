@@ -134,6 +134,18 @@ def test_configuration_requires_exact_cost_identity_and_private_provider_pin() -
         api.PublicModelApiConfiguration.from_environment(generic_cost_role)
 
 
+def test_diagnostics_require_an_exact_model_release() -> None:
+    enabled = {**_environment(), "LUCY_PUBLIC_DIAGNOSTICS_ENABLED": "true"}
+    with pytest.raises(api.PublicModelApiConfigurationError, match="release"):
+        api.PublicModelApiConfiguration.from_environment(enabled)
+
+    config = api.PublicModelApiConfiguration.from_environment(
+        {**enabled, "LUCY_PUBLIC_MODEL_RELEASE_ID": "d" * 40}
+    )
+    assert config.diagnostics_enabled is True
+    assert config.release_id == "d" * 40
+
+
 def test_private_api_authenticates_bounds_and_returns_no_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

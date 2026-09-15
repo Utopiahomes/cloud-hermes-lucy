@@ -6,6 +6,7 @@ authority over the packet, evidence identifiers, links, and the final answer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -298,6 +299,9 @@ fairly supported by that evidence. Conversation, apologies, clarifications, and 
 guidance need no citation, but must not smuggle in Utopia-specific factual claims. Return only
 JSON matching the supplied schema, without an envelope or contract/version field. When uncertain
 about support, reject."""
+
+PUBLIC_ANSWER_POLICY_DIGEST = hashlib.sha256(_ANSWER_POLICY.encode("utf-8")).hexdigest()
+PUBLIC_VERIFY_POLICY_DIGEST = hashlib.sha256(_VERIFY_POLICY.encode("utf-8")).hexdigest()
 
 
 class PublicConversationEngine:

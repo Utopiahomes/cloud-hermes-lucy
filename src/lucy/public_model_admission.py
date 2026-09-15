@@ -27,6 +27,14 @@ from lucy.public_model import (
 _ATTEMPT_NAMESPACE = UUID("a58b25e3-7379-43da-8125-42808d933bf0")
 
 
+def public_model_attempt_id(request_id: UUID, purpose: str) -> UUID:
+    """Derive the content-free provider-attempt identifier for one public trace."""
+
+    if request_id.version != 4 or purpose not in {"answer", "verify"}:
+        raise ValueError("public model attempt identity is invalid")
+    return uuid5(_ATTEMPT_NAMESPACE, f"{request_id}:{purpose}")
+
+
 class PublicInferenceExecutor(Protocol):
     def execute(
         self,
@@ -95,9 +103,7 @@ class AdmittedPublicJsonModel:
     def complete(self, call: PublicModelCall) -> PublicModelCompletion:
         encoded = call.model_dump_json().encode("utf-8")
         input_tokens = approximate_tokens(call.messages)
-        attempt_id = uuid5(
-            _ATTEMPT_NAMESPACE, f"{self._request_id}:{call.purpose}"
-        )
+        attempt_id = public_model_attempt_id(self._request_id, call.purpose)
         attempt = ProviderAttemptRequestV1(
             attempt_id=attempt_id,
             idempotency_key=f"public-model:{self._request_id}:{call.purpose}",

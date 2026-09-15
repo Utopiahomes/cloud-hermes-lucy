@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Literal, cast
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -24,6 +25,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from lucy.public_contracts import PublicHistoryTurn, PublicPageContext
+from lucy.public_diagnostics import (
+    PublicDiagnosticReceipt,
+    PublicDiagnosticStore,
+    receipt_now,
+)
 from lucy.public_model_service import (
     HttpPublicModelClient,
     PublicModelServiceRequest,
@@ -42,6 +48,7 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _PUBLIC_LOGIN = re.compile(r"lucy_[a-z][a-z0-9]{0,30}_public\Z")
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")
+_RELEASE_ID = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class PublicApiConfigurationError(ValueError):
@@ -88,6 +95,16 @@ class PublicApiConfiguration:
     model_hostport: str | None
     model_token: str | None
     cost_commitment_key: bytes | None
+    diagnostics_enabled: bool
+    diagnostic_token: str | None
+    release_id: str | None
+    deployment_tier: str | None
+    diagnostic_ttl_seconds: int
+    diagnostic_maximum_receipts: int
+    exercise_mode: bool
+    exercise_concurrency_limit: int
+    exercise_session_request_limit: int
+    exercise_total_request_limit: int
 
     @classmethod
     def from_environment(
@@ -178,6 +195,29 @@ class PublicApiConfiguration:
                 values, "LUCY_PUBLIC_COST_COMMITMENT_KEY_B64"
             )
 
+        diagnostics_enabled = _strict_bool(
+            values.get("LUCY_PUBLIC_DIAGNOSTICS_ENABLED", "false"),
+            "LUCY_PUBLIC_DIAGNOSTICS_ENABLED",
+        )
+        diagnostic_token = values.get("LUCY_PUBLIC_DIAGNOSTIC_TOKEN", "").strip() or None
+        release_id = values.get("LUCY_PUBLIC_RELEASE_ID", "").strip() or None
+        deployment_tier = values.get("LUCY_PUBLIC_DEPLOYMENT_TIER", "").strip() or None
+        if diagnostics_enabled and (
+            not model_enabled
+            or diagnostic_token is None
+            or not 32 <= len(diagnostic_token) <= 512
+            or release_id is None
+            or _RELEASE_ID.fullmatch(release_id) is None
+            or deployment_tier not in {"staging", "production"}
+        ):
+            raise PublicApiConfigurationError("public diagnostic boundary is invalid")
+        exercise_mode = _strict_bool(
+            values.get("LUCY_PUBLIC_EXERCISE_MODE", "false"),
+            "LUCY_PUBLIC_EXERCISE_MODE",
+        )
+        if exercise_mode and (not diagnostics_enabled or deployment_tier != "staging"):
+            raise PublicApiConfigurationError("public exercise boundary is invalid")
+
         return cls(
             database_url=database_url,
             api_token=api_token,
@@ -202,6 +242,26 @@ class PublicApiConfiguration:
             model_hostport=model_hostport,
             model_token=model_token,
             cost_commitment_key=cost_commitment_key,
+            diagnostics_enabled=diagnostics_enabled,
+            diagnostic_token=diagnostic_token,
+            release_id=release_id,
+            deployment_tier=deployment_tier,
+            diagnostic_ttl_seconds=_bounded_int_default(
+                values, "LUCY_PUBLIC_DIAGNOSTIC_TTL_SECONDS", 3_600, 60, 86_400
+            ),
+            diagnostic_maximum_receipts=_bounded_int_default(
+                values, "LUCY_PUBLIC_DIAGNOSTIC_MAX_RECEIPTS", 200, 10, 10_000
+            ),
+            exercise_mode=exercise_mode,
+            exercise_concurrency_limit=_bounded_int_default(
+                values, "LUCY_PUBLIC_EXERCISE_CONCURRENCY_LIMIT", 2, 1, 20
+            ),
+            exercise_session_request_limit=_bounded_int_default(
+                values, "LUCY_PUBLIC_EXERCISE_SESSION_REQUEST_LIMIT", 20, 1, 100
+            ),
+            exercise_total_request_limit=_bounded_int_default(
+                values, "LUCY_PUBLIC_EXERCISE_TOTAL_REQUEST_LIMIT", 40, 1, 1_000
+            ),
         )
 
 
@@ -215,6 +275,23 @@ def _required(values: Mapping[str, str], name: str) -> str:
 def _bounded_int(values: Mapping[str, str], name: str, minimum: int, maximum: int) -> int:
     try:
         value = int(_required(values, name))
+    except ValueError as exc:
+        raise PublicApiConfigurationError(f"public limit is invalid: {name}") from exc
+    if not minimum <= value <= maximum:
+        raise PublicApiConfigurationError(f"public limit is invalid: {name}")
+    return value
+
+
+def _bounded_int_default(
+    values: Mapping[str, str],
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = values.get(name, str(default)).strip()
+    try:
+        value = int(raw)
     except ValueError as exc:
         raise PublicApiConfigurationError(f"public limit is invalid: {name}") from exc
     if not minimum <= value <= maximum:
@@ -299,6 +376,56 @@ class _OpaqueRateLimiter:
         }
 
 
+@dataclass
+class _ExerciseSession:
+    last_seen: float
+    requests: int
+
+
+class _ExerciseLimiter:
+    """Bound a staging exercise independently of ordinary production rate limits."""
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._sessions: dict[UUID, _ExerciseSession] = {}
+        self._active_requests = 0
+        self._total_requests = 0
+        self._lock = threading.Lock()
+
+    def acquire(self, session_id: UUID, config: PublicApiConfiguration) -> bool:
+        now = self._clock()
+        with self._lock:
+            self._sessions = {
+                key: value
+                for key, value in self._sessions.items()
+                if now - value.last_seen <= config.session_ttl_seconds
+            }
+            current = self._sessions.get(session_id)
+            if (
+                self._active_requests >= config.exercise_concurrency_limit
+                or self._total_requests >= config.exercise_total_request_limit
+                or (
+                    current is not None
+                    and current.requests >= config.exercise_session_request_limit
+                )
+            ):
+                return False
+            if current is None:
+                current = _ExerciseSession(last_seen=now, requests=0)
+                self._sessions[session_id] = current
+            current.last_seen = now
+            current.requests += 1
+            self._total_requests += 1
+            self._active_requests += 1
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            if self._active_requests <= 0:
+                raise RuntimeError("public exercise request accounting is unbalanced")
+            self._active_requests -= 1
+
+
 app = FastAPI(
     title="Lucy Public Projection API",
     version="1.0.0",
@@ -307,6 +434,7 @@ app = FastAPI(
     redoc_url=None,
 )
 _limiter = _OpaqueRateLimiter()
+_exercise_limiter = _ExerciseLimiter()
 _retriever = PublicKnowledgeRetriever()
 
 
@@ -339,6 +467,15 @@ def _model_client() -> HttpPublicModelClient:
     return HttpPublicModelClient(config.model_hostport, config.model_token)
 
 
+@lru_cache(maxsize=1)
+def _diagnostic_store() -> PublicDiagnosticStore:
+    config = _configuration()
+    return PublicDiagnosticStore(
+        ttl_seconds=config.diagnostic_ttl_seconds,
+        maximum_receipts=config.diagnostic_maximum_receipts,
+    )
+
+
 def _cost_commitment(key: bytes, kind: str, value: str) -> str:
     return hmac.new(key, f"{kind}\0{value}".encode(), hashlib.sha256).hexdigest()
 
@@ -346,6 +483,35 @@ def _cost_commitment(key: bytes, kind: str, value: str) -> str:
 @app.get("/health", tags=["operations"])
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/v1/operations/public-diagnostic/{trace_id}", tags=["operations"])
+def public_diagnostic(trace_id: str, request: Request) -> JSONResponse:
+    try:
+        config = _configuration()
+    except PublicApiConfigurationError:
+        return _response(404, "Diagnostic receipt is unavailable")
+    if not config.diagnostics_enabled or config.diagnostic_token is None:
+        return _response(404, "Diagnostic receipt is unavailable")
+    authorization = request.headers.get("authorization")
+    if authorization is None or not secrets.compare_digest(
+        authorization, f"Bearer {config.diagnostic_token}"
+    ):
+        return _response(401, "Invalid diagnostic credential")
+    try:
+        identifier = UUID(trace_id)
+    except ValueError:
+        return _response(404, "Diagnostic receipt is unavailable")
+    if identifier.version != 4 or str(identifier) != trace_id:
+        return _response(404, "Diagnostic receipt is unavailable")
+    receipt = _diagnostic_store().get(identifier)
+    if receipt is None:
+        return _response(404, "Diagnostic receipt is unavailable")
+    return JSONResponse(
+        status_code=200,
+        content=receipt.model_dump(mode="json"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/v1/public/answer", tags=["public"])
@@ -411,25 +577,110 @@ async def public_answer(request: Request) -> JSONResponse:
             if config.model_enabled:
                 if config.cost_commitment_key is None:
                     return _response(503, "Public Lucy is unavailable")
-                model_response = _model_client().answer(
-                    PublicModelServiceRequest(
-                        contract="lucy.public-model-request.v1",
-                        request_id=uuid4(),
+                trace_id = uuid4()
+                started = time.perf_counter()
+                exercise_acquired = False
+                if config.exercise_mode:
+                    exercise_acquired = _exercise_limiter.acquire(session_id, config)
+                    if not exercise_acquired:
+                        return _response(429, "Public exercise limit reached")
+                try:
+                    try:
+                        model_response = _model_client().answer(
+                            PublicModelServiceRequest(
+                                contract="lucy.public-model-request.v1",
+                                request_id=trace_id,
+                                snapshot_digest=projection.snapshot_digest,
+                                session_commitment=_cost_commitment(
+                                    config.cost_commitment_key, "session", str(session_id)
+                                ),
+                                ip_commitment=_cost_commitment(
+                                    config.cost_commitment_key, "ip", client_ip
+                                ),
+                                question=question.question,
+                                entries=projection.entries,
+                                page_context=question.page_context,
+                                history=question.history,
+                            )
+                        )
+                    except PublicModelServiceUnavailable:
+                        if (
+                            config.diagnostics_enabled
+                            and config.release_id is not None
+                            and config.deployment_tier in {"staging", "production"}
+                        ):
+                            _diagnostic_store().put(
+                                PublicDiagnosticReceipt(
+                                    contract="lucy.public-diagnostic-receipt.v1",
+                                    trace_id=trace_id,
+                                    recorded_at=receipt_now(),
+                                    environment=cast(
+                                        Literal["staging", "production"],
+                                        config.deployment_tier,
+                                    ),
+                                    cloud_release_id=config.release_id,
+                                    snapshot_version=projection.version,
+                                    snapshot_digest=projection.snapshot_digest,
+                                    request_latency_ms=max(
+                                        0,
+                                        round(
+                                            (time.perf_counter() - started) * 1_000
+                                        ),
+                                    ),
+                                    outcome="unavailable",
+                                )
+                            )
+                            return _response(
+                                503,
+                                "Public Lucy is unavailable",
+                                extra_headers={
+                                    "X-Lucy-Trace-Id": str(trace_id),
+                                    "X-Lucy-Cloud-Release": config.release_id,
+                                    "X-Lucy-Snapshot-Version": str(projection.version),
+                                    "X-Lucy-Snapshot-Digest": projection.snapshot_digest,
+                                },
+                            )
+                        raise
+                finally:
+                    if exercise_acquired:
+                        _exercise_limiter.release()
+                response_headers = {"Cache-Control": "no-store"}
+                if config.diagnostics_enabled:
+                    if (
+                        model_response.diagnostic is None
+                        or model_response.diagnostic.request_id != trace_id
+                        or config.release_id is None
+                        or config.deployment_tier not in {"staging", "production"}
+                    ):
+                        return _response(503, "Public Lucy is unavailable")
+                    receipt = PublicDiagnosticReceipt(
+                        contract="lucy.public-diagnostic-receipt.v1",
+                        trace_id=trace_id,
+                        recorded_at=receipt_now(),
+                        environment=cast(
+                            Literal["staging", "production"], config.deployment_tier
+                        ),
+                        cloud_release_id=config.release_id,
+                        snapshot_version=projection.version,
                         snapshot_digest=projection.snapshot_digest,
-                        session_commitment=_cost_commitment(
-                            config.cost_commitment_key, "session", str(session_id)
+                        request_latency_ms=max(
+                            0, round((time.perf_counter() - started) * 1_000)
                         ),
-                        ip_commitment=_cost_commitment(
-                            config.cost_commitment_key, "ip", client_ip
-                        ),
-                        question=question.question,
-                        entries=projection.entries,
-                        page_context=question.page_context,
-                        history=question.history,
+                        outcome="completed",
+                        model=model_response.diagnostic,
                     )
-                )
+                    _diagnostic_store().put(receipt)
+                    response_headers.update(
+                        {
+                            "X-Lucy-Trace-Id": str(trace_id),
+                            "X-Lucy-Cloud-Release": config.release_id,
+                            "X-Lucy-Snapshot-Version": str(projection.version),
+                            "X-Lucy-Snapshot-Digest": projection.snapshot_digest,
+                        }
+                    )
                 result = model_response.answer
             else:
+                response_headers = {"Cache-Control": "no-store"}
                 result = _retriever.retrieve(
                     question=question.question,
                     entries=projection.entries,
@@ -452,7 +703,7 @@ async def public_answer(request: Request) -> JSONResponse:
                     "version": projection.version,
                     "snapshot_digest": projection.snapshot_digest,
                 },
-                headers={"Cache-Control": "no-store"},
+                headers=response_headers,
             )
         answer = _reader().answer_admitted(
             hostname=config.site_hostname,
@@ -477,9 +728,17 @@ async def public_answer(request: Request) -> JSONResponse:
     )
 
 
-def _response(status_code: int, detail: str) -> JSONResponse:
+def _response(
+    status_code: int,
+    detail: str,
+    *,
+    extra_headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    headers = {"Cache-Control": "no-store"}
+    if extra_headers is not None:
+        headers.update(extra_headers)
     return JSONResponse(
         status_code=status_code,
         content={"detail": detail},
-        headers={"Cache-Control": "no-store"},
+        headers=headers,
     )
