@@ -63,6 +63,29 @@ def _contain() -> dict[str, object]:
     with psycopg.connect(
         os.environ["LUCY_MIGRATION_DATABASE_URL"], autocommit=True
     ) as connection:
+        session_rows = connection.execute(
+            "SELECT usename,state,count(*) FROM pg_stat_activity "
+            "WHERE datname=current_database() "
+            "AND usename IN ('lucy_utopia_routine','lucy_utopia_public') "
+            "AND pid<>pg_backend_pid() GROUP BY usename,state ORDER BY usename,state"
+        ).fetchall()
+        role_boundary = connection.execute(
+            "SELECT current_user,"
+            "(SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user),"
+            "pg_has_role(current_user,'lucy_utopia_routine','MEMBER'),"
+            "pg_has_role(current_user,'lucy_utopia_public','MEMBER')"
+        ).fetchone()
+        print(
+            json.dumps(
+                {
+                    "phase": "contain-pre-termination",
+                    "sessions": session_rows,
+                    "role_boundary": role_boundary,
+                },
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
         terminated = connection.execute(
             "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
             "AND usename IN ('lucy_utopia_routine','lucy_utopia_public') "
