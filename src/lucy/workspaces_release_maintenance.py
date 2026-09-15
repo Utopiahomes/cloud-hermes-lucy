@@ -49,12 +49,17 @@ def _contain() -> dict[str, object]:
             "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
             "lucy.capture_boundary_safe_v1()"
         ).fetchone()
-        if boundary != (SOURCE_REVISION, "ready", True):
+        if (
+            boundary[0] != SOURCE_REVISION
+            or boundary[1] not in {"ready", "quarantined"}
+            or boundary[2] is not True
+        ):
             raise RuntimeError(f"containment boundary differs: {boundary!r}")
-        connection.execute(
-            "UPDATE lucy.runtime_admission SET state='quarantined',updated_at=now() "
-            "WHERE singleton"
-        )
+        if boundary[1] == "ready":
+            connection.execute(
+                "UPDATE lucy.runtime_admission SET state='quarantined',updated_at=now() "
+                "WHERE singleton"
+            )
     with psycopg.connect(
         os.environ["LUCY_MIGRATION_DATABASE_URL"], autocommit=True
     ) as connection:
