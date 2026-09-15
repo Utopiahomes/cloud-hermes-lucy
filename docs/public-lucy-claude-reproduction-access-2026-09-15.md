@@ -166,7 +166,9 @@ Executed locally against Cloud diagnostic commit
   `docker-secrets-engine` parent directories advanced between the Ingest and Secrets Engine
   failures but did not recover the daemon; a subsequent start recreated the Ingest socket
   failure. No factory reset, uninstall, or destructive cleanup was attempted. A local-only
-  diagnostic bundle was gathered and not uploaded.
+  diagnostic bundle was gathered, then uploaded with Ray's explicit authorization as Docker
+  diagnostics ID `949B2614-539E-485E-9D14-A0238705A24D/20260915162759`. The redacted
+  reproduction was posted to `docker/desktop-feedback#460` as issue comment `5684318816`.
 - 2026-09-15: the current Render Hobby workspace has 23 of 25 service slots occupied and the
   existing project already uses its two-environment limit. The remaining two service slots are
   insufficient for the separately credentialed public, model, database, cost-writer, and
