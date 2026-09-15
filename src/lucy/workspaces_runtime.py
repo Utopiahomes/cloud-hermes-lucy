@@ -286,7 +286,10 @@ def check_workspaces_readiness(config: WorkspacesRuntimeConfiguration) -> None:
             raise WorkspacesRuntimeConfigurationError("database identity can administer storage")
         revisions = list(session.scalars(text("SELECT version_num FROM public.alembic_version")))
         if revisions != [WORKSPACES_SCHEMA_REVISION]:
-            raise WorkspacesRuntimeConfigurationError("database schema is not ready")
+            raise WorkspacesRuntimeConfigurationError(
+                "database schema is not ready "
+                f"(expected={[WORKSPACES_SCHEMA_REVISION]!r}, observed={revisions!r})"
+            )
         for signature in (
             "lucy.enqueue_workspaces_task_v1(uuid,uuid,uuid,uuid,uuid,text,text)",
             "lucy.claim_workspaces_task_v1(uuid,integer)",
