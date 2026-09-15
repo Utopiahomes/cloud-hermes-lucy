@@ -322,6 +322,14 @@ accepted `0057` migration is merged at `2807dad`.
     deletion protected, and have point-in-time recovery enabled. This adds one customer-managed
     KMS key (approximately $1/month before request charges). No provider call, personal data,
     product ingress, or transcript capture was involved.
+50. The temporary Render topology now names all three components required by the actual
+    implementation: the existing isolated policy service, the existing private routine service
+    running the pilot executor, and the temporary database-free intake proxy. A read-only
+    commissioning preflight validated the exact authorized bundle, Raymond scope, database
+    identities, AWS archive/outcome boundaries, pinned Hermes commit, provider route, and
+    rollback inputs. Both existing services remain suspended and unchanged. Applying their
+    secret-bearing environment is pending one explicit destination-specific authorization;
+    no personal records were uploaded and the public proxy was not created.
 
 ## Verification ledger
 
@@ -364,6 +372,7 @@ accepted `0057` migration is merged at `2807dad`.
 | Personal-data pilot | Not executed | Intentionally outside this gate | Requires separate pilot authorization |
 | Deployed cloud import | Commissioning authorized; not yet ready | Exact Raymond realm and pilot authorization recorded; no personal-data network call | Requires separate realm Render/AWS/PostgreSQL commissioning and deployed acceptance |
 | Raymond cloud head evidence | Passed without activation | `docs/evidence/raymond-private-memory-head-2026-09-15.json`; exact commit `ee52a20`, six read-only predicates, temporary runner deleted, no personal payload/provider call | Migration, realm foundation/binding, capture fence, verifier, Dockerfile, or Raymond database-state change |
+| Raymond disabled Render pilot preflight | Passed locally against live suspended service metadata; apply not executed | Exact bundle `7a162762...a8d9`, policy/routine services, private scope, database/AWS/provider bindings, content-free rollback plan; 48 focused runtime/topology tests, Ruff, and strict helper mypy | Pilot authorization, Render service metadata, realm/AWS outputs, provider policy, runtime code, or explicit secret-destination approval |
 
 The focused synthetic acceptance proves: exact manifest authorization; independent encrypted
 records; protected staging; separate ordinary and protected approval/recall; stale-candidate
