@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
@@ -115,6 +116,18 @@ def _check_sql(check: str) -> tuple[str, Mapping[str, object]]:
     raise VerificationError("private-memory head verification check is invalid")
 
 
+def _requested_check(argv: Sequence[str]) -> str:
+    arguments = list(argv)
+    if not arguments:
+        check = ALL_CHECKS
+    elif len(arguments) == 2 and arguments[0] == "--check":
+        check = arguments[1]
+    else:
+        raise VerificationError("verification utility arguments are invalid")
+    _selected_checks(check)
+    return check
+
+
 def verify(
     configuration: VerificationConfiguration, *, check: str = ALL_CHECKS
 ) -> dict[str, object]:
@@ -147,14 +160,7 @@ def verify(
 
 def main(argv: Sequence[str] | None = None) -> int:
     try:
-        arguments = list(argv or ())
-        if not arguments:
-            check = ALL_CHECKS
-        elif len(arguments) == 2 and arguments[0] == "--check":
-            check = arguments[1]
-        else:
-            raise VerificationError("verification utility arguments are invalid")
-        _selected_checks(check)
+        check = _requested_check(sys.argv[1:] if argv is None else argv)
         report = verify(VerificationConfiguration.from_environment(), check=check)
     except VerificationError as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True))

@@ -9,6 +9,7 @@ from deploy.postgres.verify_private_memory_head_v1_3 import (
     VerificationConfiguration,
     VerificationError,
     _check_sql,
+    _requested_check,
     _selected_checks,
 )
 
@@ -82,3 +83,12 @@ def test_unknown_diagnostic_check_fails_closed() -> None:
         _selected_checks("database_dump")
     with pytest.raises(VerificationError):
         _check_sql("database_dump")
+
+
+def test_requested_check_parses_the_module_command_line() -> None:
+    assert _requested_check(()) == ALL_CHECKS
+    assert _requested_check(("--check", "revision")) == "revision"
+    with pytest.raises(VerificationError):
+        _requested_check(("--check", "database_dump"))
+    with pytest.raises(VerificationError):
+        _requested_check(("revision",))
