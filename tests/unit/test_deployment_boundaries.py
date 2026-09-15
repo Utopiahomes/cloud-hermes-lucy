@@ -161,6 +161,7 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
     for artifact in (
         "bootstrap_cloud_v1_2.py",
         "bootstrap_realm_cloud_v1_3.py",
+        "verify_private_memory_head_v1_3.py",
         "commission_realm_runtime_v1_3.py",
         "inspect_unresolved_cloud_v1_2.py",
         "recover_expired_synthetic_retrieval_cloud_v1_2.py",
