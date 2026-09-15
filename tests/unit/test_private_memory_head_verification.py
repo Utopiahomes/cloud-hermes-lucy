@@ -3,9 +3,13 @@ from __future__ import annotations
 import pytest
 
 from deploy.postgres.verify_private_memory_head_v1_3 import (
+    ALL_CHECKS,
     AUTHORIZATION,
+    CHECK_NAMES,
     VerificationConfiguration,
     VerificationError,
+    _check_sql,
+    _selected_checks,
 )
 
 
@@ -62,3 +66,19 @@ def test_configuration_fails_closed(key: str, value: str) -> None:
     environment[key] = value
     with pytest.raises(VerificationError):
         VerificationConfiguration.from_environment(environment)
+
+
+def test_diagnostic_checks_are_exactly_allowlisted() -> None:
+    assert _selected_checks(ALL_CHECKS) == CHECK_NAMES
+    for check in CHECK_NAMES:
+        assert _selected_checks(check) == (check,)
+        statement, parameters = _check_sql(check)
+        assert statement.startswith("SELECT ")
+        assert set(parameters) <= {"expected"}
+
+
+def test_unknown_diagnostic_check_fails_closed() -> None:
+    with pytest.raises(VerificationError):
+        _selected_checks("database_dump")
+    with pytest.raises(VerificationError):
+        _check_sql("database_dump")

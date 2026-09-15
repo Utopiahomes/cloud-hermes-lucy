@@ -17,6 +17,15 @@ from lucy.readiness import PRIVATE_MEMORY_SCHEMA_REVISION
 
 AUTHORIZATION = "private-memory-head-read-only-v1.3"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
+ALL_CHECKS = "all"
+CHECK_NAMES = (
+    "revision",
+    "runtime_admission",
+    "lifecycle",
+    "capture_boundary",
+    "content_scope",
+    "service_binding",
+)
 
 
 class VerificationError(RuntimeError):
@@ -64,51 +73,89 @@ class VerificationConfiguration:
         return cls(url.set(drivername="postgresql+psycopg"), scope)
 
 
-def verify(configuration: VerificationConfiguration) -> dict[str, object]:
+def _selected_checks(check: str) -> tuple[str, ...]:
+    if check == ALL_CHECKS:
+        return CHECK_NAMES
+    if check not in CHECK_NAMES:
+        raise VerificationError("private-memory head verification check is invalid")
+    return (check,)
+
+
+def _check_sql(check: str) -> tuple[str, Mapping[str, object]]:
+    if check == "revision":
+        return (
+            "SELECT (SELECT version_num FROM public.alembic_version) = :expected",
+            {"expected": PRIVATE_MEMORY_SCHEMA_REVISION},
+        )
+    if check == "runtime_admission":
+        return (
+            "SELECT (SELECT state FROM lucy.runtime_admission WHERE singleton) "
+            "= 'quarantined'",
+            {},
+        )
+    if check == "lifecycle":
+        return (
+            "SELECT (SELECT state FROM lucy.lifecycle WHERE singleton) = 'offline'",
+            {},
+        )
+    if check == "capture_boundary":
+        return "SELECT lucy.capture_boundary_safe_v1()", {}
+    if check == "content_scope":
+        return (
+            "SELECT (SELECT count(*) FROM lucy.realm_content_scopes_v1 "
+            "WHERE id=:scope) = 1",
+            {},
+        )
+    if check == "service_binding":
+        return (
+            "SELECT (SELECT count(*) FROM lucy.realm_service_bindings_v1 "
+            "WHERE content_scope_id=:scope AND active) = 1",
+            {},
+        )
+    raise VerificationError("private-memory head verification check is invalid")
+
+
+def verify(
+    configuration: VerificationConfiguration, *, check: str = ALL_CHECKS
+) -> dict[str, object]:
+    selected = _selected_checks(check)
     engine = create_engine(configuration.database_url, poolclass=NullPool)
     try:
         with engine.connect() as connection:
             transaction = connection.begin()
             try:
                 connection.execute(text("SET TRANSACTION READ ONLY"))
-                state = connection.execute(
-                    text(
-                        "SELECT "
-                        "(SELECT version_num FROM public.alembic_version),"
-                        "(SELECT state FROM lucy.runtime_admission WHERE singleton),"
-                        "(SELECT state FROM lucy.lifecycle WHERE singleton),"
-                        "lucy.capture_boundary_safe_v1(),"
-                        "(SELECT count(*) FROM lucy.realm_content_scopes_v1 WHERE id=:scope),"
-                        "(SELECT count(*) FROM lucy.realm_service_bindings_v1 "
-                        " WHERE content_scope_id=:scope AND active)"
-                    ),
-                    {"scope": configuration.content_scope_id},
-                ).one()
+                for name in selected:
+                    statement, parameters = _check_sql(name)
+                    bound = {"scope": configuration.content_scope_id, **parameters}
+                    if connection.execute(text(statement), bound).scalar_one() is not True:
+                        raise VerificationError(
+                            f"private-memory realm check failed: {name}"
+                        )
             finally:
                 transaction.rollback()
     finally:
         engine.dispose()
-    if state != (PRIVATE_MEMORY_SCHEMA_REVISION, "quarantined", "offline", True, 1, 1):
-        raise VerificationError("private-memory realm state is not accepted")
     return {
         "contract": "lucy.private-memory-head-verification.v1.3",
         "status": "passed",
-        "migration_revision": state[0],
-        "runtime_admission": state[1],
-        "lifecycle": state[2],
-        "capture_boundary_safe": state[3],
-        "content_scope_count": state[4],
-        "active_service_binding_count": state[5],
+        "checks": list(selected),
         "transcript_capture_enabled": False,
         "product_ingress_enabled": False,
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    if argv:
-        raise VerificationError("verification utility accepts no arguments")
     try:
-        report = verify(VerificationConfiguration.from_environment())
+        arguments = list(argv or ())
+        if not arguments:
+            check = ALL_CHECKS
+        elif len(arguments) == 2 and arguments[0] == "--check":
+            check = arguments[1]
+        else:
+            raise VerificationError("verification utility arguments are invalid")
+        _selected_checks(check)
+        report = verify(VerificationConfiguration.from_environment(), check=check)
     except VerificationError as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True))
         return 1
