@@ -86,11 +86,18 @@ def _contain() -> dict[str, object]:
             ),
             flush=True,
         )
-        terminated = connection.execute(
-            "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
-            "AND usename IN ('lucy_utopia_routine','lucy_utopia_public') "
-            "AND pid<>pg_backend_pid() AND pg_terminate_backend(pid)"
-        ).fetchone()[0]
+        target_pids = [
+            row[0]
+            for row in connection.execute(
+                "SELECT pid FROM pg_stat_activity WHERE datname=current_database() "
+                "AND usename IN ('lucy_utopia_routine','lucy_utopia_public') "
+                "AND pid<>pg_backend_pid()"
+            ).fetchall()
+        ]
+        terminated = sum(
+            bool(connection.execute("SELECT pg_terminate_backend(%s)", (pid,)).fetchone()[0])
+            for pid in target_pids
+        )
         remaining = connection.execute(
             "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
             "AND usename IN ('lucy_utopia_routine','lucy_utopia_public') "
