@@ -57,7 +57,7 @@ by this branch. Production mutation remains a later action-time gate.
 | Strict typing | Passed | Refreshed strict `mypy src`, 103 source files | Python source or type configuration change |
 | Broad Python suite, initial | Diagnostic | 909 passed, 260 skipped, 3 failed: two stale expectations and the known Windows CRLF byte-hash mismatch | Superseded by corrected run |
 | Corrected affected tests | Passed | 40 tests for Workspaces runtime/deploy shape, API-surface, and OpenRouter boundaries | Workspaces runtime/template, API, provider request, or tests change |
-| Broad Python suite | Passed with one platform-specific deselection | Refreshed candidate: 936 passed, 261 environment-gated skips; only the frozen-template disk-byte test deselected on the CRLF checkout | Relevant code, tests, dependencies, or line-ending policy change |
+| Broad Python unit suite | Passed with two harness-specific deselections | Refreshed batch branch: 968 passed. The known frozen-template Windows CRLF byte check and one subprocess import check that deliberately removes the isolated test environment's `PYTHONPATH` were deselected; both limitations are unrelated to the coordinator or journal | Relevant code, tests, dependencies, line-ending policy, or test environment change |
 | Schema/reopen compatibility unit slice | Passed | 43 focused checks cover `0054` and `0068` Telegram reopen, post-memory readiness at `0068`, exact production migration configuration, quarantine refusal, target migration, grant checks, Public Lucy migration, role rendering, Workspaces runtime/queue, direct-table denial, and Docker inclusion | Readiness, Telegram activation, migration utility, role template, runtime, or Docker change |
 | Fresh PostgreSQL migration and authority boundary | Passed | Disposable loopback/tmpfs PostgreSQL 16 migrated cleanly from `0001` through `0068`; 16 live-SQL checks passed for realm provisioning, explicit Workspaces membership, execute-only production roles, task queue lifecycle, directory admission, and withdrawal/reenablement denial. The stale fixture now performs its authorized withdrawal through the owner boundary before proving the app identity cannot reactivate it. Containers and test data were removed after the run. | Migrations, role template, provisioners, directory admission, task queue, integration fixtures, or PostgreSQL image change |
 | Frozen v1.2 AWS source | Passed independently | Git object SHA-256 `3acff006d2268ef03001e48caaf3e6ea4f9b510fb802aaac0337517e1b71c3df`; the Windows working copy uses CRLF and therefore has different disk bytes | Frozen Git object change |
@@ -67,6 +67,7 @@ by this branch. Production mutation remains a later action-time gate.
 | Live Render metadata | Passed with reconciled later production state | Read-only API inspection found the production PostgreSQL database available in Virginia on PostgreSQL 18 with an empty public allow-list. All inventoried services have auto-deploy off, production V1.3 configuration, no blank environment values, and no static AWS credentials. Public Lucy is live with capture false; its separate paid-model service is suspended. Private Telegram Stage 2 is live and intentionally has encrypted capture true. Policy, evidence, and deletion remain suspended. No Workspaces service exists yet. | Render service, deployment, environment, or database metadata change |
 | Production PostgreSQL head/admission | Current query still required | The accepted Telegram release began at `0054`; the accepted Public Lucy release includes the `0054 -> 0056 -> 0057` production bridge, so `0057` is expected but must not be assumed. The database allow-list is empty. Recheck atomically through `migrate_workspaces_v1.py`; it accepts only `0054`, `0057`, or idempotent `0068` and refuses any non-quarantined boundary before its first write. | Database migration, activation, role/grant, or runtime state change |
 | Deployed Workspaces call | Not executed | Private service remains undeployed | Requires the approved deployment gate below |
+| Coordinated batch durability | Passed locally | Exact-plan journal atomically persists and reloads chained receipts, refuses overwrite/reordering/cross-batch use, fails closed on concurrent locks or tampering, and makes containment terminal; 33 focused tests pass | Coordinator, journal, receipt models, or filesystem semantics change |
 
 ## Bounded deployment gate
 
@@ -117,8 +118,11 @@ action-time approval after the read-only checks and rollback route are ready.
 
 ## Exact next action
 
-Finish the refreshed full release gates, publish the candidate updates to the existing
-Cloud Lucy pull request, and create the already prepared Workspaces deployment-config
-pull request. Do not merge, migrate, create the private service, write
-membership/configuration, or activate Workspaces without the later concrete
-action-time approval and rollback route.
+The Cloud Lucy and Workspaces release pull requests were merged, but Cloud Lucy
+production activation is paused. Build and review the content-free coordinated batch in
+`deploy/render/workspaces_production_batch.py` and
+`docs/workspaces-production-batch.md`. The atomic, digest-bound journal is prepared in
+`deploy/render/workspaces_production_batch_journal.py`; do not initialize a production
+journal or install a live driver, migrate, create the private service, write
+membership/configuration, or activate Workspaces until the pause ends and the exact
+batch digest receives separate action-time approval.
