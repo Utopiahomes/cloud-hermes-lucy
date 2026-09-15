@@ -6,6 +6,14 @@
   },
   "checked_at": "2026-09-15T14:58:55.505584+00:00",
   "contract": "lucy.raymond-memory-outcome-aws-receipt.v1",
+  "fail_closed_canary": {
+    "code": "contract_invalid",
+    "error": "request_rejected",
+    "executed_version": "1",
+    "function_error": null,
+    "ok": false,
+    "status_code": 200
+  },
   "kms_rotation": true,
   "lambda_alias": "arn:aws:lambda:us-east-1:429870640638:function:lucy-raymond-v13-memory-outcome-recovery-v1:outcome-v1",
   "lambda_version": "1",
