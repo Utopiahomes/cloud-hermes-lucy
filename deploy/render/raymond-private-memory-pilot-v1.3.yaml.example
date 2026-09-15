@@ -1,11 +1,40 @@
 # Review-only commissioning shape for Raymond's temporary private-memory pilot.
 # It does not provision or deploy anything. The existing private routine service
-# temporarily runs the executor command; the new public web service is a
-# database-free, credential-minimal proxy. Both remain disabled by default.
+# temporarily runs the executor command; the existing private policy service
+# issues narrowly bound recovery grants; the new public web service is a
+# database-free, credential-minimal proxy. All remain disabled by default.
 
 services:
   - type: pserv
-    name: lucy-raymond-routine
+    name: raymond-lucy-policy
+    runtime: docker
+    branch: codex/r1-tenant-foundation
+    autoDeployTrigger: "off"
+    healthCheckPath: /health
+    envVars:
+      - {key: LUCY_ENVIRONMENT, value: production}
+      - {key: LUCY_SECURITY_ENVIRONMENT, value: production}
+      - {key: LUCY_SECURITY_BASELINE, value: v1.3}
+      - {key: LUCY_SERVICE_MODE, value: policy}
+      - {key: LUCY_TRANSCRIPT_CAPTURE_ENABLED, value: "false"}
+      - {key: LUCY_PRODUCT_INGRESS_ENABLED, value: "false"}
+      - {key: LUCY_EXPECTED_DATABASE_LOGIN, value: lucy_raymond_policy}
+      - {key: LUCY_STORAGE_EPOCH, sync: false}
+      - {key: LUCY_DATABASE_URL, sync: false}
+      - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
+      - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
+      - {key: LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64, sync: false}
+      - {key: LUCY_V13_POLICY_KEY_ID, sync: false}
+      - {key: LUCY_V13_POLICY_TRUST_STORE_JSON, sync: false}
+      - {key: LUCY_V13_RECEIPT_TRUST_STORE_JSON, sync: false}
+      - {key: LUCY_POLICY_ISSUER, value: lucy-raymond-policy}
+      - {key: LUCY_V13_TARGET_SCOPE_JSON, sync: false}
+      - {key: LUCY_V13_EXECUTION_BINDING_JSON, sync: false}
+      - {key: LUCY_V13_CALLER_IDENTITY, sync: false}
+      - {key: LUCY_MEMORY_OUTCOME_POLICY_VERSION, value: "1"}
+
+  - type: pserv
+    name: raymond-lucy-routine
     runtime: docker
     branch: codex/r1-tenant-foundation
     autoDeployTrigger: "off"
@@ -44,7 +73,7 @@ services:
       - {key: LUCY_AWS_OUTCOME_RECOVERY_ALIAS_ARN, sync: false}
       - {key: LUCY_POLICY_GATEWAY_TOKEN, sync: false}
       - key: LUCY_POLICY_HOSTPORT
-        fromService: {type: pserv, name: lucy-raymond-policy, property: hostport}
+        fromService: {type: pserv, name: raymond-lucy-policy, property: hostport}
       - {key: OPENROUTER_API_KEY, sync: false}
       - {key: LUCY_MEMORY_PROVIDER_REFERENCE_KEY_B64, sync: false}
       - {key: LUCY_MEMORY_PROVIDER_POLICY_ID, sync: false}
@@ -76,13 +105,13 @@ services:
       - {key: LUCY_MEMORY_PILOT_INTAKE_ENABLED, value: "false"}
       - {key: LUCY_OBSERVED_HERMES_COMMIT, sync: false}
       - key: LUCY_MEMORY_PILOT_EXECUTOR_HOSTPORT
-        fromService: {type: pserv, name: lucy-raymond-routine, property: hostport}
+        fromService: {type: pserv, name: raymond-lucy-routine, property: hostport}
       - {key: LUCY_MEMORY_PILOT_GATEWAY_TOKEN, sync: false}
 
 # Commissioning order:
 # 1. migrate the quarantined Raymond database through 0072;
-# 2. deploy both services with enable flags false;
-# 3. enable the private executor and prove synthetic replay;
+# 2. deploy the policy and private executor with public intake disabled;
+# 3. prove policy readiness, then enable the private executor and prove synthetic replay;
 # 4. enable the public proxy and prove wrong-token/redirect/logging failures;
 # 5. register and upload only the exact owner-authorized pilot;
 # 6. disable/delete the proxy and restore the routine service command.

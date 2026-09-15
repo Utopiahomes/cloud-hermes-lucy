@@ -641,6 +641,49 @@ def test_v13_render_blueprint_is_capture_off_and_pinned_to_commissioning_branch(
     )
 
 
+def test_raymond_memory_pilot_blueprint_includes_isolated_policy_boundary() -> None:
+    document = yaml.safe_load(
+        (
+            ROOT
+            / "deploy"
+            / "render"
+            / "raymond-private-memory-pilot-v1.3.yaml.example"
+        ).read_text(encoding="utf-8")
+    )
+    services = {service["name"]: service for service in document["services"]}
+    assert set(services) == {
+        "raymond-lucy-policy",
+        "raymond-lucy-routine",
+        "lucy-raymond-memory-pilot-intake",
+    }
+    policy = {
+        item["key"]: item for item in services["raymond-lucy-policy"]["envVars"]
+    }
+    assert policy["LUCY_SERVICE_MODE"]["value"] == "policy"
+    assert policy["LUCY_TRANSCRIPT_CAPTURE_ENABLED"]["value"] == "false"
+    assert policy["LUCY_PRODUCT_INGRESS_ENABLED"]["value"] == "false"
+    assert policy["LUCY_EXPECTED_DATABASE_LOGIN"]["value"] == (
+        "lucy_raymond_policy"
+    )
+    assert {
+        "LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64",
+        "LUCY_V13_POLICY_KEY_ID",
+        "LUCY_V13_TARGET_SCOPE_JSON",
+        "LUCY_V13_EXECUTION_BINDING_JSON",
+        "LUCY_V13_CALLER_IDENTITY",
+        "LUCY_MEMORY_OUTCOME_POLICY_VERSION",
+    } <= policy.keys()
+    assert not any(key.startswith("AWS_") or key.startswith("LUCY_AWS_") for key in policy)
+    routine = {
+        item["key"]: item for item in services["raymond-lucy-routine"]["envVars"]
+    }
+    assert routine["LUCY_POLICY_HOSTPORT"]["fromService"] == {
+        "type": "pserv",
+        "name": "raymond-lucy-policy",
+        "property": "hostport",
+    }
+
+
 def test_v13_render_blueprint_preserves_exact_identity_boundaries() -> None:
     services = _v13_render_services()
     environments = {
