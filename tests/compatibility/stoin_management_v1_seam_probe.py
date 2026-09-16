@@ -9,6 +9,7 @@ material is generated in a temporary directory and discarded when the probe ends
 from __future__ import annotations
 
 import argparse
+import base64
 import ipaddress
 import json
 import os
@@ -28,11 +29,6 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from lucy.management_contract import (
     MANAGEMENT_BUNDLE_DIGEST,
-    HealthStatus,
-    ManagementClient,
-    ManagementContractError,
-    ManagementJwtIssuer,
-    ReasonCode,
     verify_management_bundle,
 )
 
@@ -180,9 +176,37 @@ def _adapter_environment(
     return environment
 
 
+def _commission_environment(
+    control_root: Path,
+    port: int,
+    jwt_private_key: Ed25519PrivateKey,
+    ca_path: Path,
+) -> dict[str, str]:
+    private_seed = jwt_private_key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PYTHONPATH": str(control_root / "src"),
+            "SSL_CERT_FILE": str(ca_path),
+            "STOIN_MANAGEMENT_PROVIDER_BASE_URL": f"https://localhost:{port}",
+            "STOIN_MANAGEMENT_EXPECTED_PROVIDER_RELEASE_ID": RELEASE_ID,
+            "STOIN_MANAGEMENT_JWT_PRIVATE_KEY_B64": base64.b64encode(private_seed).decode(
+                "ascii"
+            ),
+            "STOIN_MANAGEMENT_JWT_KEY_ID": KEY_ID,
+        }
+    )
+    return environment
+
+
 def main() -> None:
     arguments = _arguments()
     adapter_root = arguments.adapter_root.resolve()
+    control_root = Path(__file__).resolve().parents[2]
     adapter_commit = _git(adapter_root, "rev-parse", "HEAD")
     if adapter_commit != arguments.expected_adapter_commit:
         raise RuntimeError("Homes adapter commit differs from the reviewed handoff")
@@ -219,41 +243,53 @@ def main() -> None:
         )
         try:
             _wait_for_port(process, port)
-            previous_ca = os.environ.get("SSL_CERT_FILE")
-            os.environ["SSL_CERT_FILE"] = str(ca_path)
-            try:
-                client = ManagementClient(
-                    f"https://localhost:{port}",
-                    ManagementJwtIssuer(jwt_private_key, key_id=KEY_ID),
-                )
-                observation = client.observe()
-                if observation.health.status is not HealthStatus.UNKNOWN:
-                    raise RuntimeError("Transitional adapter did not report unknown health")
-                if observation.health.reason_codes != (
-                    ReasonCode.HEALTH_COVERAGE_LIMITED,
-                ):
-                    raise RuntimeError("Transitional health reason differs from RC3")
-                if observation.version.management_provider.release_id != RELEASE_ID:
-                    raise RuntimeError("Release ID differs across the seam")
-                capabilities = observation.capabilities.capabilities
-                if len(capabilities) != 1 or capabilities[0].capability_id != "guest.answer":
-                    raise RuntimeError("Expected guest.answer capability is absent")
+            valid_environment = _commission_environment(
+                control_root, port, jwt_private_key, ca_path
+            )
+            valid = subprocess.run(
+                [sys.executable, "-m", "lucy.management_commission"],
+                env=valid_environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if valid.returncode != 0 or valid.stderr:
+                raise RuntimeError("Control commissioning command did not pass")
+            evidence = json.loads(valid.stdout)
+            expected = {
+                "capability": evidence["enabled_capabilities"],
+                "digest": evidence["bundle_digest"],
+                "health": evidence["health_status"],
+                "reason_codes": evidence["health_reason_codes"],
+                "release": evidence["management_provider_release_id"],
+                "resources": evidence["resources_observed"],
+            }
+            if expected != {
+                "capability": ["guest.answer"],
+                "digest": MANAGEMENT_BUNDLE_DIGEST,
+                "health": "unknown",
+                "reason_codes": ["health_coverage_limited"],
+                "release": RELEASE_ID,
+                "resources": 4,
+            }:
+                raise RuntimeError("Control commissioning evidence differs from RC3")
 
-                bad_client = ManagementClient(
-                    f"https://localhost:{port}",
-                    ManagementJwtIssuer(Ed25519PrivateKey.generate(), key_id=KEY_ID),
-                )
-                try:
-                    bad_client.observe()
-                except ManagementContractError:
-                    pass
-                else:
-                    raise RuntimeError("Homes adapter accepted an invalid JWT signature")
-            finally:
-                if previous_ca is None:
-                    os.environ.pop("SSL_CERT_FILE", None)
-                else:
-                    os.environ["SSL_CERT_FILE"] = previous_ca
+            invalid_environment = _commission_environment(
+                control_root, port, Ed25519PrivateKey.generate(), ca_path
+            )
+            invalid = subprocess.run(
+                [sys.executable, "-m", "lucy.management_commission"],
+                env=invalid_environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if (
+                invalid.returncode == 0
+                or invalid.stdout
+                or invalid.stderr != "management commissioning failed\n"
+            ):
+                raise RuntimeError("Invalid-signature commissioning did not fail closed")
         finally:
             process.terminate()
             try:
