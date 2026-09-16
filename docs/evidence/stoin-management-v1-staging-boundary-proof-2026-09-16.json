@@ -1,0 +1,88 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-16",
+  "scope": "non-production Management Contract v1 independent-deployment boundary proof",
+  "contract": {
+    "version": "1.0",
+    "bundle_digest": "c3bc25e4ae7708aba2581282d933ddd431d5ed5d0277a66477cdbe7ecc39fe33"
+  },
+  "environment": {
+    "provider": "Render",
+    "name": "management-contract-staging",
+    "id": "evm-dal82elg1s2s73ei84qg",
+    "cross_environment_networking": "isolated"
+  },
+  "homes_adapter": {
+    "service_name": "utopia-homes-management-adapter-staging",
+    "service_id": "srv-dal8aoff3r2c73fc8hlg",
+    "repository": "Utopiahomes/utopia-homes-management-adapter",
+    "source_commit": "92efee373505319f6f4835f258f228cd4d02b96e",
+    "reviewed_source_commit": "c04a97a47c9bbecb9e45b882492f756eeaaed196",
+    "artifact_digest": "sha256:a2afe3d34375216fc102c380b11b0dff534c95a12a3c00d60c44e21d91e1a69b",
+    "database_attached": false,
+    "environment_group_attached": false,
+    "auto_deploy": false,
+    "final_state": "suspended",
+    "jwt_public_key_allowlist_removed": true
+  },
+  "control_commissioner": {
+    "service_name": "stoin-control-management-commission-staging",
+    "service_id": "crn-dal8ctqd0e5s738tc000",
+    "repository": "Utopiahomes/cloud-hermes-lucy",
+    "branch": "codex/management-contract-v1",
+    "source_commit": "08758ef8848e0d8a624772850b772eef668d4360",
+    "command": "python -m lucy.management_commission",
+    "database_attached": false,
+    "environment_group_attached": false,
+    "auto_deploy": false,
+    "final_state": "suspended",
+    "jwt_private_key_removed": true,
+    "jwt_key_id_removed": true
+  },
+  "positive_run": {
+    "started_at": "2026-09-16T08:14:28-04:00",
+    "completed_at": "2026-09-16T08:14:37-04:00",
+    "exit_status": 0,
+    "resources_observed": 4,
+    "synth_id": "stoin:synth:utopia-homes-prime",
+    "realm_id": "stoin:realm:utopia-homes",
+    "provider_release_id": "homes-management:release:staging.92efee3",
+    "health_status": "unknown",
+    "health_reason_codes": [
+      "health_coverage_limited"
+    ],
+    "enabled_capabilities": [
+      "guest.answer"
+    ],
+    "output_content_free": true
+  },
+  "negative_run": {
+    "started_at": "2026-09-16T08:18:10-04:00",
+    "completed_at": "2026-09-16T08:18:26-04:00",
+    "credential_condition": "deliberately mismatched ephemeral signing key",
+    "exit_status": 1,
+    "output": "management commissioning failed",
+    "output_content_free": true
+  },
+  "deployment_repairs": [
+    {
+      "commit": "21a23921d3ac86ef0cfc332421a80abd1a6afe76",
+      "issue": "Render lockfile omitted the PyJWT runtime dependency",
+      "verification": "27 focused tests plus Ruff and strict mypy"
+    },
+    {
+      "commit": "08758ef8848e0d8a624772850b772eef668d4360",
+      "issue": "Control Docker image omitted the pinned contract bundle",
+      "verification": "27 focused tests plus deployment-boundary regression assertion"
+    }
+  ],
+  "exclusions_verified": {
+    "production_changed": false,
+    "dns_changed": false,
+    "website_changed": false,
+    "public_lucy_changed": false,
+    "private_lucy_changed": false,
+    "database_changed": false,
+    "guest_request_path_dependency_created": false
+  }
+}

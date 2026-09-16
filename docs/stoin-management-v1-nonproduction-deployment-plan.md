@@ -1,7 +1,10 @@
 # Management Contract v1 — non-production deployment plan
 
-Date: 2026-09-16. Prepared only; no service, credential, endpoint, or deployment
-is authorized or created by this document.
+Date: 2026-09-16. Completed in an isolated Render staging environment. The
+ephemeral credentials were removed and both workloads were suspended after
+acceptance evidence was captured. This document remains the reproducible plan;
+the exact result is recorded in
+`docs/evidence/stoin-management-v1-staging-boundary-proof-2026-09-16.json`.
 
 ## Finish line
 
@@ -116,10 +119,9 @@ destruction of the ephemeral key. Because there is no database, DNS record,
 traffic route, scheduler, or product activation, rollback requires no data
 migration or guest-facing action.
 
-## Remaining authorization gate
+## Completion state
 
-The local implementations and two-process TLS proof are complete. The next
-state-changing action is pushing the exact branches and creating isolated
-staging workloads. That requires explicit deployment authorization naming the
-commits, target environment, allowed spend, and permission to provision the
-ephemeral key. Production activation remains a separate decision.
+The local implementations, two-process TLS proof, independently deployed HTTPS
+proof, negative authentication check, credential teardown, and workload
+suspension are complete. Production activation remains a separate decision and
+was not performed or authorized by this proof.

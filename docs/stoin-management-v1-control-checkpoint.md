@@ -1,8 +1,9 @@
 # Stoin Management Contract v1 — Control implementation checkpoint
 
-Date: 2026-09-16. Local Control-side implementation and independent-process
-compatibility proof only; nothing is deployed, provisioned, or connected to a
-production Utopia Homes runtime by this checkpoint.
+Date: 2026-09-16. Control-side implementation, local independent-process
+compatibility proof, and isolated hosted staging proof are complete. Nothing was
+connected to a production Utopia Homes runtime. The ephemeral credentials were
+removed and both staging workloads were suspended after evidence capture.
 
 ## Scope
 
@@ -52,6 +53,9 @@ The reader is in `src/lucy/management_contract.py`; the one-shot command is
 | Ruff | Passed | `python -m ruff check src tests` | Python source or lint configuration change |
 | Strict mypy | Passed across 121 source files | `python -m mypy src/lucy` | Source, typing dependency, or mypy configuration change |
 | Independent-process seam | Passed | Control commit `158601b39feb728c66147f451e5de94fbb56b727` read all four resources from Homes adapter commit `c04a97a47c9bbecb9e45b882492f756eeaaed196` over local TLS; `guest.answer` and transitional `unknown`/`health_coverage_limited` matched RC3; invalid JWT signature was rejected | Either implementation commit, pinned bundle, TLS/JWT profile, or compatibility probe change |
+| Hosted independent-deployment seam | Passed | Render Control commit `08758ef8848e0d8a624772850b772eef668d4360` read four resources from separately deployed Homes adapter commit `92efee373505319f6f4835f258f228cd4d02b96e`; exact content-free result and service identifiers are in `docs/evidence/stoin-management-v1-staging-boundary-proof-2026-09-16.json` | Either deployed source/artifact, contract bundle, workload configuration, JWT profile, or staging topology change |
+| Hosted invalid-credential rejection | Passed | A deliberately mismatched ephemeral signing key produced only `management commissioning failed` and exit status 1 | Authentication implementation, credential profile, or failure-output change |
+| Hosted teardown | Passed | Control private seed and key ID removed; adapter public-key allowlist removed; both isolated staging workloads visibly suspended and not billed | Either workload resumed or new credentials installed |
 
 The unit run emitted two existing dependency deprecation warnings from
 FastAPI/Starlette test-client imports. They are unrelated to this increment.
@@ -67,9 +71,17 @@ at exit. It does not import Homes source into the Control process or bypass the
 client's HTTPS requirement. The invalid-signature run also verifies the command's
 generic, content-free failure output.
 
-The prepared execution plan is
-`docs/stoin-management-v1-nonproduction-deployment-plan.md`. Its next step
-requires explicit authorization to push the exact branches, create isolated
-staging workloads, and provision an ephemeral test key. This checkpoint does not
-authorize deployment, production credentials, polling, persistence, alerts, DNS
-changes, or any guest request-path dependency on Control.
+The execution plan is
+`docs/stoin-management-v1-nonproduction-deployment-plan.md`. Its acceptance and
+rollback steps were completed in the isolated Render environment on 2026-09-16.
+The first two hosted attempts exposed deployment-packaging omissions: PyJWT was
+absent from the Render lockfile and the pinned contract bundle was absent from
+the Docker image. Commits `21a23921d3ac86ef0cfc332421a80abd1a6afe76`
+and `08758ef8848e0d8a624772850b772eef668d4360` fixed those defects and added
+regression coverage before the accepted runs.
+
+Management Contract v1's first independent deployment proof is therefore
+complete. The next architecture step is joint review of this evidence and a
+separate Business Contract capability design. This checkpoint does not authorize
+production credentials, polling, persistence, alerts, DNS changes, or any guest
+request-path dependency on Control.
