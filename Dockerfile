@@ -43,6 +43,7 @@ COPY deploy/postgres/configure_security_v1.2.sql.example ./deploy/postgres/confi
 COPY deploy/render/utopia-public-projection.v0.json ./deploy/render/utopia-public-projection.v0.json
 COPY deploy/render/utopia-public-knowledge.r1.json ./deploy/render/utopia-public-knowledge.r1.json
 COPY alembic.ini hermes.lock ./
+COPY contracts ./contracts
 COPY migrations ./migrations
 COPY src ./src
 RUN pip install --no-cache-dir --require-hashes -r deploy/render/requirements.lock

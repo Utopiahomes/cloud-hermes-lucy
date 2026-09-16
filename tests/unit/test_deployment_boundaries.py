@@ -136,6 +136,7 @@ def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "python:3.12.11-slim@sha256:" in dockerfile
     assert "COPY deploy/render/requirements.lock" in dockerfile
+    assert "COPY contracts ./contracts" in dockerfile
     assert "pip install --no-cache-dir --require-hashes" in dockerfile
     assert "pip install --no-cache-dir ." not in dockerfile
 
