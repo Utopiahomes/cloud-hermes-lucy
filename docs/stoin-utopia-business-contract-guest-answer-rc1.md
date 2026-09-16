@@ -1,9 +1,9 @@
-# Utopia Homes Business Contract — `guest.answer` v0.2
+# Utopia Homes Business Contract — `guest.answer` RC1
 
-**Document revision:** design draft 0.2  
+**Document revision:** Release Candidate 1  
 **Capability version:** `guest.answer@1.0`  
-**Status:** design for Ray, Lucy, and Claude review; no implementation or deployment authority  
-**Review state:** Claude's Homes-side corrections and an independent architecture challenge pass are incorporated; five concrete freeze questions remain in §23  
+**Status:** protocol freeze candidate; no implementation or deployment authority  
+**Review state:** Claude's Homes-side corrections, Lucy's product/architecture review, and an independent architecture challenge pass are incorporated; §23 records the settled freeze decisions  
 **Business provider:** Utopia Homes Prime  
 **Initial application consumer:** Utopia Homes website guest adapter  
 **Date:** 2026-09-16
@@ -86,6 +86,10 @@ Version 1.0 does not support:
 
 Published explanations of the booking process or Design estimate process are allowed. They must not
 be confused with live availability, a binding price, or reservation access.
+
+Public information owned by another Utopia business domain, including a future independent Utopia
+Design domain, may be consumed only through an approved published projection or versioned contract.
+Including that information in a Homes answer does not transfer canonical ownership to the Homes realm.
 
 ## 5. Parties and ownership
 
@@ -241,7 +245,8 @@ Idempotency-Key: <UUID-v4>
 - History must alternate roles, begin with `user`, and end with `assistant` when non-empty.
 - The current `message.turn_id` cannot appear in history. All included turn IDs are unique.
 - `page_context` is optional. `path` must be a normalized Utopia-relative path of at most 512
-  characters. It cannot contain a scheme, host, credentials, fragment, or encoded external URL.
+  characters. It cannot contain a scheme, host, credentials, query string, fragment, encoded external
+  URL, or percent-encoded delimiter that would introduce a query string or fragment.
 - `subject_type` is one of `property`, `destination`, `service`, `design`, or `none`.
 - `subject_id` is an approved stable public identifier or null. The provider resolves it against
   Homes-owned public data; it never treats it as proof that the record exists or is public.
@@ -432,21 +437,22 @@ as customer content or forward them to browser analytics.
 
 Prime constructs the answer from the following precedence order:
 
-1. an effective reservation-specific exception, when a future authenticated capability permits it;
-2. an effective public operational restriction or withdrawal;
-3. authoritative PMS availability and stay restrictions, when a future version connects them;
-4. current structured public property and service facts;
-5. approved descriptive knowledge and curated local-guide records; and
-6. general model reasoning that does not claim a Utopia fact.
+1. an effective public operational restriction or withdrawal;
+2. current structured public property and service facts;
+3. approved descriptive knowledge and curated local-guide records; and
+4. general model reasoning that does not claim a Utopia fact.
 
-Items 2 and 4–6 apply to anonymous `guest.answer@1.0`. Effective public operational restrictions and
-withdrawals override structured facts, descriptive knowledge, general reasoning, and cached responses.
-Items 1 and 3 are unavailable in v1.0.
+Effective public operational restrictions and withdrawals override structured facts, descriptive
+knowledge, general reasoning, and cached responses.
 
 Homes Prime owns and validates effective public restriction state. If the current state required for
 an answer cannot be established, the affected portion fails closed. An expired unresolved restriction
 becomes unknown pending review, not automatically resolved. Software rollback must not restore
 withdrawn knowledge.
+
+Future authenticated reservation exceptions and authoritative PMS availability, pricing, and stay
+restrictions require separately versioned capabilities. Their precedence is defined when those
+capabilities exist rather than being implied by `guest.answer@1.0`.
 
 The provider must distinguish:
 
@@ -517,7 +523,8 @@ tracing, and analytics must all be checked before making that claim to visitors.
 
 Allowed durable telemetry is content-free and may include:
 
-- request, response, session, release, and idempotency identifiers;
+- request, response, release, and idempotency identifiers;
+- a one-way keyed digest of `session_id` for bounded troubleshooting and abuse correlation;
 - timestamps and bounded latency stages;
 - outcome and error categories;
 - input/output size buckets;
@@ -529,6 +536,11 @@ Allowed durable telemetry is content-free and may include:
 It must not include message text, answer text, source snippets, names, emails, IP-derived profiles,
 page query strings, arbitrary URLs, or model prompts. Infrastructure access logs should minimize or
 redact IP addresses and user agents according to approved retention policy.
+
+Raw `session_id` must not be durably retained. Its keyed digest has an explicit maximum TTL of 24
+hours, uses an environment-specific key unavailable to browser code, and is deleted when that TTL
+expires. Neither the raw value nor its digest may be joined to a guest identity, authenticated
+session, advertising identifier, or marketing profile. Deployments may choose a shorter TTL.
 
 Security audit events record authentication failures and abuse categories without token contents or
 body content.
@@ -674,7 +686,9 @@ Schema conformance alone is never described as `guest.answer@1.0` capability con
    under the same key fails.
 7. No request or answer content appears in infrastructure logs, traces, error reports, analytics, or
    provider-retained data contrary to the approved route policy.
-8. No database, DNS, booking, payment, message, or customer record is mutated.
+8. No canonical Homes business record, DNS record, booking, payment, outbound message, reservation,
+   or customer record is mutated. Content-free security, idempotency, accounting, and operational
+   coordination state may be written only as explicitly permitted by this contract.
 9. A preview token fails against production, a JWT `jti` cannot be replayed, and retries succeed with
    a fresh JWT while preserving the same canonical payload and idempotency key.
 10. Simultaneous duplicates arriving from separate website replicas, response loss, coordinator
@@ -729,6 +743,8 @@ Schema conformance alone is never described as `guest.answer@1.0` capability con
     missing qualification, and unsupported claim attached to a valid source all fail before display.
 32. A withdrawal, amenity closure, expired unresolved restriction, stale projection, cached replay,
     or software rollback cannot restore or expose superseded public information.
+33. The website, reverse proxy, and generic HTTP middleware do not automatically retry
+    non-retryable `answer_validation_failed`, even though its HTTP status is `503`.
 
 ## 22. Conformance artifacts
 
@@ -744,6 +760,8 @@ This byte-reproducible bundle includes:
 - positive and negative vectors for every schema rule;
 - authentication claim vectors;
 - request-canonicalization, idempotency, crash/recovery, and retry-state vectors;
+- consumer and reverse-proxy vectors proving that `answer_validation_failed` is not automatically
+  retried despite its `503` status;
 - cross-field invariants for session, turns, outcomes, sources, actions, and retry semantics;
 - paired provider/consumer fixtures;
 - privacy-safe log and error fixtures; and
@@ -766,27 +784,27 @@ from human or model-graded judgments and preserves privacy-safe run metadata. A 
 which evaluation was run; it does not prove that a model passed it. Production acceptance requires
 the recorded run results and thresholds as separate evidence.
 
-## 23. Review questions before freeze
+## 23. Settled freeze decisions
 
-The draft makes recommendations rather than leaving architecture open. Reviewers should confirm or
-change only these concrete points:
+1. `guest.answer@1.0` is the first Business Contract capability. Live availability, booking actions,
+   and authenticated guest access remain separate future capabilities.
+2. The website guest adapter is the sole initial caller and has its own service identity. Future
+   callers receive distinct identities and grants.
+3. The 15-second attempt and 22-second total interaction limits are hard safety ceilings, not the
+   desired customer-experience target. Production activation requires a separate latency SLO derived
+   from repeated measured p95 and p99 evaluation results.
+4. The single-coordinator and ten-minute volatile replay profile is accepted for the initial release
+   as a deliberate privacy-versus-availability tradeoff. A coordinator restart may produce explicit
+   `idempotency_recovery_unavailable`; it may not trigger an invisible duplicate pipeline.
+5. Real local-guide selections are not a protocol-freeze dependency. Tier B may use clearly labeled,
+   approved synthetic fixtures. Selecting and approving actual Wildwoods businesses is a Homes
+   content and activation decision.
 
-1. Is `guest.answer@1.0` the correct first Business Contract capability, with live availability and
-   authenticated customer access explicitly deferred?
-2. Is the website guest adapter the sole initial caller and is its proposed stable service identity
-   acceptable?
-3. Is the proposed 15-second attempt / 22-second total interaction deadline acceptable for the current
-   measured model latency, including one bounded retry?
-4. Is the initial single-coordinator replay profile and ten-minute volatile replay plus durable
-   content-free status tradeoff acceptable, including explicit recovery-unavailable behavior after a
-   coordinator restart?
-5. Which initial local-guide records are approved for the coffee/destination acceptance scenarios?
+## 24. Review disposition
 
-## 24. Claude review disposition
+Claude's review of draft 0.1 and Lucy's review of draft 0.2 were accepted as follows:
 
-Claude's review of draft 0.1 was accepted as follows:
-
-| Finding | Draft 0.2 disposition |
+| Finding | RC1 disposition |
 | --- | --- |
 | Protocol conformance and semantic model quality cannot share one deterministic certification claim | Split into deterministic Tier A and execution-dependent Tier B in §22 |
 | Volatile response replay is ambiguous across replicas | Initial v1.0 profile now requires one active answer coordinator; horizontal replay requires a separately reviewed affinity or memory-only shared-cache profile |
@@ -794,10 +812,16 @@ Claude's review of draft 0.1 was accepted as follows:
 | Character bounds could exceed the prior 32 KiB transport bound | Request bound raised to 64 KiB and independent decoded-character and encoded-byte enforcement made explicit |
 | Preview conformance level was ambiguous | Split into explicitly preconformant compatibility preview and fully normative conformance preview |
 | `iat`/`nbf`, JCS dependency, non-retryable 503, shrinking retry budget, and future caller identity needed precision | All stated explicitly in §§7, 11, and 17 |
+| Criterion 8 prohibited the content-free coordination writes required elsewhere | Narrowed to canonical business/customer mutations while explicitly permitting contract-defined coordination state |
+| Utopia Design information could imply Homes ownership | Cross-domain public information now requires an approved projection or contract and retains its canonical owner |
+| Page context could carry query-string tracking or personal data | Query strings, fragments, and their encoded delimiters are prohibited |
+| Durable raw session identifiers could create longitudinal pseudonymous tracking | Raw session IDs are prohibited from durable telemetry; keyed digests have a maximum 24-hour TTL and cannot join to identity or marketing data |
+| V1 precedence modeled unavailable future capabilities | Normative precedence now includes only effective public restrictions, structured facts, approved knowledge, and general reasoning; future PMS/reservation rules are deferred |
+| Middleware could retry non-retryable `answer_validation_failed` because it uses HTTP 503 | Added explicit website/reverse-proxy acceptance and Tier A vectors proving no automatic retry |
 
-Claude's five §23 answers otherwise concurred with the selected first capability and caller identity.
-The latency thresholds remain evidence-dependent, the replay profile remains a conscious privacy/
-availability tradeoff for final review, and local-guide approval remains a Homes content decision.
+The selected capability, caller identity, hard deadlines, replay profile, and content-fixture boundary
+are now recorded as settled freeze decisions in §23. The production latency SLO and real local-guide
+content remain activation evidence and Homes content decisions, not protocol questions.
 
 ## 25. Explicit non-authorization
 
