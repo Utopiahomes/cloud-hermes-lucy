@@ -1,9 +1,9 @@
-# Utopia Homes Business Contract — `guest.answer` RC1
+# Utopia Homes Business Contract — `guest.answer` RC2
 
-**Document revision:** Release Candidate 1  
+**Document revision:** Release Candidate 2\
 **Capability version:** `guest.answer@1.0`  
 **Status:** protocol freeze candidate; no implementation or deployment authority  
-**Review state:** Claude's Homes-side corrections, Lucy's product/architecture review, and an independent architecture challenge pass are incorporated; §23 records the settled freeze decisions  
+**Review state:** Claude's Homes-side corrections, Lucy's product/architecture review, an independent architecture challenge pass, and the Tier A wire-format preflight review are incorporated; §23 records the settled freeze decisions\
 **Business provider:** Utopia Homes Prime  
 **Initial application consumer:** Utopia Homes website guest adapter  
 **Date:** 2026-09-16
@@ -58,6 +58,10 @@ The terms **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are no
 
 Examples are illustrative unless marked normative. Paths, member names, enumerated values, limits,
 and authentication claims are normative for `guest.answer@1.0` once the contract is accepted.
+
+Unless a field states otherwise, character bounds count Unicode scalar values after strict UTF-8 and
+JSON decoding. In this document, a UUID v4 is the canonical lowercase RFC 4122 text form matching
+`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`.
 
 ## 4. V1 scope
 
@@ -197,6 +201,7 @@ Idempotency-Key: <UUID-v4>
 
 - `X-Request-ID` is a content-free correlation value. The provider returns it unchanged.
 - `Idempotency-Key` identifies one requested assistant turn, not a person or conversation.
+- `X-Request-ID` and `Idempotency-Key` are canonical lowercase UUID v4 values as defined in §3.
 - Query parameters are prohibited in v1.0.
 - Unknown or malformed required headers return `400 invalid_request`, except authentication failures,
   which return `401 authentication_failed`.
@@ -248,9 +253,12 @@ Idempotency-Key: <UUID-v4>
   characters. It cannot contain a scheme, host, credentials, query string, fragment, encoded external
   URL, or percent-encoded delimiter that would introduce a query string or fragment.
 - `subject_type` is one of `property`, `destination`, `service`, `design`, or `none`.
-- `subject_id` is an approved stable public identifier or null. The provider resolves it against
-  Homes-owned public data; it never treats it as proof that the record exists or is public.
-- `locale` is an approved BCP 47 tag. V1.0 initially guarantees only `en-US`.
+- `subject_id` is null or a 1–64 character lowercase kebab-case identifier matching
+  `^[a-z0-9]+(?:-[a-z0-9]+)*$`. When
+  `subject_type` is `none`, `subject_id` must be null. For every other subject type, a non-null value
+  is resolved against approved Homes-owned public data and never proves that the record exists or is
+  public.
+- `locale` is exactly `en-US` in v1.0.
 - Unknown request members are rejected. This prevents a caller from silently sending identity,
   private context, tool instructions, or future fields to an older provider.
 
@@ -397,6 +405,12 @@ not know.”
   v1.0; all links and actions use the structured fields below.
 - The consumer renders the answer as text and never interprets model-produced markup.
 - `sources` contains zero to eight unique approved public sources.
+- Every `source_id` and `action_id` uses exactly one colon and matches
+  `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[a-z0-9]+(?:-[a-z0-9]+)*$`. The namespace before the colon is
+  1–32 characters; the local identifier after it is 1–95 characters; the complete identifier is
+  3–128 characters. Both components are lowercase kebab-case with no leading, trailing, or
+  consecutive hyphen. Additional colons are prohibited.
+- A source `title` is 1–120 Unicode scalar values of display-ready plain text.
 - Business factual claims require sufficient supporting evidence unless they are served directly
   from an authoritative structured record. Clarification, correction, conversational acknowledgment,
   and general guidance do not require decorative citations.
@@ -404,10 +418,23 @@ not know.”
   modify it.
 - `actions` contains zero to four unique approved actions. V1.0 permits only
   `open_internal_link`, `open_external_booking_link`, and `contact_utopia`.
+- An action `label` is 1–80 Unicode scalar values of display-ready plain text.
 - An external-booking action identifies its actual provider destination. It is never represented as
   a completed reservation, held inventory, or live price.
 - `limitations` contains zero to four concise customer-relevant limitations. It must not reveal
-  internal provider, prompt, policy, security, or infrastructure details.
+  internal provider, prompt, policy, security, or infrastructure details. Each limitation is
+  1–240 Unicode scalar values of display-ready plain text.
+- Every source and action URL uses HTTPS, is at most 2,048 characters, and contains no user-info or
+  fragment. A source URL must exactly match an approved public-source destination. An
+  `open_internal_link` or `contact_utopia` URL must use an approved Utopia-owned hostname and match
+  an approved destination. An `open_external_booking_link` URL must use an approved configured
+  external-booking hostname and match the property's configured destination. These hostname,
+  destination, and action-kind relationships are cross-field business invariants, not merely URL
+  schema patterns.
+- Within `sources`, `source_id` values are unique and source URL values are independently unique.
+  Within `actions`, `action_id` values are unique and action URL values are independently unique.
+  No cross-array uniqueness rule applies: a source and an action may legitimately use the same URL
+  because they have different presentation semantics.
 - `session_id` exactly matches the request.
 - `response_id` and `assistant_turn_id` are new UUID v4 values.
 - Unknown response members may be ignored by a v1 consumer. Known members remain strict.
@@ -429,6 +456,10 @@ X-Request-ID: <request value>
 X-Utopia-Business-Release: <opaque release id>
 X-Utopia-Knowledge-Release: <opaque approved projection id>
 ```
+
+Both release-header values are 1–128 visible ASCII characters matching `^[\x21-\x7e]{1,128}$`.
+They are opaque, contain no whitespace, secret, customer data, or conversation content, and are not
+interpreted as authorization.
 
 The website may retain these identifiers in restricted operational telemetry but must not show them
 as customer content or forward them to browser analytics.
@@ -559,25 +590,28 @@ body content.
 }
 ```
 
-| HTTP | Code | Retryable | Meaning |
-| --- | --- | --- | --- |
-| 400 | `invalid_request` | no | Malformed headers, body, history, or page context |
-| 400 | `unsupported_version` | no | Requested capability version is not supported |
-| 401 | `authentication_failed` | no | Generic service-authentication failure |
-| 403 | `capability_forbidden` | no | Valid caller lacks `guest.answer` |
-| 409 | `idempotency_conflict` | no | Key reused with different canonical request |
-| 409 | `request_in_progress` | yes | Same request is already executing |
-| 409 | `idempotency_recovery_unavailable` | no | Prior execution cannot be replayed without forbidden content retention |
-| 409 | `response_invalidated` | no | Prior response is no longer eligible under current public state |
-| 413 | `request_too_large` | no | Body or bounded-content limit exceeded |
-| 429 | `rate_limited` | yes | Public or service limit reached |
-| 503 | `temporarily_unavailable` | yes | Model, knowledge, policy, or execution dependency unavailable |
-| 503 | `answer_validation_failed` | no | No supported final answer survived validation; no answer content is returned |
-| 504 | `deadline_exceeded` | yes | Provider could not complete within its deadline |
+| HTTP | Code | Exact `message` | Retryable | Meaning |
+| --- | --- | --- | --- | --- |
+| 400 | `invalid_request` | `The request is invalid.` | no | Malformed headers, body, history, or page context |
+| 400 | `unsupported_version` | `This request version is not supported.` | no | Requested capability version is not supported |
+| 401 | `authentication_failed` | `Authentication failed.` | no | Generic service-authentication failure |
+| 403 | `capability_forbidden` | `This capability is not permitted.` | no | Valid caller lacks `guest.answer` |
+| 409 | `idempotency_conflict` | `This request conflicts with an earlier request.` | no | Key reused with different canonical request |
+| 409 | `request_in_progress` | `This request is still in progress.` | yes | Same request is already executing |
+| 409 | `idempotency_recovery_unavailable` | `The earlier response is no longer available.` | no | Prior execution cannot be replayed without forbidden content retention |
+| 409 | `response_invalidated` | `The earlier response is no longer valid.` | no | Prior response is no longer eligible under current public state |
+| 413 | `request_too_large` | `The request is too large.` | no | Body or bounded-content limit exceeded |
+| 429 | `rate_limited` | `Too many requests. Please try again shortly.` | yes | Public or service limit reached |
+| 503 | `temporarily_unavailable` | `Lucy is temporarily unavailable. Please try again shortly.` | yes | Model, knowledge, policy, or execution dependency unavailable |
+| 503 | `answer_validation_failed` | `Lucy could not produce a supported answer for this request.` | no | No supported final answer survived validation; no answer content is returned |
+| 504 | `deadline_exceeded` | `Lucy could not respond within the allowed time.` | yes | Provider could not complete within its deadline |
 
 - Errors contain no `observed_at`, stack trace, provider message, prompt fragment, rejected value,
   token, key ID, policy threshold, database detail, or internal hostname.
-- `correlation_id` is provider-generated and distinct from `X-Request-ID`.
+- `message` is the exact generic string paired with `code` in the table; implementations do not
+  append punctuation, diagnostics, identifiers, or rejected values.
+- `correlation_id` is a provider-generated canonical lowercase UUID v4 distinct from
+  `X-Request-ID`.
 - Retryable responses include integer `Retry-After` seconds between 1 and 30.
 - `answer_validation_failed` is intentionally a non-retryable `503`: the serving capability failed
   to produce a safe answer for this request, but an automatic identical retry is not permitted merely
@@ -758,11 +792,14 @@ This byte-reproducible bundle includes:
 
 - JSON Schemas for request, success response, source, action, and error envelopes;
 - positive and negative vectors for every schema rule;
+- boundary vectors for all identifier, text, URL, locale, release-header, and exact error-message
+  constraints;
 - authentication claim vectors;
 - request-canonicalization, idempotency, crash/recovery, and retry-state vectors;
 - consumer and reverse-proxy vectors proving that `answer_validation_failed` is not automatically
   retried despite its `503` status;
-- cross-field invariants for session, turns, outcomes, sources, actions, and retry semantics;
+- cross-field invariants for session, turns, page-context subject consistency, outcomes, source and
+  action ID/URL uniqueness, URL-host/action-kind approval, and retry semantics;
 - paired provider/consumer fixtures;
 - privacy-safe log and error fixtures; and
 - a raw-byte canonical content digest reproducible without executing either implementation's code.
@@ -802,9 +839,10 @@ the recorded run results and thresholds as separate evidence.
 
 ## 24. Review disposition
 
-Claude's review of draft 0.1 and Lucy's review of draft 0.2 were accepted as follows:
+Claude's review of draft 0.1, Lucy's review of draft 0.2, and Claude's RC1 Tier A preflight review
+were accepted as follows:
 
-| Finding | RC1 disposition |
+| Finding | RC2 disposition |
 | --- | --- |
 | Protocol conformance and semantic model quality cannot share one deterministic certification claim | Split into deterministic Tier A and execution-dependent Tier B in §22 |
 | Volatile response replay is ambiguous across replicas | Initial v1.0 profile now requires one active answer coordinator; horizontal replay requires a separately reviewed affinity or memory-only shared-cache profile |
@@ -818,10 +856,15 @@ Claude's review of draft 0.1 and Lucy's review of draft 0.2 were accepted as fol
 | Durable raw session identifiers could create longitudinal pseudonymous tracking | Raw session IDs are prohibited from durable telemetry; keyed digests have a maximum 24-hour TTL and cannot join to identity or marketing data |
 | V1 precedence modeled unavailable future capabilities | Normative precedence now includes only effective public restrictions, structured facts, approved knowledge, and general reasoning; future PMS/reservation rules are deferred |
 | Middleware could retry non-retryable `answer_validation_failed` because it uses HTTP 503 | Added explicit website/reverse-proxy acceptance and Tier A vectors proving no automatic retry |
+| `subject_id`, customer-visible text fields, release headers, locale, UUID fields, and error messages lacked fully encodable wire bounds | Added normative patterns, lengths, exact values, and exact safe error strings in §§3, 8, 9, 12, and 17 |
+| Source/action identifier examples did not determine an implementable grammar | Required exactly one colon, bounded lowercase kebab-case namespace and local components, and a literal regex |
+| Source/action uniqueness could mean entry identity or independent field uniqueness | Required independent ID and URL uniqueness within each array while explicitly allowing the same URL across `sources` and `actions` |
+| URL syntax alone could not enforce provider and action semantics | Constrained URL syntax in the wire shape and made approved hostname, exact destination, and action-kind relationships Tier A cross-field invariants |
 
-The selected capability, caller identity, hard deadlines, replay profile, and content-fixture boundary
-are now recorded as settled freeze decisions in §23. The production latency SLO and real local-guide
-content remain activation evidence and Homes content decisions, not protocol questions.
+The selected capability, caller identity, hard deadlines, replay profile, content-fixture boundary,
+and deterministic wire-format decisions are now recorded in the normative sections and §23. The
+production latency SLO and real local-guide content remain activation evidence and Homes content
+decisions, not protocol questions.
 
 ## 25. Explicit non-authorization
 
