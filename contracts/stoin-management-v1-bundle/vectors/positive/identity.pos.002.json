@@ -1,0 +1,15 @@
+{
+  "vector_id": "identity.pos.002",
+  "schema": "identity.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§9.2",
+  "description": "display_name at its lower bound of 1 character.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "synth_id": "stoin:synth:utopia-homes-prime",
+    "realm_id": "stoin:realm:utopia-homes",
+    "synth_class": "business-prime",
+    "display_name": "U"
+  }
+}

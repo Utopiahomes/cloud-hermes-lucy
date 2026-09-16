@@ -1,0 +1,30 @@
+{
+  "vector_id": "inv.I-07.pos.002",
+  "invariant": "I-07",
+  "expect": "hold",
+  "contract_reference": "§10 zero-enabled branch",
+  "description": "no_enabled_capabilities absent while a capability is enabled.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": [
+        "health_coverage_limited"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

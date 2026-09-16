@@ -1,0 +1,18 @@
+{
+  "vector_id": "health.pos.005",
+  "schema": "health.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§10 status rules",
+  "description": "unknown with two sorted reason codes and an empty impaired set. This replaces the RC2-era vector that reported unknown while naming the sole enabled capability as impaired — under RC3 that makes I equal E and requires unavailable. The legitimate reading survives here: a dependency condition is known while its effect on serviceability is not yet resolved.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unknown",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "dependency_unavailable",
+      "health_coverage_limited"
+    ]
+  }
+}

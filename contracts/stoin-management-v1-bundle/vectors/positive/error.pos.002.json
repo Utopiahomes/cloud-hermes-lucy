@@ -1,0 +1,17 @@
+{
+  "vector_id": "error.pos.002",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§13, criterion 18",
+  "description": "Valid inbound request ID echoed exactly alongside the provider correlation ID.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false,
+      "request_id": "d7a9062e-7ee9-4b7a-8998-73658ce39c70"
+    }
+  }
+}

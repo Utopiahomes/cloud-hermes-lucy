@@ -1,0 +1,19 @@
+{
+  "vector_id": "health.neg.019",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10 zero-enabled branch",
+  "description": "no_enabled_capabilities present while the impaired set is non-empty. If no capability is enabled, none can be impaired.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unavailable",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [
+      "guest.answer"
+    ],
+    "reason_codes": [
+      "no_enabled_capabilities"
+    ]
+  }
+}

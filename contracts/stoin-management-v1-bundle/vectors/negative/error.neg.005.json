@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.005",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§13 error table",
+  "description": "rate_limited marked non-retryable, contradicting the error table.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "rate_limited",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false
+    }
+  }
+}

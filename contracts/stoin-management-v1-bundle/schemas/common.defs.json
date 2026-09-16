@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:management:v1:common.defs",
+  "title": "Shared definitions — Stoin Control ↔ Utopia Homes Management Contract v1.0",
+  "$comment": "Encodes RC2 §8 common response rules and the primitive formats used by §§9-13. These definitions deliberately encode the contract text and nothing stricter; a constraint not stated in the contract is not asserted here.",
+  "$defs": {
+    "contractVersion": {
+      "$comment": "RC2 §8: contract_version is exactly 1.0.",
+      "const": "1.0"
+    },
+    "observedAt": {
+      "$comment": "RC2 §8: RFC 3339 UTC timestamp, whole-second precision, trailing Z. Fractional seconds are NOT permitted for observed_at.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "rfc3339Utc": {
+      "$comment": "RC2 §11.2 deployed_at: 'Provider deployment RFC 3339 UTC timestamp'. UTC (trailing Z) is required. The contract does not restate §8's whole-second rule for this member, so optional fractional seconds are accepted here. See README 'Interpretations taken', item I-1.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "printableAscii1to128": {
+      "type": "string",
+      "pattern": "^[\\x20-\\x7E]{1,128}$"
+    },
+    "printableAscii1to160": {
+      "type": "string",
+      "pattern": "^[\\x20-\\x7E]{1,160}$"
+    },
+    "uuid": {
+      "$comment": "RC2 §7/§13: UUID v4. Version nibble 4 and variant nibble 8/9/a/b are enforced. Uppercase hexadecimal is accepted because the contract does not require lowercase and §13 requires an exact echo of the caller's value. See README 'Interpretations taken', item I-2.",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "capabilityId": {
+      "$comment": "RC2 §12.2, verbatim regex.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+    },
+    "capabilityContractVersion": {
+      "$comment": "RC2 §12.2: capability contract semantic version MAJOR.MINOR. This is the capability's own version and is NOT constrained to the management contract's 1.0.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "managementContractVersion": {
+      "$comment": "RC2 §14: management contract major.minor token, as listed in supported_management_contracts.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "semanticVersion": {
+      "$comment": "RC2 §11.2: provider semantic version MAJOR.MINOR.PATCH.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "artifactDigest": {
+      "$comment": "RC2 §11.2: lowercase 'sha256:' prefix plus exactly 64 hexadecimal characters.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "healthStatus": {
+      "$comment": "RC2 §10.2. 'unknown' is a RECOGNIZED v1.0 value meaning insufficient evidence; per §14 it MUST NOT be treated as an unrecognized enum token.",
+      "enum": ["healthy", "degraded", "unavailable", "unknown"]
+    },
+    "reasonCode": {
+      "$comment": "RC3 §10. The generic code is 'unspecified'; 'unknown' is NOT a valid reason code in v1.0 — it was renamed to remove the collision with the health status of the same name. 'no_enabled_capabilities' was added in RC3 for the zero-enabled configuration state.",
+      "enum": [
+        "capacity_limited",
+        "configuration_error",
+        "dependency_unavailable",
+        "health_coverage_limited",
+        "maintenance",
+        "no_enabled_capabilities",
+        "release_in_progress",
+        "unspecified"
+      ]
+    },
+    "capabilityState": {
+      "$comment": "RC2 §12.2.",
+      "enum": ["enabled", "disabled", "deprecated"]
+    },
+    "errorCode": {
+      "$comment": "RC2 §13 error table.",
+      "enum": [
+        "invalid_request",
+        "authentication_failed",
+        "authorization_denied",
+        "method_not_allowed",
+        "contract_not_supported",
+        "request_too_large",
+        "rate_limited",
+        "internal_error",
+        "management_unavailable"
+      ]
+    }
+  }
+}

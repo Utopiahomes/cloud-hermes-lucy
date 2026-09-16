@@ -1,0 +1,18 @@
+{
+  "vector_id": "capabilities.pos.001",
+  "schema": "capabilities.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§12.1, §12.2",
+  "description": "Canonical capabilities response: guest.answer with business_contract_id absent, which is the required shape until a Homes Business Contract is formally approved.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest.answer",
+        "contract_version": "1.0",
+        "state": "enabled"
+      }
+    ]
+  }
+}

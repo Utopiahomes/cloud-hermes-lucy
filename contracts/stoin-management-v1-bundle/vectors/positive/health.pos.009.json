@@ -1,0 +1,17 @@
+{
+  "vector_id": "health.pos.009",
+  "schema": "health.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§10 reason codes",
+  "description": "The stand-alone fallback code satisfying the non-empty reason requirement at unknown, for a provider whose uncertainty no more specific v1.0 code truthfully describes.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unknown",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "unspecified"
+    ]
+  }
+}

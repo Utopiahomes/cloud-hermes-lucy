@@ -1,0 +1,20 @@
+{
+  "vector_id": "inv.I-02.pos.001",
+  "invariant": "I-02",
+  "expect": "hold",
+  "contract_reference": "§12",
+  "description": "The single advertised v1.0 capability is trivially unique.",
+  "documents": {
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

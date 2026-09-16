@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.005",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§13 error table",
+  "description": "authentication_failed is not retryable; §5 forbids the consumer retrying it.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "authentication_failed",
+      "message": "Authentication failed.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false
+    }
+  }
+}

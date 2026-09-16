@@ -1,0 +1,19 @@
+{
+  "vector_id": "capabilities.neg.004",
+  "schema": "capabilities.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§8, §12.2",
+  "description": "business_contract_id null rather than absent while the Business Contract does not yet exist.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest.answer",
+        "contract_version": "1.0",
+        "state": "enabled",
+        "business_contract_id": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "vector_id": "inv.I-01.neg.003",
+  "invariant": "I-01",
+  "expect": "violation",
+  "contract_reference": "§8, §12, criterion 9",
+  "description": "capabilities out of order by capability_id. Two entries appear here solely to express a REJECTION case for the ordering rule; this is not an advertisement of a second v1.0 capability and MUST NOT be reused to construct a positive degraded state.",
+  "documents": {
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.status",
+          "contract_version": "1.0",
+          "state": "enabled"
+        },
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

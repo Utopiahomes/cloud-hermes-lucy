@@ -1,0 +1,18 @@
+{
+  "vector_id": "capabilities.neg.006",
+  "schema": "capabilities.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§12.2",
+  "description": "Capability contract_version is not MAJOR.MINOR.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest.answer",
+        "contract_version": "1.0.0",
+        "state": "enabled"
+      }
+    ]
+  }
+}

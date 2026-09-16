@@ -1,0 +1,37 @@
+{
+  "vector_id": "inv.I-03.neg.001",
+  "invariant": "I-03",
+  "expect": "violation",
+  "contract_reference": "§10.2, §11.2",
+  "description": "Provider release ID disagrees between /health and /version. Each response is independently schema-valid, so only the paired check catches it. This is the failure an adapter produces when one endpoint reads a cached or build-time value and the other reads live configuration.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-14.7",
+      "degraded_capabilities": [],
+      "reason_codes": [
+        "health_coverage_limited"
+      ]
+    },
+    "version": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "management_provider": {
+        "deployment_id": "stoin:deployment:utopia-homes-management:production",
+        "runtime_id": "stoin:runtime:utopia-homes-management:01J7XYZEXAMPLE",
+        "release_id": "homes-management:release:2026-09-15.1",
+        "software_version": "0.1.0",
+        "artifact_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "deployed_at": "2026-09-15T19:45:00Z"
+      },
+      "managed_synth": {
+        "synth_id": "stoin:synth:utopia-homes-prime"
+      },
+      "supported_management_contracts": [
+        "1.0"
+      ]
+    }
+  }
+}

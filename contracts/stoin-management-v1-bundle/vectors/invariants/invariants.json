@@ -1,0 +1,102 @@
+{
+  "$comment": "Normative rules of Management Contract v1.0 RC3 that JSON Schema cannot express, either because they are ordering properties or because they relate one endpoint's response to another's. Both implementations MUST check these in addition to schema validation. Each rule is named so a conformance report can cite it.",
+  "contract_revision": "v1.0 Release Candidate 3",
+  "set_notation": {
+    "E": "The enabled set: capabilities advertised by /capabilities with state=enabled.",
+    "I": "The impaired set: the contents of /health degraded_capabilities.",
+    "$comment": "RC3 §10 defines every health status in terms of E and I observed together. A single /health response cannot see E, so the rules below are the only place most of that definition can be enforced."
+  },
+  "invariants": [
+    {
+      "id": "I-01",
+      "title": "Arrays are sorted ascending",
+      "contract_reference": "§8",
+      "rule": "sorted_ascending",
+      "statement": "Arrays whose ordering is not otherwise meaningful MUST be sorted lexicographically by stable ID. JSON Schema has no ordering keyword, so sortedness is checked here.",
+      "applies_to": [
+        { "schema": "health.response.schema.json", "pointer": "/degraded_capabilities" },
+        { "schema": "health.response.schema.json", "pointer": "/reason_codes" },
+        { "schema": "version.response.schema.json", "pointer": "/supported_management_contracts" },
+        { "schema": "capabilities.response.schema.json", "pointer": "/capabilities", "key": "capability_id" }
+      ]
+    },
+    {
+      "id": "I-02",
+      "title": "Capability IDs are unique",
+      "contract_reference": "§12, criterion 9",
+      "rule": "unique_by_key",
+      "statement": "The capabilities array contains no duplicates. Schema-level uniqueItems only catches wholly identical entries; this rule also catches the same capability_id advertised twice with different state or contract_version.",
+      "applies_to": [
+        { "schema": "capabilities.response.schema.json", "pointer": "/capabilities", "key": "capability_id" }
+      ]
+    },
+    {
+      "id": "I-03",
+      "title": "Provider release ID agrees across /health and /version",
+      "contract_reference": "§10.2, §11.2",
+      "rule": "cross_endpoint_equality",
+      "statement": "/health management_provider_release_id and /version management_provider.release_id identify the same management-provider release and MUST carry equal values. The two members are spelled differently and live in different responses, so this can only be checked across a paired observation. It is the check that catches an adapter reading a build-time value on one endpoint and live configuration on the other.",
+      "left": { "schema": "health.response.schema.json", "pointer": "/management_provider_release_id" },
+      "right": { "schema": "version.response.schema.json", "pointer": "/management_provider/release_id" }
+    },
+    {
+      "id": "I-04",
+      "title": "Health status matches the relationship between E and I",
+      "contract_reference": "§10 status rules",
+      "rule": "status_set_semantics",
+      "statement": "healthy requires E non-empty and I empty. degraded requires I to be a non-empty proper subset of E. unavailable requires either E non-empty with I = E, or E empty with I empty and no_enabled_capabilities present. unknown requires E non-empty with I empty or a proper subset of E. This rule assumes I is a subset of E, which invariant I-06 establishes independently, and defers to I-06 when it is not. The evidentiary half of each status rule -- whether the provider actually held authoritative evidence -- is not decidable from the wire and is not checked here.",
+      "left": { "schema": "health.response.schema.json", "pointer": "/status" },
+      "right": { "schema": "capabilities.response.schema.json", "pointer": "/capabilities" }
+    },
+    {
+      "id": "I-05",
+      "title": "The transitional adapter does not claim healthy",
+      "contract_reference": "§10 transitional paragraph, §17, criterion 10",
+      "rule": "transitional_adapter_health",
+      "statement": "While the provider is the transitional adapter and no authoritative content-free signal covers the real guest.answer knowledge path, /health MUST report status=unknown with an empty impaired set and MUST include health_coverage_limited in reason_codes. Checked only when the conformance run declares provider_mode=transitional, because it constrains a deployment mode rather than the wire format.",
+      "applies_to": [
+        { "schema": "health.response.schema.json", "pointer": "", "provider_mode": "transitional" }
+      ]
+    },
+    {
+      "id": "I-06",
+      "title": "Every impaired capability is advertised and enabled",
+      "contract_reference": "§10 set definition",
+      "rule": "impaired_subset_of_enabled",
+      "statement": "I MUST be a subset of E. A capability named as impaired must appear in /capabilities and carry state=enabled. Disabled and deprecated capabilities are policy states, not impairments, and must never appear in I. A single /health response cannot check this because it cannot see the advertisement.",
+      "left": { "schema": "health.response.schema.json", "pointer": "/degraded_capabilities" },
+      "right": { "schema": "capabilities.response.schema.json", "pointer": "/capabilities" }
+    },
+    {
+      "id": "I-07",
+      "title": "no_enabled_capabilities is present exactly when E is empty",
+      "contract_reference": "§10 zero-enabled branch",
+      "rule": "no_enabled_capabilities_biconditional",
+      "statement": "The reason code no_enabled_capabilities MUST be present when no advertised capability is enabled, and MUST NOT be present when any is. Both directions matter: the first stops a provider reporting an unexplained unavailable while nothing is switched on, and the second stops it claiming a zero-enabled configuration while actually serving capabilities. The health schema enforces what one response can determine; only the pairing with /capabilities establishes whether E is genuinely empty.",
+      "left": { "schema": "health.response.schema.json", "pointer": "/reason_codes" },
+      "right": { "schema": "capabilities.response.schema.json", "pointer": "/capabilities" }
+    }
+  ],
+  "not_machine_checkable": [
+    {
+      "contract_reference": "§10 status rules, §14",
+      "statement": "Every status rule has an evidentiary half -- whether the provider authoritatively knew a capability to be serviceable, unserviceable, or indeterminate. With an empty impaired set both healthy and unknown are structurally legal; with a non-empty proper subset both degraded and unknown are. The wire response cannot reveal which was true, so RC3 §14 keeps evidentiary correctness as a provider-mode and acceptance-test obligation. Invariant I-05 covers the one case the first proof depends on, and it works only because the conformance run declares provider_mode."
+    },
+    {
+      "contract_reference": "§10 reason codes",
+      "statement": "That 'unspecified' was used only because no more specific v1.0 code truthfully described the condition cannot be verified from the response. The enforceable shadow of that rule is the mutual-exclusion constraint in the health schema, which at least makes the provider's claim explicit."
+    },
+    {
+      "contract_reference": "§13, §15",
+      "statement": "Error messages MUST be fixed generic strings containing no exception text or internal identifiers, and logs MUST exclude JWTs, business content, customer identifiers and secrets. Nothing here can prove absence of such content in a free-text field; acceptance criteria 6 and 15 are satisfied by review and by the undeclared-member vectors."
+    },
+    {
+      "contract_reference": "§6.3, criterion 19",
+      "statement": "JWT skew acceptance exactly at exp + 30 seconds and rejection after that instant is a live authentication behaviour, not a response shape. It belongs in each side's deployed-endpoint test suite; this bundle fixes the boundary value so both suites assert the same instant."
+    },
+    {
+      "contract_reference": "§5, §13",
+      "statement": "Timeout ceilings, the one-retry limit, and polling cadence are client behaviours observable only against a running provider."
+    }
+  ]
+}

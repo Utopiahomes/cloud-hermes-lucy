@@ -1,0 +1,17 @@
+{
+  "vector_id": "health.pos.001",
+  "schema": "health.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§10.1, §10 transitional paragraph, criterion 10",
+  "description": "The expected steady state of the first proof: status=unknown, empty impaired set, health_coverage_limited. This is the vector the transitional adapter must satisfy.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unknown",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "health_coverage_limited"
+    ]
+  }
+}

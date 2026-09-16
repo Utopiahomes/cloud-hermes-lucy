@@ -1,0 +1,30 @@
+{
+  "vector_id": "inv.I-04.pos.001",
+  "invariant": "I-04",
+  "expect": "hold",
+  "contract_reference": "§10 status rules",
+  "description": "unknown with an empty impaired set against one enabled capability — the expected first-proof pairing.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": [
+        "health_coverage_limited"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

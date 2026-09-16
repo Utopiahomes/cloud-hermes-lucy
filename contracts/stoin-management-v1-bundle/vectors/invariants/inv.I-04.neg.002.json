@@ -1,0 +1,37 @@
+{
+  "vector_id": "inv.I-04.neg.002",
+  "invariant": "I-04",
+  "expect": "violation",
+  "contract_reference": "§10 status rules",
+  "description": "unavailable naming an INCOMPLETE enabled set: one of two enabled capabilities is named impaired while the status claims total unavailability. Two entries appear here solely as a rejection fixture, not as an advertisement of a second v1.0 capability.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unavailable",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.answer"
+      ],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        },
+        {
+          "capability_id": "guest.status",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

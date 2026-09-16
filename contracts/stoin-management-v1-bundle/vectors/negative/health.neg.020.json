@@ -1,0 +1,17 @@
+{
+  "vector_id": "health.neg.020",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10 zero-enabled branch",
+  "description": "no_enabled_capabilities present at status=healthy. An empty enabled set excludes healthy, degraded and unknown, all of which require a non-empty E — this is the vacuous-healthy state RC3 closed.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "healthy",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "no_enabled_capabilities"
+    ]
+  }
+}

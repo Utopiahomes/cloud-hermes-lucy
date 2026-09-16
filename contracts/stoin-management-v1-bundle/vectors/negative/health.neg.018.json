@@ -1,0 +1,17 @@
+{
+  "vector_id": "health.neg.018",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10 status rules",
+  "description": "unavailable with an empty impaired set and no no_enabled_capabilities. This is the exact defect that RC2's vectors asserted as legal: with a non-empty enabled set, unavailable requires I = E, so an empty impaired set can only be the zero-enabled branch.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unavailable",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "dependency_unavailable"
+    ]
+  }
+}

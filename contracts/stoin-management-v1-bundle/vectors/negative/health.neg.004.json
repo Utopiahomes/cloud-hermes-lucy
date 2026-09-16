@@ -1,0 +1,17 @@
+{
+  "vector_id": "health.neg.004",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10 status rules",
+  "description": "degraded with an empty impaired set; degraded asserts a known impairment that must be named.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "degraded",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "dependency_unavailable"
+    ]
+  }
+}

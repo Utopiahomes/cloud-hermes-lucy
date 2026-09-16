@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.003",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§13 error table",
+  "description": "rate_limited is retryable.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "rate_limited",
+      "message": "The management reader exceeded its rate.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": true
+    }
+  }
+}

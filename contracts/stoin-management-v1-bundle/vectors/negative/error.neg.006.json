@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.006",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§13 error table",
+  "description": "Error code outside the v1.0 set.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "not_found",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false
+    }
+  }
+}

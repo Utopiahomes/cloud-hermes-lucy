@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:management:v1:error.response",
+  "title": "Non-success response — all management v1.0 errors",
+  "$comment": "RC2 §13. Unlike the success responses, the error envelope carries no observed_at: §8's observed_at rule is stated for SUCCESSFUL responses, and §13's envelope names only contract_version and error. Per §2, member names are normative. See README 'Interpretations taken', item I-4.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "error"],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/contractVersion" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "correlation_id", "retryable"],
+      "properties": {
+        "code": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/errorCode" },
+        "message": {
+          "$comment": "RC2 §13: fixed, generic strings. MUST NOT contain exception text or internal identifiers — a content property no schema can verify; see invariant note in README.",
+          "type": "string",
+          "minLength": 1
+        },
+        "correlation_id": {
+          "$comment": "RC2 §13: provider-generated UUID v4, always present, returned in both the body and the X-Correlation-ID header. Never presented as the caller's request ID.",
+          "$ref": "urn:stoin:management:v1:common.defs#/$defs/uuid"
+        },
+        "request_id": {
+          "$comment": "RC2 §13: present with the caller's exact value only when the inbound X-Request-ID was a valid UUID v4; otherwise ABSENT (never null, and never a fabricated substitute).",
+          "$ref": "urn:stoin:management:v1:common.defs#/$defs/uuid"
+        },
+        "retryable": {
+          "$comment": "RC2 §13 error table. Constrained per-code by the allOf below.",
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "RC2 §13: 429, 500 and 503 are the retryable conditions.",
+          "if": {
+            "properties": {
+              "code": { "enum": ["rate_limited", "internal_error", "management_unavailable"] }
+            },
+            "required": ["code"]
+          },
+          "then": { "properties": { "retryable": { "const": true } } }
+        },
+        {
+          "$comment": "RC2 §13: every other code is non-retryable. §5 forbids the consumer retrying them regardless of intermediary behaviour.",
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "invalid_request",
+                  "authentication_failed",
+                  "authorization_denied",
+                  "method_not_allowed",
+                  "contract_not_supported",
+                  "request_too_large"
+                ]
+              }
+            },
+            "required": ["code"]
+          },
+          "then": { "properties": { "retryable": { "const": false } } }
+        }
+      ]
+    }
+  }
+}

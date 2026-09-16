@@ -1,0 +1,32 @@
+{
+  "vector_id": "inv.I-06.pos.001",
+  "invariant": "I-06",
+  "expect": "hold",
+  "contract_reference": "§10 set definition",
+  "description": "The impaired set names a capability that is advertised and enabled.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unavailable",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.answer"
+      ],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

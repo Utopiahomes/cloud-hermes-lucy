@@ -1,0 +1,18 @@
+{
+  "vector_id": "capabilities.neg.002",
+  "schema": "capabilities.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§12.2",
+  "description": "capability_id with no dotted segment; the pattern requires at least two segments.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest",
+        "contract_version": "1.0",
+        "state": "enabled"
+      }
+    ]
+  }
+}

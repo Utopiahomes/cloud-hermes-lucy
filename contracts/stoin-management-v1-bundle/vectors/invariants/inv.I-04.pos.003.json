@@ -1,0 +1,30 @@
+{
+  "vector_id": "inv.I-04.pos.003",
+  "invariant": "I-04",
+  "expect": "hold",
+  "contract_reference": "§10 zero-enabled branch",
+  "description": "The zero-enabled state: nothing advertised is enabled, so status is unavailable with an empty impaired set and no_enabled_capabilities present.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unavailable",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": [
+        "no_enabled_capabilities"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "disabled"
+        }
+      ]
+    }
+  }
+}

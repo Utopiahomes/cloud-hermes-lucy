@@ -1,0 +1,17 @@
+{
+  "vector_id": "error.neg.003",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§8, §13, criterion 18",
+  "description": "request_id null. When the inbound request ID is missing or invalid the member is ABSENT; a null is still a fabricated response member.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false,
+      "request_id": null
+    }
+  }
+}

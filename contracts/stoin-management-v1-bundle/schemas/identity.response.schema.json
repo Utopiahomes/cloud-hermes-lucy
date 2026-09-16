@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:management:v1:identity.response",
+  "title": "GET /management/v1/identity — success response",
+  "$comment": "RC2 §9. additionalProperties is false for PROVIDER conformance. Consumers MUST NOT use this schema as a runtime gate: RC2 §14 requires consumers to ignore unknown response members within major version 1. See README 'Strict provider mode vs lenient consumer mode'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "observed_at",
+    "synth_id",
+    "realm_id",
+    "synth_class",
+    "display_name"
+  ],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/contractVersion" },
+    "observed_at": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/observedAt" },
+    "synth_id": {
+      "$comment": "RC2 §9.2: exact stable value.",
+      "const": "stoin:synth:utopia-homes-prime"
+    },
+    "realm_id": {
+      "$comment": "RC2 §9.2: exact stable value.",
+      "const": "stoin:realm:utopia-homes"
+    },
+    "synth_class": {
+      "$comment": "RC2 §9.2: exact value.",
+      "const": "business-prime"
+    },
+    "display_name": {
+      "$comment": "RC2 §9.2: 1-100 Unicode characters; presentation only, never authority.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    }
+  }
+}

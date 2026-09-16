@@ -1,0 +1,37 @@
+{
+  "vector_id": "inv.I-06.neg.002",
+  "invariant": "I-06",
+  "expect": "violation",
+  "contract_reference": "§10 set definition, §12",
+  "description": "The impaired set names an advertised capability that is DISABLED. A disabled capability is a policy state, not an impairment — reporting it as impaired would let a deliberate shutdown read to Control as a fault.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.status"
+      ],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        },
+        {
+          "capability_id": "guest.status",
+          "contract_version": "1.0",
+          "state": "disabled"
+        }
+      ]
+    }
+  }
+}

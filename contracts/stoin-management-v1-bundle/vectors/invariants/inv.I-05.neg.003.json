@@ -1,0 +1,36 @@
+{
+  "vector_id": "inv.I-05.neg.003",
+  "invariant": "I-05",
+  "expect": "violation",
+  "contract_reference": "§10 transitional paragraph",
+  "description": "The transitional adapter reports degraded, asserting a known impairment it has no authority to observe. This was the behaviour proposed in the Homes-side Draft 0.1 review and corrected before RC1; the vector keeps the corrected reading enforced.",
+  "provider_mode": "transitional",
+  "also_violates": [
+    "I-04"
+  ],
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "degraded",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.answer"
+      ],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

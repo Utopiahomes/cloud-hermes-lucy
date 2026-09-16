@@ -1,0 +1,15 @@
+{
+  "vector_id": "error.neg.002",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§13",
+  "description": "correlation_id absent; every error must carry a provider-generated correlation ID.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The management request is invalid.",
+      "retryable": false
+    }
+  }
+}

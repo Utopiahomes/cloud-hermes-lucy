@@ -1,0 +1,19 @@
+{
+  "vector_id": "capabilities.pos.002",
+  "schema": "capabilities.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§12.2",
+  "description": "business_contract_id present — legal only once the Business Contract exists.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest.answer",
+        "contract_version": "1.0",
+        "state": "enabled",
+        "business_contract_id": "utopia-homes-business:guest.answer:1.0"
+      }
+    ]
+  }
+}

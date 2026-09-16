@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:management:v1:health.response",
+  "title": "GET /management/v1/health — success response",
+  "$comment": "RC3 §10. Status is defined over two sets: E, the advertised capabilities with state=enabled, and I, the contents of degraded_capabilities. Most of the E/I relationship needs /capabilities and lives in invariants I-04, I-06 and I-07; the conditionals below encode every part that a single health response determines on its own. additionalProperties is false for PROVIDER conformance only; see README. Array sortedness (§8) is invariant I-01.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "observed_at",
+    "status",
+    "management_provider_release_id",
+    "degraded_capabilities",
+    "reason_codes"
+  ],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/contractVersion" },
+    "observed_at": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/observedAt" },
+    "status": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/healthStatus" },
+    "management_provider_release_id": {
+      "$comment": "RC3 §10.2: current opaque MANAGEMENT-PROVIDER release ID (not the managed synth's). Must equal /version management_provider.release_id — cross-endpoint invariant I-03.",
+      "$ref": "urn:stoin:management:v1:common.defs#/$defs/printableAscii1to128"
+    },
+    "degraded_capabilities": {
+      "$comment": "RC3 §10.2: the impaired set I. A SORTED SET of unique advertised, ENABLED capability IDs authoritatively known to be impaired. Disabled and deprecated capabilities are not impaired and must not appear — enforced by invariant I-06.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/capabilityId" }
+    },
+    "reason_codes": {
+      "$comment": "RC3 §10.2: a sorted set of unique safe codes. Non-empty when status=unknown; see the conditionals below.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/reasonCode" }
+    },
+    "retry_after_seconds": {
+      "$comment": "RC3 §10.2: 1-3600; absent when no estimate is available. Absent, never null (§8).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "RC3 §10: 'healthy' requires I to be empty.",
+      "if": { "properties": { "status": { "const": "healthy" } }, "required": ["status"] },
+      "then": { "properties": { "degraded_capabilities": { "maxItems": 0 } } }
+    },
+    {
+      "$comment": "RC3 §10: 'degraded' requires I to be a NON-EMPTY proper subset of E. Only the non-empty half is decidable from one response; the proper-subset half is invariant I-04.",
+      "if": { "properties": { "status": { "const": "degraded" } }, "required": ["status"] },
+      "then": { "properties": { "degraded_capabilities": { "minItems": 1 } } }
+    },
+    {
+      "$comment": "RC3 §10: when status=unknown, reason_codes MUST be non-empty. Unknown is an observability state, and Control is entitled to be told why serviceability could not be established.",
+      "if": { "properties": { "status": { "const": "unknown" } }, "required": ["status"] },
+      "then": { "properties": { "reason_codes": { "minItems": 1 } } }
+    },
+    {
+      "$comment": "RC3 §10: 'unspecified' MUST NOT appear alongside any other reason code AT ANY STATUS. Once a specific reason is known, the fallback adds nothing. Whether a more specific code would have been truthful is evidentiary and cannot be checked here.",
+      "if": {
+        "properties": { "reason_codes": { "contains": { "const": "unspecified" } } },
+        "required": ["reason_codes"]
+      },
+      "then": { "properties": { "reason_codes": { "maxItems": 1 } } }
+    },
+    {
+      "$comment": "RC3 §10: 'unavailable' with a non-empty E requires I = E, so an empty I under 'unavailable' can only be the zero-enabled branch — which requires no_enabled_capabilities. This conditional is what makes the RC2-era defect (unavailable with an empty impaired set and no explanation) catchable from a single response.",
+      "if": {
+        "properties": {
+          "status": { "const": "unavailable" },
+          "degraded_capabilities": { "maxItems": 0 }
+        },
+        "required": ["status", "degraded_capabilities"]
+      },
+      "then": {
+        "properties": {
+          "reason_codes": { "contains": { "const": "no_enabled_capabilities" } }
+        }
+      }
+    },
+    {
+      "$comment": "RC3 §10: no_enabled_capabilities means E is empty. An empty E excludes healthy, degraded and unknown, all of which require a non-empty E, so the status must be unavailable.",
+      "if": {
+        "properties": {
+          "reason_codes": { "contains": { "const": "no_enabled_capabilities" } }
+        },
+        "required": ["reason_codes"]
+      },
+      "then": { "properties": { "status": { "const": "unavailable" } } }
+    },
+    {
+      "$comment": "RC3 §10: no_enabled_capabilities means E is empty, and I is a subset of E, so I must also be empty.",
+      "if": {
+        "properties": {
+          "reason_codes": { "contains": { "const": "no_enabled_capabilities" } }
+        },
+        "required": ["reason_codes"]
+      },
+      "then": { "properties": { "degraded_capabilities": { "maxItems": 0 } } }
+    }
+  ]
+}

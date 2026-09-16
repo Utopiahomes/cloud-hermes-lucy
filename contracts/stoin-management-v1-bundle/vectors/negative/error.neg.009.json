@@ -1,0 +1,17 @@
+{
+  "vector_id": "error.neg.009",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§8, §13, interpretation I-4",
+  "description": "observed_at present on an error envelope. §8's observed_at rule is stated for SUCCESSFUL responses and §13's envelope names only contract_version and error.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": false
+    },
+    "observed_at": "2026-09-15T20:15:30Z"
+  }
+}

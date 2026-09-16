@@ -1,0 +1,16 @@
+{
+  "vector_id": "identity.neg.007",
+  "schema": "identity.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§2, §9",
+  "description": "Undeclared member. A v1.0 provider must not ship surface the contract does not define; CONSUMERS must tolerate this per §14, so only provider conformance rejects it.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "synth_id": "stoin:synth:utopia-homes-prime",
+    "realm_id": "stoin:realm:utopia-homes",
+    "synth_class": "business-prime",
+    "display_name": "Utopia Homes Prime",
+    "region": "us-east-1"
+  }
+}

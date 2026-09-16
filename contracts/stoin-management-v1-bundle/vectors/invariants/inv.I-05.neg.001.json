@@ -1,0 +1,29 @@
+{
+  "vector_id": "inv.I-05.neg.001",
+  "invariant": "I-05",
+  "expect": "violation",
+  "contract_reference": "§10 transitional paragraph, criterion 10",
+  "description": "The transitional adapter claims healthy. It cannot verify the real knowledge path, so this is an unearned assertion of serviceability — the specific failure criterion 10 exists to prevent.",
+  "provider_mode": "transitional",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "healthy",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": []
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

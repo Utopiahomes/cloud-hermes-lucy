@@ -87,6 +87,7 @@ See:
 - [`docs/deletion-provenance-2026-08-31.md`](docs/deletion-provenance-2026-08-31.md) for multi-source deletion closure, observed tool provenance, and remaining interruption/history-reset blockers
 - [`docs/deletion-recovery-2026-08-31.md`](docs/deletion-recovery-2026-08-31.md) for independent deletion intent, process-kill/backup-restore proof, and the production-provider hold
 - [`docs/production-journal-2026-08-31.md`](docs/production-journal-2026-08-31.md) for the DynamoDB journal design, mocked failure proof, least-privilege templates, and real-cloud acceptance hold
+- [`docs/stoin-management-v1-control-checkpoint.md`](docs/stoin-management-v1-control-checkpoint.md) for the pinned Management Contract v1 artifact and local Control-reader proof
 
 ## Local verification
 

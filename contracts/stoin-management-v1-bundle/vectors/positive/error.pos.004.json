@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.004",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§13 error table",
+  "description": "management_unavailable is retryable.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "management_unavailable",
+      "message": "Management state is unavailable.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": true
+    }
+  }
+}

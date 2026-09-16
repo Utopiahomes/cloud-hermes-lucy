@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.004",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§13 error table",
+  "description": "invalid_request marked retryable, contradicting the error table and §5's retry restriction.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The management request is invalid.",
+      "correlation_id": "1eb6c24c-adfb-4512-987c-13ae318741bb",
+      "retryable": true
+    }
+  }
+}

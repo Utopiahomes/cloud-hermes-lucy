@@ -1,0 +1,19 @@
+{
+  "vector_id": "health.neg.003",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10 status rules",
+  "description": "healthy while naming an impaired capability — self-contradictory.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "healthy",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [
+      "guest.answer"
+    ],
+    "reason_codes": [
+      "health_coverage_limited"
+    ]
+  }
+}

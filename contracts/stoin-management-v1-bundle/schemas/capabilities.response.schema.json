@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:management:v1:capabilities.response",
+  "title": "GET /management/v1/capabilities — success response",
+  "$comment": "RC2 §12. Sortedness by capability_id and absence of duplicate capability_id values are enforced by invariants I-01 and I-02. additionalProperties is false for PROVIDER conformance only; see README.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "observed_at", "capabilities"],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/contractVersion" },
+    "observed_at": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/observedAt" },
+    "capabilities": {
+      "$comment": "RC2 §12: sorted by capability_id, no duplicates, and MUST NOT include provider, model, prompt, database, schema, customer, or secret metadata — enforced structurally by additionalProperties: false on each entry.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability_id", "contract_version", "state"],
+        "properties": {
+          "capability_id": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/capabilityId" },
+          "contract_version": {
+            "$comment": "RC2 §12.2: the CAPABILITY contract's own MAJOR.MINOR version. Deliberately not constrained to the management contract's 1.0.",
+            "$ref": "urn:stoin:management:v1:common.defs#/$defs/capabilityContractVersion"
+          },
+          "state": { "$ref": "urn:stoin:management:v1:common.defs#/$defs/capabilityState" },
+          "business_contract_id": {
+            "$comment": "RC2 §12.2: optional. Present only after the Business Contract is formally approved; v1.0 does not require it for guest.answer, and advertisement MUST NOT invent or reserve an unapproved identifier. Absent, never null (§8).",
+            "$ref": "urn:stoin:management:v1:common.defs#/$defs/printableAscii1to160"
+          }
+        }
+      }
+    }
+  }
+}

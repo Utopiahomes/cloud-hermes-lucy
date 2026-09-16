@@ -1,0 +1,18 @@
+{
+  "vector_id": "capabilities.pos.003",
+  "schema": "capabilities.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§12.2",
+  "description": "A capability whose own contract version differs from the management contract version, confirming the two are independent.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "capabilities": [
+      {
+        "capability_id": "guest.answer",
+        "contract_version": "2.3",
+        "state": "enabled"
+      }
+    ]
+  }
+}

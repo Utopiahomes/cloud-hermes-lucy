@@ -1,0 +1,25 @@
+{
+  "vector_id": "inv.I-02.neg.001",
+  "invariant": "I-02",
+  "expect": "violation",
+  "contract_reference": "§12, criterion 9",
+  "description": "The same capability_id advertised twice with different state. Schema uniqueItems does not catch this because the two entries are not identical objects.",
+  "documents": {
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        },
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "disabled"
+        }
+      ]
+    }
+  }
+}

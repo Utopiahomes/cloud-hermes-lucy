@@ -1,0 +1,20 @@
+{
+  "vector_id": "health.neg.014",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§8, §10.2",
+  "description": "Duplicate entry in the impaired set. RC3 defines degraded_capabilities as a set.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unavailable",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [
+      "guest.answer",
+      "guest.answer"
+    ],
+    "reason_codes": [
+      "dependency_unavailable"
+    ]
+  }
+}

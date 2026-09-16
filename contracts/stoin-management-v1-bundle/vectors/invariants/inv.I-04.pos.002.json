@@ -1,0 +1,32 @@
+{
+  "vector_id": "inv.I-04.pos.002",
+  "invariant": "I-04",
+  "expect": "hold",
+  "contract_reference": "§10 status rules",
+  "description": "unavailable naming the complete enabled set. Corrected for RC3: the RC2-era version of this fixture paired unavailable with an empty impaired set and was declared to HOLD, which is how a wrong rule can certify wrong behaviour.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unavailable",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.answer"
+      ],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

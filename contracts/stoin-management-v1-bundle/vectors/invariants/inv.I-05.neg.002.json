@@ -1,0 +1,31 @@
+{
+  "vector_id": "inv.I-05.neg.002",
+  "invariant": "I-05",
+  "expect": "violation",
+  "contract_reference": "§10 transitional paragraph, criterion 10",
+  "description": "The transitional adapter reports unknown with a reason code, but omits health_coverage_limited, leaving Control unable to distinguish limited coverage from an unexplained loss of visibility. This fixture is schema-valid and violates only the provider-mode rule, which is what an invariant test should look like; the previous version used an empty reason_codes array, which RC3 now rejects at the schema level as health.neg.016.",
+  "provider_mode": "transitional",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": [
+        "dependency_unavailable"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

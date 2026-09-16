@@ -1,0 +1,28 @@
+{
+  "vector_id": "inv.I-04.pos.004",
+  "invariant": "I-04",
+  "expect": "hold",
+  "contract_reference": "§10 status rules",
+  "description": "healthy against a non-empty enabled set with an empty impaired set.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "healthy",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [],
+      "reason_codes": []
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

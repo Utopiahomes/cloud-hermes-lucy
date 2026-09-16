@@ -1,0 +1,33 @@
+{
+  "vector_id": "inv.I-04.neg.003",
+  "invariant": "I-04",
+  "expect": "violation",
+  "contract_reference": "§10 status rules",
+  "description": "unknown while naming the sole enabled capability as impaired, so I equals E. If the impairment is authoritative every enabled capability is known impaired, which is unavailable; if it is not authoritative it cannot appear in the impaired set at all. This was shipped as a POSITIVE vector in the RC2 bundle and is the defect Lucy's review found.",
+  "documents": {
+    "health": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "status": "unknown",
+      "management_provider_release_id": "homes-management:release:2026-09-15.1",
+      "degraded_capabilities": [
+        "guest.answer"
+      ],
+      "reason_codes": [
+        "dependency_unavailable",
+        "health_coverage_limited"
+      ]
+    },
+    "capabilities": {
+      "contract_version": "1.0",
+      "observed_at": "2026-09-15T20:15:30Z",
+      "capabilities": [
+        {
+          "capability_id": "guest.answer",
+          "contract_version": "1.0",
+          "state": "enabled"
+        }
+      ]
+    }
+  }
+}

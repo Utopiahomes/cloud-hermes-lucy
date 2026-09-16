@@ -1,0 +1,16 @@
+{
+  "vector_id": "health.neg.009",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§10.2",
+  "description": "management_provider_release_id missing.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unknown",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "health_coverage_limited"
+    ]
+  }
+}

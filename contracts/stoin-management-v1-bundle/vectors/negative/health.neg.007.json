@@ -1,0 +1,18 @@
+{
+  "vector_id": "health.neg.007",
+  "schema": "health.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§8, §10.2",
+  "description": "retry_after_seconds as a numeric string; §8 requires JSON integers.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "status": "unknown",
+    "management_provider_release_id": "homes-management:release:2026-09-15.1",
+    "degraded_capabilities": [],
+    "reason_codes": [
+      "health_coverage_limited"
+    ],
+    "retry_after_seconds": "30"
+  }
+}

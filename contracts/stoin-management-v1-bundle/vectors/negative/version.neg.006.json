@@ -1,0 +1,26 @@
+{
+  "vector_id": "version.neg.006",
+  "schema": "version.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§11.2",
+  "description": "supported_management_contracts does not include 1.0 while serving contract 1.0.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "management_provider": {
+      "deployment_id": "stoin:deployment:utopia-homes-management:production",
+      "runtime_id": "stoin:runtime:utopia-homes-management:01J7XYZEXAMPLE",
+      "release_id": "homes-management:release:2026-09-15.1",
+      "software_version": "0.1.0",
+      "artifact_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "deployed_at": "2026-09-15T19:45:00Z"
+    },
+    "managed_synth": {
+      "synth_id": "stoin:synth:utopia-homes-prime",
+      "observed_release_id": "homes-prime:release:legacy-public-2026-09-14.1"
+    },
+    "supported_management_contracts": [
+      "2.0"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "vector_id": "identity.neg.002",
+  "schema": "identity.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§9.2",
+  "description": "realm_id is not the exact stable value.",
+  "document": {
+    "contract_version": "1.0",
+    "observed_at": "2026-09-15T20:15:30Z",
+    "synth_id": "stoin:synth:utopia-homes-prime",
+    "realm_id": "stoin:realm:utopia",
+    "synth_class": "business-prime",
+    "display_name": "Utopia Homes Prime"
+  }
+}
