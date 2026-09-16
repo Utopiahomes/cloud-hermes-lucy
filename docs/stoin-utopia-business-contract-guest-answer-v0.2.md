@@ -1,8 +1,9 @@
-# Utopia Homes Business Contract — `guest.answer` v0.1
+# Utopia Homes Business Contract — `guest.answer` v0.2
 
-**Document revision:** design draft 0.1  
+**Document revision:** design draft 0.2  
 **Capability version:** `guest.answer@1.0`  
 **Status:** design for Ray, Lucy, and Claude review; no implementation or deployment authority  
+**Review state:** Claude's Homes-side corrections and an independent architecture challenge pass are incorporated; five concrete freeze questions remain in §23  
 **Business provider:** Utopia Homes Prime  
 **Initial application consumer:** Utopia Homes website guest adapter  
 **Date:** 2026-09-16
@@ -117,7 +118,9 @@ POST /business/v1/guest/answer
   backoff, to 22 seconds.
 - Streaming is not part of v1.0. A later compatible capability version may add it.
 - Successful response bodies **MUST NOT** exceed 64 KiB.
-- Request bodies **MUST NOT** exceed 32 KiB.
+- Request bodies **MUST NOT** exceed 64 KiB. The byte limit and decoded character limits in §9 apply
+  independently. The server-side consumer should serialize validated strings directly as UTF-8
+  rather than expanding ordinary Unicode into `\\u` escape sequences.
 - Responses **MUST** include `Cache-Control: no-store` and **MUST NOT** set cookies.
 
 The browser-facing `/api/lucy` route is an application adapter and is not part of this service
@@ -150,16 +153,22 @@ key discovery, token issuance, introspection, rotation, or authorization through
 | `sub` | `stoin:service:utopia-homes-web-guest-adapter` |
 | `aud` | `stoin:business:utopia-homes-prime` |
 | `scope` | Exact string `guest.answer` |
-| `iat`, `nbf`, `exp` | Integer UTC epoch seconds; `nbf <= exp`, `iat < exp`, `exp - iat <= 300`; neither `iat` nor `nbf` may be more than 30 seconds in the future |
+| `iat`, `nbf`, `exp` | Integer UTC epoch seconds; `nbf == iat`, `iat < exp`, `exp - iat <= 300`; neither `iat` nor `nbf` may be more than 30 seconds in the future |
 | `jti` | UUID v4 one-time nonce unique to the issued token |
 
 The credential grants only the public `guest.answer` capability. It grants no private record access
 and cannot be expanded by a message, page context, claimed identity, or model interpretation.
 
+Every future application caller receives its own `sub`, key, environment binding, and explicit
+capability grant. It must not reuse the website guest adapter's identity.
+
 The provider atomically records a content-free digest of each accepted `jti` until the latest
 permitted acceptance instant and rejects replay. Each retry uses a fresh JWT and `jti`, while keeping
 the same idempotency key and request payload. Duplicate, malformed, or conflicting security claims
 are rejected. A token is rejected after `exp + 30 seconds`; skew is never widened dynamically.
+The replay record uses the same Homes-owned, crash-tolerant, content-free coordination facility as
+idempotency status, with a separate namespace and retention rule. It never stores a token or request
+body.
 
 Authentication and public authorization are established before reading or interpreting the body.
 Untrusted signature, key, identity, audience, algorithm, or token-validity failures return generic
@@ -295,10 +304,25 @@ The consumer may make at most one automatic retry with the same canonical reques
 after a transport failure or an error explicitly marked retryable. It uses a fresh valid JWT and
 `X-Request-ID` for the new attempt. For an HTTP response it honors `Retry-After`; for a transport
 failure it uses a randomized 250–750 millisecond backoff. Both attempts and the backoff share the
-22-second interaction deadline. Validation, authentication, authorization, version, invalidation,
-and idempotency conflicts are not retried automatically.
+22-second interaction deadline. The consumer dynamically limits the second attempt to the smaller of
+15 seconds or the remaining interaction budget; it never starts an attempt after the total deadline
+has elapsed. Validation, authentication, authorization, version, invalidation, and idempotency
+conflicts are not retried automatically.
 
-### 11.1 Canonical request identity
+### 11.1 Initial replica profile
+
+The initial v1.0 deployment uses exactly one active Prime answer coordinator per environment. Model
+execution may scale behind that coordinator, but Business Contract admission, volatile replay, and
+final response assembly do not load-balance across independent coordinator memories. This makes
+same-process replay the normal case while preserving the no-persistent-content rule.
+
+A horizontally scaled coordinator tier requires a separately reviewed replay profile before it may
+claim conformance. That profile must either provide deterministic request affinity or use a shared,
+memory-only, non-persistent replay cache with equivalent privacy and withdrawal enforcement. Without
+one of those mechanisms, `idempotency_recovery_unavailable` would become an expected cross-replica
+outcome and is not accepted silently as the v1.0 operating profile.
+
+### 11.2 Canonical request identity
 
 Before hashing, the provider:
 
@@ -309,6 +333,9 @@ Before hashing, the provider:
    (`page_context.subject_id`) as null; and
 5. serializes the validated body with RFC 8785 JSON Canonicalization Scheme and hashes those bytes
    with SHA-256.
+
+Implementations must use a maintained, reviewed RFC 8785 library with conformance vectors. Hand-
+rolled number formatting, string escaping, or Unicode canonicalization is not accepted.
 
 Authentication tokens, `X-Request-ID`, and other transport headers are excluded from request identity.
 Reordered object members and insignificant JSON whitespace therefore remain the same request; Unicode
@@ -540,6 +567,9 @@ body content.
   token, key ID, policy threshold, database detail, or internal hostname.
 - `correlation_id` is provider-generated and distinct from `X-Request-ID`.
 - Retryable responses include integer `Retry-After` seconds between 1 and 30.
+- `answer_validation_failed` is intentionally a non-retryable `503`: the serving capability failed
+  to produce a safe answer for this request, but an automatic identical retry is not permitted merely
+  because generic HTTP tooling often retries 5xx responses.
 - The website converts errors into a natural customer-facing state and preserves normal navigation,
   forms, contact routes, and booking links.
 
@@ -607,19 +637,26 @@ The first cut is a strangler boundary, not a rewrite:
 1. Freeze this contract and build an independent conformance bundle.
 2. Have Homes wrap the accepted current guest-answer behavior behind this provider contract while
    retaining existing production behavior.
-3. Change the website `/api/lucy` adapter to consume `guest.answer@1.0` in an isolated preview.
+3. Exercise the wrapper as an explicitly preconformant compatibility preview using synthetic and
+   staff-only traffic. It may prove schemas, authentication, isolation, and failure handling, but it
+   must not advertise conformance or receive public guest traffic while carrying forward behavior
+   that does not yet satisfy §§13–18.
 4. Prove that Prime continues answering when Stoin Control is unavailable.
 5. Move Homes prompts, knowledge projection, business validation, and curated local guide under Homes
    ownership without changing the website contract.
 6. Extract provider-neutral model execution behind Prime's private execution boundary.
-7. Activate only after conversational, factual, privacy, failure, cost, and rollback acceptance pass.
-8. Retire the former cross-realm guest request path only after rollback evidence and an observation
+7. Change the website `/api/lucy` adapter to consume the candidate in an isolated conformance preview
+   only after every normative provider requirement is implemented. Run the full protocol and semantic
+   acceptance suites there.
+8. Activate only after conversational, factual, privacy, failure, cost, and rollback acceptance pass.
+9. Retire the former cross-realm guest request path only after rollback evidence and an observation
    window.
 
 The migration must not create a second durable transcript store or a dual-write Homes database.
 No migration stage may claim conformance or receive newly routed guest traffic until the serving
 boundaries in §§5 and 15 hold. Legacy nonconformant behavior may remain only on the separately
 identified existing path pending an approved cutover.
+Schema conformance alone is never described as `guest.answer@1.0` capability conformance.
 
 ## 21. Acceptance criteria
 
@@ -640,9 +677,9 @@ identified existing path pending an approved cutover.
 8. No database, DNS, booking, payment, message, or customer record is mutated.
 9. A preview token fails against production, a JWT `jti` cannot be replayed, and retries succeed with
    a fresh JWT while preserving the same canonical payload and idempotency key.
-10. Simultaneous duplicates across replicas, response loss, process crash before and after provider
-    completion, late completion after timeout, and unresolved cost settlement never start an
-    untracked duplicate answer pipeline.
+10. Simultaneous duplicates arriving from separate website replicas, response loss, coordinator
+    restart before and after provider completion, late completion after timeout, and unresolved cost
+    settlement never start an untracked duplicate answer pipeline.
 11. Forged assistant history, copied session IDs, and purported prior approvals or tool results grant
     no authority and are independently regrounded.
 12. Blocking all Stoin Control network access does not prevent cold authentication, configuration,
@@ -695,8 +732,13 @@ identified existing path pending an approved cutover.
 
 ## 22. Conformance artifacts
 
-After design approval, Claude owns the Homes/provider conformance bundle and provider implementation;
-the website consumer owns consumer fixtures. The frozen bundle should include:
+After design approval, Claude owns the Homes/provider artifacts and provider implementation; the
+website consumer owns consumer fixtures. Protocol conformance and semantic product quality are two
+separate evidence tiers.
+
+### 22.1 Tier A — deterministic protocol bundle
+
+This byte-reproducible bundle includes:
 
 - JSON Schemas for request, success response, source, action, and error envelopes;
 - positive and negative vectors for every schema rule;
@@ -704,12 +746,25 @@ the website consumer owns consumer fixtures. The frozen bundle should include:
 - request-canonicalization, idempotency, crash/recovery, and retry-state vectors;
 - cross-field invariants for session, turns, outcomes, sources, actions, and retry semantics;
 - paired provider/consumer fixtures;
-- privacy-safe log and error fixtures;
-- semantic acceptance conversations and adversarial grounding cases; and
+- privacy-safe log and error fixtures; and
 - a raw-byte canonical content digest reproducible without executing either implementation's code.
 
 Strict provider schemas and tolerant additive response parsing must be tested separately so the
 conformance validator is not mistakenly used as the runtime consumer parser.
+
+### 22.2 Tier B — semantic and grounding evaluation suite
+
+Acceptance criteria 13–32 require actual answer generation and cannot be certified by JSON Schema or
+a deterministic validator. Their test definitions, approved knowledge fixtures, adversarial cases,
+scoring rubrics, and evaluator configuration are versioned and digest-pinned, but a pass requires
+recorded execution against the exact provider, model route, Homes behavior release, knowledge release,
+and evaluation configuration.
+
+The suite records repeated-trial factual correctness, support, correction quality, comparison quality,
+clarification behavior, latency, cost, and failure handling. It distinguishes deterministic assertions
+from human or model-graded judgments and preserves privacy-safe run metadata. A digest match proves
+which evaluation was run; it does not prove that a model passed it. Production acceptance requires
+the recorded run results and thresholds as separate evidence.
 
 ## 23. Review questions before freeze
 
@@ -722,11 +777,29 @@ change only these concrete points:
    acceptable?
 3. Is the proposed 15-second attempt / 22-second total interaction deadline acceptable for the current
    measured model latency, including one bounded retry?
-4. Is the ten-minute volatile replay plus durable content-free status tradeoff acceptable, including
-   explicit recovery-unavailable behavior after response loss or process restart?
+4. Is the initial single-coordinator replay profile and ten-minute volatile replay plus durable
+   content-free status tradeoff acceptable, including explicit recovery-unavailable behavior after a
+   coordinator restart?
 5. Which initial local-guide records are approved for the coffee/destination acceptance scenarios?
 
-## 24. Explicit non-authorization
+## 24. Claude review disposition
+
+Claude's review of draft 0.1 was accepted as follows:
+
+| Finding | Draft 0.2 disposition |
+| --- | --- |
+| Protocol conformance and semantic model quality cannot share one deterministic certification claim | Split into deterministic Tier A and execution-dependent Tier B in §22 |
+| Volatile response replay is ambiguous across replicas | Initial v1.0 profile now requires one active answer coordinator; horizontal replay requires a separately reviewed affinity or memory-only shared-cache profile |
+| JWT replay state needs crash-tolerant coordination | Bound to the same Homes-owned content-free coordination facility as idempotency status, with separate namespace and retention |
+| Character bounds could exceed the prior 32 KiB transport bound | Request bound raised to 64 KiB and independent decoded-character and encoded-byte enforcement made explicit |
+| Preview conformance level was ambiguous | Split into explicitly preconformant compatibility preview and fully normative conformance preview |
+| `iat`/`nbf`, JCS dependency, non-retryable 503, shrinking retry budget, and future caller identity needed precision | All stated explicitly in §§7, 11, and 17 |
+
+Claude's five §23 answers otherwise concurred with the selected first capability and caller identity.
+The latency thresholds remain evidence-dependent, the replay profile remains a conscious privacy/
+availability tradeoff for final review, and local-guide approval remains a Homes content decision.
+
+## 25. Explicit non-authorization
 
 This design does not authorize code, schemas, migrations, services, keys, deployment, production
 traffic, provider spending, database movement, DNS changes, transcript capture, or retirement of the
