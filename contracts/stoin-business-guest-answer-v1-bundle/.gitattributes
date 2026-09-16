@@ -1,0 +1,9 @@
+# The bundle digest is taken over raw file bytes, so line endings are part of the
+# contract artifact. Without this, a Windows checkout converts LF to CRLF and both
+# repositories compute a different digest from the same logical bundle.
+* -text
+*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+.gitattributes text eol=lf

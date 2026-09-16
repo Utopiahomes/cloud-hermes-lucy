@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:business:guest-answer:v1:error.response",
+  "title": "POST /business/v1/guest/answer — non-success response",
+  "$comment": "RC2 §17. Unlike RC3's Management Contract, RC2 pins an EXACT message string per code ('message is the exact generic string paired with code in the table; implementations do not append punctuation, diagnostics, identifiers, or rejected values') and ties retryable to code exactly. Both are encoded below as per-code const pairs, sourced verbatim from the §17 table.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "error"],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/contractVersion" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "correlation_id", "retryable"],
+      "properties": {
+        "code": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/errorCode" },
+        "message": { "type": "string", "minLength": 1 },
+        "correlation_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+        "retryable": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "const": "invalid_request" } }, "required": ["code"] },
+          "then": {
+            "properties": { "message": { "const": "The request is invalid." }, "retryable": { "const": false } }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "unsupported_version" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "This request version is not supported." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "authentication_failed" } }, "required": ["code"] },
+          "then": {
+            "properties": { "message": { "const": "Authentication failed." }, "retryable": { "const": false } }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "capability_forbidden" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "This capability is not permitted." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "idempotency_conflict" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "This request conflicts with an earlier request." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "request_in_progress" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "This request is still in progress." },
+              "retryable": { "const": true }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "code": { "const": "idempotency_recovery_unavailable" } },
+            "required": ["code"]
+          },
+          "then": {
+            "properties": {
+              "message": { "const": "The earlier response is no longer available." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "response_invalidated" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "The earlier response is no longer valid." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "request_too_large" } }, "required": ["code"] },
+          "then": {
+            "properties": { "message": { "const": "The request is too large." }, "retryable": { "const": false } }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "rate_limited" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "Too many requests. Please try again shortly." },
+              "retryable": { "const": true }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "temporarily_unavailable" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "Lucy is temporarily unavailable. Please try again shortly." },
+              "retryable": { "const": true }
+            }
+          }
+        },
+        {
+          "$comment": "answer_validation_failed is intentionally a non-retryable 503 — RC2 §17's own emphasis, load-bearing enough to also appear as acceptance criterion 33 and its own Tier A vector group.",
+          "if": { "properties": { "code": { "const": "answer_validation_failed" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "Lucy could not produce a supported answer for this request." },
+              "retryable": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "code": { "const": "deadline_exceeded" } }, "required": ["code"] },
+          "then": {
+            "properties": {
+              "message": { "const": "Lucy could not respond within the allowed time." },
+              "retryable": { "const": true }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

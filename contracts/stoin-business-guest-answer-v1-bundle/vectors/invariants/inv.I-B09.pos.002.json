@@ -1,0 +1,17 @@
+{
+  "vector_id": "inv.I-B09.pos.002",
+  "invariant": "I-B09",
+  "expect": "hold",
+  "contract_reference": "§11",
+  "description": "Same key, same canonical request, content still volatile, still eligible: replay.",
+  "documents": {
+    "state": {
+      "durable_status": "completed",
+      "volatile_content_present": true,
+      "canonical_request_matches": true,
+      "still_eligible": true
+    },
+    "expected_outcome": "replay"
+  },
+  "also_violates": []
+}

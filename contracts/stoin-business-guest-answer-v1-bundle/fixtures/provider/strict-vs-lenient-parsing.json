@@ -1,0 +1,21 @@
+{
+  "$comment": "RC2 §22.1: 'Strict provider schemas and tolerant additive response parsing must be tested separately so the conformance validator is not mistakenly used as the runtime consumer parser.' Mirrors the Management Contract bundle's identical warning. schemas/response.schema.json sets additionalProperties:false, which is correct for asserting the PROVIDER never emits undeclared members, and WRONG if wired into a consumer's live parser: RC2 §19 requires additive optional response members to be ignored within v1, so a consumer using this strict schema at runtime would reject the first compatible v1.1 addition it ever saw. tools/verify_bundle.py's check_strict_vs_lenient_fixture() actually runs both schemas against this one document rather than treating this file as illustrative-only prose, per Lyra's review of the second Tier A cut.",
+  "provider_conformance_use": "Validate every response Prime actually emits against schemas/response.schema.json (or error.response.schema.json) exactly as shipped, strict additionalProperties:false intact.",
+  "consumer_runtime_use": "Derive a lenient copy (set additionalProperties:true, or equivalently: only assert the required members exist and are individually valid) and use THAT for the consumer's live request handling. Do not edit the shipped schema files to do this — deriving changes their bytes and therefore the bundle digest.",
+  "document_with_a_hypothetical_additive_v1_1_member": {
+    "contract_version": "1.0",
+    "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+    "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+    "assistant_turn_id": "ed1f1cfa-125c-4178-ae7d-dbc527a14863",
+    "outcome": "answered",
+    "answer": "Our public collection currently includes three homes.",
+    "sources": [],
+    "actions": [],
+    "limitations": [],
+    "confidence_hint": "a hypothetical additive v1.1 optional member a v1.0 consumer has never heard of"
+  },
+  "expected": {
+    "strict_provider_schema_rejects_it": true,
+    "lenient_consumer_schema_accepts_it": true
+  }
+}

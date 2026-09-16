@@ -1,0 +1,32 @@
+{
+  "vector_id": "headers.004",
+  "kind": "header-format",
+  "contract_reference": "§17",
+  "description": "Retryable error responses include integer Retry-After seconds between 1 and 30.",
+  "rule": "retry_after",
+  "cases": [
+    {
+      "value": 1,
+      "expect": "valid"
+    },
+    {
+      "value": 30,
+      "expect": "valid"
+    },
+    {
+      "value": 0,
+      "expect": "invalid",
+      "reason": "below minimum"
+    },
+    {
+      "value": 31,
+      "expect": "invalid",
+      "reason": "above maximum"
+    },
+    {
+      "value": 15.5,
+      "expect": "invalid",
+      "reason": "not an integer"
+    }
+  ]
+}

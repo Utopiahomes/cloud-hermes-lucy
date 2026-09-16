@@ -1,0 +1,17 @@
+{
+  "vector_id": "inv.I-B09.pos.003",
+  "invariant": "I-B09",
+  "expect": "hold",
+  "contract_reference": "§11",
+  "description": "Same key, different canonical request: conflict regardless of completion state.",
+  "documents": {
+    "state": {
+      "durable_status": "completed",
+      "volatile_content_present": true,
+      "canonical_request_matches": false,
+      "still_eligible": true
+    },
+    "expected_outcome": "idempotency_conflict"
+  },
+  "also_violates": []
+}

@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.006",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§17",
+  "description": "Exact required message/retryable pairing for request_in_progress (409).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "request_in_progress",
+      "message": "This request is still in progress.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": true
+    }
+  }
+}

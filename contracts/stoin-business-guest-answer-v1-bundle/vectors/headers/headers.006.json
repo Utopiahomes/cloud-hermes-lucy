@@ -1,0 +1,28 @@
+{
+  "vector_id": "headers.006",
+  "kind": "header-format",
+  "contract_reference": "§6",
+  "description": "Every response — success or error — MUST include Cache-Control: no-store.",
+  "rule": "cache_control",
+  "cases": [
+    {
+      "value": "no-store",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "header absent"
+    },
+    {
+      "value": "no-cache",
+      "expect": "invalid",
+      "reason": "wrong directive"
+    },
+    {
+      "value": "no-store, max-age=0",
+      "expect": "invalid",
+      "reason": "RC2 requires exactly no-store, not a superset directive list"
+    }
+  ]
+}

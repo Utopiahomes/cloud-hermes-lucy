@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.002",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§17",
+  "description": "retryable does not match the required value for this code (invalid_request is never retryable).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The request is invalid.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": true
+    }
+  }
+}

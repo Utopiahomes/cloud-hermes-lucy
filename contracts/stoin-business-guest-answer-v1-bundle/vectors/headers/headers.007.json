@@ -1,0 +1,18 @@
+{
+  "vector_id": "headers.007",
+  "kind": "header-format",
+  "contract_reference": "§6",
+  "description": "Responses MUST NOT set cookies.",
+  "rule": "no_set_cookie",
+  "cases": [
+    {
+      "value": null,
+      "expect": "valid"
+    },
+    {
+      "value": "session=abc123; Path=/",
+      "expect": "invalid",
+      "reason": "Set-Cookie present"
+    }
+  ]
+}

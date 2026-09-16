@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:business:guest-answer:v1:request",
+  "title": "POST /business/v1/guest/answer — request",
+  "$comment": "RC2 §9. additionalProperties:false throughout per 'Unknown request members are rejected.' history and page_context are the only optional top-level members (RC2 §9.1 calls page_context optional explicitly; history's 'zero to 12' phrasing plus §11.2's omitted-member canonicalization rule are read here as history also being omittable when empty — see README 'Interpretations taken', item RB-1). Aggregate/cross-field rules that cannot be expressed in JSON Schema alone (10,000-char history total, turn_id uniqueness/non-collision, role alternation, subject_type/subject_id consistency) live in vectors/invariants/invariants.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "session_id", "message", "locale"],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/contractVersion" },
+    "session_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turn_id", "content"],
+      "properties": {
+        "turn_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+        "content": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/messageContent" }
+      }
+    },
+    "history": {
+      "$comment": "RC2 §9.1: zero to 12 prior messages. Alternation/role-start-end/turn_id-uniqueness/10000-char-total are cross-field invariants (I-B02..I-B04), not expressible here.",
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["turn_id", "role", "content"],
+        "properties": {
+          "turn_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+          "role": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/historyRole" },
+          "content": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/historyEntryContent" }
+        }
+      }
+    },
+    "page_context": {
+      "$comment": "RC2 §9.1: optional. When present, all three members are present; subject_id is nullable but never omitted (RC2 §11.2 names it the one explicitly-allowed-null member).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "subject_type", "subject_id"],
+      "properties": {
+        "path": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/normalizedPath" },
+        "subject_type": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/subjectType" },
+        "subject_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/subjectId" }
+      },
+      "allOf": [
+        {
+          "$comment": "RC2 §9.1: subject_type=none requires subject_id=null.",
+          "if": { "properties": { "subject_type": { "const": "none" } }, "required": ["subject_type"] },
+          "then": { "properties": { "subject_id": { "const": null } } }
+        },
+        {
+          "$comment": "RC2 §9.1: every subject_type other than none requires a non-null subject_id.",
+          "if": {
+            "properties": { "subject_type": { "not": { "const": "none" } } },
+            "required": ["subject_type"]
+          },
+          "then": { "properties": { "subject_id": { "type": "string" } } }
+        }
+      ]
+    },
+    "locale": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/locale" }
+  }
+}

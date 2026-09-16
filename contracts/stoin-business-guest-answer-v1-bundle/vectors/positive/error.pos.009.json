@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.009",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§17",
+  "description": "Exact required message/retryable pairing for request_too_large (413).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "request_too_large",
+      "message": "The request is too large.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "vector_id": "response.pos.009",
+  "schema": "response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§12.2",
+  "description": "sources at the maximum of 8 entries, all unique.",
+  "document": {
+    "contract_version": "1.0",
+    "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+    "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+    "assistant_turn_id": "ed1f1cfa-125c-4178-ae7d-dbc527a14863",
+    "outcome": "answered",
+    "answer": "Our public collection currently includes three homes. Buttercup Beauty is a verified match.",
+    "sources": [
+      {
+        "source_id": "public-property:home-00",
+        "title": "Home 0",
+        "url": "https://www.utopiahomes.com/stays/home-00"
+      },
+      {
+        "source_id": "public-property:home-01",
+        "title": "Home 1",
+        "url": "https://www.utopiahomes.com/stays/home-01"
+      },
+      {
+        "source_id": "public-property:home-02",
+        "title": "Home 2",
+        "url": "https://www.utopiahomes.com/stays/home-02"
+      },
+      {
+        "source_id": "public-property:home-03",
+        "title": "Home 3",
+        "url": "https://www.utopiahomes.com/stays/home-03"
+      },
+      {
+        "source_id": "public-property:home-04",
+        "title": "Home 4",
+        "url": "https://www.utopiahomes.com/stays/home-04"
+      },
+      {
+        "source_id": "public-property:home-05",
+        "title": "Home 5",
+        "url": "https://www.utopiahomes.com/stays/home-05"
+      },
+      {
+        "source_id": "public-property:home-06",
+        "title": "Home 6",
+        "url": "https://www.utopiahomes.com/stays/home-06"
+      },
+      {
+        "source_id": "public-property:home-07",
+        "title": "Home 7",
+        "url": "https://www.utopiahomes.com/stays/home-07"
+      }
+    ],
+    "actions": [
+      {
+        "action_id": "view-property:buttercup-beauty",
+        "kind": "open_internal_link",
+        "label": "Explore Buttercup Beauty",
+        "url": "https://www.utopiahomes.com/stays/buttercup-beauty"
+      }
+    ],
+    "limitations": []
+  }
+}

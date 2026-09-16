@@ -1,0 +1,23 @@
+{
+  "vector_id": "headers.002",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "Idempotency-Key must be a canonical lowercase UUID v4, identical treatment to X-Request-ID.",
+  "rule": "uuid_v4",
+  "cases": [
+    {
+      "value": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "missing"
+    },
+    {
+      "value": "not-a-uuid",
+      "expect": "invalid",
+      "reason": "malformed"
+    }
+  ]
+}

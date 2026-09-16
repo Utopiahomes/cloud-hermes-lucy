@@ -1,0 +1,15 @@
+{
+  "vector_id": "error.neg.005",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§17",
+  "description": "correlation_id omitted.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The request is invalid.",
+      "retryable": false
+    }
+  }
+}

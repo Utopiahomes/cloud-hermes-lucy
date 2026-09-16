@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.008",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§17",
+  "description": "message is empty (and also does not match the required exact string).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": false
+    }
+  }
+}

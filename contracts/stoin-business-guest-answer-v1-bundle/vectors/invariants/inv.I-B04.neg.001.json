@@ -1,0 +1,60 @@
+{
+  "vector_id": "inv.I-B04.neg.001",
+  "invariant": "I-B04",
+  "expect": "violation",
+  "contract_reference": "§12.2",
+  "description": "response.session_id does not match request.session_id.",
+  "documents": {
+    "request": {
+      "contract_version": "1.0",
+      "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+      "message": {
+        "turn_id": "056d5f10-ed13-44fa-b8bc-1af90d43dceb",
+        "content": "Which home is best for 20 people, four cars, and a pool?"
+      },
+      "history": [
+        {
+          "turn_id": "f938d01b-0125-48ed-962b-9c739e43a24f",
+          "role": "user",
+          "content": "Tell me about the homes with pools."
+        },
+        {
+          "turn_id": "12682577-2c4b-4889-8391-47dca4b38ad4",
+          "role": "assistant",
+          "content": "Buttercup Beauty and Central Ave Socialization have verified pool information."
+        }
+      ],
+      "page_context": {
+        "path": "/stays/buttercup-beauty",
+        "subject_type": "property",
+        "subject_id": "buttercup-beauty"
+      },
+      "locale": "en-US"
+    },
+    "response": {
+      "contract_version": "1.0",
+      "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+      "session_id": "9f86d081-884c-4d65-9861-5c4111111111",
+      "assistant_turn_id": "ed1f1cfa-125c-4178-ae7d-dbc527a14863",
+      "outcome": "answered",
+      "answer": "Our public collection currently includes three homes. Buttercup Beauty is a verified match.",
+      "sources": [
+        {
+          "source_id": "public-property:buttercup-beauty",
+          "title": "Buttercup Beauty",
+          "url": "https://www.utopiahomes.com/stays/buttercup-beauty"
+        }
+      ],
+      "actions": [
+        {
+          "action_id": "view-property:buttercup-beauty",
+          "kind": "open_internal_link",
+          "label": "Explore Buttercup Beauty",
+          "url": "https://www.utopiahomes.com/stays/buttercup-beauty"
+        }
+      ],
+      "limitations": []
+    }
+  },
+  "also_violates": []
+}

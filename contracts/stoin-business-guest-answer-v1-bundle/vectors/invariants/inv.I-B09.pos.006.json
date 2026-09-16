@@ -1,0 +1,17 @@
+{
+  "vector_id": "inv.I-B09.pos.006",
+  "invariant": "I-B09",
+  "expect": "hold",
+  "contract_reference": "§11",
+  "description": "Durable status is unresolved and volatile content is unavailable.",
+  "documents": {
+    "state": {
+      "durable_status": "unresolved",
+      "volatile_content_present": false,
+      "canonical_request_matches": true,
+      "still_eligible": true
+    },
+    "expected_outcome": "idempotency_recovery_unavailable"
+  },
+  "also_violates": []
+}

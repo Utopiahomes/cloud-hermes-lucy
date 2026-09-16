@@ -1,0 +1,20 @@
+{
+  "$comment": "Invariant I-B11 (see vectors/invariants/invariants.json) — not machine-checkable from a single document, since it's a process assertion over two HTTP exchanges. This fixture is the consumer-side/reverse-proxy conformance test that RC2 §22.1 names explicitly. It documents the test; it cannot itself prove any specific consumer implementation passes it.",
+  "contract_reference": ["§17", "§22.1", "acceptance criterion 33"],
+  "scenario": "A consumer (or a reverse proxy / HTTP middleware in front of it) sends one guest.answer request. The provider returns 503 answer_validation_failed.",
+  "given": {
+    "request_headers": { "Idempotency-Key": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab" },
+    "response_status": 503,
+    "response_body": {
+      "contract_version": "1.0",
+      "error": {
+        "code": "answer_validation_failed",
+        "message": "Lucy could not produce a supported answer for this request.",
+        "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+        "retryable": false
+      }
+    }
+  },
+  "assertion": "Within the remainder of the 22-second interaction deadline, no second request is observed on the wire carrying the same Idempotency-Key (5a6a3c4e-1b2c-4d5e-89ab-1234567890ab). This must hold for the consumer's own retry logic, for any reverse proxy sitting in front of it, and for any generic HTTP client/middleware library the consumer is built on — none of which may fall back to 'retry on 5xx' default behavior for this specific code.",
+  "how_a_provider_conformance_run_uses_this": "The provider side cannot observe consumer retry behavior directly. This fixture exists so a paired protocol/end-to-end test harness (outside the provider's own process) can assert it — e.g. a test double standing in for Prime that counts requests per Idempotency-Key and fails the run if it ever sees two for this specific error code."
+}

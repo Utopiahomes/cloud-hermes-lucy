@@ -1,0 +1,41 @@
+{
+  "$comment": "RC2 §16: the allowed durable telemetry field list and the explicit forbidden-content list, made concrete as fixtures rather than left as prose. Acceptance criterion 7 requires no request or answer content appear in infrastructure logs, traces, error reports, analytics, or provider-retained data.",
+  "allowed_example": {
+    "request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+    "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+    "idempotency_key_digest": "sha256:af09...(one-way, not the raw key)",
+    "release_id": "homes-business:release:2026-09-16.1",
+    "session_id_keyed_digest": "sha256:9c14...(one-way, environment key, max 24h TTL)",
+    "observed_at": "2026-09-16T12:00:00Z",
+    "latency_stage_ms": { "auth": 8, "knowledge_retrieval": 140, "model_generation": 2100, "validation": 410 },
+    "outcome": "partial",
+    "error_category": null,
+    "input_size_bucket": "medium",
+    "output_size_bucket": "small",
+    "model_route_id": "route-a",
+    "token_total": 812,
+    "cost_total_cents": 3,
+    "source_count": 1,
+    "action_count": 1,
+    "grounding_pass": true
+  },
+  "forbidden_content_that_must_never_appear_in_a_log_line": [
+    "message.content or any history entry's content (the guest's actual question/conversation)",
+    "the answer text itself",
+    "source titles or any source/action label text",
+    "the raw (undigested) session_id",
+    "a guest's name, email, or any other PII",
+    "an IP-derived profile",
+    "page_context.path's query string (page_context itself never has one per §9.1, but a website-side access log for the underlying page view might — that's explicitly called out as needing separate redaction)",
+    "any URL beyond what the response itself already approved for display",
+    "a model prompt or system prompt fragment",
+    "a JWT, its claims, or any part of the Authorization header",
+    "an internal exception message, stack trace, or hostname"
+  ],
+  "session_id_digest_rule": {
+    "clause": "RC2 §16",
+    "max_ttl_hours": 24,
+    "key_scope": "environment-specific, unavailable to browser code",
+    "join_prohibition": "must not be joined to a guest identity, authenticated session, advertising identifier, or marketing profile"
+  }
+}

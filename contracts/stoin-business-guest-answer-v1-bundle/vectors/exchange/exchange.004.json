@@ -1,0 +1,12 @@
+{
+  "vector_id": "exchange.004",
+  "kind": "exchange",
+  "expect": "violation",
+  "contract_reference": "§17",
+  "description": "WRONG: correlation_id happens to equal X-Request-ID — the exact bug this check exists to catch (e.g. a naive implementation that copies the request ID instead of minting a fresh correlation ID).",
+  "exchange": {
+    "check": "correlation_id_distinct",
+    "x_request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+    "correlation_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab"
+  }
+}

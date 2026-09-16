@@ -1,0 +1,12 @@
+{
+  "vector_id": "exchange.002",
+  "kind": "exchange",
+  "expect": "violation",
+  "contract_reference": "§8",
+  "description": "WRONG: the outbound X-Request-ID differs from the inbound one (e.g. a provider that normalizes case, or substitutes its own value).",
+  "exchange": {
+    "check": "request_id_echo",
+    "inbound_x_request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+    "outbound_x_request_id": "5A6A3C4E-1B2C-4D5E-89AB-1234567890AB"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "vector_id": "exchange.001",
+  "kind": "exchange",
+  "expect": "hold",
+  "contract_reference": "§8",
+  "description": "The provider returns X-Request-ID unchanged from what the consumer sent.",
+  "exchange": {
+    "check": "request_id_echo",
+    "inbound_x_request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+    "outbound_x_request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab"
+  }
+}

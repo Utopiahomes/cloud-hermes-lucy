@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:business:guest-answer:v1:response",
+  "title": "POST /business/v1/guest/answer — success response",
+  "$comment": "RC2 §12. additionalProperties:false for PROVIDER conformance only; §22.1 requires strict provider schemas and tolerant additive parsing to be tested separately, so consumers must NOT wire this strict schema into their runtime parser (matches the Management Contract bundle's strict/lenient split). sources/actions/limitations are treated as always-present (possibly-empty) arrays, matching the worked example's explicit `\"limitations\": []` rather than an omittable member like request.history — see README 'Interpretations taken', item RB-2. 'No markdown/HTML' (§12.2) and the full factual-validation pipeline (§13) are content-level requirements no JSON Schema can verify; they are out of Tier A's scope by construction, same as RC3's treatment of message content it couldn't verify.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "response_id",
+    "session_id",
+    "assistant_turn_id",
+    "outcome",
+    "answer",
+    "sources",
+    "actions",
+    "limitations"
+  ],
+  "properties": {
+    "contract_version": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/contractVersion" },
+    "response_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+    "session_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+    "assistant_turn_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/uuidV4" },
+    "outcome": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/outcome" },
+    "answer": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/answerText" },
+    "sources": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "title", "url"],
+        "properties": {
+          "source_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/namespacedId" },
+          "title": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/sourceTitle" },
+          "url": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/httpsUrl" }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action_id", "kind", "label", "url"],
+        "properties": {
+          "action_id": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/namespacedId" },
+          "kind": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/actionKind" },
+          "label": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/actionLabel" },
+          "url": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/httpsUrl" }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 4,
+      "items": { "$ref": "urn:stoin:business:guest-answer:v1:common.defs#/$defs/limitationText" }
+    }
+  }
+}

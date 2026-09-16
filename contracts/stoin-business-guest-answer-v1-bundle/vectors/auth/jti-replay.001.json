@@ -1,0 +1,39 @@
+{
+  "vector_id": "jti-replay.001",
+  "kind": "jti-replay",
+  "contract_reference": "§7.2",
+  "description": "Two otherwise-independently-valid tokens sharing one jti: the first is accepted and recorded; the second, still within the recorded jti's acceptance window, is rejected as a replay.",
+  "sequence": [
+    {
+      "claims": {
+        "iss": "stoin:application:utopia-homes-web",
+        "sub": "stoin:service:utopia-homes-web-guest-adapter",
+        "aud": "stoin:business:utopia-homes-prime",
+        "scope": "guest.answer",
+        "iat": 1000000,
+        "nbf": 1000000,
+        "exp": 1000300,
+        "jti": "c1a2b3d4-e5f6-4789-9abc-def012345678"
+      },
+      "kid": "known-key-1",
+      "evaluated_at": 1000000,
+      "expect": "accept"
+    },
+    {
+      "claims": {
+        "iss": "stoin:application:utopia-homes-web",
+        "sub": "stoin:service:utopia-homes-web-guest-adapter",
+        "aud": "stoin:business:utopia-homes-prime",
+        "scope": "guest.answer",
+        "iat": 1000001,
+        "nbf": 1000001,
+        "exp": 1000301,
+        "jti": "c1a2b3d4-e5f6-4789-9abc-def012345678"
+      },
+      "kid": "known-key-1",
+      "evaluated_at": 1000001,
+      "expect": "reject",
+      "reason": "jti-replay"
+    }
+  ]
+}

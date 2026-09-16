@@ -1,0 +1,23 @@
+{
+  "vector_id": "headers.005",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "Query parameters are prohibited in v1.0; a request with any query string must be rejected as invalid_request before body parsing.",
+  "rule": "no_query_params",
+  "cases": [
+    {
+      "value": "",
+      "expect": "valid"
+    },
+    {
+      "value": "foo=bar",
+      "expect": "invalid",
+      "reason": "query parameters are prohibited"
+    },
+    {
+      "value": "contract_version=1.0",
+      "expect": "invalid",
+      "reason": "query parameters are prohibited, even ones naming a real body field"
+    }
+  ]
+}

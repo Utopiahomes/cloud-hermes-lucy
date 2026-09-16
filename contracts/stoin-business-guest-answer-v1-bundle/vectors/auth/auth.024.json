@@ -1,0 +1,50 @@
+{
+  "vector_id": "auth.024",
+  "kind": "auth-claims",
+  "expect": "reject",
+  "expect_error_code": "authentication_failed",
+  "contract_reference": "§7.1",
+  "description": "A fully valid, known, guest.answer-granted key — but bound to the preview environment — presented while serving production traffic.",
+  "header": {
+    "alg": "EdDSA",
+    "kid": "preview-key-1"
+  },
+  "claims": {
+    "iss": "stoin:application:utopia-homes-web",
+    "sub": "stoin:service:utopia-homes-web-guest-adapter",
+    "aud": "stoin:business:utopia-homes-prime",
+    "scope": "guest.answer",
+    "iat": 1000000,
+    "nbf": 1000000,
+    "exp": 1000300,
+    "jti": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab"
+  },
+  "known_kids": [
+    "known-key-1",
+    "restricted-key-1",
+    "preview-key-1"
+  ],
+  "key_metadata": {
+    "known-key-1": {
+      "environment": "production",
+      "capabilities": [
+        "guest.answer"
+      ]
+    },
+    "restricted-key-1": {
+      "environment": "production",
+      "capabilities": [
+        "some.other.capability"
+      ]
+    },
+    "preview-key-1": {
+      "environment": "preview",
+      "capabilities": [
+        "guest.answer"
+      ]
+    }
+  },
+  "serving_environment": "production",
+  "evaluated_at": 1000000,
+  "violated_rule": "key-environment-binding"
+}

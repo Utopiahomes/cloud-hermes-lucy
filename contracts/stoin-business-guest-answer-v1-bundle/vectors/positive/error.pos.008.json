@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.008",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§17",
+  "description": "Exact required message/retryable pairing for response_invalidated (409).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "response_invalidated",
+      "message": "The earlier response is no longer valid.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": false
+    }
+  }
+}

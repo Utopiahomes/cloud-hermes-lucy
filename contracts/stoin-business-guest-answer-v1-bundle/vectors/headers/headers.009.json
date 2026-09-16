@@ -1,0 +1,28 @@
+{
+  "vector_id": "headers.009",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "Every request MUST include Content-Type: application/json.",
+  "rule": "content_type_header",
+  "cases": [
+    {
+      "value": "application/json",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "header absent"
+    },
+    {
+      "value": "application/x-www-form-urlencoded",
+      "expect": "invalid",
+      "reason": "wrong media type"
+    },
+    {
+      "value": "text/plain",
+      "expect": "invalid",
+      "reason": "wrong media type"
+    }
+  ]
+}

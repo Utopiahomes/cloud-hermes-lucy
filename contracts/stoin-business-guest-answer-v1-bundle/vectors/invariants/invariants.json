@@ -1,0 +1,83 @@
+{
+  "$comment": "Cross-field / cross-document invariants for guest.answer@1.0 RC2 that no single JSON Schema can express alone. Each invariant names the RC2 clause it enforces. machine_checkable=false invariants are documented per RC3's own precedent for evidentiary requirements: recorded so they are not assumed covered just because the mechanical checks passed.",
+  "invariants": [
+    {
+      "id": "I-B01",
+      "title": "History aggregate character bound",
+      "clause": "RC2 §9.1: 'history contains zero to 12 prior messages and at most 10,000 characters total.'",
+      "rule": "sum(len(entry.content) for entry in request.history) <= 10000",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B02",
+      "title": "History role shape",
+      "clause": "RC2 §9.1: 'History must alternate roles, begin with user, and end with assistant when non-empty.'",
+      "rule": "if history is non-empty: history[0].role == 'user', history[-1].role == 'assistant', and consecutive entries never repeat the same role.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B03",
+      "title": "turn_id uniqueness and non-collision",
+      "clause": "RC2 §9.1: 'The current message.turn_id cannot appear in history. All included turn IDs are unique.'",
+      "rule": "message.turn_id is not in {e.turn_id for e in history}, and all turn_id values across message+history are pairwise distinct.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B04",
+      "title": "Response session_id matches request",
+      "clause": "RC2 §12.2: 'session_id exactly matches the request.'",
+      "rule": "response.session_id == request.session_id",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B05",
+      "title": "Source ID and URL uniqueness, independently",
+      "clause": "RC2 §12.2: 'Within sources, source_id values are unique and source URL values are independently unique.'",
+      "rule": "no two entries in response.sources share a source_id; separately, no two entries in response.sources share a url.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B06",
+      "title": "Action ID and URL uniqueness, independently",
+      "clause": "RC2 §12.2: 'Within actions, action_id values are unique and action URL values are independently unique.'",
+      "rule": "no two entries in response.actions share an action_id; separately, no two entries in response.actions share a url.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B07",
+      "title": "No cross-array URL uniqueness",
+      "clause": "RC2 §12.2: 'No cross-array uniqueness rule applies: a source and an action may legitimately use the same URL because they have different presentation semantics.'",
+      "rule": "a url appearing in both response.sources and response.actions is NOT a violation. This invariant's vector demonstrates the positive case explicitly, since it would be easy to over-implement I-B05/I-B06 as a single shared-uniqueness pool by mistake.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B08",
+      "title": "URL hostname approval matches action kind",
+      "clause": "RC2 §12.2: 'An open_internal_link or contact_utopia URL must use an approved Utopia-owned hostname and match an approved destination. An open_external_booking_link URL must use an approved configured external-booking hostname and match the property's configured destination. These hostname, destination, and action-kind relationships are cross-field business invariants, not merely URL schema patterns.'",
+      "rule": "Given a per-deployment approved-hostname configuration (declared per vector as `assumed_approved_hostnames`, since real hostnames are a Homes content/deployment decision per RC2 §23 item 5, not a protocol constant): for kind in {open_internal_link, contact_utopia}, the action's url host must be in assumed_approved_hostnames.internal; for kind == open_external_booking_link, it must be in assumed_approved_hostnames.external_booking. Exact per-property destination matching is content-level and out of Tier A's scope (same boundary RC3 drew around evidentiary requirements).",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B09",
+      "title": "Idempotency status selection",
+      "clause": "RC2 §11: the five response paths for a repeated Idempotency-Key.",
+      "rule": "Given (durable_status, volatile_content_present, canonical_request_matches, still_eligible) as a declared vector state: same-key+same-canonical+within-window+volatile-present+eligible -> replay stored result; same-key+different-canonical -> 409 idempotency_conflict; same-key+durable_status=in_progress -> 409 request_in_progress (+Retry-After); durable_status in {completed, unresolved}+volatile-content-absent -> 409 idempotency_recovery_unavailable; stored result no longer eligible under current public restrictions -> 409 response_invalidated.",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B10",
+      "title": "Canonical request identity determinism",
+      "clause": "RC2 §11.2: reordered members and insignificant whitespace remain the same request; Unicode normalization, omitted-vs-null, array ordering, or content changes remain distinct.",
+      "rule": "canonicalize(A) == canonicalize(B) iff A and B are identical after RFC 8785 JCS serialization of the validated body (excluding transport headers/tokens per §11.2).",
+      "machine_checkable": true
+    },
+    {
+      "id": "I-B11",
+      "title": "answer_validation_failed is never auto-retried",
+      "clause": "RC2 §17 and acceptance criterion 33: 'The website, reverse proxy, and generic HTTP middleware do not automatically retry non-retryable answer_validation_failed, even though its HTTP status is 503.'",
+      "rule": "A conformant consumer/proxy/middleware issues no second attempt with the same Idempotency-Key after receiving answer_validation_failed. The wire-level half (retryable=false, exact message) is schema-checkable (error.response.schema.json); the consumer-behavior half is a process assertion over two requests, not a single-document schema fact.",
+      "machine_checkable": false,
+      "note": "Recorded per RC3's own precedent for requirements a wire-level artifact cannot fully prove — the schema constant proves the provider labeled it correctly; it cannot prove a specific consumer implementation honors that label. fixtures/consumer/ documents the expected consumer-side test."
+    }
+  ]
+}

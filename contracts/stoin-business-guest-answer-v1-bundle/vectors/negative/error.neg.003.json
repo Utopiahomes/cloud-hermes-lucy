@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.003",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§17",
+  "description": "answer_validation_failed is 503 but must never be retryable=true (criterion 33).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "answer_validation_failed",
+      "message": "Lucy could not produce a supported answer for this request.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": true
+    }
+  }
+}

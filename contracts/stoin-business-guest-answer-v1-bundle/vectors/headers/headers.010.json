@@ -1,0 +1,33 @@
+{
+  "vector_id": "headers.010",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "Authorization must be exactly 'Bearer <token>' framing — no other scheme, no missing token.",
+  "rule": "authorization_framing",
+  "cases": [
+    {
+      "value": "Bearer eyJhbGciOiJFZERTQSJ9.abc.def",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "header absent"
+    },
+    {
+      "value": "Basic dXNlcjpwYXNz",
+      "expect": "invalid",
+      "reason": "wrong auth scheme"
+    },
+    {
+      "value": "Bearer",
+      "expect": "invalid",
+      "reason": "scheme with no token"
+    },
+    {
+      "value": "bearer eyJ...",
+      "expect": "invalid",
+      "reason": "scheme must be exactly 'Bearer' (case-sensitive per RFC 7235's usual convention and RC2's own literal header example)"
+    }
+  ]
+}

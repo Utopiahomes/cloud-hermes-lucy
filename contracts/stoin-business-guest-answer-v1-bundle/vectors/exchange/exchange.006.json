@@ -1,0 +1,13 @@
+{
+  "vector_id": "exchange.006",
+  "kind": "exchange",
+  "expect": "violation",
+  "contract_reference": "§12.2",
+  "description": "WRONG: X-Utopia-Business-Release is absent from an otherwise-successful response.",
+  "exchange": {
+    "check": "release_headers_present",
+    "headers": {
+      "X-Utopia-Knowledge-Release": "homes-knowledge:projection:2026-09-16.1"
+    }
+  }
+}

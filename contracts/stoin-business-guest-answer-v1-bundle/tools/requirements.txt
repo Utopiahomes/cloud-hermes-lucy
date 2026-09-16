@@ -1,0 +1,11 @@
+# Pinned dependencies for tools/verify_bundle.py, tools/compute_digest.py, and
+# tools/generate_vectors.py. Install with: pip install -r tools/requirements.txt
+#
+# Exact versions this bundle was built and verified against, on 2026-09-16. Lyra's independent
+# review reproduced the identical 217/217 result against jsonschema 4.25.1 (one minor version
+# behind this pin) before this file existed, which is reassuring evidence that a draft-2020-12
+# schema this small isn't sensitive to jsonschema's minor version — but pin exact versions
+# anyway so nobody else has to guess, the way she had to.
+jsonschema==4.26.0
+referencing==0.37.0
+rfc8785==0.1.4

@@ -1,0 +1,37 @@
+{
+  "vector_id": "headers.003",
+  "kind": "header-format",
+  "contract_reference": "§12.2",
+  "description": "X-Utopia-Business-Release and X-Utopia-Knowledge-Release must be 1-128 visible ASCII characters, no whitespace.",
+  "rule": "release_id",
+  "cases": [
+    {
+      "value": "homes-business:release:2026-09-16.1",
+      "expect": "valid"
+    },
+    {
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect": "valid"
+    },
+    {
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect": "invalid",
+      "reason": "exceeds 128 characters"
+    },
+    {
+      "value": "",
+      "expect": "invalid",
+      "reason": "below 1 character"
+    },
+    {
+      "value": "has a space",
+      "expect": "invalid",
+      "reason": "contains whitespace"
+    },
+    {
+      "value": "has\ttab",
+      "expect": "invalid",
+      "reason": "contains a non-visible control character"
+    }
+  ]
+}

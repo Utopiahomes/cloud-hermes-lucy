@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.pos.013",
+  "schema": "error.response.schema.json",
+  "expect": "valid",
+  "contract_reference": "§17",
+  "description": "Exact required message/retryable pairing for deadline_exceeded (504).",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "deadline_exceeded",
+      "message": "Lucy could not respond within the allowed time.",
+      "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc",
+      "retryable": true
+    }
+  }
+}

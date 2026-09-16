@@ -1,0 +1,12 @@
+{
+  "vector_id": "exchange.003",
+  "kind": "exchange",
+  "expect": "hold",
+  "contract_reference": "§17",
+  "description": "An error response's body correlation_id is a freshly-generated value, distinct from the caller's X-Request-ID — never a copy of it.",
+  "exchange": {
+    "check": "correlation_id_distinct",
+    "x_request_id": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+    "correlation_id": "b139a2b0-61f2-4523-99ad-aa4c67db2cdc"
+  }
+}

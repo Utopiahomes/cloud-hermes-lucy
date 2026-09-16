@@ -1,0 +1,17 @@
+{
+  "vector_id": "inv.I-B09.pos.001",
+  "invariant": "I-B09",
+  "expect": "hold",
+  "contract_reference": "§11",
+  "description": "No prior admission under this key: a fresh execution is admitted.",
+  "documents": {
+    "state": {
+      "durable_status": "none",
+      "volatile_content_present": false,
+      "canonical_request_matches": true,
+      "still_eligible": true
+    },
+    "expected_outcome": "new_execution"
+  },
+  "also_violates": []
+}

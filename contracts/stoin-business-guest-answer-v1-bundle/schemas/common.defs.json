@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stoin:business:guest-answer:v1:common.defs",
+  "title": "Shared definitions — Utopia Homes Business Contract guest.answer@1.0 RC2",
+  "$comment": "Encodes RC2 verbatim and nothing stricter. Every pattern here traces to an explicit RC2 clause; where RC2 left a field to a cross-field business invariant rather than wire syntax (e.g. URL hostname approval), this file does not attempt to encode that invariant as a schema pattern.",
+  "$defs": {
+    "contractVersion": {
+      "$comment": "RC2 §9.1: contract_version is exactly 1.0.",
+      "const": "1.0"
+    },
+    "uuidV4": {
+      "$comment": "RC2 §3: canonical lowercase RFC 4122 text form. Unlike the Management Contract, uppercase is NOT accepted here — RC2 states the canonical form explicitly.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "subjectId": {
+      "$comment": "RC2 §9.1: null or a 1-64 character lowercase kebab-case identifier. No leading/trailing/consecutive hyphen (enforced by the +(?:-...)* shape, which cannot produce -- or a leading/trailing -).",
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "subjectType": {
+      "$comment": "RC2 §9.1.",
+      "enum": ["property", "destination", "service", "design", "none"]
+    },
+    "normalizedPath": {
+      "$comment": "RC2 §9.1: at most 512 chars; no scheme, host, credentials, query string, fragment, encoded external URL, or percent-encoded delimiter that would introduce a query string or fragment. Encoded as: starts with a single '/' (not '//', which would be protocol-relative), contains none of ? # : @ literally, and contains no %3f/%3F (encoded ?) or %23 (encoded #) anywhere.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^/(?!/)(?!.*%3[Ff])(?!.*%23)[^?#:@]*$"
+    },
+    "locale": {
+      "$comment": "RC2 §9.1: exactly en-US in v1.0. Additional locales require explicit capability negotiation, not a wider pattern here.",
+      "const": "en-US"
+    },
+    "messageContent": {
+      "$comment": "RC2 §9.1: message.content, after trimming, is 1-2000 Unicode scalar values.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "historyEntryContent": {
+      "$comment": "RC2 §9.1: no explicit per-entry bound is stated beyond the 10,000-character total across history (enforced as a cross-field invariant, not here) and message.content's 1-2000 bound for the current message. A history entry's content is therefore only bounded to be a non-empty string here; the 10,000-character aggregate is I-B01.",
+      "type": "string",
+      "minLength": 1
+    },
+    "historyRole": {
+      "$comment": "RC2 §9.1: only user and assistant. system/developer/tool/unknown are rejected.",
+      "enum": ["user", "assistant"]
+    },
+    "namespacedId": {
+      "$comment": "RC2 §12.2: source_id and action_id. Exactly one colon; namespace 1-32 chars, local identifier 1-95 chars, complete identifier 3-128 chars; both components lowercase kebab-case with no leading/trailing/consecutive hyphen; no additional colons. The two lookaheads enforce the 32/95 sub-bounds directly (the overall 3-128 bound follows automatically: 1+1+1 <= total <= 32+1+95); minLength/maxLength below are a redundant belt-and-suspenders check of that overall bound.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^(?=[a-z0-9-]{1,32}:)[a-z][a-z0-9]*(?:-[a-z0-9]+)*:(?=[a-z0-9-]{1,95}$)[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "displayText": {
+      "$comment": "RC2 §12.2: a customer-visible plain-text field. Base type only; callers apply the field-specific minLength/maxLength (title 1-120, label 1-80, limitation 1-240, answer 1-4000).",
+      "type": "string"
+    },
+    "answerText": {
+      "allOf": [{ "$ref": "#/$defs/displayText" }],
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "sourceTitle": {
+      "allOf": [{ "$ref": "#/$defs/displayText" }],
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "actionLabel": {
+      "allOf": [{ "$ref": "#/$defs/displayText" }],
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "limitationText": {
+      "allOf": [{ "$ref": "#/$defs/displayText" }],
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "httpsUrl": {
+      "$comment": "RC2 §12.2: HTTPS only, at most 2048 chars, no user-info, no fragment. Query strings ARE allowed here (unlike request page_context.path) — an external booking destination may legitimately carry query parameters. Encoded as: https:// scheme; the authority component (up to the first '/') contains no '@' (no user-info); the whole value contains no '#' (no fragment).",
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https://[^@/\\s]+(/[^#\\s]*)?$"
+    },
+    "releaseId": {
+      "$comment": "RC2 §12.2: X-Utopia-Business-Release / X-Utopia-Knowledge-Release. 1-128 visible ASCII characters, no whitespace.",
+      "type": "string",
+      "pattern": "^[\\x21-\\x7e]{1,128}$"
+    },
+    "actionKind": {
+      "$comment": "RC2 §12.2: v1.0 permits exactly these three.",
+      "enum": ["open_internal_link", "open_external_booking_link", "contact_utopia"]
+    },
+    "outcome": {
+      "$comment": "RC2 §12.1.",
+      "enum": ["answered", "partial", "clarification_needed", "out_of_scope", "refused"]
+    },
+    "errorCode": {
+      "$comment": "RC2 §17 error table.",
+      "enum": [
+        "invalid_request",
+        "unsupported_version",
+        "authentication_failed",
+        "capability_forbidden",
+        "idempotency_conflict",
+        "request_in_progress",
+        "idempotency_recovery_unavailable",
+        "response_invalidated",
+        "request_too_large",
+        "rate_limited",
+        "temporarily_unavailable",
+        "answer_validation_failed",
+        "deadline_exceeded"
+      ]
+    }
+  }
+}

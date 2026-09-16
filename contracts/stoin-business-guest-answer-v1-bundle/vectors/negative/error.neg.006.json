@@ -1,0 +1,16 @@
+{
+  "vector_id": "error.neg.006",
+  "schema": "error.response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§17",
+  "description": "correlation_id is not a valid UUID v4.",
+  "document": {
+    "contract_version": "1.0",
+    "error": {
+      "code": "invalid_request",
+      "message": "The request is invalid.",
+      "correlation_id": "not-a-uuid",
+      "retryable": false
+    }
+  }
+}

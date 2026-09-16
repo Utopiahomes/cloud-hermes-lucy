@@ -1,0 +1,46 @@
+{
+  "vector_id": "inv.I-B08.pos.002",
+  "invariant": "I-B08",
+  "expect": "hold",
+  "contract_reference": "§12.2",
+  "description": "External-booking action uses the approved external-booking hostname and destination.",
+  "documents": {
+    "response": {
+      "contract_version": "1.0",
+      "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+      "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+      "assistant_turn_id": "ed1f1cfa-125c-4178-ae7d-dbc527a14863",
+      "outcome": "answered",
+      "answer": "Our public collection currently includes three homes. Buttercup Beauty is a verified match.",
+      "sources": [
+        {
+          "source_id": "public-property:buttercup-beauty",
+          "title": "Buttercup Beauty",
+          "url": "https://www.utopiahomes.com/stays/buttercup-beauty"
+        }
+      ],
+      "actions": [
+        {
+          "action_id": "book-property:buttercup-beauty",
+          "kind": "open_external_booking_link",
+          "label": "Check availability",
+          "url": "https://booking.examplepms.com/buttercup-beauty"
+        }
+      ],
+      "limitations": []
+    },
+    "assumed_approved_hostnames": {
+      "internal": [
+        "www.utopiahomes.com"
+      ],
+      "external_booking": [
+        "booking.examplepms.com"
+      ]
+    },
+    "assumed_approved_destinations": [
+      "https://www.utopiahomes.com/stays/buttercup-beauty",
+      "https://booking.examplepms.com/buttercup-beauty"
+    ]
+  },
+  "also_violates": []
+}

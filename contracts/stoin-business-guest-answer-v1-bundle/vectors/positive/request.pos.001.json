@@ -1,0 +1,33 @@
+{
+  "vector_id": "request.pos.001",
+  "schema": "request.schema.json",
+  "expect": "valid",
+  "contract_reference": "§9",
+  "description": "Canonical worked example from the contract text.",
+  "document": {
+    "contract_version": "1.0",
+    "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+    "message": {
+      "turn_id": "056d5f10-ed13-44fa-b8bc-1af90d43dceb",
+      "content": "Which home is best for 20 people, four cars, and a pool?"
+    },
+    "history": [
+      {
+        "turn_id": "f938d01b-0125-48ed-962b-9c739e43a24f",
+        "role": "user",
+        "content": "Tell me about the homes with pools."
+      },
+      {
+        "turn_id": "12682577-2c4b-4889-8391-47dca4b38ad4",
+        "role": "assistant",
+        "content": "Buttercup Beauty and Central Ave Socialization have verified pool information."
+      }
+    ],
+    "page_context": {
+      "path": "/stays/buttercup-beauty",
+      "subject_type": "property",
+      "subject_id": "buttercup-beauty"
+    },
+    "locale": "en-US"
+  }
+}

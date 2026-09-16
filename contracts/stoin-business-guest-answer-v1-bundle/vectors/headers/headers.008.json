@@ -1,0 +1,28 @@
+{
+  "vector_id": "headers.008",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "Every request MUST include Accept: application/json.",
+  "rule": "accept_header",
+  "cases": [
+    {
+      "value": "application/json",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "header absent"
+    },
+    {
+      "value": "text/html",
+      "expect": "invalid",
+      "reason": "wrong media type"
+    },
+    {
+      "value": "application/xml",
+      "expect": "invalid",
+      "reason": "wrong media type"
+    }
+  ]
+}

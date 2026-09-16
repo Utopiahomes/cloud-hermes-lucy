@@ -1,0 +1,30 @@
+{
+  "$comment": "RC2 §11 (consumer retry rules) and §17 (retryable flags). auto_retry_permitted is copied directly from the error table's retryable column — it is not a separate business decision, it IS that column, restated here as an explicit consumer-facing policy fixture per §22.1's request for 'consumer and reverse-proxy vectors proving that answer_validation_failed is not automatically retried despite its 503 status.'",
+  "rule": "The consumer may make at most one automatic retry, with the same canonical request and Idempotency-Key, using a fresh JWT and X-Request-ID, only for a transport failure or a response whose code has auto_retry_permitted=true below. Validation, authentication, authorization, version, invalidation, and idempotency-conflict codes are never auto-retried, regardless of HTTP status.",
+  "retry_budget": {
+    "total_interaction_deadline_seconds": 22,
+    "second_attempt_timeout_seconds": "min(15, remaining_budget_after_first_attempt_and_backoff)",
+    "transport_failure_backoff_ms": [250, 750],
+    "http_response_backoff": "honor Retry-After (1-30s integer) when present"
+  },
+  "codes": [
+    { "code": "invalid_request", "http": 400, "auto_retry_permitted": false },
+    { "code": "unsupported_version", "http": 400, "auto_retry_permitted": false },
+    { "code": "authentication_failed", "http": 401, "auto_retry_permitted": false },
+    { "code": "capability_forbidden", "http": 403, "auto_retry_permitted": false },
+    { "code": "idempotency_conflict", "http": 409, "auto_retry_permitted": false },
+    { "code": "request_in_progress", "http": 409, "auto_retry_permitted": true },
+    { "code": "idempotency_recovery_unavailable", "http": 409, "auto_retry_permitted": false },
+    { "code": "response_invalidated", "http": 409, "auto_retry_permitted": false },
+    { "code": "request_too_large", "http": 413, "auto_retry_permitted": false },
+    { "code": "rate_limited", "http": 429, "auto_retry_permitted": true },
+    { "code": "temporarily_unavailable", "http": 503, "auto_retry_permitted": true },
+    {
+      "code": "answer_validation_failed",
+      "http": 503,
+      "auto_retry_permitted": false,
+      "note": "The load-bearing case: HTTP 503 normally reads as retryable to generic tooling. RC2 §17 and acceptance criterion 33 are explicit that this specific code must never be auto-retried despite that status. A conformant reverse proxy or HTTP client library configured to blanket-retry 5xx responses is NOT conformant unless it special-cases this code."
+    },
+    { "code": "deadline_exceeded", "http": 504, "auto_retry_permitted": true }
+  ]
+}

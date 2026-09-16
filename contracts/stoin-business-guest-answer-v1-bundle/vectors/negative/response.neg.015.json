@@ -1,0 +1,55 @@
+{
+  "vector_id": "response.neg.015",
+  "schema": "response.schema.json",
+  "expect": "invalid",
+  "contract_reference": "§12.2",
+  "description": "actions exceeds the 4-entry maximum.",
+  "document": {
+    "contract_version": "1.0",
+    "response_id": "a9ec2c26-cf3d-4a58-9939-cd421db25d71",
+    "session_id": "27b20c7b-777e-4af3-8db1-5fe1fc2f3b7e",
+    "assistant_turn_id": "ed1f1cfa-125c-4178-ae7d-dbc527a14863",
+    "outcome": "answered",
+    "answer": "Our public collection currently includes three homes. Buttercup Beauty is a verified match.",
+    "sources": [
+      {
+        "source_id": "public-property:buttercup-beauty",
+        "title": "Buttercup Beauty",
+        "url": "https://www.utopiahomes.com/stays/buttercup-beauty"
+      }
+    ],
+    "actions": [
+      {
+        "action_id": "view-property:home-00",
+        "kind": "open_internal_link",
+        "label": "View home 0",
+        "url": "https://www.utopiahomes.com/stays/home-00"
+      },
+      {
+        "action_id": "view-property:home-01",
+        "kind": "open_internal_link",
+        "label": "View home 1",
+        "url": "https://www.utopiahomes.com/stays/home-01"
+      },
+      {
+        "action_id": "view-property:home-02",
+        "kind": "open_internal_link",
+        "label": "View home 2",
+        "url": "https://www.utopiahomes.com/stays/home-02"
+      },
+      {
+        "action_id": "view-property:home-03",
+        "kind": "open_internal_link",
+        "label": "View home 3",
+        "url": "https://www.utopiahomes.com/stays/home-03"
+      },
+      {
+        "action_id": "view-property:home-04",
+        "kind": "open_internal_link",
+        "label": "View home 4",
+        "url": "https://www.utopiahomes.com/stays/home-04"
+      }
+    ],
+    "limitations": []
+  }
+}

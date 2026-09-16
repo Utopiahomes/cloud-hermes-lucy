@@ -1,0 +1,14 @@
+{
+  "vector_id": "exchange.005",
+  "kind": "exchange",
+  "expect": "hold",
+  "contract_reference": "§12.2",
+  "description": "A successful response MUST include both X-Utopia-Business-Release and X-Utopia-Knowledge-Release — presence, not just format (format is separately covered by headers.003).",
+  "exchange": {
+    "check": "release_headers_present",
+    "headers": {
+      "X-Utopia-Business-Release": "homes-business:release:2026-09-16.1",
+      "X-Utopia-Knowledge-Release": "homes-knowledge:projection:2026-09-16.1"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "vector_id": "headers.001",
+  "kind": "header-format",
+  "contract_reference": "§8",
+  "description": "X-Request-ID must be a canonical lowercase UUID v4; RC2 §8 explicitly types it the same as the body's UUID v4 fields.",
+  "rule": "uuid_v4",
+  "cases": [
+    {
+      "value": "5a6a3c4e-1b2c-4d5e-89ab-1234567890ab",
+      "expect": "valid"
+    },
+    {
+      "value": null,
+      "expect": "invalid",
+      "reason": "missing"
+    },
+    {
+      "value": "not-a-uuid",
+      "expect": "invalid",
+      "reason": "malformed"
+    },
+    {
+      "value": "5A6A3C4E-1B2C-4D5E-89AB-1234567890AB",
+      "expect": "invalid",
+      "reason": "uppercase (RC2 §3 requires canonical lowercase)"
+    }
+  ]
+}
