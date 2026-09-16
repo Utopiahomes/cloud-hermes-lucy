@@ -1,7 +1,8 @@
 # Stoin Management Contract v1 — Control implementation checkpoint
 
-Date: 2026-09-15. Local Control-side implementation only; nothing is deployed,
-provisioned, or connected to Utopia Homes by this checkpoint.
+Date: 2026-09-16. Local Control-side implementation and independent-process
+compatibility proof only; nothing is deployed, provisioned, or connected to a
+production Utopia Homes runtime by this checkpoint.
 
 ## Scope
 
@@ -44,15 +45,23 @@ artifact is under `contracts/stoin-management-v1-bundle/`.
 | Complete unit suite | Passed, 1,027 tests | `python -m pytest tests/unit -q` | Source, test, or dependency change |
 | Ruff | Passed | `python -m ruff check src tests` | Python source or lint configuration change |
 | Strict mypy | Passed across 120 source files | `python -m mypy src/lucy` | Source, typing dependency, or mypy configuration change |
+| Independent-process seam | Passed | Control commit `158601b39feb728c66147f451e5de94fbb56b727` read all four resources from Homes adapter commit `c04a97a47c9bbecb9e45b882492f756eeaaed196` over local TLS; `guest.answer` and transitional `unknown`/`health_coverage_limited` matched RC3; invalid JWT signature was rejected | Either implementation commit, pinned bundle, TLS/JWT profile, or compatibility probe change |
 
 The unit run emitted two existing dependency deprecation warnings from
 FastAPI/Starlette test-client imports. They are unrelated to this increment.
 
-## Next integration seam
+## Independent-process proof
 
-Claude owns the independently deployed Homes management adapter and its
-provider-side conformance proof. Once that endpoint exists in a non-production
-test environment, the next Control task is the contract-required network HTTP
-proof between the two independent processes. That proof will use separately
-provisioned test keys and an exact test base URL; it does not authorize production
-activation.
+The reusable probe is
+`tests/compatibility/stoin_management_v1_seam_probe.py`. It runs the Control
+client and Claude's separately checked-out Homes adapter in different OS
+processes, generates temporary local TLS and Ed25519 material, verifies the exact
+adapter commit and clean worktree, and removes the key material at exit. It does
+not import Homes source into the Control process or bypass the client's HTTPS
+requirement.
+
+The next step is joint review of this evidence and a non-production deployment
+plan for the two independently released processes. That later step requires
+deployment-owned endpoint and key provisioning. This checkpoint does not
+authorize deployment, production credentials, polling, persistence, alerts,
+DNS changes, or any guest request-path dependency on Control.
