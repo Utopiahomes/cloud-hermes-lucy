@@ -336,6 +336,79 @@ def test_authoritative_reaper_distinguishes_never_sent_from_ambiguous_dispatch(
     assert ambiguous.settled_microusd is None
 
 
+def test_unclear_dispatch_commit_aborts_only_same_live_owner(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="2" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    aborted = ledger.resolve_unclear_dispatch_commit(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+    )
+    assert aborted.state == "failed"
+    assert aborted.failure_code == "execution_aborted"
+    assert aborted.settlement_status == "settled"
+    assert aborted.settled_microusd == 0
+
+
+def test_unclear_dispatch_resolution_preserves_newer_reaper_uncertainty(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="3" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    ledger.reap_scope(
+        scope,
+        now=dispatched.execution_deadline + timedelta(seconds=31),
+        coordinator_generation=coordinator,
+    )
+    resolved = ledger.resolve_unclear_dispatch_commit(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+    )
+    assert resolved.state == "outcome_unknown"
+    assert resolved.failure_code == "execution_outcome_unknown"
+    assert resolved.settlement_status == "pending_reconciliation"
+    assert resolved.settled_microusd is None
+
+
 def test_restore_generation_mismatch_blocks_until_offline_reconciliation(
     database_urls: tuple[str, str],
 ) -> None:

@@ -600,6 +600,96 @@ class PostgresExecutionLedger:
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
+    def resolve_unclear_dispatch_commit(
+        self,
+        scope: LedgerScope,
+        execution_id: UUID,
+        *,
+        coordinator_generation: int,
+        record_generation: int,
+        owner_id: UUID,
+    ) -> LedgerRecord:
+        """Resolve a dispatch commit whose acknowledgement was lost without sending.
+
+        The caller of this method has not emitted provider-request bytes. A matching live owner may
+        therefore abort either `admitted` or confirmed `dispatched` state at zero cost. If a reaper
+        or another fenced owner already established a later state, that authoritative result wins.
+        """
+
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    gate = connection.execute(
+                        """
+                        SELECT storage_epoch, recovery_generation, coordinator_generation,
+                               dispatch_blocked
+                        FROM tiamat.restore_gate
+                        WHERE environment = %s
+                        FOR SHARE
+                        """,
+                        (scope.environment,),
+                    ).fetchone()
+                    self._validate_gate(gate, coordinator_generation)
+                    current = connection.execute(
+                        f"""
+                        SELECT {_RECORD_COLUMNS}
+                        FROM tiamat.execution_records
+                        WHERE execution_id = %s AND issuer = %s AND caller_id = %s
+                          AND realm = %s AND environment = %s
+                        FOR UPDATE
+                        """,
+                        (
+                            execution_id,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                        ),
+                    ).fetchone()
+                    if current is None:
+                        raise LedgerUnavailable("execution record is not authoritative")
+                    record = LedgerRecord.from_row(current)
+                    if record.state not in {"admitted", "dispatched"}:
+                        return record
+                    if (
+                        record.coordinator_generation != coordinator_generation
+                        or record.record_generation != record_generation
+                        or record.lease_owner_id != owner_id
+                    ):
+                        raise DurableFenceRejected
+                    updated = connection.execute(
+                        f"""
+                        UPDATE tiamat.execution_records
+                        SET state = 'failed',
+                            record_generation = record_generation + 1,
+                            settlement_status = 'settled',
+                            settled_microusd = 0,
+                            failure_code = 'execution_aborted',
+                            terminal_at = clock_timestamp(),
+                            updated_at = clock_timestamp()
+                        WHERE execution_id = %s AND state IN ('admitted', 'dispatched')
+                          AND coordinator_generation = %s AND record_generation = %s
+                          AND lease_owner_id = %s
+                        RETURNING {_RECORD_COLUMNS}
+                        """,
+                        (
+                            execution_id,
+                            coordinator_generation,
+                            record_generation,
+                            owner_id,
+                        ),
+                    ).fetchone()
+                    if updated is None:
+                        raise DurableFenceRejected
+                    return LedgerRecord.from_row(updated)
+        except (DispatchBlocked, DurableFenceRejected, LedgerUnavailable):
+            raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
     def forfeit_due_reconciliations(
         self,
         scope: LedgerScope,

@@ -49,6 +49,8 @@
   concurrent single admission, dispatch-before-send, settlement, non-owner RLS isolation,
   coordinator failover/takeover, admitted/dispatched reaping, recovery-generation mismatch, and a
   stale physical database snapshot failing closed under a newer external witness.
+- Durable unclear-dispatch resolution aborts at zero cost only for the exact live owner epoch. If a
+  newer reaper result exists, the lookup preserves `outcome_unknown` and its held reservation.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -62,9 +64,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. finish durable ambiguous-commit lookup, overrun/quarantine, tombstone expiry, and partition-block
-   operations, then prove the implemented lease/epoch/generation/accounting behavior against real
-   PostgreSQL and stale-backup recovery;
+3. finish durable overrun/quarantine, tombstone expiry, and partition-block operations, then inject
+   connection loss inside dispatch and settlement transactions rather than only around stable
+   transition boundaries;
 4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
 5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
@@ -88,6 +90,6 @@ At local commit preparation on 2026-09-17:
 - Strict mypy: passed across 132 source files.
 - Alembic: the independent `0001_execution_ledger` upgrade rendered successfully as PostgreSQL
   offline SQL.
-- Focused durable-ledger unit tests: 22 passed. Seven real PostgreSQL integration tests passed using
+- Focused durable-ledger unit tests: 22 passed. Nine real PostgreSQL integration tests passed using
   a loopback-only, tmpfs-backed PostgreSQL 16 container with synthetic credentials. This establishes
   local database behavior, not production replication or failover.

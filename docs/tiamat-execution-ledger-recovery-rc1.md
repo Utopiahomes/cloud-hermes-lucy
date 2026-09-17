@@ -64,13 +64,15 @@ external witness leaves dispatch blocked.
 - A replacement coordinator fenced the old generation and adopted an expired lease before dispatch.
 - The authoritative reaper settled expired `admitted` work at zero and retained an expired
   `dispatched` reservation as `outcome_unknown`.
+- An unclear dispatch commit aborted at zero only under the same live owner epoch; once the reaper
+  established a newer `outcome_unknown` state, resolution preserved that uncertainty and held cost.
 - A physical stale database snapshot remained internally valid but could not resume under the newer
   deployment-owned recovery witness.
 
 ## Verification remaining before deployment
 
-- Inject process and database disconnects during the ambiguous dispatch-commit and settlement
-  windows, not only at stable transition boundaries.
+- Inject actual connection loss during the dispatch-commit and settlement windows; the current
+  suite proves authoritative lookup outcomes after acknowledgement loss at stable boundaries.
 - Prove cost overrun, route quarantine, reconciliation, and 30-day tombstone expiry against the
   durable store.
 - Demonstrate single-node loss and failover on the selected production-class database service.
