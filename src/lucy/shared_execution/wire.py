@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import math
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from lucy.shared_execution.canonical import canonical_json_bytes
 
 BUNDLE_DIGEST = "5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85"
 CONTRACT_DIGEST = "a010c2cd5d501dd5586be3e1c54753ed7bf82505b9971d19c007e227bb9a75a8"
@@ -33,9 +34,7 @@ class JsonSchemaOutput(StrictModel):
 
     @model_validator(mode="after")
     def schema_is_restricted(self) -> JsonSchemaOutput:
-        canonical = json.dumps(
-            self.schema_, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
-        ).encode("utf-8")
+        canonical = canonical_json_bytes(self.schema_)
         if len(canonical) > 32_768 or not restricted_schema_is_valid(self.schema_):
             raise ValueError("JSON Schema output contract is outside the RC1 subset")
         return self
@@ -234,13 +233,7 @@ def _numeric_literals_are_valid(schema: dict[str, Any]) -> bool:
 
 def _enum_is_unique(values: list[Any]) -> bool:
     encoded = [
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        canonical_json_bytes(value).decode("utf-8")
         for value in values
     ]
     return len(encoded) == len(set(encoded))

@@ -242,3 +242,14 @@ def test_unknown_path_does_not_disclose_release_headers() -> None:
     response = client.post("/wrong", content=raw, headers=headers(private_key, raw))
     assert response.status_code == 404
     assert "x-stoin-execution-release" not in response.headers
+
+
+def test_non_json_numeric_constant_is_rejected_before_provider_dispatch() -> None:
+    client, transport, private_key, _ = setup()
+    raw = body().replace(b'"max_output_tokens":900', b'"max_output_tokens":NaN')
+    response = client.post(
+        "/execution/v1/inference", content=raw, headers=headers(private_key, raw)
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert transport.calls == 0

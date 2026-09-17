@@ -7,12 +7,12 @@ contract and provides a seam for a durable fenced PostgreSQL store without claim
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
+from lucy.shared_execution.canonical import canonical_json_bytes
 from lucy.shared_execution.output_validation import validate_output
 from lucy.shared_execution.wire import (
     CostReceipt,
@@ -182,13 +182,7 @@ class SharedExecutionService:
             self._store.transition(caller, idempotency_key, "dispatched", "failed")
             raise ExecutionFailure("provider_response_invalid")
         if isinstance(result.content, dict):
-            output_bytes = json.dumps(
-                result.content,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
+            output_bytes = canonical_json_bytes(result.content)
             if len(output_bytes) > 65_536:
                 self._store.transition(caller, idempotency_key, "dispatched", "failed")
                 raise ExecutionFailure("provider_response_too_large")
@@ -225,10 +219,8 @@ class SharedExecutionService:
 
 
 def canonical_identity(request: ExecutionRequest) -> str:
-    """Hash the current JSON subset; RFC 8785 differential proof remains a Tier B gate."""
+    """Hash the RFC 8785 canonical request identity used by idempotency."""
 
     payload = request.model_dump(mode="json", by_alias=True)
-    encoded = json.dumps(
-        payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
-    ).encode("utf-8")
+    encoded = canonical_json_bytes(payload)
     return hashlib.sha256(encoded).hexdigest()

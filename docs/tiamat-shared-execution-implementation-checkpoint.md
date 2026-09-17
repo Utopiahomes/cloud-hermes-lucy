@@ -29,6 +29,8 @@
   applicability, predecessor/successor activation, no predecessor fallback, active versus pending
   exposure, the `2N` bound, contingency-reserve sizing, carried obligations, settlement, and
   forfeiture.
+- Runtime RFC 8785 canonicalization for idempotency identity, requested-schema byte bounds, and JSON
+  candidate byte bounds, verified against all five already-vendored official reference vectors.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -45,7 +47,7 @@ Before any deployment or real provider activation, Tier B must add and prove:
    ambiguous-commit lookup, reaping, tombstones, and partition blocking;
 4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
-5. full RFC 8785 canonicalization and differential fixtures for identity and requested schemas;
+5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 6. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 7. finish differential and adversarial coverage for the restricted-schema evaluator;
 8. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback

@@ -122,9 +122,9 @@ def create_shared_execution_app(
             return _error("authentication_failed", request_id=None)
 
         try:
-            payload = json.loads(body)
+            payload = json.loads(body, parse_constant=_reject_non_json_number)
             request = ExecutionRequest.model_validate(payload)
-        except (json.JSONDecodeError, UnicodeError, ValidationError):
+        except (json.JSONDecodeError, UnicodeError, ValidationError, ValueError):
             return _error("invalid_request", request_id=request_id_text, release=release)
         if request.execution_profile_id not in verifier.identity.execution_profiles:
             return _error("capability_forbidden", request_id=request_id_text, release=release)
@@ -189,6 +189,10 @@ def _timeout(value: str | None) -> int | None:
     except ValueError:
         return None
     return parsed if 1000 <= parsed <= 18_000 else None
+
+
+def _reject_non_json_number(value: str) -> None:
+    raise ValueError(f"non-JSON number is prohibited: {value}")
 
 
 def _authenticated_headers(request_id: str, release: ApiRelease) -> dict[str, str]:
