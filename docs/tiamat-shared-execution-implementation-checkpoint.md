@@ -31,6 +31,9 @@
   forfeiture.
 - Runtime RFC 8785 canonicalization for idempotency identity, requested-schema byte bounds, and JSON
   candidate byte bounds, verified against all five already-vendored official reference vectors.
+- Content-free fenced transition reference model with lease epochs, record generations, CAS-style
+  owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
+  eligibility suppression.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -43,8 +46,8 @@ Before any deployment or real provider activation, Tier B must add and prove:
 1. complete the private FastAPI ordered gate from §6.3, including gross framing, duplicate-header,
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. replace the local atomic `jti` replay adapter with durable scoped replay state and prove rotation;
-3. a durable PostgreSQL execution/accounting store with leases, epochs, fencing, CAS transitions,
-   ambiguous-commit lookup, reaping, tombstones, and partition blocking;
+3. implement the tested lease/epoch/generation behavior in a durable store with atomic accounting,
+   ambiguous-commit lookup, tombstones, and partition blocking once deployment topology is settled;
 4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
 5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
