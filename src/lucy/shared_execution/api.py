@@ -18,6 +18,7 @@ from lucy.shared_execution.auth import (
     content_sha256,
 )
 from lucy.shared_execution.service import (
+    ExecutionFailure,
     ExecutionInProgress,
     IdempotencyConflict,
     SharedExecutionService,
@@ -45,6 +46,14 @@ ERRORS: dict[str, tuple[int, str, bool]] = {
     "output_contract_unsupported": (422, "The requested output contract is not supported.", False),
     "cost_ceiling_insufficient": (422, "The execution cost ceiling is insufficient.", False),
     "provider_execution_failed": (502, "The model execution failed.", False),
+    "provider_response_invalid": (502, "The model returned an unusable result.", False),
+    "provider_response_too_large": (502, "The model response is too large.", False),
+    "output_limit_reached": (502, "The model reached its output limit.", False),
+    "cost_settlement_violation": (
+        502,
+        "The provider charge exceeded its reservation.",
+        False,
+    ),
     "authentication_state_unavailable": (
         503,
         "Service authentication state is temporarily unavailable.",
@@ -145,6 +154,8 @@ def create_shared_execution_app(
                 else "output_contract_unsupported"
             )
             return _error(code, request_id=request_id_text, release=release)
+        except ExecutionFailure as exc:
+            return _error(exc.code, request_id=request_id_text, release=release)
         except RuntimeError:
             return _error("provider_execution_failed", request_id=request_id_text, release=release)
 

@@ -8,7 +8,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from lucy.shared_execution.output_validation import validate_output
 from lucy.shared_execution.service import (
+    ExecutionFailure,
     ExecutionInProgress,
     ExecutionProfile,
     IdempotencyConflict,
@@ -16,7 +18,11 @@ from lucy.shared_execution.service import (
     ProviderResult,
     SharedExecutionService,
 )
-from lucy.shared_execution.wire import BUNDLE_DIGEST, ExecutionRequest
+from lucy.shared_execution.wire import (
+    BUNDLE_DIGEST,
+    ExecutionRequest,
+    restricted_schema_is_valid,
+)
 
 
 class FakeProvider:
@@ -162,3 +168,115 @@ def test_profile_requires_complete_worst_case_reservation() -> None:
             request=ExecutionRequest.model_validate(payload),
         )
     assert provider.calls == 0
+
+
+def test_json_schema_provider_output_is_validated_by_executor() -> None:
+    class InvalidJsonProvider:
+        def execute(
+            self, request: ExecutionRequest, profile: ExecutionProfile
+        ) -> ProviderResult:
+            return ProviderResult(
+                content={"answer": ""},
+                input_tokens=10,
+                generated_tokens=1,
+                output_tokens=1,
+                reasoning_tokens=0,
+                cost_microusd=1,
+            )
+
+    profile = ExecutionProfile(
+        profile_id="utopia-homes.public-answer.generate.v1",
+        release_id="profiles-local.1",
+        allowed_modes=frozenset({"json_schema"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2000,
+    )
+    executor = SharedExecutionService(
+        InMemoryExecutionStore(), InvalidJsonProvider(), {profile.profile_id: profile}
+    )
+    payload = request().model_dump(mode="json", by_alias=True)
+    payload["output"] = {
+        "mode": "json_schema",
+        "name": "guest-answer-candidate",
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string", "minLength": 1}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    }
+    with pytest.raises(ExecutionFailure) as failure:
+        executor.execute(
+            caller="stoin:synth:utopia-homes-prime",
+            idempotency_key=str(uuid4()),
+            request_id=uuid4(),
+            request=ExecutionRequest.model_validate(payload),
+        )
+    assert failure.value.code == "provider_response_invalid"
+
+
+def test_output_validator_distinguishes_json_boolean_from_integer() -> None:
+    assert validate_output({"type": "integer", "minimum": 0}, 1)
+    assert not validate_output({"type": "integer", "minimum": 0}, True)
+
+
+def test_output_token_limit_is_checked_against_combined_generated_tokens() -> None:
+    class OverLimitProvider:
+        def execute(
+            self, request: ExecutionRequest, profile: ExecutionProfile
+        ) -> ProviderResult:
+            return ProviderResult(
+                content="candidate",
+                input_tokens=1,
+                generated_tokens=901,
+                output_tokens=600,
+                reasoning_tokens=301,
+                cost_microusd=1,
+            )
+
+    profile = ExecutionProfile(
+        profile_id="utopia-homes.public-answer.generate.v1",
+        release_id="profiles-local.1",
+        allowed_modes=frozenset({"text"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2000,
+    )
+    executor = SharedExecutionService(
+        InMemoryExecutionStore(), OverLimitProvider(), {profile.profile_id: profile}
+    )
+    with pytest.raises(ExecutionFailure) as failure:
+        executor.execute(
+            caller="stoin:synth:utopia-homes-prime",
+            idempotency_key=str(uuid4()),
+            request_id=uuid4(),
+            request=request(),
+        )
+    assert failure.value.code == "output_limit_reached"
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+            "$ref": "x",
+        },
+        {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": [],
+            "additionalProperties": False,
+        },
+        {"type": ["string", "null"], "const": "answer"},
+        {"type": ["string", "null"], "enum": ["answer"]},
+        {"type": "integer", "minimum": -(2**53)},
+        {"type": "string", "enum": ["same", "same"]},
+    ],
+)
+def test_restricted_schema_rejects_unsupported_or_ambiguous_shapes(
+    schema: dict[str, Any],
+) -> None:
+    assert not restricted_schema_is_valid(schema)

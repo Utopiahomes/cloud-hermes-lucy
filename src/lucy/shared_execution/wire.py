@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -149,7 +150,31 @@ def restricted_schema_is_valid(
     schema_type = schema.get("type")
     if depth == 1 and schema_type != "object":
         return False
-    if schema_type == "object":
+    simple = {"object", "array", "string", "integer", "number", "boolean", "null"}
+    if isinstance(schema_type, list):
+        if (
+            len(schema_type) != 2
+            or len(set(schema_type)) != 2
+            or "null" not in schema_type
+            or not set(schema_type) <= simple
+        ):
+            return False
+        non_null_type = next(item for item in schema_type if item != "null")
+    elif schema_type in simple:
+        non_null_type = schema_type
+    else:
+        return False
+    if not _numeric_literals_are_valid(schema):
+        return False
+    enum = schema.get("enum")
+    if enum is not None:
+        if not isinstance(enum, list) or len(enum) > 64 or not _enum_is_unique(enum):
+            return False
+        if isinstance(schema_type, list) and sum(item is None for item in enum) != 1:
+            return False
+    if "const" in schema and isinstance(schema_type, list) and schema["const"] is not None:
+        return False
+    if non_null_type == "object":
         properties = schema.get("properties")
         required = schema.get("required")
         if (
@@ -165,18 +190,57 @@ def restricted_schema_is_valid(
             restricted_schema_is_valid(child, depth=depth + 1, count=count)
             for child in properties.values()
         )
-    if schema_type == "array":
+    if non_null_type == "array":
         return "items" in schema and restricted_schema_is_valid(
             schema["items"], depth=depth + 1, count=count
         )
-    if isinstance(schema.get("enum"), list) and len(schema["enum"]) > 64:
-        return False
-    simple = {"string", "integer", "number", "boolean", "null"}
-    if schema_type in simple:
-        return True
-    return (
-        isinstance(schema_type, list)
-        and len(schema_type) == 2
-        and "null" in schema_type
-        and len(set(schema_type) & simple) == 2
-    )
+    return True
+
+
+def _numeric_literals_are_valid(schema: dict[str, Any]) -> bool:
+    for key in ("minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"):
+        if key not in schema:
+            continue
+        value = schema[key]
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        if not math.isfinite(float(value)) or abs(value) > 2**53 - 1:
+            return False
+        if key in {"minLength", "maxLength", "minItems", "maxItems"} and not isinstance(
+            value, int
+        ):
+            return False
+        if key.startswith("min") and value < 0:
+            return False
+    literals = list(schema.get("enum", []))
+    if "const" in schema:
+        literals.append(schema["const"])
+    for value in literals:
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and (not math.isfinite(float(value)) or abs(value) > 2**53 - 1)
+        ):
+            return False
+    for smaller, larger in (
+        ("minimum", "maximum"),
+        ("minLength", "maxLength"),
+        ("minItems", "maxItems"),
+    ):
+        if smaller in schema and larger in schema and schema[smaller] > schema[larger]:
+            return False
+    return True
+
+
+def _enum_is_unique(values: list[Any]) -> bool:
+    encoded = [
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        for value in values
+    ]
+    return len(encoded) == len(set(encoded))

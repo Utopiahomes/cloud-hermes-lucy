@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
+from lucy.shared_execution.output_validation import validate_output
 from lucy.shared_execution.wire import (
     CostReceipt,
     ExecutionRequest,
@@ -61,6 +62,14 @@ class IdempotencyConflict(RuntimeError):
 
 class ExecutionInProgress(RuntimeError):
     """The one admitted operation has not reached a replayable terminal state."""
+
+
+class ExecutionFailure(RuntimeError):
+    """A mapped post-dispatch RC1 failure without provider details."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 class InMemoryExecutionStore:
@@ -154,15 +163,35 @@ class SharedExecutionService:
         result = self._transport.execute(request, profile)
         if result.cost_microusd > profile.maximum_cost_microusd:
             self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise RuntimeError("provider cost exceeded the admitted reservation")
+            raise ExecutionFailure("cost_settlement_violation")
+        if result.generated_tokens > request.limits.max_output_tokens:
+            self._store.transition(caller, idempotency_key, "dispatched", "failed")
+            raise ExecutionFailure("output_limit_reached")
 
         output_mode = request.output.mode
         if output_mode == "text" and not isinstance(result.content, str):
             self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise RuntimeError("provider response does not satisfy the output contract")
-        if isinstance(request.output, JsonSchemaOutput) and not isinstance(result.content, dict):
+            raise ExecutionFailure("provider_response_invalid")
+        if isinstance(result.content, str) and len(result.content.encode("utf-8")) > 65_536:
             self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise RuntimeError("provider response does not satisfy the output contract")
+            raise ExecutionFailure("provider_response_too_large")
+        if isinstance(request.output, JsonSchemaOutput) and (
+            not isinstance(result.content, dict)
+            or not validate_output(request.output.schema_, result.content)
+        ):
+            self._store.transition(caller, idempotency_key, "dispatched", "failed")
+            raise ExecutionFailure("provider_response_invalid")
+        if isinstance(result.content, dict):
+            output_bytes = json.dumps(
+                result.content,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            if len(output_bytes) > 65_536:
+                self._store.transition(caller, idempotency_key, "dispatched", "failed")
+                raise ExecutionFailure("provider_response_too_large")
 
         response = ExecutionResponse(
             contract="stoin.inference.execute.response.v1",
@@ -185,6 +214,10 @@ class SharedExecutionService:
                 settlement_status="settled",
             ),
         )
+        response_bytes = response.model_dump_json(by_alias=True).encode("utf-8")
+        if len(response_bytes) > 131_072:
+            self._store.transition(caller, idempotency_key, "dispatched", "failed")
+            raise ExecutionFailure("provider_response_too_large")
         self._store.transition(
             caller, idempotency_key, "dispatched", "completed", response=response
         )
