@@ -1,0 +1,21 @@
+# Synthetic Tiamat ledger tests only: isolated database, loopback port, no persistent volume.
+name: tiamat-ledger-tests
+
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: tiamat_test
+      POSTGRES_USER: tiamat_migration
+      POSTGRES_PASSWORD: synthetic-tiamat-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:54331:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tiamat_migration -d tiamat_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: "no"

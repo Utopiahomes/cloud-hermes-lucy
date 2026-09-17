@@ -55,15 +55,25 @@ evidence, and the recovery drill below.
 Restoring a backup never constitutes authorization to resume. Failure to reconcile or match the
 external witness leaves dispatch blocked.
 
+## Verified locally
+
+- The dedicated migration upgraded a fresh PostgreSQL 16 database.
+- A non-owner, `NOBYPASSRLS` serving login completed replay, admission, durable dispatch, and
+  settlement while a wrong-realm session could not observe the record.
+- Concurrent first admission created exactly one durable execution record.
+- A replacement coordinator fenced the old generation and adopted an expired lease before dispatch.
+- The authoritative reaper settled expired `admitted` work at zero and retained an expired
+  `dispatched` reservation as `outcome_unknown`.
+- A physical stale database snapshot remained internally valid but could not resume under the newer
+  deployment-owned recovery witness.
+
 ## Verification remaining before deployment
 
-- Run the dedicated migration into a fresh real PostgreSQL database.
-- Run serving-role negative tests proving cross-caller, cross-realm, and cross-environment denial.
-- Kill a coordinator after `admitted`, after durable `dispatched`, and during settlement; verify the
-  authoritative reaper results and one-dispatch invariant.
-- Restore a deliberately stale backup under a newer external recovery generation and prove that no
-  admission or dispatch succeeds before reconciliation.
+- Inject process and database disconnects during the ambiguous dispatch-commit and settlement
+  windows, not only at stable transition boundaries.
+- Prove cost overrun, route quarantine, reconciliation, and 30-day tombstone expiry against the
+  durable store.
 - Demonstrate single-node loss and failover on the selected production-class database service.
 
-Docker/PostgreSQL was unavailable on the development machine when this checkpoint was written, so
-none of those database-backed claims is marked passed yet.
+The local database used a loopback-only Docker service with tmpfs and synthetic credentials; it is
+not deployment or production durability evidence.

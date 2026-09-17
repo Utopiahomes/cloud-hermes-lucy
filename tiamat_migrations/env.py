@@ -12,6 +12,8 @@ if config.config_file_name is not None:
 
 database_url = os.environ.get("TIAMAT_MIGRATION_DATABASE_URL")
 if database_url:
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
     config.set_main_option("sqlalchemy.url", database_url)
 
 
@@ -47,8 +49,9 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    with connectable.begin() as bootstrap_connection:
+        bootstrap_connection.execute(text("CREATE SCHEMA IF NOT EXISTS tiamat"))
     with connectable.connect() as connection:
-        connection.execute(text("CREATE SCHEMA IF NOT EXISTS tiamat"))
         context.configure(
             connection=connection,
             target_metadata=None,

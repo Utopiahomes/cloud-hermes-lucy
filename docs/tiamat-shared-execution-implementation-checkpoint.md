@@ -45,8 +45,10 @@
 - Restore quarantine uses deployment-owned storage epoch and recovery generation plus a database
   coordinator generation. A stale restore cannot resume against a newer witness until an offline
   reconciliation explicitly advances and unblocks the gate.
-- A database-backed integration test is present for replay, admission, dispatch, settlement, and
-  cross-realm isolation, but remains unexecuted because Docker and local PostgreSQL were unavailable.
+- A disposable PostgreSQL 16 integration environment proves migration, durable JWT replay,
+  concurrent single admission, dispatch-before-send, settlement, non-owner RLS isolation,
+  coordinator failover/takeover, admitted/dispatched reaping, recovery-generation mismatch, and a
+  stale physical database snapshot failing closed under a newer external witness.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -86,6 +88,6 @@ At local commit preparation on 2026-09-17:
 - Strict mypy: passed across 132 source files.
 - Alembic: the independent `0001_execution_ledger` upgrade rendered successfully as PostgreSQL
   offline SQL.
-- Focused durable-ledger tests: 22 passed; the real PostgreSQL integration test was skipped because
-  neither Docker nor a local PostgreSQL endpoint was available. This skipped check is a release gap,
-  not a passing database claim.
+- Focused durable-ledger unit tests: 22 passed. Seven real PostgreSQL integration tests passed using
+  a loopback-only, tmpfs-backed PostgreSQL 16 container with synthetic credentials. This establishes
+  local database behavior, not production replication or failover.

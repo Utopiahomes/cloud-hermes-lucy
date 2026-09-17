@@ -531,6 +531,75 @@ class PostgresExecutionLedger:
             ),
         )
 
+    def takeover_expired(
+        self,
+        scope: LedgerScope,
+        execution_id: UUID,
+        *,
+        coordinator_generation: int,
+        owner_id: UUID,
+        now: datetime,
+    ) -> LedgerRecord:
+        """Adopt an expired live record under a strictly newer coordinator fence."""
+
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    gate = connection.execute(
+                        """
+                        SELECT storage_epoch, recovery_generation, coordinator_generation,
+                               dispatch_blocked
+                        FROM tiamat.restore_gate
+                        WHERE environment = %s
+                        FOR SHARE
+                        """,
+                        (scope.environment,),
+                    ).fetchone()
+                    self._validate_gate(gate, coordinator_generation)
+                    row = connection.execute(
+                        f"""
+                        UPDATE tiamat.execution_records
+                        SET coordinator_generation = %s,
+                            record_generation = record_generation + 1,
+                            lease_owner_id = %s,
+                            lease_expires_at = CASE state
+                                WHEN 'admitted' THEN least(
+                                    %s + interval '5 seconds', execution_deadline
+                                )
+                                ELSE execution_deadline + interval '30 seconds'
+                            END,
+                            updated_at = clock_timestamp()
+                        WHERE execution_id = %s AND issuer = %s AND caller_id = %s
+                          AND realm = %s AND environment = %s
+                          AND state IN ('admitted', 'dispatched')
+                          AND lease_expires_at <= %s
+                          AND coordinator_generation < %s
+                        RETURNING {_RECORD_COLUMNS}
+                        """,
+                        (
+                            coordinator_generation,
+                            owner_id,
+                            now,
+                            execution_id,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            now,
+                            coordinator_generation,
+                        ),
+                    ).fetchone()
+                    if row is None:
+                        raise DurableFenceRejected
+                    return LedgerRecord.from_row(row)
+        except (DispatchBlocked, DurableFenceRejected):
+            raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
     def forfeit_due_reconciliations(
         self,
         scope: LedgerScope,

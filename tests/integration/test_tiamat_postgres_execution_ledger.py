@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -8,15 +9,22 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from lucy.shared_execution.auth import AuthenticationStateUnavailable
 from lucy.shared_execution.postgres_ledger import (
+    DispatchBlocked,
+    DurableFenceRejected,
     LedgerAdmission,
     LedgerScope,
     PostgresExecutionLedger,
     PostgresJtiReplayStore,
     RecoveryWitness,
+)
+from lucy.shared_execution.recovery import (
+    authorize_reconciled_state,
+    quarantine_environment,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -24,7 +32,7 @@ DATABASE_URL = os.environ.get("TIAMAT_TEST_DATABASE_URL")
 
 
 @pytest.fixture(scope="module")
-def database_url() -> str:
+def database_urls() -> tuple[str, str]:
     if DATABASE_URL is None:
         pytest.skip("TIAMAT_TEST_DATABASE_URL is not configured")
     parsed = make_url(DATABASE_URL)
@@ -32,9 +40,40 @@ def database_url() -> str:
         pytest.fail("TIAMAT_TEST_DATABASE_URL must name a disposable tiamat_test* database")
     config = Config(os.path.join(ROOT, "tiamat_alembic.ini"))
     config.set_main_option("script_location", os.path.join(ROOT, "tiamat_migrations"))
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+    config.set_main_option(
+        "sqlalchemy.url", DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    )
     command.upgrade(config, "head")
-    return DATABASE_URL
+    runtime_url = DATABASE_URL.replace(
+        "tiamat_migration:synthetic-tiamat-only",
+        "tiamat_runtime_test:synthetic-runtime-only",
+    )
+    with psycopg.connect(DATABASE_URL, autocommit=True) as connection:
+        connection.execute(
+            """
+            DO $bootstrap$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tiamat_runtime_test') THEN
+                CREATE ROLE tiamat_runtime_test LOGIN NOINHERIT NOSUPERUSER NOCREATEDB
+                  NOCREATEROLE NOREPLICATION NOBYPASSRLS
+                  PASSWORD 'synthetic-runtime-only';
+              END IF;
+            END
+            $bootstrap$
+            """
+        )
+        connection.execute("GRANT CONNECT ON DATABASE tiamat_test TO tiamat_runtime_test")
+        connection.execute("GRANT USAGE ON SCHEMA tiamat TO tiamat_runtime_test")
+        connection.execute(
+            """
+            GRANT SELECT, INSERT, UPDATE, DELETE ON
+              tiamat.jti_replay, tiamat.spending_partitions,
+              tiamat.execution_records, tiamat.grant_releases
+            TO tiamat_runtime_test
+            """
+        )
+        connection.execute("GRANT SELECT, UPDATE ON tiamat.restore_gate TO tiamat_runtime_test")
+    return DATABASE_URL, runtime_url
 
 
 def _seed(database_url: str) -> tuple[LedgerScope, RecoveryWitness, datetime]:
@@ -110,32 +149,46 @@ def _seed(database_url: str) -> tuple[LedgerScope, RecoveryWitness, datetime]:
     )
 
 
-def test_durable_replay_fencing_and_cross_scope_isolation(database_url: str) -> None:
-    scope, witness, now = _seed(database_url)
-    replay = PostgresJtiReplayStore(database_url)
+def _admission(
+    now: datetime,
+    *,
+    key_digest: str,
+    identity_digest: str = "c" * 64,
+    owner_id=None,
+) -> LedgerAdmission:
+    return LedgerAdmission(
+        idempotency_key_digest=key_digest,
+        identity_digest=identity_digest,
+        digest_key_version="digest-v1",
+        operation="inference.execute",
+        contract_major=1,
+        execution_profile_id="profile.v1",
+        profile_release_id="profiles.1",
+        owner_id=owner_id or uuid4(),
+        execution_deadline=now + timedelta(seconds=15),
+        eligibility_generation=1,
+        reserved_microusd=2_000,
+    )
+
+
+def test_durable_replay_fencing_and_cross_scope_isolation(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    replay = PostgresJtiReplayStore(runtime_url)
     namespace = (scope.issuer, scope.caller_id, scope.realm, scope.environment)
     jti = uuid4()
     assert replay.consume(namespace, jti, int((now + timedelta(minutes=10)).timestamp()))
     assert not replay.consume(namespace, jti, int((now + timedelta(minutes=10)).timestamp()))
 
-    ledger = PostgresExecutionLedger(database_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
+    admission = _admission(now, key_digest="b" * 64, owner_id=owner)
     record, created = ledger.create_or_get(
         scope,
-        LedgerAdmission(
-            idempotency_key_digest="b" * 64,
-            identity_digest="c" * 64,
-            digest_key_version="digest-v1",
-            operation="inference.execute",
-            contract_major=1,
-            execution_profile_id="profile.v1",
-            profile_release_id="profiles.1",
-            owner_id=owner,
-            execution_deadline=now + timedelta(seconds=15),
-            eligibility_generation=1,
-            reserved_microusd=2_000,
-        ),
+        admission,
         coordinator_generation=coordinator,
         now=now,
     )
@@ -159,7 +212,7 @@ def test_durable_replay_fencing_and_cross_scope_isolation(database_url: str) -> 
     assert settled.state == "completed"
     assert settled.settled_microusd == 20
 
-    with psycopg.connect(database_url) as connection:
+    with psycopg.connect(runtime_url) as connection:
         connection.execute(
             "SELECT set_config('tiamat.environment', %s, false)", (scope.environment,)
         )
@@ -170,6 +223,187 @@ def test_durable_replay_fencing_and_cross_scope_isolation(database_url: str) -> 
             (record.execution_id,),
         ).fetchone()
         assert hidden is not None and int(hidden[0]) == 0
+
+
+def test_concurrent_first_admission_creates_exactly_one_record(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    admission = _admission(now, key_digest="d" * 64)
+
+    def admit() -> tuple[str, bool]:
+        record, created = ledger.create_or_get(
+            scope, admission, coordinator_generation=coordinator, now=now
+        )
+        return str(record.execution_id), created
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = tuple(pool.map(lambda _index: admit(), range(2)))
+    assert {execution_id for execution_id, _created in results} == {results[0][0]}
+    assert sorted(created for _execution_id, created in results) == [False, True]
+
+
+def test_failover_fences_old_coordinator_and_adopts_only_after_lease_expiry(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    first_coordinator = ledger.acquire_coordinator_generation()
+    first_owner = uuid4()
+    record, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="e" * 64, owner_id=first_owner),
+        coordinator_generation=first_coordinator,
+        now=now,
+    )
+    second_coordinator = ledger.acquire_coordinator_generation()
+    with pytest.raises(DurableFenceRejected):
+        ledger.dispatch(
+            scope,
+            record.execution_id,
+            coordinator_generation=first_coordinator,
+            record_generation=record.record_generation,
+            owner_id=first_owner,
+        )
+    second_owner = uuid4()
+    adopted = ledger.takeover_expired(
+        scope,
+        record.execution_id,
+        coordinator_generation=second_coordinator,
+        owner_id=second_owner,
+        now=now + timedelta(seconds=6),
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        adopted.execution_id,
+        coordinator_generation=second_coordinator,
+        record_generation=adopted.record_generation,
+        owner_id=second_owner,
+    )
+    assert dispatched.state == "dispatched"
+
+
+def test_authoritative_reaper_distinguishes_never_sent_from_ambiguous_dispatch(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="f" * 64),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    admitted_result = ledger.reap_scope(
+        scope, now=now + timedelta(seconds=6), coordinator_generation=coordinator
+    )
+    admitted_reaped = next(
+        row for row in admitted_result if row.execution_id == admitted.execution_id
+    )
+    assert admitted_reaped.state == "failed"
+    assert admitted_reaped.failure_code == "execution_aborted"
+    assert admitted_reaped.settled_microusd == 0
+
+    owner = uuid4()
+    second, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="1" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        second.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=second.record_generation,
+        owner_id=owner,
+    )
+    dispatched_result = ledger.reap_scope(
+        scope,
+        now=dispatched.execution_deadline + timedelta(seconds=31),
+        coordinator_generation=coordinator,
+    )
+    ambiguous = next(row for row in dispatched_result if row.execution_id == second.execution_id)
+    assert ambiguous.state == "outcome_unknown"
+    assert ambiguous.settlement_status == "pending_reconciliation"
+    assert ambiguous.settled_microusd is None
+
+
+def test_restore_generation_mismatch_blocks_until_offline_reconciliation(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, _now = _seed(owner_url)
+    quarantine_environment(owner_url, environment=scope.environment, reason="stale_restore_review")
+    with pytest.raises(DispatchBlocked):
+        PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+
+    authorize_reconciled_state(
+        owner_url,
+        environment=scope.environment,
+        expected_storage_epoch=witness.storage_epoch,
+        current_recovery_generation=1,
+        next_recovery_generation=2,
+        unresolved_provider_liabilities=0,
+    )
+    with pytest.raises(DispatchBlocked):
+        PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+    next_witness = RecoveryWitness(scope.environment, witness.storage_epoch, 2)
+    assert PostgresExecutionLedger(runtime_url, next_witness).acquire_coordinator_generation() >= 2
+
+
+def test_stale_database_snapshot_cannot_resume_under_new_recovery_witness(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, _now = _seed(owner_url)
+    source_database = make_url(owner_url).database
+    assert source_database is not None and source_database.startswith("tiamat_test")
+    restore_database = f"tiamat_test_restore_{uuid4().hex[:8]}"
+    admin_url = make_url(owner_url).set(database="postgres").render_as_string(hide_password=False)
+    stale_runtime_url = (
+        make_url(runtime_url).set(database=restore_database).render_as_string(hide_password=False)
+    )
+
+    with psycopg.connect(admin_url, autocommit=True) as connection:
+        connection.execute(
+            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(restore_database), sql.Identifier(source_database)
+            )
+        )
+    try:
+        quarantine_environment(
+            owner_url, environment=scope.environment, reason="snapshot_restore_review"
+        )
+        authorize_reconciled_state(
+            owner_url,
+            environment=scope.environment,
+            expected_storage_epoch=witness.storage_epoch,
+            current_recovery_generation=1,
+            next_recovery_generation=2,
+            unresolved_provider_liabilities=0,
+        )
+        current_witness = RecoveryWitness(scope.environment, witness.storage_epoch, 2)
+        with pytest.raises(DispatchBlocked):
+            PostgresExecutionLedger(
+                stale_runtime_url, current_witness
+            ).acquire_coordinator_generation()
+    finally:
+        with psycopg.connect(admin_url, autocommit=True) as connection:
+            connection.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+                (restore_database,),
+            )
+            connection.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(restore_database))
+            )
 
 
 def test_unreachable_database_fails_replay_state_closed() -> None:
