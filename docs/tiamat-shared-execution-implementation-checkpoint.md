@@ -15,6 +15,13 @@
 - Profile-pinned local execution service with atomic in-memory create/reserve, dispatch-before-send,
   scoped canonical-identity conflict, single dispatch, terminal replay, and synchronous settlement.
 - Fake-provider unit tests including concurrent same-key admission.
+- Private local FastAPI endpoint with bounded raw-body handling, required request headers, exact
+  authenticated response headers, no cookies, and release-header suppression on authentication and
+  unknown-route failures.
+- EdDSA workload JWT verification with provisioned key/issuer/subject/profile binding, fixed
+  audience/scope, temporal limits, request binding, and scoped atomic in-memory `jti` replay state.
+- Focused ordered-gate tests for invalid-token versus replay-store failure, step-6 digest mismatch,
+  malformed request identity, fresh-token idempotent replay, and release-information disclosure.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -24,13 +31,14 @@ production change was created.
 The in-memory store is a test adapter. It does not establish durable or multi-replica conformance.
 Before any deployment or real provider activation, Tier B must add and prove:
 
-1. the private FastAPI transport and exact ordered gate from §6.3;
-2. EdDSA workload JWT verification, request binding, and durable scoped `jti` replay state;
+1. complete the private FastAPI ordered gate from §6.3, including gross framing, duplicate-header,
+   cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
+2. replace the local atomic `jti` replay adapter with durable scoped replay state and prove rotation;
 3. a durable PostgreSQL execution/accounting store with leases, epochs, fencing, CAS transitions,
    ambiguous-commit lookup, reaping, tombstones, and partition blocking;
 4. signed profile, privacy-policy, grant, period, successor, revocation, and exposure admission;
 5. full RFC 8785 canonicalization and differential fixtures for identity and requested schemas;
-6. exact error-envelope/header behavior and tolerant-consumer tests against the bundle;
+6. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 7. executor-side validation of provider JSON against the caller's restricted schema;
 8. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
    failure injection;
