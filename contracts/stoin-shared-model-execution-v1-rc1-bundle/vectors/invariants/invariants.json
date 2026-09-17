@@ -1,0 +1,64 @@
+{
+  "invariants": [
+    {
+      "id": "I-01",
+      "rule": "messages",
+      "section": "§9.2",
+      "description": "one first system message; alternating user/assistant thereafter; final role user"
+    },
+    {
+      "id": "I-02",
+      "rule": "usage",
+      "section": "§9.5",
+      "description": "breakdown is paired and, when present, sums to generated_tokens"
+    },
+    {
+      "id": "I-03",
+      "rule": "cost",
+      "section": "§13",
+      "description": "settlement status and settled amount agree with reservation semantics"
+    },
+    {
+      "id": "I-04",
+      "rule": "error_receipts",
+      "section": "§16",
+      "description": "state-store and conflict errors omit receipts; paid post-dispatch errors include authoritative receipts"
+    },
+    {
+      "id": "I-05",
+      "rule": "restricted_schema",
+      "section": "§9.3.2",
+      "description": "restricted JSON Schema subset, depth, properties, enum, required, and numeric rules"
+    },
+    {
+      "id": "I-06",
+      "rule": "headers",
+      "section": "§6",
+      "description": "required request/response headers and disclosure rules"
+    },
+    {
+      "id": "I-07",
+      "rule": "jwt",
+      "section": "§7",
+      "description": "EdDSA claims, time bounds, request binding, and replay namespace"
+    },
+    {
+      "id": "I-08",
+      "rule": "idempotency",
+      "section": "§11",
+      "description": "canonical identity, stable execution id, single dispatch, replay and conflict"
+    },
+    {
+      "id": "I-09",
+      "rule": "exposure",
+      "section": "§13",
+      "description": "unique obligations and active/pending exposure bounds"
+    },
+    {
+      "id": "I-10",
+      "rule": "grant",
+      "section": "§13.1",
+      "description": "period applicability, successor selection, revocation, and no replenishment"
+    }
+  ]
+}

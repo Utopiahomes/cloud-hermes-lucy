@@ -1,0 +1,12 @@
+{
+  "id": "state.pos.timeout-pending-slot",
+  "valid": true,
+  "events": [
+    "create_reserved",
+    "dispatched_commit",
+    "provider_send",
+    "deadline",
+    "outcome_unknown",
+    "pending_reconciliation_slot_retained"
+  ]
+}

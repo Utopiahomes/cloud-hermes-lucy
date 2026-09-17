@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.stoin.local/shared-execution/v1/response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "request_id",
+    "execution_id",
+    "replayed",
+    "execution_profile_id",
+    "profile_release_id",
+    "output",
+    "finish_reason",
+    "usage",
+    "cost"
+  ],
+  "properties": {
+    "contract": {
+      "const": "stoin.inference.execute.response.v1"
+    },
+    "request_id": {
+      "$ref": "common.defs.json#/$defs/uuid4"
+    },
+    "execution_id": {
+      "$ref": "common.defs.json#/$defs/uuid4"
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "execution_profile_id": {
+      "$ref": "common.defs.json#/$defs/stableId"
+    },
+    "profile_release_id": {
+      "$ref": "common.defs.json#/$defs/releaseId"
+    },
+    "output": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "content"
+          ],
+          "properties": {
+            "mode": {
+              "const": "text"
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "content"
+          ],
+          "properties": {
+            "mode": {
+              "const": "json_schema"
+            },
+            "content": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "finish_reason": {
+      "const": "stop"
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "generated_tokens",
+        "output_tokens",
+        "reasoning_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "$ref": "common.defs.json#/$defs/nonnegative"
+        },
+        "generated_tokens": {
+          "$ref": "common.defs.json#/$defs/nonnegative"
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reasoning_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "cost": {
+      "$ref": "common.defs.json#/$defs/cost"
+    }
+  }
+}

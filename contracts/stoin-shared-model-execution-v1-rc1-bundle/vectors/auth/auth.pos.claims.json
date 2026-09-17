@@ -1,0 +1,16 @@
+{
+  "id": "auth.pos.claims",
+  "valid": true,
+  "claims": {
+    "iss": "https://homes.internal",
+    "sub": "stoin:synth:utopia-homes-prime",
+    "aud": "stoin:shared-model-execution",
+    "scope": "inference.execute",
+    "iat": 1000,
+    "nbf": 1000,
+    "exp": 1300,
+    "jti": "75f612d7-55ef-4e36-8fe3-c3ce550553b9",
+    "req": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  "now": 1010
+}

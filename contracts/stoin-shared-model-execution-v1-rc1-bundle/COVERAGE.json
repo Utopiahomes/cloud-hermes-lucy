@@ -1,0 +1,262 @@
+{
+  "contract": "Stoin Shared Model Execution Contract v1.0 RC1",
+  "scope": "Tier A deterministic wire and state-model artifact",
+  "acceptance_criteria": {
+    "1": {
+      "status": "covered"
+    },
+    "2": {
+      "status": "covered"
+    },
+    "3": {
+      "status": "covered"
+    },
+    "4": {
+      "status": "covered"
+    },
+    "5": {
+      "status": "covered"
+    },
+    "6": {
+      "status": "covered"
+    },
+    "7": {
+      "status": "covered"
+    },
+    "8": {
+      "status": "covered"
+    },
+    "9": {
+      "status": "covered"
+    },
+    "10": {
+      "status": "covered"
+    },
+    "11": {
+      "status": "covered"
+    },
+    "12": {
+      "status": "covered"
+    },
+    "13": {
+      "status": "executor-proof-required"
+    },
+    "14": {
+      "status": "executor-proof-required"
+    },
+    "15": {
+      "status": "covered"
+    },
+    "16": {
+      "status": "covered"
+    },
+    "17": {
+      "status": "covered"
+    },
+    "18": {
+      "status": "covered"
+    },
+    "19": {
+      "status": "covered"
+    },
+    "20": {
+      "status": "covered"
+    },
+    "21": {
+      "status": "covered"
+    },
+    "22": {
+      "status": "covered"
+    },
+    "23": {
+      "status": "executor-proof-required"
+    },
+    "24": {
+      "status": "executor-proof-required"
+    },
+    "25": {
+      "status": "covered"
+    },
+    "26": {
+      "status": "executor-proof-required"
+    },
+    "27": {
+      "status": "covered"
+    },
+    "28": {
+      "status": "covered"
+    },
+    "29": {
+      "status": "covered"
+    },
+    "30": {
+      "status": "covered"
+    },
+    "31": {
+      "status": "covered"
+    },
+    "32": {
+      "status": "covered"
+    },
+    "33": {
+      "status": "executor-proof-required"
+    },
+    "34": {
+      "status": "executor-proof-required"
+    },
+    "35": {
+      "status": "covered"
+    },
+    "36": {
+      "status": "covered"
+    },
+    "37": {
+      "status": "executor-proof-required"
+    },
+    "38": {
+      "status": "executor-proof-required"
+    },
+    "39": {
+      "status": "covered"
+    },
+    "40": {
+      "status": "covered"
+    },
+    "41": {
+      "status": "covered"
+    },
+    "42": {
+      "status": "covered"
+    },
+    "43": {
+      "status": "executor-proof-required"
+    },
+    "44": {
+      "status": "executor-proof-required"
+    },
+    "45": {
+      "status": "covered"
+    },
+    "46": {
+      "status": "covered"
+    },
+    "47": {
+      "status": "covered"
+    },
+    "48": {
+      "status": "covered"
+    },
+    "49": {
+      "status": "covered"
+    },
+    "50": {
+      "status": "covered"
+    },
+    "51": {
+      "status": "covered"
+    },
+    "52": {
+      "status": "executor-proof-required"
+    },
+    "53": {
+      "status": "executor-proof-required"
+    },
+    "54": {
+      "status": "executor-proof-required"
+    },
+    "55": {
+      "status": "covered"
+    },
+    "56": {
+      "status": "covered"
+    },
+    "57": {
+      "status": "covered"
+    },
+    "58": {
+      "status": "covered"
+    },
+    "59": {
+      "status": "executor-proof-required"
+    },
+    "60": {
+      "status": "executor-proof-required"
+    },
+    "61": {
+      "status": "executor-proof-required"
+    },
+    "62": {
+      "status": "covered"
+    },
+    "63": {
+      "status": "covered"
+    },
+    "64": {
+      "status": "covered"
+    },
+    "65": {
+      "status": "covered"
+    },
+    "66": {
+      "status": "executor-proof-required"
+    },
+    "67": {
+      "status": "executor-proof-required"
+    },
+    "68": {
+      "status": "covered"
+    },
+    "69": {
+      "status": "covered"
+    },
+    "70": {
+      "status": "covered"
+    },
+    "71": {
+      "status": "covered"
+    },
+    "72": {
+      "status": "covered"
+    },
+    "73": {
+      "status": "covered"
+    },
+    "74": {
+      "status": "covered"
+    },
+    "75": {
+      "status": "covered"
+    },
+    "76": {
+      "status": "covered"
+    },
+    "77": {
+      "status": "covered"
+    },
+    "78": {
+      "status": "covered"
+    },
+    "79": {
+      "status": "covered"
+    },
+    "80": {
+      "status": "covered"
+    },
+    "81": {
+      "status": "covered"
+    },
+    "82": {
+      "status": "covered"
+    },
+    "83": {
+      "status": "covered"
+    },
+    "84": {
+      "status": "covered"
+    },
+    "85": {
+      "status": "covered"
+    }
+  },
+  "notes": "Covered means represented by a schema, deterministic vector, or invariant. Executor-proof-required means the behavior needs a running stateful implementation, failure injection, timing observation, or external provider evidence; the bundle does not claim that proof."
+}

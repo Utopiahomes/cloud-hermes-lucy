@@ -1,0 +1,16 @@
+{
+  "id": "error.pos.route_not_found",
+  "schema": "error.schema.json",
+  "valid": true,
+  "rule": "§16 exact error tuple",
+  "document": {
+    "contract": "stoin.inference.execute.error.v1",
+    "correlation_id": "34a5eef4-b1f4-4aaa-b05d-19c3b31cb293",
+    "request_id": "7c606a49-357b-4d76-8678-b0f754c65016",
+    "error": {
+      "code": "route_not_found",
+      "message": "The requested execution route was not found.",
+      "retryable": false
+    }
+  }
+}

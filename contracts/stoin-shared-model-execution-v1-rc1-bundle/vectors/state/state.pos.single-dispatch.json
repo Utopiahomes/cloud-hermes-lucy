@@ -1,0 +1,11 @@
+{
+  "id": "state.pos.single-dispatch",
+  "valid": true,
+  "events": [
+    "create_reserved",
+    "lease_acquired",
+    "dispatched_commit",
+    "provider_send",
+    "completed_commit"
+  ]
+}

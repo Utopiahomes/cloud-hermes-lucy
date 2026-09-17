@@ -1,0 +1,12 @@
+{
+  "id": "state.neg.timeout-frees-slot",
+  "valid": false,
+  "events": [
+    "create_reserved",
+    "dispatched_commit",
+    "provider_send",
+    "deadline",
+    "outcome_unknown",
+    "exposure_slot_released"
+  ]
+}

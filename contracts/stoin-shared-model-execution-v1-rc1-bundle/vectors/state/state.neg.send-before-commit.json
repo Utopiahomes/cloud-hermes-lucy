@@ -1,0 +1,10 @@
+{
+  "id": "state.neg.send-before-commit",
+  "valid": false,
+  "events": [
+    "create_reserved",
+    "lease_acquired",
+    "provider_send",
+    "dispatched_commit"
+  ]
+}

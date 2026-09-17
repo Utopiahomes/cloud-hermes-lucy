@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.stoin.local/shared-execution/v1/request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "execution_profile_id",
+    "messages",
+    "output",
+    "limits"
+  ],
+  "properties": {
+    "contract": {
+      "const": "stoin.inference.execute.request.v1"
+    },
+    "execution_profile_id": {
+      "$ref": "common.defs.json#/$defs/stableId"
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          }
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "text"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "name",
+            "schema"
+          ],
+          "properties": {
+            "mode": {
+              "const": "json_schema"
+            },
+            "name": {
+              "$ref": "common.defs.json#/$defs/stableId"
+            },
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_output_tokens",
+        "max_cost_microusd"
+      ],
+      "properties": {
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "max_cost_microusd": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.stoin.local/shared-execution/v1/common.defs.json",
+  "$defs": {
+    "uuid4": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "releaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7E]+$"
+    },
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reserved_microusd",
+        "settled_microusd",
+        "settlement_status"
+      ],
+      "properties": {
+        "reserved_microusd": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "settled_microusd": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "settlement_status": {
+          "enum": [
+            "settled",
+            "pending_reconciliation",
+            "reservation_forfeited",
+            "settlement_overrun"
+          ]
+        }
+      }
+    }
+  }
+}

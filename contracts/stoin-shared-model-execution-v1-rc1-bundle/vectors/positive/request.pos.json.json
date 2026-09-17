@@ -1,0 +1,42 @@
+{
+  "id": "request.pos.json",
+  "schema": "request.schema.json",
+  "valid": true,
+  "rule": "§9 JSON Schema request",
+  "document": {
+    "contract": "stoin.inference.execute.request.v1",
+    "execution_profile_id": "utopia-homes.public-answer.generate.v1",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Use approved Utopia context only."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about Buttercup."
+      }
+    ],
+    "output": {
+      "mode": "json_schema",
+      "name": "guest-answer-candidate",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limits": {
+      "max_output_tokens": 900,
+      "max_cost_microusd": 2000
+    }
+  }
+}

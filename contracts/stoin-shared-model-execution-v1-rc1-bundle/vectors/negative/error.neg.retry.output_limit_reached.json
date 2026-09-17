@@ -1,0 +1,16 @@
+{
+  "id": "error.neg.retry.output_limit_reached",
+  "schema": "error.schema.json",
+  "valid": false,
+  "rule": "§16 exact retryability",
+  "document": {
+    "contract": "stoin.inference.execute.error.v1",
+    "correlation_id": "34a5eef4-b1f4-4aaa-b05d-19c3b31cb293",
+    "request_id": "7c606a49-357b-4d76-8678-b0f754c65016",
+    "error": {
+      "code": "output_limit_reached",
+      "message": "The model reached its output limit.",
+      "retryable": true
+    }
+  }
+}

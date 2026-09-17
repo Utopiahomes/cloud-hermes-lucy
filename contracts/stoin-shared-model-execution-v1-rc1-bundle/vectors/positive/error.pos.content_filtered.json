@@ -1,0 +1,16 @@
+{
+  "id": "error.pos.content_filtered",
+  "schema": "error.schema.json",
+  "valid": true,
+  "rule": "§16 exact error tuple",
+  "document": {
+    "contract": "stoin.inference.execute.error.v1",
+    "correlation_id": "34a5eef4-b1f4-4aaa-b05d-19c3b31cb293",
+    "request_id": "7c606a49-357b-4d76-8678-b0f754c65016",
+    "error": {
+      "code": "content_filtered",
+      "message": "The model response was filtered.",
+      "retryable": false
+    }
+  }
+}

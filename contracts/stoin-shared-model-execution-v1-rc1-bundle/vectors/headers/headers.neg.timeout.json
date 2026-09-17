@@ -1,0 +1,14 @@
+{
+  "id": "headers.neg.timeout",
+  "valid": false,
+  "kind": "request",
+  "headers": {
+    "Authorization": "Bearer opaque",
+    "X-Request-ID": "7c606a49-357b-4d76-8678-b0f754c65016",
+    "Idempotency-Key": "75f612d7-55ef-4e36-8fe3-c3ce550553b9",
+    "X-Execution-Timeout-Ms": "18001",
+    "X-Content-SHA256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "request.cost-limit",
+  "schema": "request.schema.json",
+  "valid": false,
+  "rule": "§9.5 cost bound",
+  "document": {
+    "contract": "stoin.inference.execute.request.v1",
+    "execution_profile_id": "utopia-homes.public-answer.generate.v1",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Use approved Utopia context only."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about Buttercup."
+      }
+    ],
+    "output": {
+      "mode": "text"
+    },
+    "limits": {
+      "max_output_tokens": 900,
+      "max_cost_microusd": 1000001
+    }
+  }
+}

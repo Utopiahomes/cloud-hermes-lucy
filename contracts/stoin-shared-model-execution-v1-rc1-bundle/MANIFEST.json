@@ -1,0 +1,544 @@
+{
+  "bundle": "stoin-shared-model-execution-v1-rc1-bundle",
+  "contract_digest": "a010c2cd5d501dd5586be3e1c54753ed7bf82505b9971d19c007e227bb9a75a8",
+  "bundle_digest": "5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85",
+  "file_count": 134,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sha256": "39cf0dd200876d3dd950c90bcd9d4edfc0aa9b78a6041cc4d48f28cf8a4081dc"
+    },
+    {
+      "path": "COVERAGE.json",
+      "sha256": "6b8e79a31225cad334b544ab9d463931072a1847fc2f3511ffa5eab7d66851a0"
+    },
+    {
+      "path": "README.md",
+      "sha256": "84d63902f4588c9d89ecaae78caef05535fdabc6ca59b4ff6fb7e4ea27cbf63e"
+    },
+    {
+      "path": "schemas/common.defs.json",
+      "sha256": "beed0b99dabc14a37dca85e0439eeb1765f907aa4b0ac8b12f929bd145694ca2"
+    },
+    {
+      "path": "schemas/error.schema.json",
+      "sha256": "25ec9fd0f558d367bab5f92ac0a537445b86c543d3fd83d8a86974450d657e5c"
+    },
+    {
+      "path": "schemas/request.schema.json",
+      "sha256": "5a72d5a785dc53628c79d2a0039c965aaf66b0f45e0154d1bfac72a682d980d1"
+    },
+    {
+      "path": "schemas/response.schema.json",
+      "sha256": "f98f7e93c7d94be11738c266c8b35283165173163f2cfa39e5e4bed97a245331"
+    },
+    {
+      "path": "tools/build_bundle.py",
+      "sha256": "f968bc39e4a535ed644a875218367a321cd2f86dfcaed295e497bd64c106d5c4"
+    },
+    {
+      "path": "tools/compute_digest.py",
+      "sha256": "1436a703918fa4f6e92d67d786b7e78245246ec3c0b45b40647f157f84e6c68e"
+    },
+    {
+      "path": "tools/requirements.txt",
+      "sha256": "136f646cfe33f6a805466bf9cb14831339d487b63a2533c961bee2d6a87a659e"
+    },
+    {
+      "path": "tools/verify_bundle.py",
+      "sha256": "0aea7433bdac60c91f77a2bd01ed4d6998e3bd1537effed45e36894e5afc5ac6"
+    },
+    {
+      "path": "vectors/auth/auth.neg.long-life.json",
+      "sha256": "6f51ae0a175ab834e14c8fc05f24daa97cdf5fbe0a0f8e555d57d2098a998a04"
+    },
+    {
+      "path": "vectors/auth/auth.neg.scope.json",
+      "sha256": "6f494512657c0c4c57aea24419b8848114da13f84fc6f63b110f67abc440f27c"
+    },
+    {
+      "path": "vectors/auth/auth.pos.claims.json",
+      "sha256": "efdd3cec08dc511ce9f9ca378276b5bd0bd7351711381652d2a89f92eb2ad247"
+    },
+    {
+      "path": "vectors/headers/headers.neg.cookie.json",
+      "sha256": "cef9a7694f7204f2f440fff6b2dafabd499b2e23b349c87f82e3d56288a9f73b"
+    },
+    {
+      "path": "vectors/headers/headers.neg.timeout.json",
+      "sha256": "86938bd01ed5a3fb9452363f254b5145db71f9537175c9ea0dce946dc505a1fd"
+    },
+    {
+      "path": "vectors/headers/headers.pos.request.json",
+      "sha256": "03b2686a0f11a2fa9a1cb2499dcf3210a9545dd4d57844904c8b384e0ef3f83a"
+    },
+    {
+      "path": "vectors/headers/headers.pos.success.json",
+      "sha256": "4914a559a058e8f665d0b6949f42c3709777d33c524a1560b8d73a740825c311"
+    },
+    {
+      "path": "vectors/invariants/inv.cost.neg.over.json",
+      "sha256": "436099220b2700ba8d9a1a83108aa41885be2fd5143ec2d2222572fe8ae8bbd0"
+    },
+    {
+      "path": "vectors/invariants/inv.cost.pos.pending.json",
+      "sha256": "398105da5c4ab62a82b0f867669dc5d8fd56518b32d526f41b00fd855c6996a9"
+    },
+    {
+      "path": "vectors/invariants/inv.cost.pos.settled.json",
+      "sha256": "6a189b9b98d71581702d6560c2a441961b866131b5158c6f5831e037a17bc411"
+    },
+    {
+      "path": "vectors/invariants/inv.messages.neg.adjacent.json",
+      "sha256": "2036ded773de5af96752220a05150d98c040d6a5309c9b10209fe7841c3350fa"
+    },
+    {
+      "path": "vectors/invariants/inv.messages.neg.final.json",
+      "sha256": "3709465411c4d9fc227c88f5c0e3d3c422f3ffb0fa5e49f4e7b11e146484fe5d"
+    },
+    {
+      "path": "vectors/invariants/inv.messages.pos.json",
+      "sha256": "38a680bd648bfa8df3990ea26a2319d69a2c4aeaf8fc38b40bb138ab010e853f"
+    },
+    {
+      "path": "vectors/invariants/inv.usage.neg.partial-null.json",
+      "sha256": "2cf7f96c30dc5ac2a0e01568afd48692d335d325f24e1079a0f43edcdb458f00"
+    },
+    {
+      "path": "vectors/invariants/inv.usage.neg.sum.json",
+      "sha256": "1c52b99f9c69fc5901c0cb23ad522871e4fc4b36ff84ae0f3afcacb5a1340aae"
+    },
+    {
+      "path": "vectors/invariants/inv.usage.pos.combined.json",
+      "sha256": "2d45e05ffbb22d9b2cb77f63faf69e9add1d26c9f22a78736fa20468e3ff0f5c"
+    },
+    {
+      "path": "vectors/invariants/inv.usage.pos.json",
+      "sha256": "e1d83aa0943c01ee9e1545478e78aeefee92f665dc3dfb2b9fe9b93223b0e4ce"
+    },
+    {
+      "path": "vectors/invariants/invariants.json",
+      "sha256": "7c2fbab2c91619ba9c78c5ce811e699dee9c0ebe7ad36c644f82268407cab743"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.authentication_failed.json",
+      "sha256": "a4df7e2f9eeb22cdfa47a9b26cec21b19b0038067a22886c8633ca168dc35fb5"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.authentication_state_unavailable.json",
+      "sha256": "ea6a575aa254ab5688184dacb38bfad01e76f3edac49094977aee678d70f299b"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.capability_forbidden.json",
+      "sha256": "d8f86f0e9388c09d19ab7ccb214c01fd774557d53108def38407a49a89853ba3"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.content_filtered.json",
+      "sha256": "7621c14618cc5476828d6f406ced12b19623f21778ea44f08b283ee8b994828e"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.cost_ceiling_insufficient.json",
+      "sha256": "557c68d2887007e4294d41913cb3be0bc9628adecd47af6a4c7383803c64da86"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.cost_settlement_violation.json",
+      "sha256": "5bc696dba713b90bdb899ffc1e0591ec431768016dcece0d5d036c1f9c5195f6"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.deadline_exceeded.json",
+      "sha256": "91094209161fed35d0860ae7ba688634f8f3506942307cddc991541bceedd3a3"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.execution_aborted.json",
+      "sha256": "64052f6b3b4874cd45b792d68a16965414e50bcf1dce58fd1c478f2273314140"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.execution_invalidated.json",
+      "sha256": "d30fbddc798332ab2b4c74f2eb536c86ebfb534f84bf223ea16e19c4dd6e449a"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.execution_outcome_unknown.json",
+      "sha256": "a61303597a637744d584d6ae0e1bf9e3a9a812c5a227aa1b11fa0ebdd740a995"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.idempotency_conflict.json",
+      "sha256": "f2dcb9a35c1e4ba7e7ee3aa50397469be85b88b5605799667ec8694638a5008b"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.idempotency_recovery_unavailable.json",
+      "sha256": "e0213d1b2368d0d41f66f68331e163fd58836d71792f7ce5ab7b444e9e8a1e4e"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.invalid_request.json",
+      "sha256": "4591da92175144a2840c46e381e0b520c1b6810f497e6cf8a4ca9749b98a1a45"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.method_not_allowed.json",
+      "sha256": "a54bcefe918e7dc1e06683c0d15c72a96d0df96f936b369df0dad8749c8e1b20"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.output_contract_unsupported.json",
+      "sha256": "7176130fba8039acc3fb00055d25a8cd3f20e1ee44bc660a7c3eb51179fb4391"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.output_limit_reached.json",
+      "sha256": "cd025c19cf809aec1bec1a3089e6372f64380bf1481c4b3a4cf457c71a50f6f7"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.privacy_route_unavailable.json",
+      "sha256": "5d003bad5d399355ed5b12be14cf571313fbacaf09322ae2e14686d11c99048c"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.provider_execution_failed.json",
+      "sha256": "bb5daf45d9f18bfa7a6e9620ea8e2905c717b84ad697ba19686613c76bb4d58c"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.provider_response_invalid.json",
+      "sha256": "bc1ac2f210206a0da85d60f86822490b9cbb123bebcde32f5bb5a13ce0bed75b"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.provider_response_too_large.json",
+      "sha256": "6f56ff22e380be29ed0710290384dd305dc6e6872b3c9d732afb7aa9add03271"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.rate_limited.json",
+      "sha256": "9ac919c0cd1616a47990d714c33d203eef29585171422e5e69352d1a497a4ce0"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.request_in_progress.json",
+      "sha256": "a37be75e9334fdb96db7523f8bb4bfc8a51cc0d249c34aa76058818058d55b0d"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.request_too_large.json",
+      "sha256": "b59253d1d310414dd213e3d8c437f8d46603689549a365b4fe2a590c7bab022f"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.response_media_not_acceptable.json",
+      "sha256": "de250397bcf70f36fc6cb5a67bfe0bbbdc7fa16642903797034a9cd08403d108"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.route_not_found.json",
+      "sha256": "f59bf4a164307b8007294c06f26b55efb619fd0099db8ff2d331ea56a6e6832e"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.spending_authority_exhausted.json",
+      "sha256": "f342a2b362a2ab42ec85a34ec8367fedb59dc9e43ac5e3f789de0dd0d1000aca"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.state_store_unavailable.json",
+      "sha256": "128e0796dd1946a2caf28d1902411f1190db513ee6f349509615afcba42f8fb9"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.temporarily_unavailable.json",
+      "sha256": "f234bec534e7d5505d97f682258e2daa5e4bc94d5e7669752156f26dbd98251a"
+    },
+    {
+      "path": "vectors/negative/error.neg.message.unsupported_media_type.json",
+      "sha256": "871fc781b0443f4ed16f3bbaed182eb4f62115310b633182e89cb4e1ce2591fc"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.authentication_failed.json",
+      "sha256": "e3df143716d07c02643c20895a56c5d1f94c308ae3f576b739fde58062ad195c"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.authentication_state_unavailable.json",
+      "sha256": "60a1671e3e9e2c44c41ccaca9502f9eeb8f24793fb209301db1b91c71688b183"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.capability_forbidden.json",
+      "sha256": "958760854d3a2556a5f7256ef82c43368f72fa9b0282d2e02b094b35e83060c6"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.content_filtered.json",
+      "sha256": "955e54c8b645fc7df473ef141f9c6bb738089c5f506bf0cda9671f314699764c"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.cost_ceiling_insufficient.json",
+      "sha256": "e11f29f29af69b85cb84313976ecb1bdfc926b9833337d08fa90e25daac0264e"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.cost_settlement_violation.json",
+      "sha256": "5d84b0686756304e0fe8ab1084ab98d19faae610e186262f067bc5f69dd24c4b"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.deadline_exceeded.json",
+      "sha256": "1415ab527bad4c36d75ff34a508e8a527cda18f0f64a39c8c9dc5b004ec31552"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.execution_aborted.json",
+      "sha256": "a6174ee59890b850b8e18c917b2750af4de6489a57be6c2b34cf5a981359a6e0"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.execution_invalidated.json",
+      "sha256": "7375dbcd7d6ea14fa18c8a9e557e31f42dad96c617e0c596357ef41bb05a0383"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.execution_outcome_unknown.json",
+      "sha256": "c59e011bfca5997da1c4e27b53efe40b686356a0277c6a2d5810feedaa089b96"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.idempotency_conflict.json",
+      "sha256": "7da772e1c8335ef09131504e0b180b3d5215787638cfda9c29af580f74b9b172"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.idempotency_recovery_unavailable.json",
+      "sha256": "735d045847d38ca3ba30a17f867dac567c207b747f65fd2117941367bc1c8b3d"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.invalid_request.json",
+      "sha256": "4bbf0b9e745ba973eb7bd4652f16331047dc180d55197eb8979fc42fb7c29551"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.method_not_allowed.json",
+      "sha256": "ff160ba924cec2412da9c7e5f7df8c1398f85d180484f31ec55701b498f21ced"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.output_contract_unsupported.json",
+      "sha256": "382b1fbf5c18f8e39c1a4c8d7b714b67c00dd613cea26bc3eaf9af8734b60837"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.output_limit_reached.json",
+      "sha256": "64ce2575efdc436a07f9c067c54b92046aaf93d0a966c2e0371f5f1b3604b936"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.privacy_route_unavailable.json",
+      "sha256": "7f964312869e9b415ed687a6f7191743e2931dae6e674c9a4fb72c169e3daee1"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.provider_execution_failed.json",
+      "sha256": "12906fe4f48f1e3fef34579167a204fd79169484daf74b6ace0a47cb8e8c9152"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.provider_response_invalid.json",
+      "sha256": "83933814330698cb2c957571a1811a37e66a2d25a16e7ad9701ddccad704407b"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.provider_response_too_large.json",
+      "sha256": "005624f35055d751ee502ac15af88709804cb94653c6ba7e654c7413363db211"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.rate_limited.json",
+      "sha256": "9e8d2bca7531c10bd0be5c74d02112a007af77e1771cfd9ae0279d0b5ab9834c"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.request_in_progress.json",
+      "sha256": "464386a2c180a3d9b2e0b40c5f081f78c1014f124311ad4b97d39747af0790a5"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.request_too_large.json",
+      "sha256": "7f333376f27e13e2824221b12b80fef9b9ebe41b36164fe9c1eb082a845a9f91"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.response_media_not_acceptable.json",
+      "sha256": "b8705c44a6300427ceb029d99e9fe48c66acd4dc58518d760c59e89d71e3d26e"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.route_not_found.json",
+      "sha256": "77d777318a4edd0ba5ce760ca75bc03be77afbd76284106e2f3cf68b65dcef02"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.spending_authority_exhausted.json",
+      "sha256": "e5ebecb87e5f25ddc0aabbc36a49e92ee85892d2cc6e36b62e77b11780e3cb8f"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.state_store_unavailable.json",
+      "sha256": "5239df291ccceed644541ded3a25aafed6685434cc2f78c5040dfbfe643a1f3e"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.temporarily_unavailable.json",
+      "sha256": "a3cc116df0fdda4a83e200820d8fd2941153adb1779fe59902e98fbec6da1ce8"
+    },
+    {
+      "path": "vectors/negative/error.neg.retry.unsupported_media_type.json",
+      "sha256": "1039f696a4d4fc4a4bead89ff10e3fdb462e56d122cbe780e6924621f137cf2c"
+    },
+    {
+      "path": "vectors/negative/request.bad-contract.json",
+      "sha256": "eb43577310e598db2e6cb121427bce958ce343f46185b98c904854dd31234f07"
+    },
+    {
+      "path": "vectors/negative/request.cost-limit.json",
+      "sha256": "a3c2dc329dacdeefad74aa6fe605b48a47c23177ae2ae815bdcdae3c701b7e1e"
+    },
+    {
+      "path": "vectors/negative/request.messages-short.json",
+      "sha256": "54c0504c85971ea31ff79adc2f2d0bc406b6e88d690b1c51256d4b8297bf12e6"
+    },
+    {
+      "path": "vectors/negative/request.output-extra.json",
+      "sha256": "b8b631378cbf61741a9a3fd7536a695f970c82973ebe89097d432e28d9484f2f"
+    },
+    {
+      "path": "vectors/negative/request.output-limit.json",
+      "sha256": "8c52e7f7f67607ed9bd762af050e1e59649d1086868d0514bdc5d17b230970d2"
+    },
+    {
+      "path": "vectors/negative/request.unknown.json",
+      "sha256": "c07e40a284f5b5a88df592a83644959ee99f667543d5f618153635dd125914ca"
+    },
+    {
+      "path": "vectors/negative/response.bad-finish.json",
+      "sha256": "6e06f313dd3467eb2ad23e741789bc8a9be98dd7500f05a581c5649af9fb957e"
+    },
+    {
+      "path": "vectors/negative/response.bad-uuid.json",
+      "sha256": "94ce2f1e36bfd6790d7aeb98993402ea1c9e3d19c5f51d4f3650b5b9afd90345"
+    },
+    {
+      "path": "vectors/negative/response.mode-shape.json",
+      "sha256": "d600f3fd4718074d7ac56f568f770435d541d869b171f1d6582812c7d29faf9c"
+    },
+    {
+      "path": "vectors/negative/response.unknown.json",
+      "sha256": "a00985919ce40e6992a56698144872dbb398266938c7d066622efa10fd71e651"
+    },
+    {
+      "path": "vectors/positive/error.pos.authentication_failed.json",
+      "sha256": "0e9f66641a5cbc6d14eb6c56478bb937581142f1adc53266c160e1823e1c834f"
+    },
+    {
+      "path": "vectors/positive/error.pos.authentication_state_unavailable.json",
+      "sha256": "4a4e67d9c2c41e75335e128ae0411da824ee6d1c9584ecb1106014d19d91a524"
+    },
+    {
+      "path": "vectors/positive/error.pos.capability_forbidden.json",
+      "sha256": "d563de034bb408c51abda7b07a61000975c6585cdd7f9f5614de5da10fb7936c"
+    },
+    {
+      "path": "vectors/positive/error.pos.content_filtered.json",
+      "sha256": "ac22bffdfe461c92d7cabea47b6d43ca467455147d948d225996cf22e6043194"
+    },
+    {
+      "path": "vectors/positive/error.pos.cost_ceiling_insufficient.json",
+      "sha256": "3c9d4c6582d4ed57d11e1943c1e0777dc5a39d6e420bdea22120c0ee940cf702"
+    },
+    {
+      "path": "vectors/positive/error.pos.cost_settlement_violation.json",
+      "sha256": "06f64fa5b54cbb216503a460a4004860aa06c3e3074a2b944f50f4f61f3b6b20"
+    },
+    {
+      "path": "vectors/positive/error.pos.deadline_exceeded.json",
+      "sha256": "1bb880dc9a47ee2e3251beafec5be30fb2c2252b56476960f3cfa96e3bd0b76d"
+    },
+    {
+      "path": "vectors/positive/error.pos.execution_aborted.json",
+      "sha256": "3fe76ed7c4bea979061e420b0f5c7ebe8f69244bfd310bb01e0488c07c3fd6d7"
+    },
+    {
+      "path": "vectors/positive/error.pos.execution_invalidated.json",
+      "sha256": "69138eeb24bdc64c05beff91cc590810e4859f94368baa390729ace7dafb9040"
+    },
+    {
+      "path": "vectors/positive/error.pos.execution_outcome_unknown.json",
+      "sha256": "4611e19d7de67ef8f278500d58b4b083a5146d7549586bcb4022c81fae8f016c"
+    },
+    {
+      "path": "vectors/positive/error.pos.idempotency_conflict.json",
+      "sha256": "720b47953fdc945b747c30e952e347ea739d6db54daa322954d05d2fdb690a1f"
+    },
+    {
+      "path": "vectors/positive/error.pos.idempotency_recovery_unavailable.json",
+      "sha256": "2b96f91f9c2002b4435807d86b714758b7b77074c2e2a0f61a775d1543f638f2"
+    },
+    {
+      "path": "vectors/positive/error.pos.invalid_request.json",
+      "sha256": "ca7d731ecaee3ced89efb88e368c0561376f2d0bce3a359fcab6ad6ffbd01207"
+    },
+    {
+      "path": "vectors/positive/error.pos.method_not_allowed.json",
+      "sha256": "1c554e6c2adba4d259e422b7e966320af2aba27719c64f695ca7e861165fc076"
+    },
+    {
+      "path": "vectors/positive/error.pos.output_contract_unsupported.json",
+      "sha256": "80f53429da3a4a941cfa374114d6609a09d0b6cecf62140df4434f0e7775ce4f"
+    },
+    {
+      "path": "vectors/positive/error.pos.output_limit_reached.json",
+      "sha256": "65f0521d943146d2123fada2b64df6625eda3a5c19a024fd501221e65d8970a9"
+    },
+    {
+      "path": "vectors/positive/error.pos.privacy_route_unavailable.json",
+      "sha256": "e9ebb1a02bf628f85bd2daec8c9ec94735967533c3d4030cb157629902d4f0ca"
+    },
+    {
+      "path": "vectors/positive/error.pos.provider_execution_failed.json",
+      "sha256": "70f459ce415b6f27b396d6dea871b75096d2d23c06c90997084b7c55f033a173"
+    },
+    {
+      "path": "vectors/positive/error.pos.provider_response_invalid.json",
+      "sha256": "9ec2267c95d5ef6b76b87a0e14e1f026b4714693f46ec35b957994bf18f45f19"
+    },
+    {
+      "path": "vectors/positive/error.pos.provider_response_too_large.json",
+      "sha256": "cfc766c9d978b22c473739e4d904a917199db3a983b70b0add5ce73116ef21c5"
+    },
+    {
+      "path": "vectors/positive/error.pos.rate_limited.json",
+      "sha256": "3b3638fa972a6de0850d20345ac779d4ba84eff91b08ba84e6f62a971579bd7d"
+    },
+    {
+      "path": "vectors/positive/error.pos.request_in_progress.json",
+      "sha256": "124ed2709278ee4e96b6d59d8309420067c7e4d81aedc5084868275e9524df0a"
+    },
+    {
+      "path": "vectors/positive/error.pos.request_too_large.json",
+      "sha256": "087ffd9a705c64a523888634858a376b7a74ca0482885260eba528c771369f5e"
+    },
+    {
+      "path": "vectors/positive/error.pos.response_media_not_acceptable.json",
+      "sha256": "7505b2f2e1b8e8b2029b5acde6bf8c87a3330cb6b1c2dbc46b30476ef0a8ddbb"
+    },
+    {
+      "path": "vectors/positive/error.pos.route_not_found.json",
+      "sha256": "8446f7063258e948da7b98e05e1c3d7474595751a6160a3d3a212b2cc3f4c992"
+    },
+    {
+      "path": "vectors/positive/error.pos.spending_authority_exhausted.json",
+      "sha256": "40de18a39fe7f1efab80cc987908b994e6c4cb777036dd5ef8ea5e6812e8a314"
+    },
+    {
+      "path": "vectors/positive/error.pos.state_store_unavailable.json",
+      "sha256": "d8e3ac2348a1ac38946c0da8965fa125e501170cddb3cc6619015b24936d2d82"
+    },
+    {
+      "path": "vectors/positive/error.pos.temporarily_unavailable.json",
+      "sha256": "464014017fcdee37e6d381b8d4e2c65e3b2ce1c268307f821a39174292d490b3"
+    },
+    {
+      "path": "vectors/positive/error.pos.unsupported_media_type.json",
+      "sha256": "101810ce4394f0124ccaeba5305ed38fb6a8b8e0f22cb22a0afa765464280ecd"
+    },
+    {
+      "path": "vectors/positive/request.pos.json.json",
+      "sha256": "c047b3016953f593e61fed26cab14d1a95218d05b8426e4494c8fd59776342d5"
+    },
+    {
+      "path": "vectors/positive/request.pos.text.json",
+      "sha256": "d646fde17ea4b3b94b14f76b790631688cd747a637a38b1d017ae8557091baf0"
+    },
+    {
+      "path": "vectors/positive/response.pos.json.json",
+      "sha256": "daeb4cbc801f9810ba9bf7147a61d013745f80b26391850c6586e5316f2ee959"
+    },
+    {
+      "path": "vectors/positive/response.pos.text.json",
+      "sha256": "c68bb0cae68f5474fbcecda343d7a68d0b2f194663619c72bd0f90a96cf810cc"
+    },
+    {
+      "path": "vectors/state/state.neg.send-before-commit.json",
+      "sha256": "b63d376f4e9a360a723adc3d8b09950f7794a7018b624124b993fd51839fff2c"
+    },
+    {
+      "path": "vectors/state/state.neg.timeout-frees-slot.json",
+      "sha256": "fbdb05a0a3a45b7f2890c0b641f42f3e12be8b670cb1b4deeb1345ae41535a94"
+    },
+    {
+      "path": "vectors/state/state.pos.single-dispatch.json",
+      "sha256": "2c1a1f0400712e0ed79652752233cff0b463194ac23cfc3625c4b47836317a0a"
+    },
+    {
+      "path": "vectors/state/state.pos.timeout-pending-slot.json",
+      "sha256": "0106212c30803c4dda65a4993cca15e7bc41e9f1010ddefc46bd48696738cc07"
+    }
+  ]
+}
