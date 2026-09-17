@@ -8,6 +8,7 @@ cannot silently resume spending under a newer recovery generation.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -173,9 +174,16 @@ class PostgresJtiReplayStore:
 class PostgresExecutionLedger:
     """Atomic admission, fencing, settlement, and recovery over PostgreSQL."""
 
-    def __init__(self, database_url: str, witness: RecoveryWitness) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        witness: RecoveryWitness,
+        *,
+        transaction_probe: Callable[[str, psycopg.Connection[Any]], None] | None = None,
+    ) -> None:
         self._database_url = database_url
         self._witness = witness
+        self._transaction_probe = transaction_probe
 
     def acquire_coordinator_generation(self) -> int:
         """Fence an older coordinator before this process may acquire execution leases."""
@@ -428,6 +436,7 @@ class PostgresExecutionLedger:
                 "dispatched_at = clock_timestamp(), "
                 "lease_expires_at = execution_deadline + interval '30 seconds',"
             ),
+            probe_name="dispatch_before_commit",
         )
 
     def settle_terminal(
@@ -640,6 +649,7 @@ class PostgresExecutionLedger:
                             provider_cost_reference_digest,
                         ),
                     )
+                    self._probe_transaction("settlement_before_commit", connection)
                     return LedgerRecord.from_row(row)
         except (DispatchBlocked, DurableFenceRejected):
             raise
@@ -1348,6 +1358,7 @@ class PostgresExecutionLedger:
         record_generation: int,
         owner_id: UUID,
         extra_sql: str,
+        probe_name: str | None = None,
     ) -> LedgerRecord:
         try:
             with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
@@ -1394,6 +1405,8 @@ class PostgresExecutionLedger:
                     ).fetchone()
                     if row is None:
                         raise DurableFenceRejected
+                    if probe_name is not None:
+                        self._probe_transaction(probe_name, connection)
                     return LedgerRecord.from_row(row)
         except (DispatchBlocked, DurableFenceRejected):
             raise
@@ -1416,6 +1429,14 @@ class PostgresExecutionLedger:
             and int(row["coordinator_generation"]) != coordinator_generation
         ):
             raise DurableFenceRejected
+
+    def _probe_transaction(
+        self, name: str, connection: psycopg.Connection[Any]
+    ) -> None:
+        """Invoke an opt-in test probe while the transaction is still open."""
+
+        if self._transaction_probe is not None:
+            self._transaction_probe(name, connection)
 
 
 def _set_scope(connection: psycopg.Connection[Any], scope: LedgerScope) -> None:

@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from threading import Event
+from typing import Any
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -18,6 +20,7 @@ from lucy.shared_execution.postgres_ledger import (
     DurableFenceRejected,
     LedgerAdmission,
     LedgerScope,
+    LedgerUnavailable,
     PostgresExecutionLedger,
     PostgresJtiReplayStore,
     RecoveryWitness,
@@ -155,7 +158,7 @@ def _admission(
     *,
     key_digest: str,
     identity_digest: str = "c" * 64,
-    owner_id=None,
+    owner_id: UUID | None = None,
 ) -> LedgerAdmission:
     return LedgerAdmission(
         idempotency_key_digest=key_digest,
@@ -247,6 +250,148 @@ def test_concurrent_first_admission_creates_exactly_one_record(
         results = tuple(pool.map(lambda _index: admit(), range(2)))
     assert {execution_id for execution_id, _created in results} == {results[0][0]}
     assert sorted(created for _execution_id, created in results) == [False, True]
+
+
+def test_connection_loss_inside_dispatch_transaction_rolls_back_state(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    base_ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = base_ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = base_ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="0" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    reached, release = Event(), Event()
+    backend_pid: list[int] = []
+
+    def probe(name: str, connection: psycopg.Connection[Any]) -> None:
+        if name != "dispatch_before_commit":
+            return
+        row = connection.execute("SELECT pg_backend_pid()").fetchone()
+        assert row is not None
+        backend_pid.append(int(row["pg_backend_pid"]))
+        reached.set()
+        assert release.wait(timeout=10)
+
+    faulted_ledger = PostgresExecutionLedger(
+        runtime_url, witness, transaction_probe=probe
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            faulted_ledger.dispatch,
+            scope,
+            admitted.execution_id,
+            coordinator_generation=coordinator,
+            record_generation=admitted.record_generation,
+            owner_id=owner,
+        )
+        assert reached.wait(timeout=10)
+        with psycopg.connect(owner_url, autocommit=True) as connection:
+            assert connection.execute(
+                "SELECT pg_terminate_backend(%s)", (backend_pid[0],)
+            ).fetchone() == (True,)
+        release.set()
+        with pytest.raises(LedgerUnavailable):
+            future.result(timeout=10)
+    record, created = base_ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="0" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    assert not created
+    assert record.state == "admitted"
+
+
+def test_connection_loss_inside_settlement_rolls_back_all_accounting(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    base_ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = base_ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = base_ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="f" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = base_ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    reached, release = Event(), Event()
+    backend_pid: list[int] = []
+
+    def probe(name: str, connection: psycopg.Connection[Any]) -> None:
+        if name != "settlement_before_commit":
+            return
+        row = connection.execute("SELECT pg_backend_pid() ").fetchone()
+        assert row is not None
+        backend_pid.append(int(row["pg_backend_pid"]))
+        reached.set()
+        assert release.wait(timeout=10)
+
+    faulted_ledger = PostgresExecutionLedger(
+        runtime_url, witness, transaction_probe=probe
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            faulted_ledger.settle_terminal,
+            scope,
+            dispatched.execution_id,
+            coordinator_generation=coordinator,
+            record_generation=dispatched.record_generation,
+            owner_id=owner,
+            state="completed",
+            settled_microusd=2_500,
+            provider_cost_reference_digest="4" * 64,
+        )
+        assert reached.wait(timeout=10)
+        with psycopg.connect(owner_url, autocommit=True) as connection:
+            assert connection.execute(
+                "SELECT pg_terminate_backend(%s)", (backend_pid[0],)
+            ).fetchone() == (True,)
+        release.set()
+        with pytest.raises(LedgerUnavailable):
+            future.result(timeout=10)
+
+    with psycopg.connect(owner_url) as connection:
+        execution = connection.execute(
+            "SELECT state, settlement_status, settled_microusd "
+            "FROM tiamat.execution_records WHERE execution_id = %s",
+            (dispatched.execution_id,),
+        ).fetchone()
+        assert execution == ("dispatched", "pending_reconciliation", None)
+        partition = connection.execute(
+            """
+            SELECT period_spend_microusd, contingency_spend_microusd,
+                   external_liability_microusd
+            FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND realm = %s
+              AND partition_id = %s
+            """,
+            (scope.environment, scope.caller_id, scope.realm, scope.partition_id),
+        ).fetchone()
+        assert partition == (0, 0, 0)
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.route_rate_quarantines "
+            "WHERE source_execution_id = %s",
+            (dispatched.execution_id,),
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE execution_id = %s",
+            (dispatched.execution_id,),
+        ).fetchone() == (0,)
 
 
 def test_failover_fences_old_coordinator_and_adopts_only_after_lease_expiry(

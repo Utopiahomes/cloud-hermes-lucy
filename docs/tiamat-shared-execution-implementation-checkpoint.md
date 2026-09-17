@@ -58,6 +58,9 @@
 - Content-free financial events survive eligible idempotency-row expiry. Ordinary settled records
   retain the ten-minute contract window; unresolved forfeitures retain a 30-day tombstone before
   expiry, while their accounting event remains.
+- Real PostgreSQL backend termination while dispatch and settlement transactions are open proves
+  that execution state, spend, contingency, quarantine, and financial-event writes roll back as one
+  unit. The separately tested unclear-commit resolver covers the case where commit may have landed.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -71,18 +74,15 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. inject connection loss inside dispatch and settlement transactions rather than only around
-   stable transition boundaries; durable overrun/quarantine, tombstone expiry, and partition blocking
-   are implemented and locally proven;
-4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
+3. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
-5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
-6. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
-7. finish differential and adversarial coverage for the restricted-schema evaluator;
-8. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
+4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
+5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
+6. finish differential and adversarial coverage for the restricted-schema evaluator;
+7. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
    failure injection;
-9. a separately authorized provider adapter and provider/model/rate selection;
-10. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
+8. a separately authorized provider adapter and provider/model/rate selection;
+9. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
 
 The existing Homes corpus remains local-test-only and is not authorized for provider use.
 
@@ -97,6 +97,6 @@ At local commit preparation on 2026-09-17:
 - Strict mypy: passed across 132 source files.
 - Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL
   offline SQL.
-- Focused durable-ledger tests: seven unit tests and 14 real PostgreSQL integration tests passed using
+- Focused durable-ledger tests: seven unit tests and 16 real PostgreSQL integration tests passed using
   a loopback-only, tmpfs-backed PostgreSQL 16 container with synthetic credentials. This establishes
   local database behavior, not production replication or failover.
