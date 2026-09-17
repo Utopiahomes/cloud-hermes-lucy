@@ -68,6 +68,8 @@ class LedgerAdmission:
     contract_major: int
     execution_profile_id: str
     profile_release_id: str
+    provider_route_id: str
+    rate_release_id: str
     owner_id: UUID
     execution_deadline: datetime
     eligibility_generation: int
@@ -82,6 +84,8 @@ class LedgerAdmission:
             or self.contract_major < 1
             or not self.execution_profile_id
             or not self.profile_release_id
+            or not 1 <= len(self.provider_route_id) <= 128
+            or not 1 <= len(self.rate_release_id) <= 128
             or self.execution_deadline.tzinfo is None
             or self.eligibility_generation < 1
             or self.reserved_microusd < 1
@@ -103,6 +107,8 @@ class LedgerRecord:
     settlement_status: str
     settled_microusd: int | None
     failure_code: str | None
+    provider_route_id: str
+    rate_release_id: str
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> LedgerRecord:
@@ -119,13 +125,16 @@ class LedgerRecord:
             settlement_status=row["settlement_status"],
             settled_microusd=row["settled_microusd"],
             failure_code=row["failure_code"],
+            provider_route_id=row["provider_route_id"],
+            rate_release_id=row["rate_release_id"],
         )
 
 
 _RECORD_COLUMNS = """
 execution_id, identity_digest, state, coordinator_generation, record_generation,
 lease_owner_id, lease_expires_at, execution_deadline, reserved_microusd,
-settlement_status, settled_microusd, failure_code
+settlement_status, settled_microusd, failure_code,
+provider_route_id, rate_release_id
 """
 
 
@@ -284,6 +293,25 @@ class PostgresExecutionLedger:
                         if record.identity_digest != admission.identity_digest:
                             raise DurableIdempotencyConflict
                         return record, False
+                    quarantine = connection.execute(
+                        """
+                        SELECT 1
+                        FROM tiamat.route_rate_quarantines
+                        WHERE environment = %s AND caller_id = %s AND realm = %s
+                          AND partition_id = %s AND provider_route_id = %s
+                          AND rate_release_id = %s AND cleared_at IS NULL
+                        """,
+                        (
+                            scope.environment,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.partition_id,
+                            admission.provider_route_id,
+                            admission.rate_release_id,
+                        ),
+                    ).fetchone()
+                    if quarantine is not None:
+                        raise DispatchBlocked("provider route and rate release are quarantined")
                     _validate_partition(partition, admission.reserved_microusd, now)
                     exposure = connection.execute(
                         """
@@ -332,13 +360,14 @@ class PostgresExecutionLedger:
                             execution_id, issuer, caller_id, realm, environment, operation,
                             contract_major, partition_id, idempotency_key_digest, identity_digest,
                             digest_key_version, execution_profile_id, profile_release_id, state,
+                            provider_route_id, rate_release_id,
                             coordinator_generation, record_generation, lease_owner_id,
                             lease_expires_at, execution_deadline, eligibility_generation,
                             reserved_microusd, settlement_status, reconciliation_deadline,
                             tombstone_until
                         ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            'admitted', %s, 1, %s, %s, %s, %s, %s,
+                            'admitted', %s, %s, %s, 1, %s, %s, %s, %s, %s,
                             'pending_reconciliation', %s, %s
                         )
                         RETURNING {_RECORD_COLUMNS}
@@ -357,6 +386,8 @@ class PostgresExecutionLedger:
                             admission.digest_key_version,
                             admission.execution_profile_id,
                             admission.profile_release_id,
+                            admission.provider_route_id,
+                            admission.rate_release_id,
                             coordinator_generation,
                             admission.owner_id,
                             min(now + timedelta(seconds=5), admission.execution_deadline),
@@ -410,10 +441,18 @@ class PostgresExecutionLedger:
         state: str,
         settled_microusd: int,
         failure_code: str | None = None,
+        provider_cost_reference_digest: str | None = None,
     ) -> LedgerRecord:
         """Atomically settle a dispatched result and release its financial exposure."""
 
-        if state not in {"completed", "failed"} or settled_microusd < 0:
+        if (
+            state not in {"completed", "failed"}
+            or settled_microusd < 0
+            or (
+                provider_cost_reference_digest is not None
+                and len(provider_cost_reference_digest) != 64
+            )
+        ):
             raise ValueError("terminal settlement is invalid")
         try:
             with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
@@ -434,7 +473,8 @@ class PostgresExecutionLedger:
                     self._validate_gate(gate, coordinator_generation)
                     partition = connection.execute(
                         """
-                        SELECT period_spend_microusd
+                        SELECT period_spend_microusd, contingency_reserve_microusd,
+                               contingency_spend_microusd
                         FROM tiamat.spending_partitions
                         WHERE environment = %s AND caller_id = %s AND realm = %s
                           AND partition_id = %s
@@ -449,26 +489,17 @@ class PostgresExecutionLedger:
                     ).fetchone()
                     if partition is None:
                         raise DispatchBlocked("spending partition is unavailable")
-                    row = connection.execute(
+                    current = connection.execute(
                         f"""
-                        UPDATE tiamat.execution_records
-                        SET state = %s,
-                            record_generation = record_generation + 1,
-                            settlement_status = 'settled',
-                            settled_microusd = %s,
-                            failure_code = %s,
-                            terminal_at = clock_timestamp(),
-                            updated_at = clock_timestamp()
+                        SELECT {_RECORD_COLUMNS}
+                        FROM tiamat.execution_records
                         WHERE execution_id = %s AND issuer = %s AND caller_id = %s
                           AND realm = %s AND environment = %s AND state = 'dispatched'
                           AND coordinator_generation = %s AND record_generation = %s
-                          AND lease_owner_id = %s AND %s <= reserved_microusd
-                        RETURNING {_RECORD_COLUMNS}
+                          AND lease_owner_id = %s
+                        FOR UPDATE
                         """,
                         (
-                            state,
-                            settled_microusd,
-                            failure_code,
                             execution_id,
                             scope.issuer,
                             scope.caller_id,
@@ -477,15 +508,67 @@ class PostgresExecutionLedger:
                             coordinator_generation,
                             record_generation,
                             owner_id,
+                        ),
+                    ).fetchone()
+                    if current is None:
+                        raise DurableFenceRejected
+                    reserved = int(current["reserved_microusd"])
+                    overrun = settled_microusd > reserved
+                    target_state = "failed" if overrun else state
+                    settlement_status = "settlement_overrun" if overrun else "settled"
+                    target_failure = "cost_settlement_violation" if overrun else failure_code
+                    row = connection.execute(
+                        f"""
+                        UPDATE tiamat.execution_records
+                        SET state = %s,
+                            record_generation = record_generation + 1,
+                            settlement_status = %s,
+                            settled_microusd = %s,
+                            failure_code = %s,
+                            provider_cost_reference_digest = %s,
+                            terminal_at = clock_timestamp(),
+                            updated_at = clock_timestamp()
+                        WHERE execution_id = %s AND issuer = %s AND caller_id = %s
+                          AND realm = %s AND environment = %s AND state = 'dispatched'
+                          AND coordinator_generation = %s AND record_generation = %s
+                          AND lease_owner_id = %s
+                        RETURNING {_RECORD_COLUMNS}
+                        """,
+                        (
+                            target_state,
+                            settlement_status,
                             settled_microusd,
+                            target_failure,
+                            provider_cost_reference_digest,
+                            execution_id,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            coordinator_generation,
+                            record_generation,
+                            owner_id,
                         ),
                     ).fetchone()
                     if row is None:
                         raise DurableFenceRejected
+                    excess = max(0, settled_microusd - reserved)
+                    contingency_available = int(partition["contingency_reserve_microusd"]) - int(
+                        partition["contingency_spend_microusd"]
+                    )
+                    funded_excess = min(excess, max(0, contingency_available))
+                    uncovered = excess - funded_excess
                     connection.execute(
                         """
                         UPDATE tiamat.spending_partitions
                         SET period_spend_microusd = period_spend_microusd + %s,
+                            contingency_spend_microusd = contingency_spend_microusd + %s,
+                            external_liability_microusd = external_liability_microusd + %s,
+                            blocked = CASE WHEN %s > 0 THEN true ELSE blocked END,
+                            block_reason = CASE
+                                WHEN %s > 0 THEN 'settlement_liability_unfunded'
+                                ELSE block_reason
+                            END,
                             generation = generation + 1,
                             updated_at = clock_timestamp()
                         WHERE environment = %s AND caller_id = %s AND realm = %s
@@ -493,10 +576,68 @@ class PostgresExecutionLedger:
                         """,
                         (
                             settled_microusd,
+                            funded_excess,
+                            uncovered,
+                            uncovered,
+                            uncovered,
                             scope.environment,
                             scope.caller_id,
                             scope.realm,
                             scope.partition_id,
+                        ),
+                    )
+                    if overrun:
+                        connection.execute(
+                            """
+                            INSERT INTO tiamat.route_rate_quarantines (
+                                environment, caller_id, realm, partition_id,
+                                provider_route_id, rate_release_id, reason_code,
+                                source_execution_id
+                            ) VALUES (%s, %s, %s, %s, %s, %s,
+                                      'cost_settlement_violation', %s)
+                            ON CONFLICT (
+                                environment, caller_id, realm, partition_id,
+                                provider_route_id, rate_release_id
+                            ) DO UPDATE SET
+                                reason_code = EXCLUDED.reason_code,
+                                source_execution_id = EXCLUDED.source_execution_id,
+                                activated_at = clock_timestamp(),
+                                cleared_at = NULL
+                            """,
+                            (
+                                scope.environment,
+                                scope.caller_id,
+                                scope.realm,
+                                scope.partition_id,
+                                current["provider_route_id"],
+                                current["rate_release_id"],
+                                execution_id,
+                            ),
+                        )
+                    connection.execute(
+                        """
+                        INSERT INTO tiamat.financial_events (
+                            event_id, environment, caller_id, realm, partition_id,
+                            execution_id, event_type, actual_microusd,
+                            reservation_microusd, contingency_microusd,
+                            provider_route_id, rate_release_id,
+                            provider_cost_reference_digest
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            uuid4(),
+                            scope.environment,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.partition_id,
+                            execution_id,
+                            settlement_status,
+                            settled_microusd,
+                            reserved,
+                            funded_excess,
+                            current["provider_route_id"],
+                            current["rate_release_id"],
+                            provider_cost_reference_digest,
                         ),
                     )
                     return LedgerRecord.from_row(row)
@@ -530,6 +671,258 @@ class PostgresExecutionLedger:
                 "failure_code = 'execution_outcome_unknown',"
             ),
         )
+
+    def reconcile_cost(
+        self,
+        scope: LedgerScope,
+        execution_id: UUID,
+        *,
+        coordinator_generation: int,
+        actual_microusd: int,
+        provider_cost_reference_digest: str,
+    ) -> LedgerRecord:
+        """Apply late authoritative cost without releasing or clipping external liability."""
+
+        if actual_microusd < 0 or len(provider_cost_reference_digest) != 64:
+            raise ValueError("authoritative cost evidence is invalid")
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    gate = connection.execute(
+                        """
+                        SELECT storage_epoch, recovery_generation, coordinator_generation,
+                               dispatch_blocked
+                        FROM tiamat.restore_gate
+                        WHERE environment = %s
+                        FOR SHARE
+                        """,
+                        (scope.environment,),
+                    ).fetchone()
+                    self._validate_gate(gate, coordinator_generation)
+                    partition = connection.execute(
+                        """
+                        SELECT contingency_reserve_microusd, contingency_spend_microusd
+                        FROM tiamat.spending_partitions
+                        WHERE environment = %s AND caller_id = %s AND realm = %s
+                          AND partition_id = %s
+                        FOR UPDATE
+                        """,
+                        (
+                            scope.environment,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.partition_id,
+                        ),
+                    ).fetchone()
+                    current = connection.execute(
+                        f"""
+                        SELECT {_RECORD_COLUMNS}
+                        FROM tiamat.execution_records
+                        WHERE execution_id = %s AND issuer = %s AND caller_id = %s
+                          AND realm = %s AND environment = %s
+                          AND settlement_status IN (
+                              'pending_reconciliation', 'reservation_forfeited', 'settled'
+                          )
+                        FOR UPDATE
+                        """,
+                        (
+                            execution_id,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                        ),
+                    ).fetchone()
+                    if partition is None or current is None:
+                        raise DurableFenceRejected
+                    reserved = int(current["reserved_microusd"])
+                    previously_charged = int(current["settled_microusd"] or 0)
+                    if current["settlement_status"] == "settled":
+                        if actual_microusd == previously_charged:
+                            return LedgerRecord.from_row(current)
+                        if actual_microusd <= reserved:
+                            raise DurableFenceRejected(
+                                "settled cost correction requires operator reconciliation"
+                            )
+                    overrun = actual_microusd > reserved
+                    status = "settlement_overrun" if overrun else "settled"
+                    state = (
+                        "failed"
+                        if current["state"] == "outcome_unknown" or overrun
+                        else current["state"]
+                    )
+                    failure_code = (
+                        "cost_settlement_violation" if overrun else current["failure_code"]
+                    )
+                    updated = connection.execute(
+                        f"""
+                        UPDATE tiamat.execution_records
+                        SET state = %s,
+                            record_generation = record_generation + 1,
+                            eligibility_generation = eligibility_generation + %s,
+                            settlement_status = %s,
+                            settled_microusd = %s,
+                            provider_cost_reference_digest = %s,
+                            failure_code = %s,
+                            terminal_at = coalesce(terminal_at, clock_timestamp()),
+                            tombstone_until = greatest(
+                                tombstone_until, clock_timestamp() + interval '10 minutes'
+                            ),
+                            updated_at = clock_timestamp()
+                        WHERE execution_id = %s
+                        RETURNING {_RECORD_COLUMNS}
+                        """,
+                        (
+                            state,
+                            1 if overrun else 0,
+                            status,
+                            actual_microusd,
+                            provider_cost_reference_digest,
+                            failure_code,
+                            execution_id,
+                        ),
+                    ).fetchone()
+                    assert updated is not None
+                    excess = max(0, actual_microusd - reserved)
+                    available = int(partition["contingency_reserve_microusd"]) - int(
+                        partition["contingency_spend_microusd"]
+                    )
+                    funded_excess = min(excess, max(0, available))
+                    uncovered = excess - funded_excess
+                    connection.execute(
+                        """
+                        UPDATE tiamat.spending_partitions
+                        SET period_spend_microusd = period_spend_microusd + %s,
+                            contingency_spend_microusd = contingency_spend_microusd + %s,
+                            external_liability_microusd = external_liability_microusd + %s,
+                            blocked = CASE WHEN %s > 0 THEN true ELSE blocked END,
+                            block_reason = CASE
+                                WHEN %s > 0 THEN 'settlement_liability_unfunded'
+                                ELSE block_reason
+                            END,
+                            generation = generation + 1,
+                            updated_at = clock_timestamp()
+                        WHERE environment = %s AND caller_id = %s AND realm = %s
+                          AND partition_id = %s
+                        """,
+                        (
+                            actual_microusd - previously_charged,
+                            funded_excess,
+                            uncovered,
+                            uncovered,
+                            uncovered,
+                            scope.environment,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.partition_id,
+                        ),
+                    )
+                    if overrun:
+                        self._quarantine_route_rate(
+                            connection, scope, execution_id, current
+                        )
+                    self._insert_financial_event(
+                        connection,
+                        scope,
+                        execution_id=execution_id,
+                        event_type=status,
+                        actual_microusd=actual_microusd,
+                        reservation_microusd=reserved,
+                        contingency_microusd=funded_excess,
+                        provider_route_id=str(current["provider_route_id"]),
+                        rate_release_id=str(current["rate_release_id"]),
+                        provider_cost_reference_digest=provider_cost_reference_digest,
+                    )
+                    return LedgerRecord.from_row(updated)
+        except (DispatchBlocked, DurableFenceRejected):
+            raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def expire_tombstones(
+        self,
+        scope: LedgerScope,
+        *,
+        coordinator_generation: int,
+        now: datetime,
+    ) -> tuple[UUID, ...]:
+        """Expire eligible idempotency rows only after durable financial evidence exists."""
+
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    gate = connection.execute(
+                        """
+                        SELECT storage_epoch, recovery_generation, coordinator_generation,
+                               dispatch_blocked
+                        FROM tiamat.restore_gate WHERE environment = %s FOR SHARE
+                        """,
+                        (scope.environment,),
+                    ).fetchone()
+                    self._validate_gate(gate, coordinator_generation)
+                    candidates = connection.execute(
+                        """
+                        SELECT execution_id, settlement_status, settled_microusd,
+                               reserved_microusd, provider_route_id, rate_release_id,
+                               provider_cost_reference_digest
+                        FROM tiamat.execution_records
+                        WHERE issuer = %s AND caller_id = %s AND realm = %s
+                          AND environment = %s AND partition_id = %s
+                          AND (
+                              (
+                                  state IN ('completed', 'failed')
+                                  AND settlement_status IN ('settled', 'settlement_overrun')
+                              )
+                              OR settlement_status = 'reservation_forfeited'
+                          )
+                          AND tombstone_until <= %s
+                        FOR UPDATE
+                        """,
+                        (
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            scope.partition_id,
+                            now,
+                        ),
+                    ).fetchall()
+                    for candidate in candidates:
+                        self._insert_financial_event(
+                            connection,
+                            scope,
+                            execution_id=candidate["execution_id"],
+                            event_type=str(candidate["settlement_status"]),
+                            actual_microusd=int(candidate["settled_microusd"]),
+                            reservation_microusd=int(candidate["reserved_microusd"]),
+                            contingency_microusd=max(
+                                0,
+                                int(candidate["settled_microusd"])
+                                - int(candidate["reserved_microusd"]),
+                            ),
+                            provider_route_id=str(candidate["provider_route_id"]),
+                            rate_release_id=str(candidate["rate_release_id"]),
+                            provider_cost_reference_digest=candidate[
+                                "provider_cost_reference_digest"
+                            ],
+                        )
+                    execution_ids = tuple(row["execution_id"] for row in candidates)
+                    if execution_ids:
+                        connection.execute(
+                            "DELETE FROM tiamat.execution_records WHERE execution_id = ANY(%s)",
+                            (list(execution_ids),),
+                        )
+                    return execution_ids
+        except (DispatchBlocked, DurableFenceRejected):
+            raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
 
     def takeover_expired(
         self,
@@ -761,6 +1154,19 @@ class PostgresExecutionLedger:
                         ),
                     ).fetchall()
                     charge = sum(int(row["settled_microusd"]) for row in rows)
+                    for row in rows:
+                        self._insert_financial_event(
+                            connection,
+                            scope,
+                            execution_id=row["execution_id"],
+                            event_type="reservation_forfeited",
+                            actual_microusd=int(row["settled_microusd"]),
+                            reservation_microusd=int(row["reserved_microusd"]),
+                            contingency_microusd=0,
+                            provider_route_id=str(row["provider_route_id"]),
+                            rate_release_id=str(row["rate_release_id"]),
+                            provider_cost_reference_digest=None,
+                        )
                     if charge:
                         connection.execute(
                             """
@@ -854,6 +1260,82 @@ class PostgresExecutionLedger:
                     return tuple(LedgerRecord.from_row(row) for row in rows)
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
+
+    @staticmethod
+    def _quarantine_route_rate(
+        connection: psycopg.Connection[Any],
+        scope: LedgerScope,
+        execution_id: UUID,
+        record: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO tiamat.route_rate_quarantines (
+                environment, caller_id, realm, partition_id,
+                provider_route_id, rate_release_id, reason_code,
+                source_execution_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'cost_settlement_violation', %s)
+            ON CONFLICT (
+                environment, caller_id, realm, partition_id,
+                provider_route_id, rate_release_id
+            ) DO UPDATE SET
+                reason_code = EXCLUDED.reason_code,
+                source_execution_id = EXCLUDED.source_execution_id,
+                activated_at = clock_timestamp(),
+                cleared_at = NULL
+            """,
+            (
+                scope.environment,
+                scope.caller_id,
+                scope.realm,
+                scope.partition_id,
+                record["provider_route_id"],
+                record["rate_release_id"],
+                execution_id,
+            ),
+        )
+
+    @staticmethod
+    def _insert_financial_event(
+        connection: psycopg.Connection[Any],
+        scope: LedgerScope,
+        *,
+        execution_id: UUID,
+        event_type: str,
+        actual_microusd: int,
+        reservation_microusd: int,
+        contingency_microusd: int,
+        provider_route_id: str,
+        rate_release_id: str,
+        provider_cost_reference_digest: str | None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO tiamat.financial_events (
+                event_id, environment, caller_id, realm, partition_id,
+                execution_id, event_type, actual_microusd,
+                reservation_microusd, contingency_microusd,
+                provider_route_id, rate_release_id,
+                provider_cost_reference_digest
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (execution_id, event_type) DO NOTHING
+            """,
+            (
+                uuid4(),
+                scope.environment,
+                scope.caller_id,
+                scope.realm,
+                scope.partition_id,
+                execution_id,
+                event_type,
+                actual_microusd,
+                reservation_microusd,
+                contingency_microusd,
+                provider_route_id,
+                rate_release_id,
+                provider_cost_reference_digest,
+            ),
+        )
 
     def _cas_transition(
         self,

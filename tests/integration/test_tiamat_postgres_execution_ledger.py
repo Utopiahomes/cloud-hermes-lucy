@@ -68,7 +68,8 @@ def database_urls() -> tuple[str, str]:
             """
             GRANT SELECT, INSERT, UPDATE, DELETE ON
               tiamat.jti_replay, tiamat.spending_partitions,
-              tiamat.execution_records, tiamat.grant_releases
+              tiamat.execution_records, tiamat.grant_releases,
+              tiamat.route_rate_quarantines, tiamat.financial_events
             TO tiamat_runtime_test
             """
         )
@@ -164,6 +165,8 @@ def _admission(
         contract_major=1,
         execution_profile_id="profile.v1",
         profile_release_id="profiles.1",
+        provider_route_id="vertex-gemini-primary",
+        rate_release_id="rates.2026-09-17",
         owner_id=owner_id or uuid4(),
         execution_deadline=now + timedelta(seconds=15),
         eligibility_generation=1,
@@ -407,6 +410,318 @@ def test_unclear_dispatch_resolution_preserves_newer_reaper_uncertainty(
     assert resolved.failure_code == "execution_outcome_unknown"
     assert resolved.settlement_status == "pending_reconciliation"
     assert resolved.settled_microusd is None
+
+
+def test_settlement_overrun_charges_actual_and_quarantines_exact_route(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="4" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    overrun = ledger.settle_terminal(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+        state="completed",
+        settled_microusd=2_500,
+        provider_cost_reference_digest="9" * 64,
+    )
+    assert overrun.state == "failed"
+    assert overrun.settlement_status == "settlement_overrun"
+    assert overrun.failure_code == "cost_settlement_violation"
+
+    with psycopg.connect(runtime_url) as connection:
+        for setting, value in (
+            ("tiamat.environment", scope.environment),
+            ("tiamat.realm", scope.realm),
+            ("tiamat.caller_id", scope.caller_id),
+            ("tiamat.partition_id", scope.partition_id),
+        ):
+            connection.execute("SELECT set_config(%s, %s, false)", (setting, value))
+        partition = connection.execute(
+            """
+            SELECT period_spend_microusd, contingency_spend_microusd,
+                   external_liability_microusd, blocked
+            FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND realm = %s
+              AND partition_id = %s
+            """,
+            (scope.environment, scope.caller_id, scope.realm, scope.partition_id),
+        ).fetchone()
+        assert partition == (2_500, 500, 0, False)
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE execution_id = %s",
+            (overrun.execution_id,),
+        ).fetchone() == (1,)
+
+    with pytest.raises(DispatchBlocked, match="quarantined"):
+        ledger.create_or_get(
+            scope,
+            _admission(now, key_digest="5" * 64),
+            coordinator_generation=coordinator,
+            now=now,
+        )
+
+
+def test_late_overrun_blocks_partition_when_contingency_cannot_cover_liability(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="6" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    unknown = ledger.mark_outcome_unknown(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+    )
+    reconciled = ledger.reconcile_cost(
+        scope,
+        unknown.execution_id,
+        coordinator_generation=coordinator,
+        actual_microusd=12_000,
+        provider_cost_reference_digest="8" * 64,
+    )
+    assert reconciled.state == "failed"
+    assert reconciled.settlement_status == "settlement_overrun"
+
+    with psycopg.connect(runtime_url) as connection:
+        for setting, value in (
+            ("tiamat.environment", scope.environment),
+            ("tiamat.realm", scope.realm),
+            ("tiamat.caller_id", scope.caller_id),
+            ("tiamat.partition_id", scope.partition_id),
+        ):
+            connection.execute("SELECT set_config(%s, %s, false)", (setting, value))
+        partition = connection.execute(
+            """
+            SELECT period_spend_microusd, contingency_spend_microusd,
+                   external_liability_microusd, blocked, block_reason
+            FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND realm = %s
+              AND partition_id = %s
+            """,
+            (scope.environment, scope.caller_id, scope.realm, scope.partition_id),
+        ).fetchone()
+        assert partition == (
+            12_000,
+            8_000,
+            2_000,
+            True,
+            "settlement_liability_unfunded",
+        )
+    with pytest.raises(DispatchBlocked):
+        ledger.create_or_get(
+            scope,
+            _admission(
+                now,
+                key_digest="7" * 64,
+            ),
+            coordinator_generation=coordinator,
+            now=now,
+        )
+
+
+def test_billing_evidence_can_invalidate_an_already_returned_candidate(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="a" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    completed = ledger.settle_terminal(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+        state="completed",
+        settled_microusd=100,
+        provider_cost_reference_digest="6" * 64,
+    )
+    assert completed.state == "completed"
+    invalidated = ledger.reconcile_cost(
+        scope,
+        completed.execution_id,
+        coordinator_generation=coordinator,
+        actual_microusd=2_500,
+        provider_cost_reference_digest="5" * 64,
+    )
+    assert invalidated.state == "failed"
+    assert invalidated.settlement_status == "settlement_overrun"
+    assert invalidated.failure_code == "cost_settlement_violation"
+    with psycopg.connect(owner_url) as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE execution_id = %s",
+            (completed.execution_id,),
+        ).fetchone() == (2,)
+        assert connection.execute(
+            """
+            SELECT period_spend_microusd FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND realm = %s
+              AND partition_id = %s
+            """,
+            (scope.environment, scope.caller_id, scope.realm, scope.partition_id),
+        ).fetchone() == (2_500,)
+
+
+def test_expired_idempotency_tombstone_leaves_financial_evidence(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="8" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    ledger.settle_terminal(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+        state="completed",
+        settled_microusd=100,
+        provider_cost_reference_digest="7" * 64,
+    )
+    with psycopg.connect(owner_url) as connection:
+        connection.execute(
+            "UPDATE tiamat.execution_records SET tombstone_until = %s WHERE execution_id = %s",
+            (now + timedelta(seconds=1), admitted.execution_id),
+        )
+    expired = ledger.expire_tombstones(
+        scope,
+        coordinator_generation=coordinator,
+        now=now + timedelta(minutes=11),
+    )
+    assert expired == (admitted.execution_id,)
+    with psycopg.connect(owner_url) as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.execution_records WHERE execution_id = %s",
+            (admitted.execution_id,),
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE execution_id = %s",
+            (admitted.execution_id,),
+        ).fetchone() == (1,)
+
+
+def test_forfeited_reservation_keeps_thirty_day_tombstone_and_financial_event(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    ledger = PostgresExecutionLedger(runtime_url, witness)
+    coordinator = ledger.acquire_coordinator_generation()
+    owner = uuid4()
+    admitted, _ = ledger.create_or_get(
+        scope,
+        _admission(now, key_digest="9" * 64, owner_id=owner),
+        coordinator_generation=coordinator,
+        now=now,
+    )
+    dispatched = ledger.dispatch(
+        scope,
+        admitted.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=admitted.record_generation,
+        owner_id=owner,
+    )
+    ledger.mark_outcome_unknown(
+        scope,
+        dispatched.execution_id,
+        coordinator_generation=coordinator,
+        record_generation=dispatched.record_generation,
+        owner_id=owner,
+    )
+    with psycopg.connect(owner_url) as connection:
+        connection.execute(
+            "UPDATE tiamat.execution_records SET reconciliation_deadline = %s "
+            "WHERE execution_id = %s",
+            (admitted.execution_deadline, admitted.execution_id),
+        )
+    forfeited = ledger.forfeit_due_reconciliations(
+        scope,
+        now=now + timedelta(seconds=16),
+        coordinator_generation=coordinator,
+    )
+    row = next(item for item in forfeited if item.execution_id == admitted.execution_id)
+    assert row.settlement_status == "reservation_forfeited"
+    assert row.settled_microusd == row.reserved_microusd
+    assert ledger.expire_tombstones(
+        scope,
+        coordinator_generation=coordinator,
+        now=now + timedelta(days=29),
+    ) == ()
+    assert ledger.expire_tombstones(
+        scope,
+        coordinator_generation=coordinator,
+        now=now + timedelta(days=31),
+    ) == (admitted.execution_id,)
+    with psycopg.connect(owner_url) as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE execution_id = %s",
+            (admitted.execution_id,),
+        ).fetchone() == (1,)
 
 
 def test_restore_generation_mismatch_blocks_until_offline_reconciliation(

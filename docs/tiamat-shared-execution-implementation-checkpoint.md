@@ -34,7 +34,7 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
-- Dedicated Tiamat PostgreSQL migration lineage at `0001_execution_ledger`; Cloud Lucy remains at
+- Dedicated Tiamat PostgreSQL migration lineage through `0002_route_settlement_retention`; Cloud Lucy remains at
   `0071` and does not consume migration `0072`.
 - Content-free PostgreSQL adapters for durable scoped JWT replay, coordinator-generation fencing,
   atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
@@ -51,6 +51,13 @@
   stale physical database snapshot failing closed under a newer external witness.
 - Durable unclear-dispatch resolution aborts at zero cost only for the exact live owner epoch. If a
   newer reaper result exists, the lookup preserves `outcome_unknown` and its held reservation.
+- Exact provider route and rate releases are pinned on every durable execution. A synchronous or
+  asynchronously discovered overrun records the full external charge, spends contingency only for
+  the excess, quarantines that exact pair, invalidates replay, and blocks the partition when the
+  remaining contingency cannot cover the liability.
+- Content-free financial events survive eligible idempotency-row expiry. Ordinary settled records
+  retain the ten-minute contract window; unresolved forfeitures retain a 30-day tombstone before
+  expiry, while their accounting event remains.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -64,9 +71,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. finish durable overrun/quarantine, tombstone expiry, and partition-block operations, then inject
-   connection loss inside dispatch and settlement transactions rather than only around stable
-   transition boundaries;
+3. inject connection loss inside dispatch and settlement transactions rather than only around
+   stable transition boundaries; durable overrun/quarantine, tombstone expiry, and partition blocking
+   are implemented and locally proven;
 4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
 5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
@@ -85,11 +92,11 @@ At local commit preparation on 2026-09-17:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,084 passed with two dependency deprecation warnings.
+- Complete unit suite: 1,085 passed with two dependency deprecation warnings.
 - Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
 - Strict mypy: passed across 132 source files.
-- Alembic: the independent `0001_execution_ledger` upgrade rendered successfully as PostgreSQL
+- Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL
   offline SQL.
-- Focused durable-ledger unit tests: 22 passed. Nine real PostgreSQL integration tests passed using
+- Focused durable-ledger tests: seven unit tests and 14 real PostgreSQL integration tests passed using
   a loopback-only, tmpfs-backed PostgreSQL 16 container with synthetic credentials. This establishes
   local database behavior, not production replication or failover.

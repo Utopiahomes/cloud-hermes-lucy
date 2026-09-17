@@ -1,4 +1,4 @@
--- Run as the dedicated Tiamat database owner after migration 0001.
+-- Run as the dedicated Tiamat database owner after migration 0002.
 -- Supply passwords through the platform secret manager; never place them in this file.
 -- The serving login must not own tables, inherit the owner, or hold BYPASSRLS/SUPERUSER.
 
@@ -14,7 +14,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   tiamat.jti_replay,
   tiamat.spending_partitions,
   tiamat.execution_records,
-  tiamat.grant_releases
+  tiamat.grant_releases,
+  tiamat.route_rate_quarantines,
+  tiamat.financial_events
 TO tiamat_runtime;
 GRANT SELECT, UPDATE ON tiamat.restore_gate TO tiamat_runtime;
 

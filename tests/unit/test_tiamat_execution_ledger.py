@@ -15,6 +15,9 @@ from lucy.shared_execution.postgres_ledger import (
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "tiamat_migrations" / "versions" / "0001_execution_ledger.py"
+SETTLEMENT_MIGRATION = (
+    ROOT / "tiamat_migrations" / "versions" / "0002_route_settlement_retention.py"
+)
 
 
 def test_tiamat_has_an_independent_migration_lineage() -> None:
@@ -27,13 +30,23 @@ def test_tiamat_has_an_independent_migration_lineage() -> None:
 
 
 def test_ledger_schema_is_content_free_and_partition_forced() -> None:
-    source = MIGRATION.read_text(encoding="utf-8")
+    source = "\n".join(
+        (
+            MIGRATION.read_text(encoding="utf-8"),
+            SETTLEMENT_MIGRATION.read_text(encoding="utf-8"),
+        )
+    )
     for required in (
         "CREATE TABLE tiamat.restore_gate",
         "CREATE TABLE tiamat.jti_replay",
         "CREATE TABLE tiamat.spending_partitions",
         "CREATE TABLE tiamat.execution_records",
         "CREATE TABLE tiamat.grant_releases",
+        "CREATE TABLE tiamat.route_rate_quarantines",
+        "CREATE TABLE tiamat.financial_events",
+        "provider_route_id",
+        "rate_release_id",
+        "external_liability_microusd",
         "FORCE ROW LEVEL SECURITY",
         "current_setting('tiamat.caller_id', true)",
         "current_setting('tiamat.realm', true)",
@@ -79,6 +92,8 @@ def test_admission_rejects_content_identity_shape_drift() -> None:
             contract_major=1,
             execution_profile_id="profile.v1",
             profile_release_id="profiles.1",
+            provider_route_id="vertex-primary",
+            rate_release_id="rates.1",
             owner_id=uuid4(),
             execution_deadline=now + timedelta(seconds=10),
             eligibility_generation=1,
@@ -114,6 +129,8 @@ def test_database_row_maps_only_content_free_receipt_state() -> None:
             "settlement_status": "pending_reconciliation",
             "settled_microusd": None,
             "failure_code": "execution_outcome_unknown",
+            "provider_route_id": "vertex-primary",
+            "rate_release_id": "rates.1",
         }
     )
     assert record.execution_id == execution_id
