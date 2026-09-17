@@ -1,0 +1,47 @@
+{
+  "schema": "stoin.shared-model-execution.freeze-manifest.v1",
+  "release": "rc1",
+  "capability": "inference.execute@1.0",
+  "created_on": "2026-09-17",
+  "status": "freeze_candidate",
+  "encoding": "utf-8",
+  "line_endings": "lf",
+  "artifacts": [
+    {
+      "role": "wire_and_architecture_contract",
+      "path": "docs/stoin-shared-model-execution-contract-v1-rc1.md",
+      "bytes": 97610,
+      "sha256": "a010c2cd5d501dd5586be3e1c54753ed7bf82505b9971d19c007e227bb9a75a8"
+    },
+    {
+      "role": "runtime_recovery_companion",
+      "path": "docs/stoin-shared-model-execution-runtime-recovery-v1-rc1.md",
+      "bytes": 29414,
+      "sha256": "9ac574affc4cd5c9dc5266b4665d64409cf387abc69c59918d7fbe0475ddbc34"
+    }
+  ],
+  "normative_extract": {
+    "source_artifact": "docs/stoin-shared-model-execution-contract-v1-rc1.md",
+    "source_sections": "11-13.1",
+    "companion_artifact": "docs/stoin-shared-model-execution-runtime-recovery-v1-rc1.md",
+    "begin_marker": "<!-- BEGIN NORMATIVE EXTRACT: contract RC1 §§11-13.1 -->",
+    "end_marker": "<!-- END NORMATIVE EXTRACT: contract RC1 §§11-13.1 -->",
+    "bytes": 26488,
+    "sha256": "d8cb89be105e4507f493e5ad88d365834fc5538bb1e4f315701325e195810176"
+  },
+  "joint_requirements": {
+    "contract_and_companion_must_both_match": true,
+    "normative_extract_must_match_source": true,
+    "schema_only_is_not_runtime_conformance": true,
+    "openapi_is_not_an_rc1_freeze_dependency": true
+  },
+  "authorization": {
+    "implementation": false,
+    "credentials": false,
+    "provider_calls": false,
+    "spending": false,
+    "infrastructure": false,
+    "deployment": false,
+    "production": false
+  }
+}
