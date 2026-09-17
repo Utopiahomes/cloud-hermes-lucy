@@ -25,6 +25,10 @@
 - Executor-side provider-output enforcement for text/JSON byte bounds, the restricted caller schema,
   combined generated-token ceilings, usage arithmetic, response-envelope size, and cost overrun,
   with distinct fail-closed RC1 error codes.
+- Topology-neutral local spending-partition reference model covering grant validity and budget-period
+  applicability, predecessor/successor activation, no predecessor fallback, active versus pending
+  exposure, the `2N` bound, contingency-reserve sizing, carried obligations, settlement, and
+  forfeiture.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -39,7 +43,8 @@ Before any deployment or real provider activation, Tier B must add and prove:
 2. replace the local atomic `jti` replay adapter with durable scoped replay state and prove rotation;
 3. a durable PostgreSQL execution/accounting store with leases, epochs, fencing, CAS transitions,
    ambiguous-commit lookup, reaping, tombstones, and partition blocking;
-4. signed profile, privacy-policy, grant, period, successor, revocation, and exposure admission;
+4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
+   local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
 5. full RFC 8785 canonicalization and differential fixtures for identity and requested schemas;
 6. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 7. finish differential and adversarial coverage for the restricted-schema evaluator;
