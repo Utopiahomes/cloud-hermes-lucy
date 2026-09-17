@@ -1,0 +1,25 @@
+-- Run as the dedicated Tiamat database owner after migration 0001.
+-- Supply passwords through the platform secret manager; never place them in this file.
+-- The serving login must not own tables, inherit the owner, or hold BYPASSRLS/SUPERUSER.
+
+CREATE ROLE tiamat_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+-- Recovery is an offline, separately held credential. BYPASSRLS is required to reconcile every
+-- caller partition, and this role must never be supplied to a serving process.
+CREATE ROLE tiamat_recovery LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+
+GRANT CONNECT ON DATABASE tiamat TO tiamat_runtime, tiamat_recovery;
+GRANT USAGE ON SCHEMA tiamat TO tiamat_runtime, tiamat_recovery;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  tiamat.jti_replay,
+  tiamat.spending_partitions,
+  tiamat.execution_records,
+  tiamat.grant_releases
+TO tiamat_runtime;
+GRANT SELECT, UPDATE ON tiamat.restore_gate TO tiamat_runtime;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA tiamat TO tiamat_recovery;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA tiamat REVOKE ALL ON TABLES FROM PUBLIC;
+REVOKE ALL ON SCHEMA tiamat FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA tiamat FROM PUBLIC;

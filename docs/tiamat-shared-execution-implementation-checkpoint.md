@@ -34,6 +34,19 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
+- Dedicated Tiamat PostgreSQL migration lineage at `0001_execution_ledger`; Cloud Lucy remains at
+  `0071` and does not consume migration `0072`.
+- Content-free PostgreSQL adapters for durable scoped JWT replay, coordinator-generation fencing,
+  atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
+  authoritative lease reaping, and 24-hour reservation forfeiture.
+- Forced row-level security for caller, realm, environment, and spending-partition isolation; the
+  serving-role template is a non-owner with `NOBYPASSRLS`, while the separately held recovery role
+  is excluded from serving processes.
+- Restore quarantine uses deployment-owned storage epoch and recovery generation plus a database
+  coordinator generation. A stale restore cannot resume against a newer witness until an offline
+  reconciliation explicitly advances and unblocks the gate.
+- A database-backed integration test is present for replay, admission, dispatch, settlement, and
+  cross-realm isolation, but remains unexecuted because Docker and local PostgreSQL were unavailable.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -45,9 +58,11 @@ Before any deployment or real provider activation, Tier B must add and prove:
 
 1. complete the private FastAPI ordered gate from §6.3, including gross framing, duplicate-header,
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
-2. replace the local atomic `jti` replay adapter with durable scoped replay state and prove rotation;
-3. implement the tested lease/epoch/generation behavior in a durable store with atomic accounting,
-   ambiguous-commit lookup, tombstones, and partition blocking once deployment topology is settled;
+2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
+   real PostgreSQL;
+3. finish durable ambiguous-commit lookup, overrun/quarantine, tombstone expiry, and partition-block
+   operations, then prove the implemented lease/epoch/generation/accounting behavior against real
+   PostgreSQL and stale-backup recovery;
 4. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
    local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
 5. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
@@ -59,3 +74,18 @@ Before any deployment or real provider activation, Tier B must add and prove:
 10. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
 
 The existing Homes corpus remains local-test-only and is not authorized for provider use.
+
+## Verification ledger
+
+At local commit preparation on 2026-09-17:
+
+- RC1 conformance bundle: 130 independent checks passed; digest remained
+  `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
+- Complete unit suite: 1,084 passed with two dependency deprecation warnings.
+- Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
+- Strict mypy: passed across 132 source files.
+- Alembic: the independent `0001_execution_ledger` upgrade rendered successfully as PostgreSQL
+  offline SQL.
+- Focused durable-ledger tests: 22 passed; the real PostgreSQL integration test was skipped because
+  neither Docker nor a local PostgreSQL endpoint was available. This skipped check is a release gap,
+  not a passing database claim.
