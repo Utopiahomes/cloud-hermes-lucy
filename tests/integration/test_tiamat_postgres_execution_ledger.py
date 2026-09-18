@@ -253,6 +253,40 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
         == profile_jws
     )
 
+    privacy_vector = _bundle_json("vectors", "positive", "release.pos.privacy-policy.json")
+    privacy = verify_release(
+        privacy_vector["compact_jws"].encode(),
+        inventory=inventory,
+        expected_issuer="stoin-control",
+        expected_environment="staging",
+        expected_caller_id="stoin:synth:utopia-homes",
+        expected_realm="utopia-homes",
+        now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+    )
+    store.stage_release(privacy, "release-key-staging-1")
+    store.activate_release(scope, "privacy_policy", "utopia-public-zdr", privacy.payload.release_id)
+    revocation_vector = _bundle_json("vectors", "positive", "release.pos.release-revocation.json")
+    revocation = verify_release(
+        revocation_vector["compact_jws"].encode(),
+        inventory=inventory,
+        expected_issuer="stoin-control",
+        expected_environment="staging",
+        expected_caller_id="stoin:synth:utopia-homes",
+        expected_realm="utopia-homes",
+        now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+    )
+    store.stage_release(revocation, "release-key-staging-1")
+    store.activate_release(
+        scope,
+        "revocation",
+        "utopia-public-revocations",
+        revocation.payload.release_id,
+    )
+    store.apply_revocation(scope, revocation)
+    store.apply_revocation(scope, revocation)
+    with pytest.raises(AuthorityTransitionRejected, match="active_release_unavailable"):
+        store.load_active_jws(scope, "privacy_policy", "utopia-public-zdr")
+
     grant_vector = _bundle_json("vectors", "positive", "release.pos.spending-grant.json")
     grant = verify_release(
         grant_vector["compact_jws"].encode(),

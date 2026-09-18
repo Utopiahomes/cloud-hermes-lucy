@@ -95,9 +95,12 @@ def upgrade() -> None:
             active_release_id text NOT NULL CHECK (length(active_release_id) BETWEEN 1 AND 128),
             active_jws_sha256 text NOT NULL CHECK (active_jws_sha256 ~ '^[0-9a-f]{64}$'),
             active_sequence bigint NOT NULL CHECK (active_sequence >= 1),
+            head_state text NOT NULL DEFAULT 'active' CHECK (head_state IN ('active', 'revoked')),
+            revocation_release_id text CHECK (length(revocation_release_id) BETWEEN 1 AND 128),
             eligibility_generation bigint NOT NULL CHECK (eligibility_generation >= 1),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (environment, issuer, caller_id, realm, release_type, subject_id)
+            PRIMARY KEY (environment, issuer, caller_id, realm, release_type, subject_id),
+            CHECK ((head_state = 'revoked') = (revocation_release_id IS NOT NULL))
         )
         """
     )

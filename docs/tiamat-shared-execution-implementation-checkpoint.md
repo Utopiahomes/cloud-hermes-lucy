@@ -79,6 +79,10 @@
   root-inventory successor activation, scoped release-head locking, predecessor/sequence checks,
   atomic supersession, and exact active-JWS loading. Activation and loading both lock against the
   restore gate and fail closed when no reconciled environment row is open.
+- Active signed revocations now apply transactionally to the exact current target. The release head
+  becomes a revoked tombstone with an incremented eligibility generation; active loading fails and
+  no predecessor can reappear. Applying the same revocation is idempotent, while an ambiguous,
+  non-head, or conflicting target fails closed.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -92,9 +96,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. add transactional signed revocation application, couple spending-grant activation to the
-   existing budget projection, and complete restore reconciliation against Control; verified
-   staging, monotonic activation, exact active-byte loading, and restore-gate enforcement are done;
+3. couple spending-grant activation to the existing budget projection and complete restore
+   reconciliation against Control; verified staging, monotonic activation, signed no-fallback
+   revocation, exact active-byte loading, and restore-gate enforcement are done;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
@@ -118,6 +122,9 @@ At local commit preparation on 2026-09-17:
   loopback-only, tmpfs-backed disposable container, including blocked-before-recovery behavior,
   idempotent staging, inventory activation, release activation/loading, and missing-predecessor
   rejection. The container was stopped and removed after the run.
+- The same 17-test PostgreSQL suite passed again after adding signed revocation, proving an active
+  privacy-policy head becomes an idempotent revoked tombstone and is no longer loadable, without
+  predecessor fallback. Its disposable container was also removed.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.

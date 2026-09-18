@@ -9,7 +9,11 @@ import psycopg
 from psycopg.rows import dict_row
 
 from lucy.shared_execution.postgres_ledger import _psycopg_conninfo
-from lucy.shared_execution.signed_releases import TrustInventory, VerifiedRelease
+from lucy.shared_execution.signed_releases import (
+    RevocationRelease,
+    TrustInventory,
+    VerifiedRelease,
+)
 
 
 class AuthorityStoreUnavailable(RuntimeError):
@@ -260,6 +264,7 @@ class PostgresSignedAuthorityStore:
                     DO UPDATE SET active_release_id = EXCLUDED.active_release_id,
                       active_jws_sha256 = EXCLUDED.active_jws_sha256,
                       active_sequence = EXCLUDED.active_sequence,
+                      head_state = 'active', revocation_release_id = NULL,
                       eligibility_generation = EXCLUDED.eligibility_generation,
                       updated_at = clock_timestamp()
                     """,
@@ -295,13 +300,111 @@ class PostgresSignedAuthorityStore:
                      AND r.jws_sha256 = h.active_jws_sha256
                     WHERE h.environment = %s AND h.issuer = %s AND h.caller_id = %s
                       AND h.realm = %s AND h.release_type = %s AND h.subject_id = %s
-                      AND r.state = 'active'
+                      AND h.head_state = 'active' AND r.state = 'active'
                     """,
                     (*self._scope_values(scope), release_type, subject_id),
                 ).fetchone()
                 if row is None:
                     raise AuthorityTransitionRejected("active_release_unavailable")
                 return bytes(row["exact_jws"])
+        except AuthorityTransitionRejected:
+            raise
+        except psycopg.Error as exc:
+            raise AuthorityStoreUnavailable from exc
+
+    def apply_revocation(self, scope: AuthorityScope, revocation: VerifiedRelease) -> None:
+        item = revocation.payload
+        if not isinstance(item, RevocationRelease):
+            raise AuthorityTransitionRejected("release_is_not_revocation")
+        target = item.content
+        try:
+            with self._connect() as connection, connection.transaction():
+                self._set_scope(connection, scope)
+                self._assert_recovery_gate_open(connection, scope.environment)
+                revocation_head = connection.execute(
+                    """
+                    SELECT active_release_id, head_state
+                    FROM tiamat.release_heads
+                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+                      AND release_type = 'revocation' AND subject_id = %s
+                    FOR SHARE
+                    """,
+                    (*self._scope_values(scope), item.subject_id),
+                ).fetchone()
+                if (
+                    revocation_head is None
+                    or revocation_head["head_state"] != "active"
+                    or revocation_head["active_release_id"] != item.release_id
+                ):
+                    raise AuthorityTransitionRejected("revocation_not_active")
+                targets = connection.execute(
+                    """
+                    SELECT subject_id, release_id, state
+                    FROM tiamat.signed_releases
+                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+                      AND release_type = %s AND release_id = %s
+                    FOR UPDATE
+                    """,
+                    (
+                        *self._scope_values(scope),
+                        target.target_release_type,
+                        target.target_release_id,
+                    ),
+                ).fetchall()
+                if len(targets) != 1:
+                    raise AuthorityTransitionRejected("revocation_target_ambiguous")
+                target_row = targets[0]
+                head = connection.execute(
+                    """
+                    SELECT active_release_id, head_state, revocation_release_id
+                    FROM tiamat.release_heads
+                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+                      AND release_type = %s AND subject_id = %s
+                    FOR UPDATE
+                    """,
+                    (
+                        *self._scope_values(scope),
+                        target.target_release_type,
+                        target_row["subject_id"],
+                    ),
+                ).fetchone()
+                if head is None or head["active_release_id"] != target.target_release_id:
+                    raise AuthorityTransitionRejected("revocation_target_not_head")
+                if head["head_state"] == "revoked":
+                    if head["revocation_release_id"] == item.release_id:
+                        return
+                    raise AuthorityTransitionRejected("revocation_conflict")
+                connection.execute(
+                    """
+                    UPDATE tiamat.signed_releases
+                    SET state = 'revoked', revoked_at = %s::timestamptz
+                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+                      AND release_type = %s AND subject_id = %s AND release_id = %s
+                    """,
+                    (
+                        target.effective_at,
+                        *self._scope_values(scope),
+                        target.target_release_type,
+                        target_row["subject_id"],
+                        target.target_release_id,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE tiamat.release_heads
+                    SET head_state = 'revoked', revocation_release_id = %s,
+                        eligibility_generation = eligibility_generation + 1,
+                        updated_at = clock_timestamp()
+                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+                      AND release_type = %s AND subject_id = %s
+                    """,
+                    (
+                        item.release_id,
+                        *self._scope_values(scope),
+                        target.target_release_type,
+                        target_row["subject_id"],
+                    ),
+                )
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:
