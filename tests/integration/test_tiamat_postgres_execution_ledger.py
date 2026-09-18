@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -11,10 +14,16 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from lucy.shared_execution.auth import AuthenticationStateUnavailable
+from lucy.shared_execution.postgres_authority import (
+    AuthorityScope,
+    AuthorityTransitionRejected,
+    PostgresSignedAuthorityStore,
+)
 from lucy.shared_execution.postgres_ledger import (
     DispatchBlocked,
     DurableFenceRejected,
@@ -29,9 +38,11 @@ from lucy.shared_execution.recovery import (
     authorize_reconciled_state,
     quarantine_environment,
 )
+from lucy.shared_execution.signed_releases import verify_release, verify_trust_inventory
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATABASE_URL = os.environ.get("TIAMAT_TEST_DATABASE_URL")
+BUNDLE = os.path.join(ROOT, "contracts", "tiamat-signed-release-v1-rc1-bundle")
 
 
 @pytest.fixture(scope="module")
@@ -177,6 +188,86 @@ def _admission(
     )
 
 
+def _bundle_json(*parts: str) -> dict[str, Any]:
+    with open(os.path.join(BUNDLE, *parts), encoding="utf-8") as handle:
+        value = json.load(handle)
+    assert isinstance(value, dict)
+    return value
+
+
+def test_signed_authority_stages_activates_and_loads_exact_bytes(
+    database_urls: tuple[str, str],
+) -> None:
+    migration_url, _ = database_urls
+    keys = _bundle_json("test-keys.json")
+    root_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(keys["root_public_key_b64"]))
+    inventory_vector = _bundle_json("vectors", "positive", "inventory.pos.bootstrap.json")
+    inventory_jws = inventory_vector["compact_jws"].encode()
+    inventory = verify_trust_inventory(
+        inventory_jws,
+        root_key_id="tiamat-trust-root-staging-1",
+        root_public_key=root_key,
+        environment="staging",
+    )
+    store = PostgresSignedAuthorityStore(migration_url)
+    inventory_digest = hashlib.sha256(inventory_jws).hexdigest()
+    store.stage_inventory(inventory_jws, inventory, inventory_digest)
+    store.stage_inventory(inventory_jws, inventory, inventory_digest)
+    with pytest.raises(AuthorityTransitionRejected, match="recovery_gate_blocked"):
+        store.activate_inventory("staging", 1)
+    with psycopg.connect(migration_url) as connection:
+        connection.execute("SELECT set_config('tiamat.environment', 'staging', true)")
+        connection.execute(
+            """
+            INSERT INTO tiamat.restore_gate (
+              environment, storage_epoch, recovery_generation, coordinator_generation,
+              dispatch_blocked, block_reason, verified_at
+            ) VALUES ('staging', %s, 1, 1, false, NULL, clock_timestamp())
+            """,
+            (uuid4(),),
+        )
+    store.activate_inventory("staging", 1)
+
+    profile_vector = _bundle_json("vectors", "positive", "release.pos.execution-profile.json")
+    profile_jws = profile_vector["compact_jws"].encode()
+    profile = verify_release(
+        profile_jws,
+        inventory=inventory,
+        expected_issuer="stoin-control",
+        expected_environment="staging",
+        expected_caller_id="stoin:synth:utopia-homes",
+        expected_realm="utopia-homes",
+        now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+    )
+    store.stage_release(profile, "release-key-staging-1")
+    store.stage_release(profile, "release-key-staging-1")
+    scope = AuthorityScope("staging", "stoin-control", "stoin:synth:utopia-homes", "utopia-homes")
+    store.activate_release(
+        scope,
+        "execution_profile",
+        "utopia-homes.public-answer.generate.v1",
+        "profiles-2026-09-17.1",
+    )
+    assert (
+        store.load_active_jws(scope, "execution_profile", "utopia-homes.public-answer.generate.v1")
+        == profile_jws
+    )
+
+    grant_vector = _bundle_json("vectors", "positive", "release.pos.spending-grant.json")
+    grant = verify_release(
+        grant_vector["compact_jws"].encode(),
+        inventory=inventory,
+        expected_issuer="stoin-control",
+        expected_environment="staging",
+        expected_caller_id="stoin:synth:utopia-homes",
+        expected_realm="utopia-homes",
+        now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+    )
+    store.stage_release(grant, "release-key-staging-1")
+    with pytest.raises(AuthorityTransitionRejected, match="release_not_successor"):
+        store.activate_release(scope, "spending_grant", "utopia-public", grant.payload.release_id)
+
+
 def test_durable_replay_fencing_and_cross_scope_isolation(
     database_urls: tuple[str, str],
 ) -> None:
@@ -278,9 +369,7 @@ def test_connection_loss_inside_dispatch_transaction_rolls_back_state(
         reached.set()
         assert release.wait(timeout=10)
 
-    faulted_ledger = PostgresExecutionLedger(
-        runtime_url, witness, transaction_probe=probe
-    )
+    faulted_ledger = PostgresExecutionLedger(runtime_url, witness, transaction_probe=probe)
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
             faulted_ledger.dispatch,
@@ -341,9 +430,7 @@ def test_connection_loss_inside_settlement_rolls_back_all_accounting(
         reached.set()
         assert release.wait(timeout=10)
 
-    faulted_ledger = PostgresExecutionLedger(
-        runtime_url, witness, transaction_probe=probe
-    )
+    faulted_ledger = PostgresExecutionLedger(runtime_url, witness, transaction_probe=probe)
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
             faulted_ledger.settle_terminal,
@@ -384,8 +471,7 @@ def test_connection_loss_inside_settlement_rolls_back_all_accounting(
         ).fetchone()
         assert partition == (0, 0, 0)
         assert connection.execute(
-            "SELECT count(*) FROM tiamat.route_rate_quarantines "
-            "WHERE source_execution_id = %s",
+            "SELECT count(*) FROM tiamat.route_rate_quarantines WHERE source_execution_id = %s",
             (dispatched.execution_id,),
         ).fetchone() == (0,)
         assert connection.execute(
@@ -852,11 +938,14 @@ def test_forfeited_reservation_keeps_thirty_day_tombstone_and_financial_event(
     row = next(item for item in forfeited if item.execution_id == admitted.execution_id)
     assert row.settlement_status == "reservation_forfeited"
     assert row.settled_microusd == row.reserved_microusd
-    assert ledger.expire_tombstones(
-        scope,
-        coordinator_generation=coordinator,
-        now=now + timedelta(days=29),
-    ) == ()
+    assert (
+        ledger.expire_tombstones(
+            scope,
+            coordinator_generation=coordinator,
+            now=now + timedelta(days=29),
+        )
+        == ()
+    )
     assert ledger.expire_tombstones(
         scope,
         coordinator_generation=coordinator,

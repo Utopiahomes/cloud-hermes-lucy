@@ -75,6 +75,10 @@
   monotonic activation heads and root-signed trust-inventory generations. Forced RLS applies to all
   three tables; the runtime role receives read-only authority while a separate non-bypass release
   manager receives staging/activation writes.
+- The PostgreSQL authority adapter now provides idempotent exact-byte staging, conflict detection,
+  root-inventory successor activation, scoped release-head locking, predecessor/sequence checks,
+  atomic supersession, and exact active-JWS loading. Activation and loading both lock against the
+  restore gate and fail closed when no reconciled environment row is open.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -88,9 +92,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. wire verified artifacts into durable staging and implement transactional monotonic
-   activation/revocation operations plus restore reconciliation; the tables and role split now
-   exist, but runtime store operations are not yet implemented;
+3. add transactional signed revocation application, couple spending-grant activation to the
+   existing budget projection, and complete restore reconciliation against Control; verified
+   staging, monotonic activation, exact active-byte loading, and restore-gate enforcement are done;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
@@ -110,6 +114,10 @@ At local commit preparation on 2026-09-17:
 - Signed-authority and neighboring Shared Execution unit boundary: 76 passed. A broader `-k` run
   was discarded because pytest imported unrelated deployment tests without the repository root on
   `PYTHONPATH`; the explicit affected-file run is the valid evidence.
+- Dedicated PostgreSQL 16 authority-store proof: all 17 integration tests passed against a fresh,
+  loopback-only, tmpfs-backed disposable container, including blocked-before-recovery behavior,
+  idempotent staging, inventory activation, release activation/loading, and missing-predecessor
+  rejection. The container was stopped and removed after the run.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.

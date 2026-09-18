@@ -33,7 +33,10 @@ def upgrade() -> None:
             activated_at timestamptz,
             PRIMARY KEY (environment, inventory_generation),
             UNIQUE (environment, jws_sha256),
-            CHECK ((state = 'active') = (activated_at IS NOT NULL))
+            CHECK (
+                (state = 'staged' AND activated_at IS NULL)
+                OR (state IN ('active', 'superseded') AND activated_at IS NOT NULL)
+            )
         );
         CREATE UNIQUE INDEX trust_inventory_one_active_idx
         ON tiamat.trust_inventories (environment) WHERE state = 'active'
