@@ -48,7 +48,7 @@ def test_bootstrap_config_derives_private_tls_urls_without_owner_reuse(
     assert {url.username for url in config.role_urls.values()} == set(module.ACTIVE_BOOTSTRAP_ROLES)
 
 
-def test_bootstrap_rejects_non_tls_owner_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bootstrap_normalizes_render_owner_url_to_tls(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module()
     _configure_environment(monkeypatch)
     monkeypatch.setenv(
@@ -56,7 +56,19 @@ def test_bootstrap_rejects_non_tls_owner_url(monkeypatch: pytest.MonkeyPatch) ->
         "postgresql://temporary_owner:owner-secret@tiamat-private/tiamat_staging",
     )
 
-    with pytest.raises(module.BootstrapRejected, match="must require TLS"):
+    config = module.load_config_from_environment()
+    assert config.owner_url.query["sslmode"] == "require"
+
+
+def test_bootstrap_rejects_explicitly_weakened_owner_tls(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    _configure_environment(monkeypatch)
+    monkeypatch.setenv(
+        "TIAMAT_BOOTSTRAP_DATABASE_URL",
+        "postgresql://temporary_owner:owner-secret@tiamat-private/tiamat_staging?sslmode=disable",
+    )
+
+    with pytest.raises(module.BootstrapRejected, match="must not weaken"):
         module.load_config_from_environment()
 
 

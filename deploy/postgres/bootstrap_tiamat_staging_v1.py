@@ -79,11 +79,14 @@ def _parse_private_tls_url(value: str, *, expected_username: str | None = None) 
         raise BootstrapRejected("only PostgreSQL psycopg URLs are accepted")
     if not parsed.host or not parsed.database or not parsed.username or parsed.password is None:
         raise BootstrapRejected("database URL must contain host, database, username, and password")
-    if parsed.query.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
-        raise BootstrapRejected("database URL must require TLS")
+    supplied_sslmode = parsed.query.get("sslmode")
+    if supplied_sslmode not in {None, "require"}:
+        raise BootstrapRejected("database URL must not weaken Render internal TLS")
     if expected_username is not None and parsed.username != expected_username:
         raise BootstrapRejected("database URL has an unexpected login")
-    return parsed
+    # Render's dashboard supplies a private URL without a query string. Always set the exact
+    # required mode here rather than accepting a connection whose transport would be ambiguous.
+    return parsed.update_query_dict({"sslmode": "require"})
 
 
 def _role_url(owner_url: URL, *, role: str, password: str) -> URL:
