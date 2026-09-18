@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stoin.internal/contracts/tiamat-signed-release-v1/release-payload.schema.json",
-  "title": "Tiamat signed release payload v1",
+  "title": "Tiamat signed release payload v1 RC1",
   "oneOf": [
     { "$ref": "#/$defs/executionProfile" },
     { "$ref": "#/$defs/privacyPolicy" },

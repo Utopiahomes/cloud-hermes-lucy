@@ -1,0 +1,11 @@
+{
+  "id": "state.chain-resurrection",
+  "rule": "chain",
+  "holds": false,
+  "conditions": [
+    true,
+    true,
+    true,
+    false
+  ]
+}

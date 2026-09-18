@@ -1,0 +1,9 @@
+{
+  "id": "state.revocation-generation-rollback",
+  "rule": "revocation",
+  "holds": false,
+  "conditions": [
+    false,
+    true
+  ]
+}

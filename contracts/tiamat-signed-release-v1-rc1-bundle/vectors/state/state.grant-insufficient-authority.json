@@ -1,0 +1,9 @@
+{
+  "id": "state.grant-insufficient-authority",
+  "rule": "grant",
+  "holds": false,
+  "conditions": [
+    true,
+    false
+  ]
+}

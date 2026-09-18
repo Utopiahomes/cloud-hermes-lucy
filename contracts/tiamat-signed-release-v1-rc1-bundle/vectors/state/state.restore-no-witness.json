@@ -1,0 +1,11 @@
+{
+  "id": "state.restore-no-witness",
+  "rule": "restore",
+  "holds": false,
+  "conditions": [
+    false,
+    true,
+    true,
+    true
+  ]
+}

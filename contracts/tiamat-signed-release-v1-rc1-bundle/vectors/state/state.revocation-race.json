@@ -1,0 +1,9 @@
+{
+  "id": "state.revocation-race",
+  "rule": "revocation",
+  "holds": false,
+  "conditions": [
+    true,
+    false
+  ]
+}

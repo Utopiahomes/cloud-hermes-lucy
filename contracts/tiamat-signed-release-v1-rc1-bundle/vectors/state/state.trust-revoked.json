@@ -1,0 +1,12 @@
+{
+  "id": "state.trust-revoked",
+  "rule": "trust",
+  "holds": false,
+  "conditions": [
+    true,
+    true,
+    true,
+    true,
+    false
+  ]
+}

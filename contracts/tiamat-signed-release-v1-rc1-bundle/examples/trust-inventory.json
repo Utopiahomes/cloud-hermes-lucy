@@ -13,7 +13,7 @@
       "purpose": "policy_notary_v13",
       "use": "tiamat-signed-release",
       "algorithm": "EdDSA",
-      "public_key_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "public_key_b64": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
       "status": "active",
       "valid_from": "2026-09-17T19:55:00Z",
       "issuance_not_after": "2026-09-19T08:05:00Z",
@@ -26,6 +26,24 @@
           "realm": "utopia-homes",
           "release_type": "execution_profile",
           "subject_id": "utopia-homes.public-answer.generate.v1"
+        },
+        {
+          "caller_id": "stoin:synth:utopia-homes",
+          "realm": "utopia-homes",
+          "release_type": "privacy_policy",
+          "subject_id": "utopia-public-zdr"
+        },
+        {
+          "caller_id": "stoin:synth:utopia-homes",
+          "realm": "utopia-homes",
+          "release_type": "revocation",
+          "subject_id": "utopia-public-revocations"
+        },
+        {
+          "caller_id": "stoin:synth:utopia-homes",
+          "realm": "utopia-homes",
+          "release_type": "spending_grant",
+          "subject_id": "utopia-public"
         }
       ]
     }

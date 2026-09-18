@@ -1,6 +1,6 @@
-# Tiamat Signed Release Format v1 — Draft 0.3
+# Tiamat Signed Release Format v1 — RC1
 
-**Status:** implementation companion draft; not frozen and not production authority  
+**Status:** frozen implementation companion; not production authority
 **Date:** 2026-09-17  
 **Owner:** Tiamat / Stoin Control boundary  
 **Review requirement:** independent review by the Homes implementation steward before freeze
@@ -97,7 +97,7 @@ cutoffs and receive no skew extension for admission.
 ## 4. Exact typed content
 
 The normative machine-readable schemas are in
-`contracts/tiamat-signed-release-v1-draft-0.3/schemas`. They set
+`contracts/tiamat-signed-release-v1-rc1-bundle/schemas`. They set
 `additionalProperties: false`, define every member, type, enum, and bound, and contain the cross-type
 discriminators. Valid payload examples are in the bundle's `examples` directory. Strict schemas are
 for release issuers/providers; future consumers may become tolerant only through a new recognized
@@ -292,6 +292,6 @@ and stable RFC 8785 content digest across semantically identical content seriali
 
 ## 9. Freeze and implementation gate
 
-This draft does not authorize signing, activation, deployment, provider calls, or spending. Before
-implementation it requires independent review by the Homes implementation steward, resolution of all
-findings, an RC1 text digest, and a generated-plus-independently-verified negative-vector bundle.
+This RC1 does not authorize production signing, activation, deployment, provider calls, or spending.
+Its text is frozen for the conformance bundle and implementation. A later semantic change requires a
+new reviewed release and digest.

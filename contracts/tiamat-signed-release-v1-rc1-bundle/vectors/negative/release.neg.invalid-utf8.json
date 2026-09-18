@@ -1,0 +1,7 @@
+{
+  "id": "release.neg.invalid-utf8",
+  "kind": "release",
+  "valid": false,
+  "expected": "compact_invalid",
+  "compact_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6InJlbGVhc2Uta2V5LXN0YWdpbmctMSIsInR5cCI6InN0b2luLXNpZ25lZC1yZWxlYXNlK2p3cyJ9._w.SxKhQlO8krjlgW0l2m5h2QKt3-apAoQ52KdN381iNqFD_boKpxGIcaMye2lpJXCfEUvjxHdzduvOaTozP1I7Aw"
+}

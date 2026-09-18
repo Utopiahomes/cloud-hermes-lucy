@@ -1,0 +1,11 @@
+{
+  "id": "state.chain-competing-successor",
+  "rule": "chain",
+  "holds": false,
+  "conditions": [
+    true,
+    true,
+    false,
+    true
+  ]
+}

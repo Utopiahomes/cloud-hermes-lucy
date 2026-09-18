@@ -1,0 +1,9 @@
+{
+  "id": "state.time-expired",
+  "rule": "time",
+  "holds": false,
+  "conditions": [
+    false,
+    true
+  ]
+}

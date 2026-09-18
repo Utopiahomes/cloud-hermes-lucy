@@ -1,0 +1,11 @@
+{
+  "id": "state.chain-missing-predecessor",
+  "rule": "chain",
+  "holds": false,
+  "conditions": [
+    false,
+    true,
+    true,
+    true
+  ]
+}

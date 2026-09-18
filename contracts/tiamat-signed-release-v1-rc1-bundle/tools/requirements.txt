@@ -1,0 +1,3 @@
+cryptography>=50,<51
+jsonschema[format]>=4.25,<5
+rfc8785>=0.1.4,<0.2

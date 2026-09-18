@@ -1,0 +1,11 @@
+{
+  "id": "state.chain-nonincreasing",
+  "rule": "chain",
+  "holds": false,
+  "conditions": [
+    true,
+    false,
+    true,
+    true
+  ]
+}

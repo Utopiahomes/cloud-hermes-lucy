@@ -1,0 +1,11 @@
+{
+  "id": "state.restore-same-generation-stale",
+  "rule": "restore",
+  "holds": false,
+  "conditions": [
+    true,
+    true,
+    true,
+    false
+  ]
+}

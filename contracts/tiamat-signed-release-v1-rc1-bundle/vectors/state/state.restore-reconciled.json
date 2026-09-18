@@ -1,0 +1,11 @@
+{
+  "id": "state.restore-reconciled",
+  "rule": "restore",
+  "holds": true,
+  "conditions": [
+    true,
+    true,
+    true,
+    true
+  ]
+}

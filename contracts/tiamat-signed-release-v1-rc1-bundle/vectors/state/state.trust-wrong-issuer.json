@@ -1,0 +1,12 @@
+{
+  "id": "state.trust-wrong-issuer",
+  "rule": "trust",
+  "holds": false,
+  "conditions": [
+    false,
+    true,
+    true,
+    true,
+    true
+  ]
+}

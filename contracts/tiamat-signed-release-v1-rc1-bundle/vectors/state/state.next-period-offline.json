@@ -1,0 +1,9 @@
+{
+  "id": "state.next-period-offline",
+  "rule": "offline",
+  "holds": true,
+  "conditions": [
+    true,
+    true
+  ]
+}

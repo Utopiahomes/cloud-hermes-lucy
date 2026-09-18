@@ -1,0 +1,12 @@
+{
+  "id": "state.trust-wrong-purpose",
+  "rule": "trust",
+  "holds": false,
+  "conditions": [
+    true,
+    true,
+    true,
+    false,
+    true
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "state.grant-current",
+  "rule": "grant",
+  "holds": true,
+  "conditions": [
+    true,
+    true
+  ]
+}

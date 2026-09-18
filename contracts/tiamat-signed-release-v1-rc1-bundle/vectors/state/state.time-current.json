@@ -1,0 +1,9 @@
+{
+  "id": "state.time-current",
+  "rule": "time",
+  "holds": true,
+  "conditions": [
+    true,
+    true
+  ]
+}

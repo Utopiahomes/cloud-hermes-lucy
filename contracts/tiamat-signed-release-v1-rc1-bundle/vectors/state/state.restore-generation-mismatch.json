@@ -1,0 +1,11 @@
+{
+  "id": "state.restore-generation-mismatch",
+  "rule": "restore",
+  "holds": false,
+  "conditions": [
+    true,
+    false,
+    true,
+    true
+  ]
+}

@@ -1,4 +1,4 @@
-# Reviewer references for Tiamat Signed Release Draft 0.3
+# Reviewer references for Tiamat Signed Release RC1
 
 These are repository-local normative sources cited by the draft. Paths and line numbers refer to the
 reviewed source tree; reviewers should verify the full files and their Git revision rather than treat

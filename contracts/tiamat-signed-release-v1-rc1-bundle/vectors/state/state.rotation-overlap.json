@@ -1,0 +1,10 @@
+{
+  "id": "state.rotation-overlap",
+  "rule": "rotation",
+  "holds": true,
+  "conditions": [
+    true,
+    true,
+    true
+  ]
+}

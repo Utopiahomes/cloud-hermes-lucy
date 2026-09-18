@@ -1,0 +1,12 @@
+{
+  "id": "state.trust-wrong-environment",
+  "rule": "trust",
+  "holds": false,
+  "conditions": [
+    true,
+    false,
+    true,
+    true,
+    true
+  ]
+}

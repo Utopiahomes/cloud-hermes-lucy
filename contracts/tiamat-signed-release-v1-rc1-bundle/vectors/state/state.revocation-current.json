@@ -1,0 +1,9 @@
+{
+  "id": "state.revocation-current",
+  "rule": "revocation",
+  "holds": true,
+  "conditions": [
+    true,
+    true
+  ]
+}

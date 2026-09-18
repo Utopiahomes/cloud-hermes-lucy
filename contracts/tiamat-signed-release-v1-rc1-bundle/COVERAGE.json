@@ -1,0 +1,23 @@
+{
+  "normative_rules": {
+    "jws-exact-header-and-signature": ["release.pos.execution-profile", "release.neg.bad-signature", "release.neg.wrong-alg"],
+    "known-format-and-strict-payload": ["release.pos.privacy-policy", "release.neg.unknown-version", "release.neg.unknown-member"],
+    "content-digest-rfc8785": ["release.pos.spending-grant", "release.neg.content-digest"],
+    "signer-exact-scope": ["release.pos.execution-profile", "release.neg.scope"],
+    "typed-subject-binding": ["release.pos.execution-profile", "release.neg.subject-binding"],
+    "release-revocation-only": ["release.pos.release-revocation", "release.neg.key-revocation"],
+    "spending-contingency": ["release.pos.spending-grant", "release.neg.contingency"],
+    "root-signed-trust-inventory": ["inventory.pos.bootstrap", "inventory.neg.release-key-signed"],
+    "exact-received-bytes": ["release.pos.execution-profile", "release.neg.payload-reserialized"],
+    "size-limit": ["release.neg.oversized"],
+    "key-trust-and-revocation": ["state.trust-key-active", "state.trust-wrong-issuer", "state.trust-wrong-environment", "state.trust-wrong-use", "state.trust-wrong-purpose", "state.trust-revoked"],
+    "compact-and-json-hardening": ["release.neg.unknown-header", "release.neg.duplicate-header", "release.neg.duplicate-json-member", "release.neg.invalid-utf8", "release.neg.float", "release.neg.padding", "release.neg.malformed", "state.unprotected-header"],
+    "release-type-version": ["release.neg.unknown-version", "release.neg.unknown-release-type"],
+    "validity-and-key-window": ["state.time-current", "state.time-expired", "state.time-key-window"],
+    "predecessor-and-head-monotonicity": ["state.chain-successor", "state.chain-missing-predecessor", "state.chain-nonincreasing", "state.chain-competing-successor", "state.chain-resurrection"],
+    "budget-period-and-authority": ["state.grant-current", "state.grant-outside-period", "state.grant-insufficient-authority"],
+    "revocation-generation-and-race": ["state.revocation-current", "state.revocation-generation-rollback", "state.revocation-race"],
+    "restore-and-settlement-gate": ["state.restore-reconciled", "state.restore-no-witness", "state.restore-generation-mismatch", "state.restore-unreconciled-settlement", "state.restore-same-generation-stale"],
+    "positive-rotation-inflight-offline": ["state.rotation-overlap", "state.profile-inflight-replacement", "state.next-period-offline"]
+  }
+}

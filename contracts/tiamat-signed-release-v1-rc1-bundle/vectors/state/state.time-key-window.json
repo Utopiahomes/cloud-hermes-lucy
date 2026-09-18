@@ -1,0 +1,9 @@
+{
+  "id": "state.time-key-window",
+  "rule": "time",
+  "holds": false,
+  "conditions": [
+    true,
+    false
+  ]
+}

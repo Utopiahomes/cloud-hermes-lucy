@@ -1,0 +1,292 @@
+{
+  "bundle": "tiamat-signed-release-v1-rc1-bundle",
+  "contract_digest": "9826fa64241fc65dc4962eaa07b7554f77736629bec787cf55e0ff110bed039f",
+  "bundle_digest": "51b0f943c59b685f261bf0c58abad79a92f7c9fae5074517036c18e0884978d9",
+  "file_count": 71,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sha256": "ffcee56c11da5ccad6e6082861e98df852b26e655b6e0c52cade45f5fed30fa3"
+    },
+    {
+      "path": "COVERAGE.json",
+      "sha256": "a2674aa33d3a53636d39ba4180ba7d9e0bf7084967405cd1b4b3c497a5fc40ce"
+    },
+    {
+      "path": "README.md",
+      "sha256": "bbd4fec35e695d0172625b599cb9bd4e619c4fcbb56bcb06860d5b5856b8a191"
+    },
+    {
+      "path": "REVIEW_REFERENCES.md",
+      "sha256": "cd6b3598f28d1ca4c60391a3414baf095ea3ddd2782e77033162b202bca5dbd7"
+    },
+    {
+      "path": "examples/execution-profile.json",
+      "sha256": "df44f163b93a490ccd4a99be870c4d97f28f0f92de48fb5f9d90e50ee2f1d2c1"
+    },
+    {
+      "path": "examples/privacy-policy.json",
+      "sha256": "a2948b325c1ee07bf5790ff9b5f92f6501a5b5a907f3e157eaa41dcbcd746dd6"
+    },
+    {
+      "path": "examples/release-revocation.json",
+      "sha256": "bc496676171bf9f7736f4430715ba51df6543d484fb52c7094d2893c212a2970"
+    },
+    {
+      "path": "examples/spending-grant.json",
+      "sha256": "f7350a0b48e4debbb55508798cec87ad7bad7e0c51be861bf9bcbbf6f9fcb574"
+    },
+    {
+      "path": "examples/trust-inventory.json",
+      "sha256": "f40fca4f6f3f9a820aec79f117cfbd3fe7ff3b2e7a3322e75c38a3d7fcf2fda6"
+    },
+    {
+      "path": "schemas/release-payload.schema.json",
+      "sha256": "4e919c85f452228bae4b8224bc24bc654fb4e901a942c4a8d2ff7f239842a1b9"
+    },
+    {
+      "path": "schemas/trust-inventory.schema.json",
+      "sha256": "401edb711813289cb493ac592fe324d2bf1b3857c005578a8d0a8c0f81ab43fb"
+    },
+    {
+      "path": "test-keys.json",
+      "sha256": "948ea1a04827073bdc747bbdc7ad74c712d484f37733679d05a11e5fb965868d"
+    },
+    {
+      "path": "tools/build_bundle.py",
+      "sha256": "543ae27f208b23b65d3bf35949b3f65a79a1aae437aa0e6a78d2abe4491f767c"
+    },
+    {
+      "path": "tools/compute_digest.py",
+      "sha256": "a0222499cc44d3b36ec51fe94bc98b69796b6ee75fffe3b552dc7d397f0d4217"
+    },
+    {
+      "path": "tools/requirements.txt",
+      "sha256": "59ebe24f5a700919a200d7a5cbebee887908b0f1e42e794f5a4667e1a923aed4"
+    },
+    {
+      "path": "tools/verify_bundle.py",
+      "sha256": "c0c94a87c62a00e19ec167fc393c39b75987a458b479ec87cc179927eb0b7abf"
+    },
+    {
+      "path": "vectors/negative/inventory.neg.release-key-signed.json",
+      "sha256": "fb84a65e4a5df4433e51e4de03fffe13ffdbbf847ceafd20367c0a12e00bfa2b"
+    },
+    {
+      "path": "vectors/negative/release.neg.bad-signature.json",
+      "sha256": "971c8b8ee13ad867fb7ac045070f8ff516f80fab955a0ad835a10731eb86ab1c"
+    },
+    {
+      "path": "vectors/negative/release.neg.content-digest.json",
+      "sha256": "ce5da877189e6a88331a9a48779a6786c31eebd5c95ba3a9735c4051726554a7"
+    },
+    {
+      "path": "vectors/negative/release.neg.contingency.json",
+      "sha256": "d3f2018f7ca19c096ae33138e9e81ec81d7a4e5df6e2a1271cb7fe095d84aa17"
+    },
+    {
+      "path": "vectors/negative/release.neg.duplicate-header.json",
+      "sha256": "6712f2dfce8b922585e5864f952b26cfe0850fe7df0f93c5d144d83e637a0cc4"
+    },
+    {
+      "path": "vectors/negative/release.neg.duplicate-json-member.json",
+      "sha256": "62dc261353347275c05ab574a0c3344f6e785f0663c99e00e2f5b54feef0fdc8"
+    },
+    {
+      "path": "vectors/negative/release.neg.float.json",
+      "sha256": "b348d901b1d5a67f42dd995c8fb32720116f23ab37b5844d7c973c135f863d77"
+    },
+    {
+      "path": "vectors/negative/release.neg.invalid-utf8.json",
+      "sha256": "4b5eab73a3fb1a50572c50f2f246b15b21c409c830055742d0e0dfc4b2e47c16"
+    },
+    {
+      "path": "vectors/negative/release.neg.key-revocation.json",
+      "sha256": "5fa914f8379f0e180c807c3c0e5bd08f7b34ba542e83c098411b0477b5b9bc8c"
+    },
+    {
+      "path": "vectors/negative/release.neg.malformed.json",
+      "sha256": "18af2f0ef83357c3a05b39f8fec0365652520f6a69c35b2779afc160682a4191"
+    },
+    {
+      "path": "vectors/negative/release.neg.oversized.json",
+      "sha256": "9097dad44757349f1342db1f4bfb5bcf1b42376d6fdb3610fb28b565fbf8a9d1"
+    },
+    {
+      "path": "vectors/negative/release.neg.padding.json",
+      "sha256": "5f87f92b3efdf821511c05f2f8fa1dd7232b75cff01a498ba6dd6b74284d76c5"
+    },
+    {
+      "path": "vectors/negative/release.neg.payload-reserialized.json",
+      "sha256": "30f0eb8d7dd0d81830d1074e237ccf5123c0aef9fb9c988f772e45527890b869"
+    },
+    {
+      "path": "vectors/negative/release.neg.scope.json",
+      "sha256": "698125667d0f2bf324b305a8fa5a6ced83849ca32a17041ec063e141d7e8268c"
+    },
+    {
+      "path": "vectors/negative/release.neg.subject-binding.json",
+      "sha256": "f4fc7956c9dc0ca583ef67d4ee5ac386d5f7391723eed6ad7bf388b645c8c94b"
+    },
+    {
+      "path": "vectors/negative/release.neg.unknown-header.json",
+      "sha256": "64eca89595bb6a6a17db8710560242c43f41dc816730e3d4327b89114dd16ae9"
+    },
+    {
+      "path": "vectors/negative/release.neg.unknown-kid.json",
+      "sha256": "2daa4e7a8751ecc03dc9b33ecee91a200b7a0d781d7c0740c16442bee18403e1"
+    },
+    {
+      "path": "vectors/negative/release.neg.unknown-member.json",
+      "sha256": "26742116c071b7b24c112704bdcc8e197fc89f9418339006acc97855a3e78721"
+    },
+    {
+      "path": "vectors/negative/release.neg.unknown-release-type.json",
+      "sha256": "da72841fdb4ba022d4a0d2ed3da3846c6c9fc2cfa15ee9d3adfca2c81ff238b0"
+    },
+    {
+      "path": "vectors/negative/release.neg.unknown-version.json",
+      "sha256": "aa755d4682fef85994c94f2efdb4b81727b082c9909cac2a1158db76d51efed7"
+    },
+    {
+      "path": "vectors/negative/release.neg.wrong-alg.json",
+      "sha256": "844a6f98083f1a225194b56f15abff07a42afdbfddbb96105487e74c8bc78cb7"
+    },
+    {
+      "path": "vectors/positive/inventory.pos.bootstrap.json",
+      "sha256": "8ce43e064a44fe016cdda927012049c719c757deffc61bebd34ead0239d40561"
+    },
+    {
+      "path": "vectors/positive/release.pos.execution-profile.json",
+      "sha256": "138017b39e04bc3e5ce04f50e3d6143536666cc80b97dfdfafb74ab9e96345b3"
+    },
+    {
+      "path": "vectors/positive/release.pos.privacy-policy.json",
+      "sha256": "f43820494bb1dcdb61838c74f45302818d2543e1f06db035591132c202360d58"
+    },
+    {
+      "path": "vectors/positive/release.pos.release-revocation.json",
+      "sha256": "2f201e3a27b9e5e6ae397d2fb8cf4f7fa00c6cfb496e5b98916f472d247e9ea8"
+    },
+    {
+      "path": "vectors/positive/release.pos.spending-grant.json",
+      "sha256": "937eae038cf3d6a82028bf701be32544a24fda3f618e455c4633f0661dca9b7f"
+    },
+    {
+      "path": "vectors/state/state.chain-competing-successor.json",
+      "sha256": "4bbe292c7b1ee627b32704b99b7c1e1fac9245f7355841011d384e8ce5ff057c"
+    },
+    {
+      "path": "vectors/state/state.chain-missing-predecessor.json",
+      "sha256": "fcc16f60b5356cfadd1e4eb541e74b5d2c44c27403f2dff335f0e46db7c455e5"
+    },
+    {
+      "path": "vectors/state/state.chain-nonincreasing.json",
+      "sha256": "3d140b8a1999847ad2af1cf460ab6a5110165ed5ed1c75c001fdb73b19d4683d"
+    },
+    {
+      "path": "vectors/state/state.chain-resurrection.json",
+      "sha256": "f129ef41e04bfdccb1cec52216123c07b81f487df49c59ce07a0491a2e6b75ae"
+    },
+    {
+      "path": "vectors/state/state.chain-successor.json",
+      "sha256": "db59c49fc9935c36eecc4f644bc4a306b291d4bc35bef13bb4277c1664e2d626"
+    },
+    {
+      "path": "vectors/state/state.grant-current.json",
+      "sha256": "c75dac87e448bc8ad5d3392233ccfd00b16a56cfb1dcd7c9468cde0031d0ecf3"
+    },
+    {
+      "path": "vectors/state/state.grant-insufficient-authority.json",
+      "sha256": "3737eff202393db5147f3b0024c4cc37789e4a498dece59bc5d084a447ecf52c"
+    },
+    {
+      "path": "vectors/state/state.grant-outside-period.json",
+      "sha256": "27c8d2679b763033c7b725e1a187e67caa5a88ab075cf836facc5408897747fe"
+    },
+    {
+      "path": "vectors/state/state.next-period-offline.json",
+      "sha256": "7e6e3f4234e6ac77bb6df86a813cd4890c4da281cc69c3cf3e98fb10b2a06ea5"
+    },
+    {
+      "path": "vectors/state/state.profile-inflight-replacement.json",
+      "sha256": "2ee65e0e84ae4b81f0b910e32f8e6a146272fa0c5997c022ec1bf3c6f27d59e9"
+    },
+    {
+      "path": "vectors/state/state.restore-generation-mismatch.json",
+      "sha256": "bd3c2890dc2ae0ad456edac9773ab99f61b5bbceab0537b49326e8ed08b451d4"
+    },
+    {
+      "path": "vectors/state/state.restore-no-witness.json",
+      "sha256": "24f62b9fe90c043058d62a95dc22d846565834d1d69d46ac8b11e822804ec022"
+    },
+    {
+      "path": "vectors/state/state.restore-reconciled.json",
+      "sha256": "a6f0345e978030e13562f1bb8708b3f64b35729cfac76880474f48f187c98ec0"
+    },
+    {
+      "path": "vectors/state/state.restore-same-generation-stale.json",
+      "sha256": "96cf604b081092ce536fa29ae433a732d3523ffe6a1ca679f7d34e7c20bbf4f2"
+    },
+    {
+      "path": "vectors/state/state.restore-unreconciled-settlement.json",
+      "sha256": "5a6b65a833859ea090bdd138221e1c90b052ea6195084c4295f7be4a03f2911d"
+    },
+    {
+      "path": "vectors/state/state.revocation-current.json",
+      "sha256": "da55ac52e1daf9a43d1caeee1724828f1330315571399b62f82cbe152af0cf5a"
+    },
+    {
+      "path": "vectors/state/state.revocation-generation-rollback.json",
+      "sha256": "8e47fad4a78380cda7cc15f5b911b23f8c08d8f0213b5d171b5d103987dd38f2"
+    },
+    {
+      "path": "vectors/state/state.revocation-race.json",
+      "sha256": "45b995548a44da803d285f9264bccf6a2640914c30b1b957f969b0faaeda6b1e"
+    },
+    {
+      "path": "vectors/state/state.rotation-overlap.json",
+      "sha256": "38d2128fed3f6cac45b21438f0e7597539bacca11ef17935ccb31ed0d2f33431"
+    },
+    {
+      "path": "vectors/state/state.time-current.json",
+      "sha256": "f3d663824518b8622cbd9b350dd735baab84785accd3bd176101228b057ea534"
+    },
+    {
+      "path": "vectors/state/state.time-expired.json",
+      "sha256": "ebdf834054feee5d4e30828147744cbfca6c998fc6213dafa0a7f3e8d2f43ca5"
+    },
+    {
+      "path": "vectors/state/state.time-key-window.json",
+      "sha256": "202d1ba93889aba457497c32477bf1266b5371f8fa8d1cc02a2b03252a85d05b"
+    },
+    {
+      "path": "vectors/state/state.trust-key-active.json",
+      "sha256": "e1c3081eb763fdb81f2f4cdaf5a8cb578ac11f808cb7c8ebb2ac10c2092b7362"
+    },
+    {
+      "path": "vectors/state/state.trust-revoked.json",
+      "sha256": "22da608cde029fb42ad92c5bbb29b49a401dbc3c1cda78b9af1b81ebab4fa758"
+    },
+    {
+      "path": "vectors/state/state.trust-wrong-environment.json",
+      "sha256": "7a6d90cec10ca62e4949fc04bd43fc56ae3ee7dc1be5b2fea245c3cd93fac249"
+    },
+    {
+      "path": "vectors/state/state.trust-wrong-issuer.json",
+      "sha256": "bf6c405480df1b9cb73fc83653172119327ea087fe89f2e714e2f24e46f053e7"
+    },
+    {
+      "path": "vectors/state/state.trust-wrong-purpose.json",
+      "sha256": "f5c79ac8bf020d8e98c129b86f3e6699b9082a8446a39ba345ee9959066dae1a"
+    },
+    {
+      "path": "vectors/state/state.trust-wrong-use.json",
+      "sha256": "0fc58e4f0b1d1d7bf8947eb621c0efe1f87248d9bef8a7bff744b14daec80a14"
+    },
+    {
+      "path": "vectors/state/state.unprotected-header.json",
+      "sha256": "d270ba870e78c32c31404b1b0d3bd99cd7aa8bcc1a7da990d88415bded49ff54"
+    }
+  ]
+}

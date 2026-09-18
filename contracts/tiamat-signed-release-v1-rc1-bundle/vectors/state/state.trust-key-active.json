@@ -1,0 +1,12 @@
+{
+  "id": "state.trust-key-active",
+  "rule": "trust",
+  "holds": true,
+  "conditions": [
+    true,
+    true,
+    true,
+    true,
+    true
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "state.profile-inflight-replacement",
+  "rule": "inflight",
+  "holds": true,
+  "conditions": [
+    true,
+    true,
+    true
+  ]
+}

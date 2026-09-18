@@ -1,0 +1,7 @@
+{
+  "id": "release.neg.malformed",
+  "kind": "release",
+  "valid": false,
+  "expected": "compact_invalid",
+  "compact_jws": "not.a-jws"
+}

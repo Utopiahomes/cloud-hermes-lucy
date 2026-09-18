@@ -1,0 +1,8 @@
+{
+  "id": "state.unprotected-header",
+  "rule": "compact",
+  "holds": false,
+  "conditions": [
+    false
+  ]
+}
