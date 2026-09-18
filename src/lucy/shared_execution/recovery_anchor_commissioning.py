@@ -1,0 +1,290 @@
+"""Offline construction of exact signed Tiamat recovery-anchor bootstrap artifacts.
+
+This module performs no network or storage I/O. Root and witness private keys remain in the
+offline commissioning boundary; the online installer receives only the resulting signed bytes.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+
+from lucy.shared_execution.recovery_anchor import RecoveryAnchorIdentity, VerifiedAnchorTransition
+from lucy.shared_execution.recovery_anchor_jws import (
+    ANCHOR_TRANSITION_TYP,
+    verify_anchor_transition,
+)
+from lucy.shared_execution.recovery_witness_jws import (
+    RECOVERY_WITNESS_INVENTORY_TYP,
+    RECOVERY_WITNESS_TYP,
+    RecoveryAnchorRecordDecoder,
+    verify_recovery_witness,
+    verify_recovery_witness_inventory,
+)
+
+
+@dataclass(frozen=True)
+class RecoveryBootstrapArtifacts:
+    root_key_id: str
+    root_public_key_b64: str
+    witness_key_id: str
+    inventory_jws: bytes
+    witness_jws: bytes
+    transition_jws: bytes
+
+    @property
+    def transition_sha256(self) -> str:
+        return hashlib.sha256(self.transition_jws).hexdigest()
+
+    def public_package(self, identity: RecoveryAnchorIdentity) -> dict[str, object]:
+        """Return a content-free, signed-artifact package containing no private key material."""
+
+        return {
+            "format_version": "1",
+            "environment": identity.environment,
+            "ledger_id": str(identity.ledger_id),
+            "storage_epoch": str(identity.storage_epoch),
+            "root_key_id": self.root_key_id,
+            "root_public_key_b64": self.root_public_key_b64,
+            "root_public_key_sha256": hashlib.sha256(
+                base64.b64decode(self.root_public_key_b64, validate=True)
+            ).hexdigest(),
+            "witness_key_id": self.witness_key_id,
+            "inventory_jws_b64": base64.b64encode(self.inventory_jws).decode("ascii"),
+            "witness_jws_b64": base64.b64encode(self.witness_jws).decode("ascii"),
+            "transition_jws_b64": base64.b64encode(self.transition_jws).decode("ascii"),
+            "transition_sha256": self.transition_sha256,
+        }
+
+
+def verify_bootstrap_package(
+    package: dict[str, object], *, now: datetime, expected_root_public_sha256: str
+) -> tuple[RecoveryAnchorIdentity, VerifiedAnchorTransition]:
+    """Strictly reconstruct and verify an offline package before any online write."""
+
+    expected = {
+        "format_version",
+        "environment",
+        "ledger_id",
+        "storage_epoch",
+        "root_key_id",
+        "root_public_key_b64",
+        "root_public_key_sha256",
+        "witness_key_id",
+        "inventory_jws_b64",
+        "witness_jws_b64",
+        "transition_jws_b64",
+        "transition_sha256",
+    }
+    if set(package) != expected or package.get("format_version") != "1":
+        raise ValueError("recovery bootstrap package shape is invalid")
+    try:
+        identity = RecoveryAnchorIdentity(
+            str(package["environment"]),
+            canonical_uuid4(str(package["ledger_id"])),
+            canonical_uuid4(str(package["storage_epoch"])),
+        )
+        root_key_id = str(package["root_key_id"])
+        witness_key_id = str(package["witness_key_id"])
+        public_bytes = base64.b64decode(str(package["root_public_key_b64"]), validate=True)
+        public_key = Ed25519PublicKey.from_public_bytes(public_bytes)
+        inventory_jws = base64.b64decode(str(package["inventory_jws_b64"]), validate=True)
+        witness_jws = base64.b64decode(str(package["witness_jws_b64"]), validate=True)
+        transition_jws = base64.b64decode(str(package["transition_jws_b64"]), validate=True)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("recovery bootstrap package encoding is invalid") from exc
+    observed_root_digest = hashlib.sha256(public_bytes).hexdigest()
+    if (
+        observed_root_digest != package["root_public_key_sha256"]
+        or observed_root_digest != expected_root_public_sha256
+    ):
+        raise ValueError("recovery bootstrap root trust pin is invalid")
+    if hashlib.sha256(transition_jws).hexdigest() != package["transition_sha256"]:
+        raise ValueError("recovery bootstrap transition digest is invalid")
+    context = verify_recovery_witness_inventory(
+        inventory_jws,
+        root_key_id=root_key_id,
+        root_public_key=public_key,
+        identity=identity,
+        witness_key_id=witness_key_id,
+        now=now,
+    )
+    decoder = RecoveryAnchorRecordDecoder(context, root_key_id, public_key)
+    transition = decoder(transition_jws, witness_jws)
+    if transition.transition_version != 1 or transition.previous_transition_sha256 is not None:
+        raise ValueError("recovery bootstrap must be the unique first transition")
+    if transition.continuity != "quarantined" or transition.witness.status != "quarantined":
+        raise ValueError("recovery bootstrap must fail closed in quarantine")
+    return identity, transition
+
+
+def build_quarantined_bootstrap(
+    *,
+    identity: RecoveryAnchorIdentity,
+    root_key_id: str,
+    root_private_key: Ed25519PrivateKey,
+    witness_key_id: str,
+    witness_private_key: Ed25519PrivateKey,
+    checkpoint_digest: str,
+    release_heads_sha256: str,
+    checkpoint_settlement_position_sha256: str,
+    now: datetime,
+    validity: timedelta = timedelta(hours=12),
+) -> tuple[RecoveryBootstrapArtifacts, VerifiedAnchorTransition]:
+    """Build and self-verify the unique version-one quarantined bootstrap package."""
+
+    current = now.astimezone(UTC).replace(microsecond=0)
+    if not timedelta(minutes=1) <= validity <= timedelta(hours=24):
+        raise ValueError("recovery witness validity must be between one minute and 24 hours")
+    _require_digest(checkpoint_digest)
+    _require_digest(release_heads_sha256)
+    _require_digest(checkpoint_settlement_position_sha256)
+    public_b64 = base64.b64encode(witness_private_key.public_key().public_bytes_raw()).decode()
+    root_public_b64 = base64.b64encode(root_private_key.public_key().public_bytes_raw()).decode()
+    until = current + validity
+    inventory_payload: dict[str, object] = {
+        "format_version": "1",
+        "inventory_generation": 1,
+        "previous_inventory_digest": None,
+        "issued_at": _timestamp(current),
+        "environment": identity.environment,
+        "ledger_id": str(identity.ledger_id),
+        "root_key_id": root_key_id,
+        "keys": [
+            {
+                "kid": witness_key_id,
+                "issuer": "stoin:control",
+                "environment": identity.environment,
+                "purpose": "policy_notary_v13",
+                "use": "tiamat-recovery-witness",
+                "algorithm": "EdDSA",
+                "public_key_b64": public_b64,
+                "status": "active",
+                "ledger_id": str(identity.ledger_id),
+                "valid_from": _timestamp(current),
+                "issuance_not_after": _timestamp(until),
+                "verify_not_after": _timestamp(until),
+                "revoked_at": None,
+                "active_release_policy": "invalidate_immediately",
+            }
+        ],
+    }
+    inventory_jws = _sign_compact(
+        inventory_payload,
+        key_id=root_key_id,
+        typ=RECOVERY_WITNESS_INVENTORY_TYP,
+        private_key=root_private_key,
+    )
+    inventory_context = verify_recovery_witness_inventory(
+        inventory_jws,
+        root_key_id=root_key_id,
+        root_public_key=root_private_key.public_key(),
+        identity=identity,
+        witness_key_id=witness_key_id,
+        now=current,
+    )
+    witness_payload: dict[str, object] = {
+        "format_version": "1",
+        "witness_id": str(uuid4()),
+        "issuer": "stoin:control",
+        "environment": identity.environment,
+        "ledger_id": str(identity.ledger_id),
+        "storage_epoch": str(identity.storage_epoch),
+        "recovery_generation": 1,
+        "witness_revision": 1,
+        "status": "quarantined",
+        "issued_at": _timestamp(current),
+        "not_before": _timestamp(current),
+        "not_after": _timestamp(until),
+        "inventory_generation": 1,
+        "inventory_jws_sha256": inventory_context.inventory_jws_sha256,
+        "release_heads_sha256": release_heads_sha256,
+        "checkpoint_settlement_position_sha256": checkpoint_settlement_position_sha256,
+        "checkpoint_digest": checkpoint_digest,
+    }
+    witness_jws = _sign_compact(
+        witness_payload,
+        key_id=witness_key_id,
+        typ=RECOVERY_WITNESS_TYP,
+        private_key=witness_private_key,
+    )
+    witness = verify_recovery_witness(witness_jws, context=inventory_context)
+    transition_payload: dict[str, object] = {
+        "format_version": "1",
+        "transition_version": 1,
+        "previous_transition_sha256": None,
+        "environment": identity.environment,
+        "ledger_id": str(identity.ledger_id),
+        "storage_epoch": str(identity.storage_epoch),
+        "recovery_generation": 1,
+        "witness_revision": 1,
+        "witness_jws_sha256": witness.exact_sha256,
+        "continuity": "quarantined",
+        "beacon": None,
+    }
+    transition_jws = _sign_compact(
+        transition_payload,
+        key_id=root_key_id,
+        typ=ANCHOR_TRANSITION_TYP,
+        private_key=root_private_key,
+    )
+    transition = verify_anchor_transition(
+        transition_jws,
+        root_key_id=root_key_id,
+        root_public_key=root_private_key.public_key(),
+        witness=witness,
+    )
+    return (
+        RecoveryBootstrapArtifacts(
+            root_key_id=root_key_id,
+            root_public_key_b64=root_public_b64,
+            witness_key_id=witness_key_id,
+            inventory_jws=inventory_jws,
+            witness_jws=witness_jws,
+            transition_jws=transition_jws,
+        ),
+        transition,
+    )
+
+
+def _sign_compact(
+    payload: dict[str, object],
+    *,
+    key_id: str,
+    typ: str,
+    private_key: Ed25519PrivateKey,
+) -> bytes:
+    header = {"alg": "EdDSA", "kid": key_id, "typ": typ}
+    protected = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    encoded_payload = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = protected + b"." + encoded_payload
+    return signing_input + b"." + _b64url(private_key.sign(signing_input))
+
+
+def _b64url(value: bytes) -> bytes:
+    return base64.urlsafe_b64encode(value).rstrip(b"=")
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _require_digest(value: str) -> None:
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise ValueError("recovery bootstrap digest is invalid")
+
+
+def canonical_uuid4(value: str) -> UUID:
+    parsed = UUID(value)
+    if str(parsed) != value or parsed.version != 4:
+        raise ValueError("recovery bootstrap identity must use canonical UUID v4")
+    return parsed

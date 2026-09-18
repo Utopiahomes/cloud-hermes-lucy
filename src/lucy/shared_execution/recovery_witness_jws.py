@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ from lucy.shared_execution.recovery_anchor_jws import verify_anchor_transition
 from lucy.shared_execution.signed_releases import SignedReleaseRejected, _verify_compact
 
 RECOVERY_WITNESS_TYP = "stoin-tiamat-recovery-witness+jws"
+RECOVERY_WITNESS_INVENTORY_TYP = "stoin-tiamat-recovery-witness-trust-inventory+jws"
 _UUID4 = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 
@@ -51,6 +53,34 @@ class _WitnessPayload(_StrictModel):
     checkpoint_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class _WitnessInventoryKey(_StrictModel):
+    kid: str = Field(min_length=1, max_length=128)
+    issuer: Literal["stoin:control"]
+    environment: str = Field(min_length=1, max_length=128)
+    purpose: Literal["policy_notary_v13"]
+    use: Literal["tiamat-recovery-witness"]
+    algorithm: Literal["EdDSA"]
+    public_key_b64: str
+    status: Literal["staged", "active", "retired", "revoked"]
+    ledger_id: str = Field(pattern=_UUID4)
+    valid_from: str
+    issuance_not_after: str
+    verify_not_after: str
+    revoked_at: str | None
+    active_release_policy: Literal["invalidate_immediately", "honor_active_until_expiry"]
+
+
+class _WitnessInventoryPayload(_StrictModel):
+    format_version: Literal["1"]
+    inventory_generation: int = Field(ge=1, le=9_007_199_254_740_991)
+    previous_inventory_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    issued_at: str
+    environment: str = Field(min_length=1, max_length=128)
+    ledger_id: str = Field(pattern=_UUID4)
+    root_key_id: str = Field(min_length=1, max_length=128)
+    keys: list[_WitnessInventoryKey] = Field(min_length=1)
+
+
 @dataclass(frozen=True)
 class RecoveryWitnessVerificationContext:
     identity: RecoveryAnchorIdentity
@@ -66,6 +96,85 @@ class RecoveryWitnessVerificationContext:
             or not _is_digest(self.inventory_jws_sha256)
         ):
             raise ValueError("recovery witness verification context is invalid")
+
+
+def verify_recovery_witness_inventory(
+    exact_jws: bytes,
+    *,
+    root_key_id: str,
+    root_public_key: Ed25519PublicKey,
+    identity: RecoveryAnchorIdentity,
+    witness_key_id: str,
+    now: datetime,
+) -> RecoveryWitnessVerificationContext:
+    """Verify a root-signed, purpose-distinct witness inventory and select one active key."""
+
+    try:
+        raw = _verify_compact(
+            exact_jws,
+            expected_kid=root_key_id,
+            public_key=root_public_key,
+            expected_typ=RECOVERY_WITNESS_INVENTORY_TYP,
+        )
+        payload = _WitnessInventoryPayload.model_validate(raw)
+        issued_at = _parse_time(payload.issued_at)
+        if (
+            payload.root_key_id != root_key_id
+            or payload.environment != identity.environment
+            or _canonical_uuid4(payload.ledger_id) != identity.ledger_id
+            or issued_at > now
+            or len({item.kid for item in payload.keys}) != len(payload.keys)
+            or (payload.inventory_generation == 1) != (payload.previous_inventory_digest is None)
+        ):
+            raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_scope_invalid")
+        for item in payload.keys:
+            _parse_time(item.valid_from)
+            _parse_time(item.issuance_not_after)
+            _parse_time(item.verify_not_after)
+            if (item.status == "revoked") != (item.revoked_at is not None):
+                raise RecoveryWitnessSignatureRejected(
+                    "recovery_witness_inventory_revocation_invalid"
+                )
+            if item.revoked_at is not None:
+                _parse_time(item.revoked_at)
+        selected = next(
+            (
+                item
+                for item in payload.keys
+                if item.kid == witness_key_id and item.status == "active"
+            ),
+            None,
+        )
+        if selected is None:
+            raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_key_unavailable")
+        if (
+            selected.environment != identity.environment
+            or _canonical_uuid4(selected.ledger_id) != identity.ledger_id
+        ):
+            raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_scope_invalid")
+        valid_from = _parse_time(selected.valid_from)
+        issuance_not_after = _parse_time(selected.issuance_not_after)
+        verify_not_after = _parse_time(selected.verify_not_after)
+        if not (valid_from <= now <= issuance_not_after <= verify_not_after):
+            raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_key_not_current")
+        public_bytes = base64.b64decode(selected.public_key_b64, validate=True)
+        public_key = Ed25519PublicKey.from_public_bytes(public_bytes)
+        return RecoveryWitnessVerificationContext(
+            identity=identity,
+            key_id=selected.kid,
+            public_key=public_key,
+            inventory_generation=payload.inventory_generation,
+            inventory_jws_sha256=hashlib.sha256(exact_jws).hexdigest(),
+        )
+    except (
+        RecoveryWitnessSignatureRejected,
+        SignedReleaseRejected,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        if isinstance(exc, RecoveryWitnessSignatureRejected):
+            raise
+        raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_invalid") from exc
 
 
 def verify_recovery_witness(

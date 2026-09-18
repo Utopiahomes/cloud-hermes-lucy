@@ -234,6 +234,22 @@ At local commit preparation on 2026-09-18:
   history or provider dispatch was created. Evidence is in
   `docs/evidence/tiamat-recovery-anchor-staging-commissioning-2026-09-18.json`.
 
+- Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
+  active purpose-distinct witness key to the exact environment and ledger under the offline root.
+  The offline builder creates and self-verifies the root-signed inventory, quarantined witness and
+  predecessor-null version-one transition. Separate deployment tools generate ignored local key
+  material, create a public signed package, and verify/dry-run before any network use. The online
+  installer accepts no private key, requires an exact ledger-bound execution confirmation, uses the
+  ambient SDK identity, conditionally writes only an empty anchor and strong-reads the result. No
+  staging root key or signed history has been generated or installed.
+
+- Verification after the cryptographic commissioning increment: 42 focused recovery-anchor tests
+  passed, including offline package construction, inventory/root/scope validation, package tamper
+  rejection, independent root trust pinning, exact signed-byte decoding, conditional bootstrap,
+  strong reads, CAS collision and outage behavior. The complete unit suite passed 1,221 tests with two existing dependency
+  deprecation warnings. Ruff passed across `src`, `deploy/aws` and unit tests; strict mypy passed
+  across 144 source files plus all three new commissioning tools. `git diff --check` passed.
+
 - Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,
   quarantine/recovery-pending lifecycle, PostgreSQL control/timeline/flush-LSN beacon query,

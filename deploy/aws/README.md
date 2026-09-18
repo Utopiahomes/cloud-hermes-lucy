@@ -267,7 +267,25 @@ object. Alert receipt is exercised later with a non-destructive synthetic
 event.
 # Tiamat external recovery anchor
 
-`tiamat-recovery-anchor-v1.yaml` is the unprovisioned single-Region DynamoDB deployment definition
-for Tiamat's signed recovery authority. Its reader and updater role parameters must name distinct
-existing machine roles. Review
-`../../docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` before creating a change set.
+`tiamat-recovery-anchor-v1.yaml` is the commissioned single-Region DynamoDB deployment definition
+for Tiamat's signed recovery authority. Its reader and updater role parameters name distinct exact
+Render OIDC identities. Review
+`../../docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` before any signed bootstrap.
+
+The cryptographic bootstrap is deliberately split into offline signing and online installation:
+
+1. `generate_tiamat_recovery_identity_v1.py` creates purpose-distinct root and witness Ed25519 keys
+   as four separate private/public files under ignored storage. It refuses overwrite and prints no
+   private material. Root and witness private keys can therefore have different custody and access.
+2. `prepare_tiamat_recovery_bootstrap_v1.py` runs offline with that private identity and emits a
+   public package containing only exact signed JWS artifacts and public keys. The first transition
+   is always version 1, predecessor-null and quarantined; it cannot authorize provider dispatch.
+3. `install_tiamat_recovery_bootstrap_v1.py` defaults to verification-only. `--execute` additionally
+   requires the exact `bootstrap:<environment>:<ledger-id>` confirmation, uses only ambient Render
+   OIDC credentials, requires an independently recorded `--expected-root-public-sha256` trust pin,
+   performs a conditional empty-record write, and strong-reads the exact result.
+
+The root private key never enters Render, DynamoDB, source control, logs, or the bootstrap package.
+Do not generate the staging identity or execute the installer until the ledger UUID, storage-epoch
+UUID and checkpoint digests are reviewed. The bootstrap tool is only for the empty first record;
+successor transitions use the separately reviewed recovery procedure.

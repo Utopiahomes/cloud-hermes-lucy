@@ -88,13 +88,18 @@ large signed records are excluded and must be costed separately if added.
 1. Reconfirm both services remain suspended and provider dispatch is disabled.
 2. Resume only for the bounded staging proof and verify each live Render OIDC identity assumes its
    exact role; suspend again after evidence capture.
-3. Bootstrap a root-signed quarantined transition, strong-read it, and independently verify its
-   exact bytes and predecessor state.
-4. With old-worker provider credentials disabled, execute the approved reconciliation and install
+3. With reviewed ledger/storage identities and checkpoint digests, generate the purpose-distinct
+   root/witness identities offline under ignored local storage. Retain the root private seed only in
+   the offline recovery boundary. Build and independently review the public signed package.
+4. Run `install_tiamat_recovery_bootstrap_v1.py` without `--execute`; its verified preview must show
+   version-one quarantine and the reviewed transition digest. Then run it once through the exact
+   recovery-coordinator OIDC identity with `--execute` and the ledger-bound empty-bootstrap
+   confirmation. Strong-read and independently verify its exact bytes and predecessor-null state.
+5. With old-worker provider credentials disabled, execute the approved reconciliation and install
    the signed continuity-established transition.
-5. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
+6. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
    expired authority, stale restore, quarantine race, and recovery-crash cases in staging.
-6. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
+7. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
 
 Rollback before dispatch activation is to remove the Tiamat configuration and roles while
 retaining the table and signed history. After activation, never delete or replace the authoritative
