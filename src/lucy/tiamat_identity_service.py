@@ -12,7 +12,6 @@ DynamoDB, never signs or verifies anything, and a failed identity check is logge
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -21,22 +20,23 @@ from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[impor
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-logger = logging.getLogger("lucy.tiamat_identity_service")
-
 
 def log_assumed_aws_identity() -> None:
-    """Logs the AWS role this process assumed via its ambient credential chain (Render's OIDC
-    injection in a deployed environment). Never raises: an identity-check failure is diagnostic,
+    """Prints the AWS role this process assumed via its ambient credential chain (Render's OIDC
+    injection in a deployed environment) to stdout, the only output channel confirmed reliably
+    captured for this service -- a plain `logging.getLogger(...)` call is not: uvicorn configures
+    its own loggers but does not attach a handler to arbitrary ones, so anything logged that way is
+    silently dropped rather than shipped. Never raises: an identity-check failure is diagnostic,
     not a reason to refuse serving /healthz."""
     try:
         identity = boto3.client("sts").get_caller_identity()
     except (BotoCoreError, ClientError) as exc:
-        logger.warning("tiamat_identity_service_sts_check_failed error=%s", exc)
+        print(f"tiamat_identity_service_sts_check_failed error={exc}", flush=True)
         return
-    logger.info(
-        "tiamat_identity_service_sts_check_ok arn=%s account=%s",
-        identity.get("Arn"),
-        identity.get("Account"),
+    print(
+        f"tiamat_identity_service_sts_check_ok "
+        f"arn={identity.get('Arn')} account={identity.get('Account')}",
+        flush=True,
     )
 
 
