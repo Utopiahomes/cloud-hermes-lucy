@@ -573,6 +573,133 @@ def test_http_authentication_uses_durable_scoped_jti_replay(
     assert stored == [(scope.issuer, scope.caller_id, scope.realm, scope.environment, jti)]
 
 
+def test_workload_key_overlap_and_retirement_use_durable_replay_state(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, _witness, _now = _seed(owner_url)
+    old_key = Ed25519PrivateKey.generate()
+    new_key = Ed25519PrivateKey.generate()
+    profile_id = "utopia-homes.public-answer.generate.v1"
+
+    class FakeProvider:
+        calls = 0
+
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+            self.calls += 1
+            return ProviderResult("candidate", 2, 1, 1, 0, 10)
+
+    provider = FakeProvider()
+    profile = ExecutionProfile(
+        profile_id=profile_id,
+        release_id="profiles-key-rotation.1",
+        allowed_modes=frozenset({"text"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2_000,
+    )
+    service = SharedExecutionService(InMemoryExecutionStore(), provider, {profile_id: profile})
+    replay_store = PostgresJtiReplayStore(runtime_url)
+
+    def app(keys: dict[str, Ed25519PublicKey]) -> TestClient:
+        identity = WorkloadIdentity(
+            issuer=scope.issuer,
+            subject=scope.caller_id,
+            realm=scope.realm,
+            environment=scope.environment,
+            keys=keys,
+            execution_profiles=frozenset({profile_id}),
+        )
+        return TestClient(
+            create_shared_execution_app(
+                service,
+                WorkloadJwtVerifier(identity, replay_store),
+                ApiRelease("tiamat-key-rotation.1", "profiles-key-rotation.1"),
+            )
+        )
+
+    raw = json.dumps(
+        {
+            "contract": "stoin.inference.execute.request.v1",
+            "execution_profile_id": profile_id,
+            "messages": [
+                {"role": "system", "content": "Use approved context."},
+                {"role": "user", "content": "Tell me about Buttercup."},
+            ],
+            "output": {"mode": "text"},
+            "limits": {"max_output_tokens": 900, "max_cost_microusd": 2_000},
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    def signed_headers(key: Ed25519PrivateKey, kid: str) -> dict[str, str]:
+        idempotency_key = str(uuid4())
+        body_hash = content_sha256(raw)
+        now = int(time.time())
+        token = jwt.encode(
+            {
+                "iss": scope.issuer,
+                "sub": scope.caller_id,
+                "aud": "stoin:shared-model-execution",
+                "scope": "inference.execute",
+                "iat": now,
+                "nbf": now,
+                "exp": now + 300,
+                "jti": str(uuid4()),
+                "req": request_binding_digest(
+                    "POST", "/execution/v1/inference", idempotency_key, body_hash
+                ),
+            },
+            key,
+            algorithm="EdDSA",
+            headers={"kid": kid},
+        )
+        return {
+            "Authorization": f"Bearer {token}",
+            "X-Request-ID": str(uuid4()),
+            "Idempotency-Key": idempotency_key,
+            "X-Execution-Timeout-Ms": "15000",
+            "X-Content-SHA256": body_hash,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+    overlap = app({"old-key": old_key.public_key(), "new-key": new_key.public_key()})
+    assert (
+        overlap.post(
+            "/execution/v1/inference", content=raw, headers=signed_headers(old_key, "old-key")
+        ).status_code
+        == 200
+    )
+    assert (
+        overlap.post(
+            "/execution/v1/inference", content=raw, headers=signed_headers(new_key, "new-key")
+        ).status_code
+        == 200
+    )
+
+    successor_only = app({"new-key": new_key.public_key()})
+    rejected = successor_only.post(
+        "/execution/v1/inference", content=raw, headers=signed_headers(old_key, "old-key")
+    )
+    accepted = successor_only.post(
+        "/execution/v1/inference", content=raw, headers=signed_headers(new_key, "new-key")
+    )
+    assert rejected.status_code == 401
+    assert rejected.json()["error"]["code"] == "authentication_failed"
+    assert "x-stoin-execution-release" not in rejected.headers
+    assert accepted.status_code == 200
+    assert provider.calls == 3
+    with psycopg.connect(owner_url) as connection:
+        count = connection.execute(
+            """
+            SELECT count(*) FROM tiamat.jti_replay
+            WHERE issuer = %s AND subject = %s AND realm = %s AND environment = %s
+            """,
+            (scope.issuer, scope.caller_id, scope.realm, scope.environment),
+        ).fetchone()
+    assert count == (3,)
+
+
 def test_durable_replay_fencing_and_cross_scope_isolation(
     database_urls: tuple[str, str],
 ) -> None:
