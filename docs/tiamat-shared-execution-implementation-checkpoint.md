@@ -255,6 +255,14 @@ At local commit preparation on 2026-09-18:
   initialization, and the capability probe remain pending. Content-free evidence is
   `docs/evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json`.
 
+- Disposable bootstrap boundary: private Render service `tiamat-staging-bootstrap`
+  (`srv-damoneajnfac73ai6ucg`) reached a live, fail-closed hold endpoint at commit `f5a0058` and
+  was then deliberately suspended. Its hold process imports no database, AWS, signing, or executor
+  code and has no secret inputs. The staged bootstrap creates all three database roles, but activates
+  only the runtime and recovery logins; the release-manager role remains `NOLOGIN` until its own
+  service boundary exists. No migration, role bootstrap, ledger initialization, anchor write, or
+  provider dispatch has occurred.
+
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.
   The offline builder creates and self-verifies the root-signed inventory, quarantined witness and
