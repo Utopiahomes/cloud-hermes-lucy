@@ -59,7 +59,8 @@
     "system_identifier": "7686944526360399911",
     "timeline_id": 1,
     "flushed_wal_lsn": "0/1D00B510",
-    "dispatch_blocked": true
+    "dispatch_blocked": true,
+    "post_probe_disposition": "recovery coordinator manually suspended; no provider dispatch or recovery-anchor write occurred"
   },
   "not_performed": [
     "root-key generation",
