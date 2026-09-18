@@ -1,6 +1,7 @@
 # Tiamat DynamoDB recovery anchor — deployment review v1
 
-Status: isolated dispatch-disabled staging infrastructure commissioned; signed authority is not yet bootstrapped.
+Status: isolated dispatch-disabled staging infrastructure commissioned; predecessor-null signed
+quarantine authority is bootstrapped and strongly reread. It remains non-dispatching.
 
 AWS commissioning checkpoint (2026-09-18): AWS accepted and executed reviewed change set
 `review-20260918-01` in account `429870640638`, region `us-east-1`. Stack
@@ -83,31 +84,31 @@ well below **$1/month**. This is an estimate, not a spending guarantee. Cross-re
 customer-managed KMS keys, CloudTrail data events, AWS Backup, global tables, or unexpectedly
 large signed records are excluded and must be costed separately if added.
 
+## Staging commissioning completed
+
+- Both Render identities assumed only their exact AWS role in a bounded live proof and were then
+  suspended.
+- The dedicated PostgreSQL ledger migrated, initialized its blocked day-zero state, and passed its
+  managed-environment recovery-capability probe.
+- Purpose-distinct signing identities were created only in the offline recovery boundary. The public
+  package independently recomputed its checkpoint digests before being reviewed.
+- `install_tiamat_recovery_bootstrap_v1.py` first verified the public package and then ran once
+  through the exact recovery-coordinator OIDC identity with `--execute` and the ledger-bound
+  empty-bootstrap confirmation. The install job `job-damqf1942hec73fldhlg` on deploy
+  `dep-damqe9jm8hqs73aesjig` reported `installed_and_verified`, including its DynamoDB strong reread
+  of the predecessor-null signed record. The installed transition is
+  `ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b`, with quarantined continuity.
+  No provider dispatch was enabled.
+
 ## Remaining activation procedure
 
-1. Reconfirm both services remain suspended and provider dispatch is disabled.
-2. Resume only for the bounded staging proof and verify each live Render OIDC identity assumes its
-   exact role; suspend again after evidence capture.
-3. Provision and migrate one dedicated Tiamat PostgreSQL database using the platform-created owner
-   through a temporary migration boundary only. Apply `tiamat_roles.sql.example`, then run
-   `deploy/postgres/initialize_tiamat_ledger_v1.py` only with the separately held recovery login and
-   exact `--confirm-initialize initialize:<environment>:<storage-epoch>` acknowledgement; it writes
-   the blocked restore gate and emits the database-owned ledger UUID plus the complete day-zero
-   checkpoint. It does not contact AWS or create authority. Independently retain that checkpoint.
-4. With the emitted ledger/storage identities and complete day-zero checkpoint object, generate the
-   purpose-distinct root/witness identities offline under ignored local storage. Retain the root
-   private seed only in the offline recovery boundary. The builder independently computes every
-   checkpoint digest and accepts no caller-supplied digest strings. Build and independently review
-   the public signed package.
-5. Run `install_tiamat_recovery_bootstrap_v1.py` without `--execute`; its verified preview must show
-   version-one quarantine and the reviewed transition digest. Then run it once through the exact
-   recovery-coordinator OIDC identity with `--execute` and the ledger-bound empty-bootstrap
-   confirmation. Strong-read and independently verify its exact bytes and predecessor-null state.
-5. With old-worker provider credentials disabled, execute the approved reconciliation and install
-   the signed continuity-established transition.
-6. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
+1. Return the coordinator to suspension and reconfirm both services are suspended with provider
+   dispatch disabled.
+2. With old-worker provider credentials disabled, execute the separately approved reconciliation and
+   install the signed continuity-established transition.
+3. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
    expired authority, stale restore, quarantine race, and recovery-crash cases in staging.
-7. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
+4. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
 
 Rollback before dispatch activation is to remove the Tiamat configuration and roles while
 retaining the table and signed history. After activation, never delete or replace the authoritative

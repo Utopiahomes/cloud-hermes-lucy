@@ -19,7 +19,7 @@
     "project_id": "prj-daca8g2fngtc73clv910",
     "environment_id": "evm-dal82elg1s2s73ei84qg",
     "environment_name": "management-contract-staging",
-    "source_commit": "e059317e97fb7de40dd5e821be333c9f833f4aca",
+    "source_commit": "52c3ff4908db3d6d04972a70b1f08c482214d304",
     "services": [
       {
         "name": "tiamat-staging-executor",
@@ -62,9 +62,21 @@
     "role_variable": "AWS_ROLE_ARN",
     "auto_deploy": false
   },
+  "signed_bootstrap": {
+    "coordinator_deploy_id": "dep-damqe9jm8hqs73aesjig",
+    "coordinator_job_id": "job-damqf1942hec73fldhlg",
+    "coordinator_job_state": "succeeded",
+    "root_public_key_sha256": "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996",
+    "transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b",
+    "environment": "staging",
+    "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+    "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+    "continuity": "quarantined",
+    "verification": "The online installer verified the public package, conditionally installed the predecessor-null signed transition through the coordinator OIDC identity, and performed a DynamoDB strongly consistent reread of the exact signed record.",
+    "provider_dispatch": false,
+    "private_key_material_recorded": false
+  },
   "not_yet_executed": [
-    "bootstrap a root-signed quarantine transition",
-    "assume each role from the live Render OIDC token",
     "run restored-ledger recovery lifecycle",
     "enable provider dispatch"
   ],
@@ -73,6 +85,6 @@
     "production_changed": false,
     "dns_changed": false,
     "provider_dispatch_enabled": false,
-    "signed_anchor_history_bootstrapped": false
+    "signed_anchor_history_bootstrapped": true
   }
 }

@@ -63,10 +63,13 @@
     "post_probe_disposition": "recovery coordinator manually suspended; no provider dispatch or recovery-anchor write occurred"
   },
   "not_performed": [
-    "root-key generation",
-    "signed anchor installation",
-    "DynamoDB write",
     "provider configuration or dispatch"
   ],
-  "next_required_action": "The release-manager role remains NOLOGIN until its own boundary exists. Root-key and signed-anchor commissioning remain separate gates; the initialized ledger must remain dispatch-blocked until those later commissioning gates pass."
+  "subsequent_recovery_anchor_commissioning": {
+    "status": "completed in the separate DynamoDB staging-commissioning evidence record",
+    "continuity": "quarantined",
+    "dispatch_enabled": false,
+    "evidence": "docs/evidence/tiamat-recovery-anchor-staging-commissioning-2026-09-18.json"
+  },
+  "next_required_action": "The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked under the installed quarantined recovery authority until an independently approved reconciliation and recovery lifecycle proof pass."
 }

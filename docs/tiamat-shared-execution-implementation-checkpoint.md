@@ -183,8 +183,10 @@ The approved single-provider deployment choice is now represented locally withou
   permissions.
 - `docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` records topology, AWS-unavailable
   behavior, permissions, cost assumptions, activation procedure, and rollback. The isolated AWS
-  staging table and exact Render OIDC roles are commissioned; both inert identities remain
-  suspended and provider dispatch remains disabled.
+  staging table and exact Render OIDC roles are commissioned. A root-signed predecessor-null
+  quarantine transition has been installed and strongly reread through the coordinator role; it
+  is deliberately non-dispatching. Both inert identities return to suspension after bounded work,
+  and provider dispatch remains disabled.
 
 ## Deliberately not yet claimed
 
