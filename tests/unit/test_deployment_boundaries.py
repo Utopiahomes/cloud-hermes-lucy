@@ -163,6 +163,14 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
     assert {".env", ".env.*", "secrets", "data", "archives"} <= set(ignored)
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY deploy/postgres ./deploy/postgres" not in dockerfile
+    assert (
+        "COPY deploy/aws/install_tiamat_recovery_bootstrap_v1.py "
+        "./deploy/aws/install_tiamat_recovery_bootstrap_v1.py"
+    ) in dockerfile
+    assert (
+        "COPY deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json "
+        "./deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json"
+    ) in dockerfile
     for artifact in (
         "bootstrap_cloud_v1_2.py",
         "bootstrap_realm_cloud_v1_3.py",
