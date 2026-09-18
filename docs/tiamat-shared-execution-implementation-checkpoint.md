@@ -107,6 +107,9 @@
   replay that terminal content-free failure without another provider call. Invalid provider usage or
   cost arithmetic cannot become a success receipt and retains the full reservation pending
   reconciliation.
+- The real FastAPI/JWT boundary has been exercised with `PostgresJtiReplayStore`: the first signed
+  request dispatches once, reuse of the same `jti` returns the generic no-release-header `401`, and
+  the dedicated database retains only issuer, subject, realm, environment, `jti`, and expiry.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -120,8 +123,8 @@ Before any deployment or real provider activation, Tier B must add and prove:
    precedence, timing classes, full response-size enforcement, and disconnect behavior; route,
    method, redirect avoidance, gross framing/cap, duplicate binding headers, and authenticated
    contract-size ordering are implemented;
-2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
-   real PostgreSQL;
+2. prove workload-key and idempotency-digest-key rotation against real PostgreSQL; the durable scoped
+   `jti` adapter is wired and proven through the HTTP/JWT application boundary;
 3. connect the implemented offline exact inventory/release-head reconciliation input to an
    independently authenticated Control witness in a deployment; local witness enforcement,
    recovery-generation binding, cold-start reverification, monotonic activation, atomic grant
@@ -138,7 +141,7 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 
 ## Verification ledger
 
-At local commit preparation on 2026-09-17:
+At local commit preparation on 2026-09-18:
 
 - Signed-release RC1 bundle: 106 independent checks passed after fresh archive extraction; raw
   content digest `51b0f943c59b685f261bf0c58abad79a92f7c9fae5074517036c18e0884978d9`.
@@ -155,11 +158,13 @@ At local commit preparation on 2026-09-17:
 - The 17-test suite passed again after grant coupling, proving bootstrap and successor grants update
   the active signed head and budget projection atomically while the earlier missing-predecessor
   attempt leaves the partition unchanged. The disposable container was removed.
-- The same fresh PostgreSQL 16 suite passed all 17 tests after recovery binding and cold-start
-  loading were completed. It proves recovery rejects unconfirmed database authority, accepts only
+- The same fresh PostgreSQL 16 suite passed all 18 tests after recovery binding, cold-start loading,
+  and HTTP replay-store wiring were completed. It proves recovery rejects unconfirmed database
+  authority, accepts only
   an exact external inventory/head-set witness, restamps authority to the new recovery generation,
-  and still refuses a profile whose linked privacy policy is a revoked tombstone. The loopback-only
-  disposable container was stopped and removed.
+  still refuses a profile whose linked privacy policy is a revoked tombstone, and proves the real API
+  consumes durable scoped replay state before dispatch. The loopback-only disposable container was
+  stopped and removed.
 - Focused HTTP/service ordered-gate, receipt, and frozen-error-table suite: 41 passed. This includes
   cross-product precedence through the raw-digest gate, terminal paid-failure replay, provider
   accounting rejection, exact 404/405,

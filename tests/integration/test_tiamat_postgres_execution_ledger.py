@@ -4,12 +4,14 @@ import base64
 import hashlib
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 from uuid import UUID, uuid4
 
+import jwt
 import psycopg
 import pytest
 from alembic import command
@@ -18,11 +20,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.rows import dict_row
 from sqlalchemy.engine import make_url
 
-from lucy.shared_execution.auth import AuthenticationStateUnavailable
+from lucy.shared_execution.api import ApiRelease, create_shared_execution_app
+from lucy.shared_execution.auth import (
+    AuthenticationStateUnavailable,
+    WorkloadIdentity,
+    WorkloadJwtVerifier,
+    content_sha256,
+    request_binding_digest,
+)
 from lucy.shared_execution.postgres_authority import (
     AuthorityScope,
     AuthorityTransitionRejected,
@@ -43,11 +53,18 @@ from lucy.shared_execution.recovery import (
     authorize_reconciled_state,
     quarantine_environment,
 )
+from lucy.shared_execution.service import (
+    ExecutionProfile,
+    InMemoryExecutionStore,
+    ProviderResult,
+    SharedExecutionService,
+)
 from lucy.shared_execution.signed_releases import (
     load_authorized_profile,
     verify_release,
     verify_trust_inventory,
 )
+from lucy.shared_execution.wire import ExecutionRequest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATABASE_URL = os.environ.get("TIAMAT_TEST_DATABASE_URL")
@@ -450,6 +467,110 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
             partition_id="utopia-public",
             now=datetime(2026, 9, 18, 12, tzinfo=UTC),
         )
+
+
+def test_http_authentication_uses_durable_scoped_jti_replay(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, _witness, _now = _seed(owner_url)
+    private_key = Ed25519PrivateKey.generate()
+    key_id = "homes-prime-integration-1"
+    profile_id = "utopia-homes.public-answer.generate.v1"
+    identity = WorkloadIdentity(
+        issuer=scope.issuer,
+        subject=scope.caller_id,
+        realm=scope.realm,
+        environment=scope.environment,
+        keys={key_id: private_key.public_key()},
+        execution_profiles=frozenset({profile_id}),
+    )
+
+    class FakeProvider:
+        calls = 0
+
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+            self.calls += 1
+            return ProviderResult("candidate", 2, 1, 1, 0, 10)
+
+    provider = FakeProvider()
+    profile = ExecutionProfile(
+        profile_id=profile_id,
+        release_id="profiles-integration.1",
+        allowed_modes=frozenset({"text"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2_000,
+    )
+    service = SharedExecutionService(InMemoryExecutionStore(), provider, {profile_id: profile})
+    client = TestClient(
+        create_shared_execution_app(
+            service,
+            WorkloadJwtVerifier(identity, PostgresJtiReplayStore(runtime_url)),
+            ApiRelease("tiamat-integration.1", "profiles-integration.1"),
+        )
+    )
+    raw = json.dumps(
+        {
+            "contract": "stoin.inference.execute.request.v1",
+            "execution_profile_id": profile_id,
+            "messages": [
+                {"role": "system", "content": "Use approved context."},
+                {"role": "user", "content": "Tell me about Buttercup."},
+            ],
+            "output": {"mode": "text"},
+            "limits": {"max_output_tokens": 900, "max_cost_microusd": 2_000},
+        },
+        separators=(",", ":"),
+    ).encode()
+    idempotency_key = str(uuid4())
+    request_id = str(uuid4())
+    jti = uuid4()
+    body_hash = content_sha256(raw)
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": scope.issuer,
+            "sub": scope.caller_id,
+            "aud": "stoin:shared-model-execution",
+            "scope": "inference.execute",
+            "iat": now,
+            "nbf": now,
+            "exp": now + 300,
+            "jti": str(jti),
+            "req": request_binding_digest(
+                "POST", "/execution/v1/inference", idempotency_key, body_hash
+            ),
+        },
+        private_key,
+        algorithm="EdDSA",
+        headers={"kid": key_id},
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Request-ID": request_id,
+        "Idempotency-Key": idempotency_key,
+        "X-Execution-Timeout-Ms": "15000",
+        "X-Content-SHA256": body_hash,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    first = client.post("/execution/v1/inference", content=raw, headers=headers)
+    replay = client.post("/execution/v1/inference", content=raw, headers=headers)
+    assert first.status_code == 200
+    assert replay.status_code == 401
+    assert replay.json()["error"]["code"] == "authentication_failed"
+    assert "x-stoin-execution-release" not in replay.headers
+    assert provider.calls == 1
+    with psycopg.connect(owner_url) as connection:
+        stored = connection.execute(
+            """
+            SELECT issuer, subject, realm, environment, jti
+            FROM tiamat.jti_replay
+            WHERE issuer = %s AND subject = %s AND realm = %s AND environment = %s
+            """,
+            (scope.issuer, scope.caller_id, scope.realm, scope.environment),
+        ).fetchall()
+    assert stored == [(scope.issuer, scope.caller_id, scope.realm, scope.environment, jti)]
 
 
 def test_durable_replay_fencing_and_cross_scope_isolation(
