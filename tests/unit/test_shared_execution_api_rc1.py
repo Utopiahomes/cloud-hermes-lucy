@@ -51,6 +51,19 @@ class FakeTransport:
         )
 
 
+class InvalidTransport(FakeTransport):
+    def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+        result = super().execute(request, profile)
+        return ProviderResult(
+            content={"unexpected": True},
+            input_tokens=result.input_tokens,
+            generated_tokens=result.generated_tokens,
+            output_tokens=result.output_tokens,
+            reasoning_tokens=result.reasoning_tokens,
+            cost_microusd=result.cost_microusd,
+        )
+
+
 def body(question: str = "Tell me about Buttercup.") -> bytes:
     payload: dict[str, Any] = {
         "contract": "stoin.inference.execute.request.v1",
@@ -65,7 +78,9 @@ def body(question: str = "Tell me about Buttercup.") -> bytes:
     return json.dumps(payload, separators=(",", ":")).encode()
 
 
-def setup() -> tuple[TestClient, FakeTransport, Ed25519PrivateKey, InMemoryJtiReplayStore]:
+def setup(
+    transport: FakeTransport | None = None,
+) -> tuple[TestClient, FakeTransport, Ed25519PrivateKey, InMemoryJtiReplayStore]:
     private_key = Ed25519PrivateKey.generate()
     replay = InMemoryJtiReplayStore()
     identity = WorkloadIdentity(
@@ -76,7 +91,7 @@ def setup() -> tuple[TestClient, FakeTransport, Ed25519PrivateKey, InMemoryJtiRe
         keys={KEY_ID: private_key.public_key()},
         execution_profiles=frozenset({PROFILE}),
     )
-    transport = FakeTransport()
+    transport = transport or FakeTransport()
     profile = ExecutionProfile(
         profile_id=PROFILE,
         release_id="profiles-local.1",
@@ -176,6 +191,33 @@ def test_fresh_jwt_replays_same_operation_without_second_provider_call() -> None
     assert second.json()["execution_id"] == first.json()["execution_id"]
     assert second.json()["replayed"] is True
     assert second.json()["request_id"] == second_headers["X-Request-ID"]
+    assert transport.calls == 1
+
+
+def test_failed_duplicate_replays_authoritative_error_and_cost_receipt() -> None:
+    client, transport, private_key, _ = setup(InvalidTransport())
+    raw = body()
+    key = uuid4()
+    first = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, key=key),
+    )
+    second = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, key=key),
+    )
+    assert first.status_code == second.status_code == 502
+    assert first.json()["error"]["code"] == "provider_response_invalid"
+    assert second.json()["error"] == first.json()["error"]
+    assert second.json()["execution"] == first.json()["execution"]
+    assert second.json()["execution"]["state"] == "failed"
+    assert second.json()["cost"] == {
+        "reserved_microusd": 2000,
+        "settled_microusd": 20,
+        "settlement_status": "settled",
+    }
     assert transport.calls == 1
 
 
@@ -336,6 +378,81 @@ def test_contract_oversize_authenticates_before_step_five_rejection() -> None:
     assert response.headers["x-stoin-execution-release"] == "tiamat-local.1"
     namespace = (ISSUER, SUBJECT, "utopia-homes", "local-test")
     assert replay.consume(namespace, jti, int(time.time()) + 600) is False
+    assert transport.calls == 0
+
+
+def test_route_and_method_precede_malformed_framing_and_authentication() -> None:
+    client, transport, _, _ = setup()
+    wrong_route = client.request(
+        "DELETE",
+        "/wrong",
+        content=b"x" * 1_048_577,
+        headers={"Content-Length": "not-an-integer"},
+    )
+    wrong_method = client.request(
+        "DELETE",
+        "/execution/v1/inference",
+        content=b"x" * 1_048_577,
+        headers={"Content-Length": "not-an-integer"},
+    )
+    assert wrong_route.status_code == 404
+    assert wrong_route.json()["error"]["code"] == "route_not_found"
+    assert wrong_method.status_code == 405
+    assert wrong_method.json()["error"]["code"] == "method_not_allowed"
+    assert transport.calls == 0
+
+
+def test_authentication_precedes_nonbinding_headers_and_contract_size() -> None:
+    client, transport, private_key, _ = setup()
+    raw = b"x" * 262_145
+    invalid = headers(private_key, raw, scope="wrong")
+    invalid["X-Request-ID"] = "not-a-uuid"
+    invalid["Content-Type"] = "text/plain"
+    response = client.post("/execution/v1/inference", content=raw, headers=invalid)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_failed"
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_nonbinding_header_order_precedes_media_and_contract_size() -> None:
+    client, transport, private_key, _ = setup()
+    raw = b"x" * 262_145
+    invalid = headers(private_key, raw)
+    invalid["X-Request-ID"] = "not-a-uuid"
+    invalid["Content-Type"] = "text/plain"
+    response = client.post("/execution/v1/inference", content=raw, headers=invalid)
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert response.headers["x-stoin-execution-release"] == "tiamat-local.1"
+    assert transport.calls == 0
+
+
+def test_contract_size_precedes_raw_digest_and_json_validation() -> None:
+    client, transport, private_key, _ = setup()
+    raw = b"x" * 262_145
+    wrong_hash = content_sha256(b"different")
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, declared_hash=wrong_hash),
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_too_large"
+    assert transport.calls == 0
+
+
+def test_digest_precedes_json_and_profile_authorization() -> None:
+    client, transport, private_key, _ = setup()
+    raw = b"not-json"
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, declared_hash=content_sha256(b"different")),
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_failed"
+    assert "x-stoin-execution-release" not in response.headers
     assert transport.calls == 0
 
 

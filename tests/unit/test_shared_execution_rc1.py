@@ -20,6 +20,7 @@ from lucy.shared_execution.service import (
 )
 from lucy.shared_execution.wire import (
     BUNDLE_DIGEST,
+    CostReceipt,
     ExecutionRequest,
     restricted_schema_is_valid,
 )
@@ -172,9 +173,7 @@ def test_profile_requires_complete_worst_case_reservation() -> None:
 
 def test_json_schema_provider_output_is_validated_by_executor() -> None:
     class InvalidJsonProvider:
-        def execute(
-            self, request: ExecutionRequest, profile: ExecutionProfile
-        ) -> ProviderResult:
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
             return ProviderResult(
                 content={"answer": ""},
                 input_tokens=10,
@@ -213,6 +212,9 @@ def test_json_schema_provider_output_is_validated_by_executor() -> None:
             request=ExecutionRequest.model_validate(payload),
         )
     assert failure.value.code == "provider_response_invalid"
+    assert failure.value.execution_state == "failed"
+    assert failure.value.cost.settlement_status == "settled"
+    assert failure.value.cost.settled_microusd == 1
 
 
 def test_output_validator_distinguishes_json_boolean_from_integer() -> None:
@@ -222,9 +224,7 @@ def test_output_validator_distinguishes_json_boolean_from_integer() -> None:
 
 def test_output_token_limit_is_checked_against_combined_generated_tokens() -> None:
     class OverLimitProvider:
-        def execute(
-            self, request: ExecutionRequest, profile: ExecutionProfile
-        ) -> ProviderResult:
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
             return ProviderResult(
                 content="candidate",
                 input_tokens=1,
@@ -252,6 +252,83 @@ def test_output_token_limit_is_checked_against_combined_generated_tokens() -> No
             request=request(),
         )
     assert failure.value.code == "output_limit_reached"
+    assert failure.value.cost.settlement_status == "settled"
+
+
+def test_cost_overrun_failure_retains_authoritative_overrun_receipt() -> None:
+    class OverrunProvider:
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+            return ProviderResult(
+                content="candidate",
+                input_tokens=1,
+                generated_tokens=1,
+                output_tokens=1,
+                reasoning_tokens=0,
+                cost_microusd=2_001,
+            )
+
+    profile = ExecutionProfile(
+        profile_id="utopia-homes.public-answer.generate.v1",
+        release_id="profiles-local.1",
+        allowed_modes=frozenset({"text"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2_000,
+    )
+    executor = SharedExecutionService(
+        InMemoryExecutionStore(), OverrunProvider(), {profile.profile_id: profile}
+    )
+    with pytest.raises(ExecutionFailure) as failure:
+        executor.execute(
+            caller="stoin:synth:utopia-homes-prime",
+            idempotency_key=str(uuid4()),
+            request_id=uuid4(),
+            request=request(),
+        )
+    assert failure.value.code == "cost_settlement_violation"
+    assert failure.value.cost == CostReceipt(
+        reserved_microusd=2_000,
+        settled_microusd=2_001,
+        settlement_status="settlement_overrun",
+    )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        ProviderResult("candidate", -1, 1, 1, 0, 1),
+        ProviderResult("candidate", 1, 1, None, 0, 1),
+        ProviderResult("candidate", 1, 2, 1, 0, 1),
+        ProviderResult("candidate", 1, 1, 1, 0, -1),
+    ],
+)
+def test_invalid_provider_accounting_fails_with_pending_receipt(result: ProviderResult) -> None:
+    class InvalidAccountingProvider:
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+            return result
+
+    profile = ExecutionProfile(
+        profile_id="utopia-homes.public-answer.generate.v1",
+        release_id="profiles-local.1",
+        allowed_modes=frozenset({"text"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2_000,
+    )
+    executor = SharedExecutionService(
+        InMemoryExecutionStore(), InvalidAccountingProvider(), {profile.profile_id: profile}
+    )
+    with pytest.raises(ExecutionFailure) as failure:
+        executor.execute(
+            caller="stoin:synth:utopia-homes-prime",
+            idempotency_key=str(uuid4()),
+            request_id=uuid4(),
+            request=request(),
+        )
+    assert failure.value.code == "provider_response_invalid"
+    assert failure.value.cost == CostReceipt(
+        reserved_microusd=2_000,
+        settled_microusd=None,
+        settlement_status="pending_reconciliation",
+    )
 
 
 @pytest.mark.parametrize(

@@ -102,6 +102,11 @@
   contract-size gate. Missing or duplicate binding headers remain generic authentication failures.
 - All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
   checks the complete implemented code/message/retry set against the frozen positive vectors.
+- Post-dispatch validation failures now persist and return the stable execution ID, failed state,
+  and authoritative settled, pending-reconciliation, or overrun cost receipt. Same-key duplicates
+  replay that terminal content-free failure without another provider call. Invalid provider usage or
+  cost arithmetic cannot become a success receipt and retains the full reservation pending
+  reconciliation.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -155,13 +160,18 @@ At local commit preparation on 2026-09-17:
   an exact external inventory/head-set witness, restamps authority to the new recovery generation,
   and still refuses a profile whose linked privacy policy is a revoked tombstone. The loopback-only
   disposable container was stopped and removed.
-- Focused HTTP ordered-gate and frozen-error-table suite: 15 passed. This includes exact 404/405,
+- Focused HTTP/service ordered-gate, receipt, and frozen-error-table suite: 41 passed. This includes
+  cross-product precedence through the raw-digest gate, terminal paid-failure replay, provider
+  accounting rejection, exact 404/405,
   malformed and duplicate `Content-Length`, the unauthenticated 1 MiB cap, duplicate binding
   headers, and proof that the authenticated replay gate precedes the 262,144-byte contract cap.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,118 passed with two dependency deprecation warnings.
+- Complete unit suite: 1,129 passed with two dependency deprecation warnings. The first run exposed
+  an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
+  first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
+  code was changed in this branch.
 - Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
 - Strict mypy: passed across 134 source files.
 - Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL

@@ -54,6 +54,8 @@ class ExecutionRecord:
     state: Literal["admitted", "dispatched", "completed", "failed", "outcome_unknown"]
     reserved_microusd: int
     response: ExecutionResponse | None = None
+    failure_code: str | None = None
+    cost: CostReceipt | None = None
 
 
 class IdempotencyConflict(RuntimeError):
@@ -67,9 +69,19 @@ class ExecutionInProgress(RuntimeError):
 class ExecutionFailure(RuntimeError):
     """A mapped post-dispatch RC1 failure without provider details."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        execution_id: UUID,
+        execution_state: Literal["failed", "outcome_unknown"],
+        cost: CostReceipt,
+    ) -> None:
         super().__init__(code)
         self.code = code
+        self.execution_id = execution_id
+        self.execution_state = execution_state
+        self.cost = cost
 
 
 class InMemoryExecutionStore:
@@ -106,13 +118,21 @@ class InMemoryExecutionStore:
         state: Literal["admitted", "dispatched", "completed", "failed", "outcome_unknown"],
         *,
         response: ExecutionResponse | None = None,
+        failure_code: str | None = None,
+        cost: CostReceipt | None = None,
     ) -> ExecutionRecord:
         scoped = (caller, key)
         with self._lock:
             record = self._records[scoped]
             if record.state != expected:
                 raise ExecutionInProgress
-            updated = replace(record, state=state, response=response)
+            updated = replace(
+                record,
+                state=state,
+                response=response,
+                failure_code=failure_code,
+                cost=cost,
+            )
             self._records[scoped] = updated
             return updated
 
@@ -177,37 +197,88 @@ class SharedExecutionService:
                 return record.response.model_copy(
                     update={"request_id": request_id, "replayed": True}
                 )
+            if (
+                record.state == "failed"
+                and record.failure_code is not None
+                and record.cost is not None
+            ):
+                raise ExecutionFailure(
+                    record.failure_code,
+                    execution_id=record.execution_id,
+                    execution_state="failed",
+                    cost=record.cost,
+                )
             raise ExecutionInProgress
 
         # This durable-before-send ordering is the important seam. The in-memory adapter exercises
         # it, while the production adapter must add fencing, leases, and ambiguous-commit recovery.
         self._store.transition(caller, idempotency_key, "admitted", "dispatched")
         result = self._transport.execute(request, profile)
+        if not _provider_accounting_is_valid(result):
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "provider_response_invalid",
+                settled_microusd=None,
+                settlement_status="pending_reconciliation",
+            )
         if result.cost_microusd > profile.maximum_cost_microusd:
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("cost_settlement_violation")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "cost_settlement_violation",
+                settled_microusd=result.cost_microusd,
+                settlement_status="settlement_overrun",
+            )
         if result.generated_tokens > request.limits.max_output_tokens:
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("output_limit_reached")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "output_limit_reached",
+                settled_microusd=result.cost_microusd,
+            )
 
         output_mode = request.output.mode
         if output_mode == "text" and not isinstance(result.content, str):
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("provider_response_invalid")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "provider_response_invalid",
+                settled_microusd=result.cost_microusd,
+            )
         if isinstance(result.content, str) and len(result.content.encode("utf-8")) > 65_536:
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("provider_response_too_large")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "provider_response_too_large",
+                settled_microusd=result.cost_microusd,
+            )
         if isinstance(request.output, JsonSchemaOutput) and (
             not isinstance(result.content, dict)
             or not validate_output(request.output.schema_, result.content)
         ):
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("provider_response_invalid")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "provider_response_invalid",
+                settled_microusd=result.cost_microusd,
+            )
         if isinstance(result.content, dict):
             output_bytes = canonical_json_bytes(result.content)
             if len(output_bytes) > 65_536:
-                self._store.transition(caller, idempotency_key, "dispatched", "failed")
-                raise ExecutionFailure("provider_response_too_large")
+                self._fail_after_dispatch(
+                    caller,
+                    idempotency_key,
+                    record,
+                    "provider_response_too_large",
+                    settled_microusd=result.cost_microusd,
+                )
 
         response = ExecutionResponse(
             contract="stoin.inference.execute.response.v1",
@@ -232,12 +303,49 @@ class SharedExecutionService:
         )
         response_bytes = response.model_dump_json(by_alias=True).encode("utf-8")
         if len(response_bytes) > 131_072:
-            self._store.transition(caller, idempotency_key, "dispatched", "failed")
-            raise ExecutionFailure("provider_response_too_large")
+            self._fail_after_dispatch(
+                caller,
+                idempotency_key,
+                record,
+                "provider_response_too_large",
+                settled_microusd=result.cost_microusd,
+            )
         self._store.transition(
             caller, idempotency_key, "dispatched", "completed", response=response
         )
         return response
+
+    def _fail_after_dispatch(
+        self,
+        caller: str,
+        idempotency_key: str,
+        record: ExecutionRecord,
+        code: str,
+        *,
+        settled_microusd: int | None,
+        settlement_status: Literal[
+            "settled", "pending_reconciliation", "settlement_overrun"
+        ] = "settled",
+    ) -> None:
+        cost = CostReceipt(
+            reserved_microusd=record.reserved_microusd,
+            settled_microusd=settled_microusd,
+            settlement_status=settlement_status,
+        )
+        self._store.transition(
+            caller,
+            idempotency_key,
+            "dispatched",
+            "failed",
+            failure_code=code,
+            cost=cost,
+        )
+        raise ExecutionFailure(
+            code,
+            execution_id=record.execution_id,
+            execution_state="failed",
+            cost=cost,
+        )
 
 
 def canonical_identity(request: ExecutionRequest) -> str:
@@ -246,3 +354,24 @@ def canonical_identity(request: ExecutionRequest) -> str:
     payload = request.model_dump(mode="json", by_alias=True)
     encoded = canonical_json_bytes(payload)
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _provider_accounting_is_valid(result: ProviderResult) -> bool:
+    exact_integers = (result.input_tokens, result.generated_tokens, result.cost_microusd)
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in exact_integers
+    ):
+        return False
+    if (result.output_tokens is None) != (result.reasoning_tokens is None):
+        return False
+    if result.output_tokens is None or result.reasoning_tokens is None:
+        return True
+    breakdown = (result.output_tokens, result.reasoning_tokens)
+    return (
+        all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in breakdown
+        )
+        and sum(breakdown) == result.generated_tokens
+    )

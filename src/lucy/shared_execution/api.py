@@ -26,7 +26,7 @@ from lucy.shared_execution.service import (
     IdempotencyConflict,
     SharedExecutionService,
 )
-from lucy.shared_execution.wire import ExecutionRequest
+from lucy.shared_execution.wire import CostReceipt, ExecutionRequest
 
 PATH = "/execution/v1/inference"
 UUID4 = re.compile(
@@ -219,7 +219,13 @@ def create_shared_execution_app(
             )
             return _error(code, request_id=request_id_text, release=release)
         except ExecutionFailure as exc:
-            return _error(exc.code, request_id=request_id_text, release=release)
+            return _error(
+                exc.code,
+                request_id=request_id_text,
+                release=release,
+                execution=(exc.execution_id, exc.execution_state),
+                cost=exc.cost,
+            )
         except RuntimeError:
             return _error("provider_execution_failed", request_id=request_id_text, release=release)
 
@@ -305,6 +311,8 @@ def _error(
     request_id: str | None,
     release: ApiRelease | None = None,
     retry_after: int | None = None,
+    execution: tuple[UUID, str] | None = None,
+    cost: CostReceipt | None = None,
 ) -> JSONResponse:
     status, message, retryable = ERRORS[code]
     correlation_id = str(uuid4())
@@ -317,6 +325,13 @@ def _error(
     if request_id is not None and UUID4.fullmatch(request_id):
         content["request_id"] = request_id
         headers["X-Request-ID"] = request_id
+    if execution is not None:
+        content["execution"] = {
+            "execution_id": str(execution[0]),
+            "state": execution[1],
+        }
+    if cost is not None:
+        content["cost"] = cost.model_dump(mode="json")
     if release is not None:
         headers.update(
             {
