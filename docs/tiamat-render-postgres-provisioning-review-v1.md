@@ -1,7 +1,8 @@
-# Tiamat Render PostgreSQL — pre-provisioning review v1
+# Tiamat Render PostgreSQL — staging provisioning review v1
 
-**Status:** review-only. No Render database, secret, service configuration, migration, anchor write,
-or provider dispatch is authorized by this document.
+**Status:** the reviewed staging database is provisioned and public access is blocked. Database
+commissioning remains incomplete: no migration, role/bootstrap, ledger initialization, anchor write,
+or provider dispatch has occurred.
 
 ## Purpose and boundary
 
@@ -32,10 +33,10 @@ instance rather than replacing the attached ledger in place. [Connection control
 
 ## Cost and retention
 
-At review time, Render lists the 256 MB paid Postgres plan at **$10/month** plus **$0.30/GB-month**
-for storage. The 1 GB staging baseline is therefore approximately **$10.30/month** before tax,
-transfer, or future scale-up. Confirm the selected dashboard plan and workspace pricing before
-creation. [Current Render pricing](https://render.com/pricing)
+The selected dashboard configuration records **$6.30/month** for this staging baseline before tax,
+transfer, or future scale-up. That observed amount, rather than the earlier review estimate, is
+recorded in the [provisioning evidence](evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json).
+Reconfirm current pricing before changing the plan. [Current Render pricing](https://render.com/pricing)
 
 Paid instances receive Render PITR: the documented window is three days for Hobby and seven days for
 Pro-or-higher workspaces. Record the actual workspace plan and displayed recovery window in
@@ -59,11 +60,12 @@ No static AWS credentials are permitted.
 
 ## Commissioning procedure
 
-1. Create the dedicated paid PostgreSQL 16 instance in the exact Tiamat staging region with 1 GB
-   storage. Do not attach it to Utopia production services.
-2. Clear its external IP allow list. Record the Render ID, region, plan, storage, Postgres version,
-   workspace recovery window, and external-access-disabled setting in content-free evidence.
-3. In a temporary migration-only boundary, run the independent lineage through `0005_ledger_identity`;
+1. The dedicated PostgreSQL 16 instance is created in the exact Tiamat staging region with 1 GB
+   storage and has no Utopia production attachment.
+2. Its external IP allow list is empty. Content-free evidence records the Render ID, region, plan,
+   storage, Postgres version, and resource-specific external-access block; workspace recovery-window
+   evidence remains pending.
+3. Next, in a temporary migration-only boundary, run the independent lineage through `0005_ledger_identity`;
    then apply the role template. Remove the owner URL when that job exits.
 4. Run `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
    confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
