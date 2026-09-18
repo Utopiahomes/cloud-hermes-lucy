@@ -25,14 +25,16 @@
   "bootstrap_runner": {
     "service_name": "tiamat-staging-bootstrap",
     "service_id": "srv-damoneajnfac73ai6ucg",
-    "final_source_commit": "f5a0058cf8a8be5c2501688fb8dee950b6de43e2",
-    "final_deploy_id": "dep-damord0u01pc738eq3pg",
-    "final_deploy_state": "live before deliberate suspension",
+    "bootstrap_source_commit": "d7c83356f92140865c5ab22545d17e07e388f889",
+    "bootstrap_deploy_id": "dep-dampmv0ae00c739dh6c0",
+    "bootstrap_job_id": "job-dampngf40ujc738srjrg",
+    "bootstrap_job_state": "succeeded",
+    "bootstrap_result": "Tiamat migration head 0006_render_recovery_rls; runtime and recovery logins verified; dispatch disabled",
     "hold_behavior": "private HTTP endpoint returns 503 and does not import database, AWS, signing, or executor code",
-    "post_verification_state": "suspended by user; no secret inputs configured"
+    "temporary_secret_values_recorded": false,
+    "post_bootstrap_disposition": "temporary bootstrap secrets must be removed and the runner suspended before further commissioning"
   },
   "not_performed": [
-    "migration or role bootstrap",
     "ledger initialization",
     "recovery capability probe",
     "root-key generation",
@@ -40,5 +42,5 @@
     "DynamoDB write",
     "provider configuration or dispatch"
   ],
-  "next_required_action": "Supply the temporary runner only with its owner URL plus distinct runtime and recovery passwords, then run the exact-confirmation bootstrap. The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked until later commissioning gates."
+  "next_required_action": "Remove the temporary runner's owner URL and bootstrap passwords, then suspend it. Separately initialize the ledger and run the recovery-only capability probe. The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked until later commissioning gates."
 }

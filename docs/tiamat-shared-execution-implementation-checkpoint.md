@@ -45,7 +45,7 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
-- Dedicated Tiamat PostgreSQL migration lineage through `0005_ledger_identity`; Cloud Lucy remains at
+- Dedicated Tiamat PostgreSQL migration lineage through `0006_render_recovery_rls`; Cloud Lucy remains at
   `0071` and does not consume migration `0072`.
 - Migration `0005` creates one immutable database-owned UUID inside each newly migrated Tiamat
   ledger. The migration/recovery-only day-zero initializer refuses any existing execution, replay,
@@ -56,8 +56,9 @@
   atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
   authoritative lease reaping, and 24-hour reservation forfeiture.
 - Forced row-level security for caller, realm, environment, and spending-partition isolation; the
-  serving-role template is a non-owner with `NOBYPASSRLS`, while the separately held recovery role
-  is excluded from serving processes.
+  serving-role template is a non-owner with `NOBYPASSRLS`. The separately held recovery role is
+  excluded from serving processes and has an explicit, exact-role recovery policy rather than
+  `BYPASSRLS`, which Render's managed owner cannot mint.
 - Restore quarantine uses deployment-owned storage epoch and recovery generation plus a database
   coordinator generation. A stale restore cannot resume against a newer witness until an offline
   reconciliation explicitly advances and unblocks the gate.
@@ -245,23 +246,24 @@ At local commit preparation on 2026-09-18:
   and post-proof suspended state. The scoped proof performed zero DynamoDB writes, created no root
   key or signed history, and did not dispatch a provider request.
 
-- Render PostgreSQL staging provisioning: dedicated database `tiamat-staging-ledger`
+- Render PostgreSQL staging provisioning and bootstrap: dedicated database `tiamat-staging-ledger`
   (`dpg-damo6cp42hec73bp5nug-a`) is available in `cloud-lucy` /
   `management-contract-staging`, Virginia, on PostgreSQL 16 with the 0.1c-256mb plan and 1 GB storage.
   The selected dashboard price was $6.30/month, storage autoscaling and HA are disabled, and no
   credentials or connection strings were recorded. Render confirms that all internet traffic is
   blocked by PostgreSQL's resource-specific inbound rules; the inherited workspace and environment
-  `0.0.0.0/0` rules remain unchanged. This is not database commissioning: migration, role bootstrap,
-  initialization, and the capability probe remain pending. Content-free evidence is
+  `0.0.0.0/0` rules remain unchanged. The independent lineage reached
+  `0006_render_recovery_rls`; the runtime and recovery logins were successfully verified, and
+  dispatch remains disabled. Temporary bootstrap secrets still require removal, while initialization
+  and the capability probe remain pending. Content-free evidence is
   `docs/evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json`.
 
 - Disposable bootstrap boundary: private Render service `tiamat-staging-bootstrap`
-  (`srv-damoneajnfac73ai6ucg`) reached a live, fail-closed hold endpoint at commit `f5a0058` and
-  was then deliberately suspended. Its hold process imports no database, AWS, signing, or executor
-  code and has no secret inputs. The staged bootstrap creates all three database roles, but activates
-  only the runtime and recovery logins; the release-manager role remains `NOLOGIN` until its own
-  service boundary exists. No migration, role bootstrap, ledger initialization, anchor write, or
-  provider dispatch has occurred.
+  (`srv-damoneajnfac73ai6ucg`) ran one successful exact-confirmation job at commit `d7c8335`.
+  It migrated through `0006_render_recovery_rls`, created all three database roles, and verified only
+  the runtime and recovery logins; the release-manager remains `NOLOGIN` until its own service
+  boundary exists. The temporary owner and bootstrap-password secrets must now be removed and the
+  runner suspended. No ledger initialization, anchor write, or provider dispatch has occurred.
 
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.

@@ -1,8 +1,9 @@
 # Tiamat Render PostgreSQL — staging provisioning review v1
 
-**Status:** the reviewed staging database is provisioned and public access is blocked. Database
-commissioning remains incomplete: no migration, role/bootstrap, ledger initialization, anchor write,
-or provider dispatch has occurred.
+**Status:** the reviewed staging database is provisioned and public access is blocked. The dedicated
+Tiamat migration lineage through `0006_render_recovery_rls` and the scoped runtime/recovery role
+bootstrap succeeded. Ledger initialization, the recovery capability probe, anchor write, and provider
+dispatch remain incomplete.
 
 ## Purpose and boundary
 
@@ -50,7 +51,7 @@ connection-string switch is a Tiamat recovery event.
 | Render-created owner | Temporary migration and role/bootstrap boundary only. | Serving, recovery-anchor reads, provider dispatch. |
 | `tiamat_runtime` | Private executor's RLS-scoped ledger operations. | Ownership, `BYPASSRLS`, recovery, DynamoDB updates. |
 | `tiamat_release_manager` | Signed-release staging/activation only. | Provider dispatch, recovery, ownership. |
-| `tiamat_recovery` | Offline initialization, capability preflight, quarantine, and reconciliation. | Serving-process configuration. |
+| `tiamat_recovery` | Offline initialization, capability preflight, quarantine, and reconciliation. | Serving-process configuration or `BYPASSRLS`. |
 
 Render [the role template](../deploy/postgres/tiamat_roles.sql.example) with
 `deploy/postgres/render_tiamat_role_template_v1.py --database-name tiamat_staging`, then apply the
@@ -77,12 +78,13 @@ before commissioning proceeds. No static AWS credentials are permitted.
 2. Its external IP allow list is empty. Content-free evidence records the Render ID, region, plan,
    storage, Postgres version, and resource-specific external-access block; workspace recovery-window
    evidence remains pending.
-3. Next, in a temporary private bootstrap/migration boundary, run the independent lineage through
-   `0005_ledger_identity`; apply the rendered role template; set and verify the two existing-service
+3. Completed in a temporary private bootstrap/migration boundary: run the independent lineage through
+   `0006_render_recovery_rls`; apply the rendered role template; set and verify the two existing-service
    login passwords; then deliver each resulting URL to only its corresponding Render service secret.
    The release-manager role remains `NOLOGIN` until its service exists. Remove the owner URL and all
    bootstrap-only password inputs when that job exits.
-4. Run `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
+4. Next, remove the temporary bootstrap secrets and suspend the runner. Then run
+   `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
    confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
 5. Run `deploy/postgres/verify_tiamat_render_capabilities_v1.py` as only `tiamat_recovery`. It is
    read-only and proves TLS, exact recovery login, blocked ledger state, and access to
