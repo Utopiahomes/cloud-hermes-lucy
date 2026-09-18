@@ -7,6 +7,12 @@
 
 ## Completed locally
 
+- Recovery-anchor foundation: root-signed, predecessor-linked anchor transitions bind the verified
+  recovery witness, environment/ledger/epoch, continuity state and PostgreSQL continuity beacon.
+  A local in-memory adapter proves only transition semantics: it is explicitly not a deployment
+  store. The linked recovery-witness Draft 0.5 and companion-amendment draft define the remaining
+  external-store, launcher, PostgreSQL checkpoint and migration work.
+
 - Frozen Tier A bundle with strict provider schemas, all 29 exact error tuples, positive and
   negative vectors, cross-field invariants, header/JWT/state fixtures, complete acceptance-criteria
   classification, an independent verifier, and a reproducible raw-content digest.
@@ -170,6 +176,11 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 ## Verification ledger
 
 At local commit preparation on 2026-09-18:
+
+- Recovery-anchor unit boundary: 14 passed, including root-signed transition binding, signature/type
+  substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,
+  quarantine/recovery-pending lifecycle, stale-WAL beacon rejection, expiry and missing-anchor
+  fail-closed behavior. Ruff and strict mypy passed for the two new modules and their tests.
 
 - Signed-release RC1 bundle: 106 independent checks passed after fresh archive extraction; raw
   content digest `51b0f943c59b685f261bf0c58abad79a92f7c9fae5074517036c18e0884978d9`.
