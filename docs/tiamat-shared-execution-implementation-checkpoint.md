@@ -155,6 +155,25 @@
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
 
+### DynamoDB external recovery-anchor increment
+
+The approved single-provider deployment choice is now represented locally without provisioning:
+
+- `DynamoDbExternalRecoveryAnchor` stores exact signed transition and witness bytes, uses strongly
+  consistent exact-key reads, re-verifies signed bytes on every read and before every write, and
+  conditionally replaces only the exact predecessor digest/version. DynamoDB metadata cannot
+  establish authority on its own.
+- `RecoveryAnchorRuntimeGate` makes the approved outage behavior executable: startup requires the
+  external anchor; a running process may retain only its last verified authority until signed
+  expiry; a newly observed quarantine blocks immediately; recovery updates fail closed.
+- `deploy/aws/tiamat-recovery-anchor-v1.yaml` defines one retained, deletion-protected, encrypted,
+  PITR-enabled PAY_PER_REQUEST table and separate read-only runtime versus conditional-update
+  coordinator policies. Neither role receives scan, query, delete, restore, or table-mutation
+  permissions.
+- `docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` records topology, AWS-unavailable
+  behavior, permissions, cost assumptions, activation procedure, and rollback. No AWS resource,
+  role, credential, provider call, or dispatch activation was created.
+
 ## Deliberately not yet claimed
 
 The in-memory store is a test adapter. It does not establish durable or multi-replica conformance.
@@ -176,6 +195,16 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 ## Verification ledger
 
 At local commit preparation on 2026-09-18:
+
+- DynamoDB recovery-anchor boundary: 28 focused tests passed across the portable state machine,
+  exact-byte JWS verifier, DynamoDB adapter, runtime outage gate, and CloudFormation assertions.
+  The suite covers strong reads, bootstrap and successor CAS, signature re-verification, unsigned
+  metadata corruption, conditional races, ambiguous-write resolution, AWS-unavailable
+  startup/write behavior, bounded cached
+  operation through an outage, signed expiry, and immediate known-quarantine blocking. Ruff passed
+  for all touched Python files and strict mypy passed for both recovery-anchor source modules.
+  CloudFormation was structurally parsed and policy-asserted locally; AWS-side `validate-template`
+  remains part of the pre-provisioning activation review because no AWS call was authorized.
 
 - Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,

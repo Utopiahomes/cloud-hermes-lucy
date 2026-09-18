@@ -265,3 +265,9 @@ operations across CloudWatch Logs, S3, CloudTrail, CloudWatch, SNS, and
 EventBridge. It neither publishes a test alert nor reads any log event or S3
 object. Alert receipt is exercised later with a non-destructive synthetic
 event.
+# Tiamat external recovery anchor
+
+`tiamat-recovery-anchor-v1.yaml` is the unprovisioned single-Region DynamoDB deployment definition
+for Tiamat's signed recovery authority. Its reader and updater role parameters must name distinct
+existing machine roles. Review
+`../../docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` before creating a change set.

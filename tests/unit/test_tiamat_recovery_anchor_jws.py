@@ -113,7 +113,10 @@ def test_anchor_transition_rejects_signature_and_type_substitution() -> None:
     private_key = Ed25519PrivateKey.generate()
     witness = _witness()
     exact = _sign(_payload(witness), private_key)
-    tampered = exact[:-1] + (b"A" if exact[-1:] != b"A" else b"B")
+    protected, payload, signature = exact.split(b".")
+    # Mutate meaningful signature bits; the final base64url character can contain unused pad bits.
+    signature = (b"A" if signature[:1] != b"A" else b"B") + signature[1:]
+    tampered = b".".join((protected, payload, signature))
     with pytest.raises(RecoveryAnchorSignatureRejected):
         verify_anchor_transition(
             tampered,

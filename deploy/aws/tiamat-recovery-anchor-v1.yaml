@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Tiamat v1 external signed recovery-anchor authority
+
+Parameters:
+  ResourceNamespace:
+    Type: String
+    AllowedPattern: "[a-z0-9-]{3,32}"
+  EnvironmentName:
+    Type: String
+    AllowedPattern: "[a-z0-9-]{2,32}"
+  AnchorReaderRoleName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: Existing Tiamat runtime role; receives strongly consistent read access only
+  AnchorUpdaterRoleName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: Existing recovery-coordinator role; receives conditional update access
+
+Resources:
+  RecoveryAnchorTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-recovery-anchor-v1
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 35
+      AttributeDefinitions:
+        - AttributeName: anchor_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: anchor_key
+          KeyType: HASH
+      Tags:
+        - {Key: stoin:system, Value: tiamat}
+        - {Key: stoin:purpose, Value: recovery-authority}
+        - {Key: stoin:environment, Value: !Ref EnvironmentName}
+
+  RecoveryAnchorReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-read-v1
+      Roles: [!Ref AnchorReaderRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ReadExactRecoveryAnchorOnly
+            Effect: Allow
+            Action: dynamodb:GetItem
+            Resource: !GetAtt RecoveryAnchorTable.Arn
+            Condition:
+              ForAllValues:StringLike:
+                dynamodb:LeadingKeys: [!Sub "ENV#${EnvironmentName}#LEDGER#*"]
+              "Null": {"dynamodb:LeadingKeys": "false"}
+          - Sid: DescribeRecoveryAnchorTable
+            Effect: Allow
+            Action: dynamodb:DescribeTable
+            Resource: !GetAtt RecoveryAnchorTable.Arn
+
+  RecoveryAnchorUpdatePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-update-v1
+      Roles: [!Ref AnchorUpdaterRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CompareAndSwapRecoveryAnchorOnly
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+            Resource: !GetAtt RecoveryAnchorTable.Arn
+            Condition:
+              ForAllValues:StringLike:
+                dynamodb:LeadingKeys: [!Sub "ENV#${EnvironmentName}#LEDGER#*"]
+              "Null": {"dynamodb:LeadingKeys": "false"}
+          - Sid: DescribeRecoveryAnchorTable
+            Effect: Allow
+            Action: dynamodb:DescribeTable
+            Resource: !GetAtt RecoveryAnchorTable.Arn
+
+Outputs:
+  RecoveryAnchorTableName:
+    Value: !Ref RecoveryAnchorTable
+  RecoveryAnchorTableArn:
+    Value: !GetAtt RecoveryAnchorTable.Arn
+  RecoveryAnchorRegion:
+    Value: !Ref AWS::Region

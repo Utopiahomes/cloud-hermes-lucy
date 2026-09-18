@@ -184,6 +184,70 @@ class ExternalRecoveryAnchor(Protocol):
     ) -> VerifiedAnchorTransition: ...
 
 
+def require_transition_dispatch_authority(
+    transition: VerifiedAnchorTransition,
+    identity: RecoveryAnchorIdentity,
+    *,
+    observed_beacon: PostgresContinuityBeacon,
+    now: datetime,
+) -> VerifiedRecoveryWitness:
+    """Apply the portable signed-authority gate to one verified anchor transition."""
+
+    witness = transition.witness
+    if witness.identity != identity:
+        raise RecoveryAnchorRejected("recovery_anchor_identity_mismatch")
+    if transition.continuity != "continuity_established":
+        raise RecoveryAnchorRejected("recovery_continuity_not_established")
+    if witness.status != "reconciled" or not witness.valid_at(now):
+        raise RecoveryAnchorRejected("recovery_dispatch_not_authorized")
+    assert transition.beacon is not None
+    if not transition.beacon.covers(observed_beacon):
+        raise RecoveryAnchorRejected("recovery_continuity_beacon_mismatch")
+    return witness
+
+
+class RecoveryAnchorRuntimeGate:
+    """Bounded runtime cache with mandatory external-authority startup.
+
+    Refresh failure may preserve already verified authority until its signed expiry. A known
+    quarantine or recovery-pending transition replaces that cache immediately and blocks dispatch.
+    """
+
+    def __init__(self, anchor: ExternalRecoveryAnchor, identity: RecoveryAnchorIdentity) -> None:
+        self._anchor = anchor
+        self._identity = identity
+        self._current: VerifiedAnchorTransition | None = None
+
+    def start(self) -> VerifiedAnchorTransition:
+        """Strong external read required for each process start or restart."""
+
+        self._current = self._anchor.read(self._identity.key)
+        return self._current
+
+    def refresh(self) -> bool:
+        """Refresh known authority; return False on an external availability failure."""
+
+        try:
+            self._current = self._anchor.read(self._identity.key)
+        except RecoveryAnchorRejected as exc:
+            if str(exc) != "recovery_anchor_unavailable":
+                raise
+            return False
+        return True
+
+    def require_dispatch_authority(
+        self, *, observed_beacon: PostgresContinuityBeacon, now: datetime
+    ) -> VerifiedRecoveryWitness:
+        if self._current is None:
+            raise RecoveryAnchorRejected("recovery_anchor_startup_required")
+        return require_transition_dispatch_authority(
+            self._current,
+            self._identity,
+            observed_beacon=observed_beacon,
+            now=now,
+        )
+
+
 class InMemoryExternalRecoveryAnchor:
     """Thread-safe local behavioral model of an external anchor service."""
 
@@ -222,43 +286,9 @@ class InMemoryExternalRecoveryAnchor:
             else:
                 if expected_transition_sha256 != previous.exact_sha256:
                     raise RecoveryAnchorRejected("recovery_anchor_compare_failed")
-                self._validate_successor(previous, transition)
+                validate_anchor_successor(previous, transition)
             self._records[key] = transition
             return transition
-
-    @staticmethod
-    def _validate_successor(
-        previous: VerifiedAnchorTransition,
-        candidate: VerifiedAnchorTransition,
-    ) -> None:
-        if (
-            candidate.transition_version != previous.transition_version + 1
-            or candidate.previous_transition_sha256 != previous.exact_sha256
-        ):
-            raise RecoveryAnchorRejected("recovery_anchor_transition_chain_invalid")
-        current_witness = previous.witness
-        next_witness = candidate.witness
-        if next_witness.identity.key != current_witness.identity.key:
-            raise RecoveryAnchorRejected("recovery_anchor_identity_changed")
-        if next_witness.identity.storage_epoch != current_witness.identity.storage_epoch:
-            if candidate.continuity != "quarantined" or next_witness.witness_revision != 1:
-                raise RecoveryAnchorRejected("recovery_epoch_change_requires_quarantine")
-            return
-        if next_witness.ordering < current_witness.ordering:
-            raise RecoveryAnchorRejected("recovery_witness_rollback")
-        if next_witness.ordering == current_witness.ordering:
-            if next_witness.exact_jws != current_witness.exact_jws:
-                raise RecoveryAnchorRejected("recovery_witness_conflicting_replay")
-        elif next_witness.recovery_generation == current_witness.recovery_generation:
-            if (
-                next_witness.witness_revision != current_witness.witness_revision + 1
-                or current_witness.status != "reconciled"
-                or next_witness.status != "reconciled"
-                or next_witness.checkpoint_digest != current_witness.checkpoint_digest
-            ):
-                raise RecoveryAnchorRejected("recovery_witness_invalid_renewal")
-        elif next_witness.witness_revision != 1:
-            raise RecoveryAnchorRejected("recovery_witness_generation_requires_first_revision")
 
     def require_dispatch_authority(
         self,
@@ -267,18 +297,48 @@ class InMemoryExternalRecoveryAnchor:
         observed_beacon: PostgresContinuityBeacon,
         now: datetime,
     ) -> VerifiedRecoveryWitness:
-        transition = self.read(identity.key)
-        witness = transition.witness
-        if witness.identity != identity:
-            raise RecoveryAnchorRejected("recovery_anchor_identity_mismatch")
-        if transition.continuity != "continuity_established":
-            raise RecoveryAnchorRejected("recovery_continuity_not_established")
-        if witness.status != "reconciled" or not witness.valid_at(now):
-            raise RecoveryAnchorRejected("recovery_dispatch_not_authorized")
-        assert transition.beacon is not None
-        if not transition.beacon.covers(observed_beacon):
-            raise RecoveryAnchorRejected("recovery_continuity_beacon_mismatch")
-        return witness
+        return require_transition_dispatch_authority(
+            self.read(identity.key),
+            identity,
+            observed_beacon=observed_beacon,
+            now=now,
+        )
+
+
+def validate_anchor_successor(
+    previous: VerifiedAnchorTransition,
+    candidate: VerifiedAnchorTransition,
+) -> None:
+    """Validate the signed monotonic transition shared by every storage adapter."""
+
+    if (
+        candidate.transition_version != previous.transition_version + 1
+        or candidate.previous_transition_sha256 != previous.exact_sha256
+    ):
+        raise RecoveryAnchorRejected("recovery_anchor_transition_chain_invalid")
+    current_witness = previous.witness
+    next_witness = candidate.witness
+    if next_witness.identity.key != current_witness.identity.key:
+        raise RecoveryAnchorRejected("recovery_anchor_identity_changed")
+    if next_witness.identity.storage_epoch != current_witness.identity.storage_epoch:
+        if candidate.continuity != "quarantined" or next_witness.witness_revision != 1:
+            raise RecoveryAnchorRejected("recovery_epoch_change_requires_quarantine")
+        return
+    if next_witness.ordering < current_witness.ordering:
+        raise RecoveryAnchorRejected("recovery_witness_rollback")
+    if next_witness.ordering == current_witness.ordering:
+        if next_witness.exact_jws != current_witness.exact_jws:
+            raise RecoveryAnchorRejected("recovery_witness_conflicting_replay")
+    elif next_witness.recovery_generation == current_witness.recovery_generation:
+        if (
+            next_witness.witness_revision != current_witness.witness_revision + 1
+            or current_witness.status != "reconciled"
+            or next_witness.status != "reconciled"
+            or next_witness.checkpoint_digest != current_witness.checkpoint_digest
+        ):
+            raise RecoveryAnchorRejected("recovery_witness_invalid_renewal")
+    elif next_witness.witness_revision != 1:
+        raise RecoveryAnchorRejected("recovery_witness_generation_requires_first_revision")
 
 
 class PostgresContinuityBeaconReader:
