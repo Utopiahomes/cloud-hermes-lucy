@@ -1,4 +1,6 @@
--- Run as the dedicated Tiamat database owner after migration 0005.
+-- Render with render_tiamat_role_template_v1.py and run as the dedicated Tiamat database owner
+-- after migration 0005. The database identifier is deliberately a required placeholder so this
+-- template cannot silently grant access to a differently named database.
 -- Supply passwords through the platform secret manager; never place them in this file.
 -- The serving login must not own tables, inherit the owner, or hold BYPASSRLS/SUPERUSER.
 
@@ -8,7 +10,7 @@ CREATE ROLE tiamat_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE N
 CREATE ROLE tiamat_recovery LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
 CREATE ROLE tiamat_release_manager LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
-GRANT CONNECT ON DATABASE tiamat TO tiamat_runtime, tiamat_recovery, tiamat_release_manager;
+GRANT CONNECT ON DATABASE __TIAMAT_DATABASE__ TO tiamat_runtime, tiamat_recovery, tiamat_release_manager;
 GRANT USAGE ON SCHEMA tiamat TO tiamat_runtime, tiamat_recovery, tiamat_release_manager;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON

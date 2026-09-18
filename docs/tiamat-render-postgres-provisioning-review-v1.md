@@ -51,8 +51,9 @@ connection-string switch is a Tiamat recovery event.
 | `tiamat_release_manager` | Signed-release staging/activation only. | Provider dispatch, recovery, ownership. |
 | `tiamat_recovery` | Offline initialization, capability preflight, quarantine, and reconciliation. | Serving-process configuration. |
 
-Apply [the role template](../deploy/postgres/tiamat_roles.sql.example) after migrations, using the
-platform owner. Store each URL only in its protected deployment boundary. Every internal URL uses
+Render [the role template](../deploy/postgres/tiamat_roles.sql.example) with
+`deploy/postgres/render_tiamat_role_template_v1.py --database-name tiamat_staging`, then apply the
+result after migrations using the platform owner. Store each URL only in its protected deployment boundary. Every internal URL uses
 `sslmode=require`; the recovery probe verifies the live TLS session before commissioning proceeds.
 No static AWS credentials are permitted.
 

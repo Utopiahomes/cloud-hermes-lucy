@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from deploy.postgres.render_tiamat_role_template_v1 import render_role_template
 from lucy.shared_execution.postgres_ledger import (
     LedgerAdmission,
     LedgerRecord,
@@ -86,6 +87,18 @@ def test_serving_role_cannot_bypass_rls_or_inherit_owner() -> None:
     assert "GRANT SELECT ON tiamat.trust_inventories" in source
     assert "TO tiamat_release_manager" in source
     assert "GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery" in source
+
+
+def test_tiamat_role_template_requires_an_explicit_database_binding() -> None:
+    source = (ROOT / "deploy" / "postgres" / "tiamat_roles.sql.example").read_text(encoding="utf-8")
+    assert "GRANT CONNECT ON DATABASE __TIAMAT_DATABASE__" in source
+
+    rendered = render_role_template("tiamat_staging")
+    assert "GRANT CONNECT ON DATABASE tiamat_staging" in rendered
+    assert "__TIAMAT_DATABASE__" not in rendered
+
+    with pytest.raises(ValueError, match="database name"):
+        render_role_template("tiamat-staging; DROP DATABASE tiamat_staging")
 
 
 def test_recovery_witness_requires_positive_generation() -> None:
