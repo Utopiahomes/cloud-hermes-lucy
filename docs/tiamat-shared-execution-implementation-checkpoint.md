@@ -119,6 +119,10 @@
 - A boundary-sized 65,536-byte provider text result produces a complete strict-schema success under
   the 131,072-byte raw response cap. A one-byte-larger provider result becomes a bounded, strict,
   paid `provider_response_too_large` failure with no oversized content reflected to the caller.
+- A single adversarial cross-product walks route, method, framing, authentication, request-header,
+  media, response-media, contract-size, raw-digest, strict-request, and capability gates while every
+  later layer is also malformed; each request returns only the earliest RC1-defined failure and no
+  provider call occurs.
 - All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
   checks the complete implemented code/message/retry set against the frozen positive vectors.
 - The live success envelope, all 29 generated error envelopes, and all four cost-receipt variants
@@ -150,20 +154,16 @@ production change was created.
 The in-memory store is a test adapter. It does not establish durable or multi-replica conformance.
 Before any deployment or real provider activation, Tier B must add and prove:
 
-1. finish the remaining private FastAPI ordered-gate proof from §6.3: broader cross-product
-   precedence; route,
-   method, redirect avoidance, gross framing/cap, duplicate binding headers, and authenticated
-   contract-size ordering are implemented;
-2. connect the implemented offline exact inventory/release-head reconciliation input to an
+1. connect the implemented offline exact inventory/release-head reconciliation input to an
    independently authenticated Control witness in a deployment; local witness enforcement,
    recovery-generation binding, cold-start reverification, monotonic activation, atomic grant
    projection, signed no-fallback revocation, and exact active-byte loading are done;
-3. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
-4. complete caller-side tolerant-consumer tests against the bundle;
-5. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
+2. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
+3. complete caller-side tolerant-consumer tests against the bundle;
+4. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
    failure injection;
-6. a separately authorized provider adapter and provider/model/rate selection;
-7. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
+5. a separately authorized provider adapter and provider/model/rate selection;
+6. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
 
 The existing Homes corpus remains local-test-only and is not authorized for provider use.
 
@@ -206,7 +206,7 @@ At local commit preparation on 2026-09-18:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,166 passed with two dependency deprecation warnings. The first run exposed
+- Complete unit suite: 1,167 passed with two dependency deprecation warnings. The first run exposed
   an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
   first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
   code was changed in this branch.

@@ -614,6 +614,111 @@ def test_valid_profile_with_unsupported_output_mode_is_step_nine_422() -> None:
     assert transport.calls == 0
 
 
+def test_ordered_gate_cross_product_returns_the_earliest_failure() -> None:
+    client, transport, private_key, _ = setup()
+    normal = body()
+
+    route = client.request(
+        "DELETE",
+        "/wrong",
+        content=b"x" * 1_048_577,
+        headers={"Content-Length": "invalid"},
+    )
+    method = client.request(
+        "DELETE",
+        "/execution/v1/inference",
+        content=b"x" * 1_048_577,
+        headers={"Content-Length": "invalid"},
+    )
+    framing = client.post(
+        "/execution/v1/inference",
+        content=normal,
+        headers={"Content-Length": "invalid"},
+    )
+
+    too_large = b"x" * 262_145
+    invalid_auth_headers = headers(private_key, too_large, scope="wrong")
+    invalid_auth_headers.update(
+        {
+            "X-Request-ID": "invalid",
+            "Content-Type": "text/plain",
+            "Accept": "text/plain",
+        }
+    )
+    authentication = client.post(
+        "/execution/v1/inference", content=too_large, headers=invalid_auth_headers
+    )
+
+    invalid_request_headers = headers(private_key, too_large)
+    invalid_request_headers.update(
+        {"X-Request-ID": "invalid", "Content-Type": "text/plain", "Accept": "text/plain"}
+    )
+    request_header = client.post(
+        "/execution/v1/inference", content=too_large, headers=invalid_request_headers
+    )
+
+    media_headers = headers(private_key, too_large)
+    media_headers.update({"Content-Type": "text/plain", "Accept": "text/plain"})
+    media = client.post("/execution/v1/inference", content=too_large, headers=media_headers)
+
+    accept_headers = headers(private_key, too_large)
+    accept_headers["Accept"] = "text/plain"
+    accept = client.post("/execution/v1/inference", content=too_large, headers=accept_headers)
+
+    size = client.post(
+        "/execution/v1/inference",
+        content=too_large,
+        headers=headers(private_key, too_large, declared_hash=content_sha256(b"different")),
+    )
+    digest = client.post(
+        "/execution/v1/inference",
+        content=b"not-json",
+        headers=headers(private_key, b"not-json", declared_hash=content_sha256(b"different")),
+    )
+
+    invalid_request = json.loads(normal)
+    invalid_request["unexpected"] = True
+    invalid_request["execution_profile_id"] = "unknown.profile"
+    invalid_request_raw = json.dumps(invalid_request, separators=(",", ":")).encode()
+    schema = client.post(
+        "/execution/v1/inference",
+        content=invalid_request_raw,
+        headers=headers(private_key, invalid_request_raw),
+    )
+
+    unknown_profile = json.loads(normal)
+    unknown_profile["execution_profile_id"] = "unknown.profile"
+    unknown_profile["output"] = {
+        "mode": "json_schema",
+        "name": "candidate",
+        "schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    }
+    unknown_profile_raw = json.dumps(unknown_profile, separators=(",", ":")).encode()
+    authorization = client.post(
+        "/execution/v1/inference",
+        content=unknown_profile_raw,
+        headers=headers(private_key, unknown_profile_raw),
+    )
+
+    assert route.status_code == 404
+    assert method.status_code == 405
+    assert framing.status_code == 400 and framing.json() == {"detail": "request rejected"}
+    assert authentication.status_code == 401
+    assert request_header.status_code == 400
+    assert media.status_code == 415
+    assert accept.status_code == 406
+    assert size.status_code == 413
+    assert digest.status_code == 401
+    assert schema.status_code == 400
+    assert authorization.status_code == 403
+    assert transport.calls == 0
+
+
 def test_disconnect_while_streaming_body_fails_before_authentication() -> None:
     client, transport, _, _ = setup()
     app = client.app
