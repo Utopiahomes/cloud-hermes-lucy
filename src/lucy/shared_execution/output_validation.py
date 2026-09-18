@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, TypeGuard
 
 
 def validate_output(schema: dict[str, Any], value: object) -> bool:
@@ -25,8 +25,8 @@ def validate_output(schema: dict[str, Any], value: object) -> bool:
             return False
         if "maxLength" in schema and len(value) > schema["maxLength"]:
             return False
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(float(value)):
+    if _is_number(value):
+        if not _number_in_canonical_domain(value):
             return False
         if "minimum" in schema and value < schema["minimum"]:
             return False
@@ -57,7 +57,9 @@ def _matches_single_type(schema_type: object, value: object) -> bool:
     if schema_type == "boolean":
         return isinstance(value, bool)
     if schema_type == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
+        return _is_number(value) and (
+            isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+        )
     if schema_type == "number":
         return _is_number(value)
     if schema_type == "string":
@@ -69,14 +71,33 @@ def _matches_single_type(schema_type: object, value: object) -> bool:
     return False
 
 
-def _is_number(value: object) -> bool:
+def _is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _json_equal(left: object, right: object) -> bool:
+    if _is_number(left) and _is_number(right):
+        return (
+            _number_in_canonical_domain(left)
+            and _number_in_canonical_domain(right)
+            and left == right
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right) and all(_json_equal(left[key], right[key]) for key in left)
     if type(left) is not type(right):
         return False
     return left == right
+
+
+def _number_in_canonical_domain(value: int | float) -> bool:
+    if isinstance(value, int):
+        return abs(value) <= 2**53 - 1
+    return math.isfinite(value)
 
 
 def _has_invalid_scalar(value: str) -> bool:

@@ -222,6 +222,51 @@ def test_output_validator_distinguishes_json_boolean_from_integer() -> None:
     assert not validate_output({"type": "integer", "minimum": 0}, True)
 
 
+def test_noncanonical_provider_number_becomes_terminal_paid_failure() -> None:
+    class NoncanonicalJsonProvider:
+        def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+            return ProviderResult(
+                content={"value": 2**53},
+                input_tokens=10,
+                generated_tokens=1,
+                output_tokens=1,
+                reasoning_tokens=0,
+                cost_microusd=1,
+            )
+
+    profile = ExecutionProfile(
+        profile_id="utopia-homes.public-answer.generate.v1",
+        release_id="profiles-local.1",
+        allowed_modes=frozenset({"json_schema"}),
+        maximum_output_tokens=900,
+        maximum_cost_microusd=2000,
+    )
+    executor = SharedExecutionService(
+        InMemoryExecutionStore(), NoncanonicalJsonProvider(), {profile.profile_id: profile}
+    )
+    payload = request().model_dump(mode="json", by_alias=True)
+    payload["output"] = {
+        "mode": "json_schema",
+        "name": "numeric-candidate",
+        "schema": {
+            "type": "object",
+            "properties": {"value": {"type": "number"}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+    }
+    with pytest.raises(ExecutionFailure) as failure:
+        executor.execute(
+            caller="stoin:synth:utopia-homes-prime",
+            idempotency_key=str(uuid4()),
+            request_id=uuid4(),
+            request=ExecutionRequest.model_validate(payload),
+        )
+    assert failure.value.code == "provider_response_invalid"
+    assert failure.value.execution_state == "failed"
+    assert failure.value.cost.settled_microusd == 1
+
+
 def test_output_token_limit_is_checked_against_combined_generated_tokens() -> None:
     class OverLimitProvider:
         def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
