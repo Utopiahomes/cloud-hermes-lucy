@@ -130,6 +130,28 @@ class SharedExecutionService:
         self._transport = transport
         self._profiles = dict(profiles)
 
+    @classmethod
+    def from_signed_authority(
+        cls,
+        store: InMemoryExecutionStore,
+        transport: ProviderTransport,
+        authority: object,
+    ) -> SharedExecutionService:
+        """Construct the local executor only from a resolved complete signed release set."""
+
+        from lucy.shared_execution.signed_releases import AuthorizedExecutionProfile
+
+        if not isinstance(authority, AuthorizedExecutionProfile):
+            raise PermissionError("no valid signed execution authority")
+        profile = ExecutionProfile(
+            profile_id=authority.profile_id,
+            release_id=authority.profile_release_id,
+            allowed_modes=authority.allowed_output_modes,
+            maximum_output_tokens=authority.maximum_output_tokens,
+            maximum_cost_microusd=authority.maximum_reservable_microusd,
+        )
+        return cls(store, transport, {profile.profile_id: profile})
+
     def execute(
         self,
         *,

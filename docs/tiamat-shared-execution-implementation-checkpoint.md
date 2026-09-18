@@ -61,6 +61,16 @@
 - Real PostgreSQL backend termination while dispatch and settlement transactions are open proves
   that execution state, spend, contingency, quarantine, and financial-event writes roll back as one
   unit. The separately tested unclear-commit resolver covers the case where commit may have landed.
+- Frozen Tiamat Signed Release Format v1 RC1 plus a 71-file conformance bundle containing 55
+  deterministic synthetic vectors, strict payload schemas, root/release Ed25519 fixtures, an
+  independent verifier, a coverage map, and a reproducible raw-content digest.
+- Executor-side compact-JWS verification preserves and hashes the exact received bytes, rejects
+  duplicate JSON members and nonconformant headers, validates root-signed trust inventory and exact
+  release-key scope, checks RFC 8785 content identity, and enforces time, subject, privacy-route,
+  contingency, and budget-period relationships.
+- A complete signed execution authority now requires one current profile, its exact privacy-policy
+  release, and one applicable current spending grant. Missing trust inventory or grant fails closed
+  before a service capable of dispatch can be constructed.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -74,8 +84,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. signed profile, privacy-policy, and grant formats plus durable activation/revocation state; the
-   local period/successor/exposure semantics are implemented but not yet signature- or store-backed;
+3. durable signed-release staging, monotonic activation/revocation heads, and restore reconciliation;
+   exact format/signature verification and complete-set fail-closed admission are implemented, while
+   durable release state is not yet wired to the PostgreSQL ledger;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
@@ -89,6 +100,12 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 ## Verification ledger
 
 At local commit preparation on 2026-09-17:
+
+- Signed-release RC1 bundle: 106 independent checks passed after fresh archive extraction; raw
+  content digest `51b0f943c59b685f261bf0c58abad79a92f7c9fae5074517036c18e0884978d9`.
+- Signed-authority and neighboring Shared Execution unit boundary: 76 passed. A broader `-k` run
+  was discarded because pytest imported unrelated deployment tests without the repository root on
+  `PYTHONPATH`; the explicit affected-file run is the valid evidence.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
