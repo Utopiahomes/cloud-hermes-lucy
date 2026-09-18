@@ -38,6 +38,7 @@ COPY deploy/postgres/render_recovery_roles_v1_3.py ./deploy/postgres/render_reco
 COPY deploy/postgres/initialize_tiamat_ledger_v1.py ./deploy/postgres/initialize_tiamat_ledger_v1.py
 COPY deploy/postgres/verify_tiamat_render_capabilities_v1.py ./deploy/postgres/verify_tiamat_render_capabilities_v1.py
 COPY deploy/postgres/render_tiamat_role_template_v1.py ./deploy/postgres/render_tiamat_role_template_v1.py
+COPY deploy/postgres/bootstrap_tiamat_staging_v1.py ./deploy/postgres/bootstrap_tiamat_staging_v1.py
 COPY deploy/postgres/tiamat_roles.sql.example ./deploy/postgres/tiamat_roles.sql.example
 COPY deploy/postgres/production_bootstrap.sql.example ./deploy/postgres/production_bootstrap.sql.example
 COPY deploy/postgres/production_roles_v1.2.sql.example ./deploy/postgres/production_roles_v1.2.sql.example
@@ -46,9 +47,10 @@ COPY deploy/postgres/production_recovery_roles_v1.3.sql.example ./deploy/postgre
 COPY deploy/postgres/configure_security_v1.2.sql.example ./deploy/postgres/configure_security_v1.2.sql.example
 COPY deploy/render/utopia-public-projection.v0.json ./deploy/render/utopia-public-projection.v0.json
 COPY deploy/render/utopia-public-knowledge.r1.json ./deploy/render/utopia-public-knowledge.r1.json
-COPY alembic.ini hermes.lock ./
+COPY alembic.ini tiamat_alembic.ini hermes.lock ./
 COPY contracts ./contracts
 COPY migrations ./migrations
+COPY tiamat_migrations ./tiamat_migrations
 COPY src ./src
 RUN pip install --no-cache-dir --require-hashes -r deploy/render/requirements.lock
 

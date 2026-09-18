@@ -137,6 +137,8 @@ def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
     assert "python:3.12.11-slim@sha256:" in dockerfile
     assert "COPY deploy/render/requirements.lock" in dockerfile
     assert "COPY contracts ./contracts" in dockerfile
+    assert "COPY alembic.ini tiamat_alembic.ini hermes.lock ./" in dockerfile
+    assert "COPY tiamat_migrations ./tiamat_migrations" in dockerfile
     assert "pip install --no-cache-dir --require-hashes" in dockerfile
     assert "pip install --no-cache-dir ." not in dockerfile
 
@@ -176,6 +178,7 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
         "initialize_tiamat_ledger_v1.py",
         "verify_tiamat_render_capabilities_v1.py",
         "render_tiamat_role_template_v1.py",
+        "bootstrap_tiamat_staging_v1.py",
         "tiamat_roles.sql.example",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",
