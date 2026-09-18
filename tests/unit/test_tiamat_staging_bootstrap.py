@@ -94,6 +94,27 @@ def test_bootstrap_report_is_content_free(monkeypatch: pytest.MonkeyPatch) -> No
     assert "owner-secret" not in rendered
 
 
+def test_render_recovery_role_uses_explicit_rls_access_not_bypass() -> None:
+    module = _module()
+    template = (ROOT / "deploy" / "postgres" / "tiamat_roles.sql.example").read_text(
+        encoding="utf-8"
+    )
+    migration = (ROOT / "tiamat_migrations" / "versions" / "0006_render_recovery_rls.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert module.MIGRATION_HEAD == "0006_render_recovery_rls"
+    recovery_line = next(
+        line for line in template.splitlines() if "CREATE ROLE tiamat_recovery" in line
+    )
+    assert "LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE" in recovery_line
+    assert "NOBYPASSRLS" in recovery_line
+    assert " BYPASSRLS" not in recovery_line
+    assert "FOR ALL TO PUBLIC" in migration
+    assert "current_user = 'tiamat_recovery'" in migration
+    assert "has_table_privilege(current_user" in module.ROLE_PERMISSION_PROBES["tiamat_runtime"]
+
+
 def test_command_requires_exact_bootstrap_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

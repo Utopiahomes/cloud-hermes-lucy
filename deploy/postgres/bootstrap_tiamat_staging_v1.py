@@ -28,7 +28,7 @@ from render_tiamat_role_template_v1 import render_role_template
 from sqlalchemy.engine import URL, make_url
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_HEAD = "0005_ledger_identity"
+MIGRATION_HEAD = "0006_render_recovery_rls"
 ROLE_NAMES = ("tiamat_runtime", "tiamat_recovery", "tiamat_release_manager")
 ACTIVE_BOOTSTRAP_ROLES = ("tiamat_runtime", "tiamat_recovery")
 ROLE_PASSWORD_ENV = {
@@ -36,7 +36,11 @@ ROLE_PASSWORD_ENV = {
     "tiamat_recovery": "TIAMAT_RECOVERY_PASSWORD",
 }
 ROLE_PERMISSION_PROBES = {
-    "tiamat_runtime": "SELECT count(*) FROM tiamat.execution_records",
+    # The runtime role has an RLS-scoped data path and intentionally has no bootstrap caller
+    # context. Verify its grant without using an unscoped table read.
+    "tiamat_runtime": (
+        "SELECT has_table_privilege(current_user, 'tiamat.execution_records', 'SELECT')"
+    ),
     "tiamat_recovery": "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton",
 }
 
@@ -148,7 +152,7 @@ def _assert_role_flags(connection: psycopg.Connection[Any]) -> None:
         raise BootstrapRejected("one or more Tiamat roles are missing")
     for name, superuser, createdb, createrole, replication, bypass_rls, inherit, can_login in rows:
         name_text = str(name)
-        expected_bypass = name_text == "tiamat_recovery"
+        expected_bypass = False
         expected_login = name_text in ACTIVE_BOOTSTRAP_ROLES
         if (
             bool(superuser)
