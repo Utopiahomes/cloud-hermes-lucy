@@ -54,9 +54,19 @@ connection-string switch is a Tiamat recovery event.
 
 Render [the role template](../deploy/postgres/tiamat_roles.sql.example) with
 `deploy/postgres/render_tiamat_role_template_v1.py --database-name tiamat_staging`, then apply the
-result after migrations using the platform owner. Store each URL only in its protected deployment boundary. Every internal URL uses
-`sslmode=require`; the recovery probe verifies the live TLS session before commissioning proceeds.
-No static AWS credentials are permitted.
+result after migrations using the platform owner. The database owner URL is supplied only to a
+disposable, private bootstrap/migration runner. It creates and verifies the three database logins
+using three generated passwords that are injected into that runner only for the run.
+
+Each resulting connection URL belongs in exactly one protected, service-scoped Render secret:
+`TIAMAT_RUNTIME_DATABASE_URL` on the executor, `TIAMAT_RECOVERY_DATABASE_URL` on the recovery
+boundary, and `TIAMAT_RELEASE_MANAGER_DATABASE_URL` only on the later release-management boundary.
+Do not use a shared environment group, a permanent owner credential, or AWS Secrets Manager for
+this staging increment. Disable or delete the bootstrap runner and remove its owner secret when its
+verification succeeds. Every internal URL uses `sslmode=require`; Render's internal Postgres
+certificates are self-signed, so this requires encrypted transport without claiming CA or hostname
+verification that the platform does not provide. The recovery probe verifies the live TLS session
+before commissioning proceeds. No static AWS credentials are permitted.
 
 ## Commissioning procedure
 
@@ -65,8 +75,10 @@ No static AWS credentials are permitted.
 2. Its external IP allow list is empty. Content-free evidence records the Render ID, region, plan,
    storage, Postgres version, and resource-specific external-access block; workspace recovery-window
    evidence remains pending.
-3. Next, in a temporary migration-only boundary, run the independent lineage through `0005_ledger_identity`;
-   then apply the role template. Remove the owner URL when that job exits.
+3. Next, in a temporary private bootstrap/migration boundary, run the independent lineage through
+   `0005_ledger_identity`; apply the rendered role template; set and verify the three generated
+   login passwords; then deliver each resulting URL to only its corresponding Render service secret.
+   Remove the owner URL and all bootstrap-only password inputs when that job exits.
 4. Run `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
    confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
 5. Run `deploy/postgres/verify_tiamat_render_capabilities_v1.py` as only `tiamat_recovery`. It is
@@ -93,7 +105,9 @@ attachment cannot dispatch until reconciliation and a signed anchor transition s
 
 - External database access is disabled, not merely unused.
 - The database and both Tiamat services share one Render region and use the internal URL.
-- The capability tool passes under `tiamat_recovery` with `sslmode=require`.
+- Authenticated PostgreSQL sessions pass over Render private networking with `sslmode=require` for
+  the runtime, recovery, and release-manager roles; the capability tool passes under
+  `tiamat_recovery` and proves its live TLS transport.
 - Runtime cannot read `ledger_identity` or use recovery control/WAL functions.
 - A restore/clone preserves the post-0005 ledger UUID; a mismatched/pre-0005 identity fails anchor
   binding and remains blocked.
