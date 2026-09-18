@@ -96,6 +96,12 @@
   privacy-policy release ID, resolves the current partition grant, and constructs dispatch-capable
   authority only after the complete relationship set passes. A revoked linked policy remains
   unavailable after a correctly reconciled restore.
+- The private HTTP boundary now implements ordered route/method rejection with no release
+  disclosure, validates transfer framing before authentication, streams through a 1 MiB gross hard
+  cap instead of buffering an unbounded body, and preserves the separate authenticated 256 KiB
+  contract-size gate. Missing or duplicate binding headers remain generic authentication failures.
+- All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
+  checks the complete implemented code/message/retry set against the frozen positive vectors.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -105,8 +111,10 @@ production change was created.
 The in-memory store is a test adapter. It does not establish durable or multi-replica conformance.
 Before any deployment or real provider activation, Tier B must add and prove:
 
-1. complete the private FastAPI ordered gate from §6.3, including gross framing, duplicate-header,
-   cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
+1. finish the remaining private FastAPI ordered-gate proof from §6.3: broader cross-product
+   precedence, timing classes, full response-size enforcement, and disconnect behavior; route,
+   method, redirect avoidance, gross framing/cap, duplicate binding headers, and authenticated
+   contract-size ordering are implemented;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
 3. connect the implemented offline exact inventory/release-head reconciliation input to an
@@ -147,10 +155,13 @@ At local commit preparation on 2026-09-17:
   an exact external inventory/head-set witness, restamps authority to the new recovery generation,
   and still refuses a profile whose linked privacy policy is a revoked tombstone. The loopback-only
   disposable container was stopped and removed.
+- Focused HTTP ordered-gate and frozen-error-table suite: 15 passed. This includes exact 404/405,
+  malformed and duplicate `Content-Length`, the unauthenticated 1 MiB cap, duplicate binding
+  headers, and proof that the authenticated replay gate precedes the 262,144-byte contract cap.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,111 passed with two dependency deprecation warnings.
+- Complete unit suite: 1,118 passed with two dependency deprecation warnings.
 - Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
 - Strict mypy: passed across 134 source files.
 - Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL

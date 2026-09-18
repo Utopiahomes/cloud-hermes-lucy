@@ -10,6 +10,9 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.requests import ClientDisconnect
+from starlette.responses import Response
 
 from lucy.shared_execution.auth import (
     AuthenticationFailed,
@@ -34,6 +37,8 @@ ERRORS: dict[str, tuple[int, str, bool]] = {
     "invalid_request": (400, "The execution request is invalid.", False),
     "authentication_failed": (401, "Service authentication failed.", False),
     "capability_forbidden": (403, "This execution capability is not permitted.", False),
+    "route_not_found": (404, "The requested execution route was not found.", False),
+    "method_not_allowed": (405, "The execution method is not allowed.", False),
     "request_in_progress": (409, "The execution request is already in progress.", True),
     "idempotency_conflict": (409, "The idempotency key conflicts with an earlier request.", False),
     "request_too_large": (413, "The execution request is too large.", False),
@@ -43,12 +48,30 @@ ERRORS: dict[str, tuple[int, str, bool]] = {
         "The requested response media type is not supported.",
         False,
     ),
+    "execution_aborted": (409, "The execution ended before model dispatch.", False),
     "output_contract_unsupported": (422, "The requested output contract is not supported.", False),
     "cost_ceiling_insufficient": (422, "The execution cost ceiling is insufficient.", False),
+    "idempotency_recovery_unavailable": (
+        409,
+        "The earlier execution result is no longer available.",
+        False,
+    ),
+    "execution_outcome_unknown": (
+        409,
+        "The execution outcome could not be determined.",
+        False,
+    ),
+    "execution_invalidated": (
+        409,
+        "The earlier execution result is no longer eligible.",
+        False,
+    ),
+    "rate_limited": (429, "Execution capacity is temporarily limited.", True),
     "provider_execution_failed": (502, "The model execution failed.", False),
     "provider_response_invalid": (502, "The model returned an unusable result.", False),
     "provider_response_too_large": (502, "The model response is too large.", False),
     "output_limit_reached": (502, "The model reached its output limit.", False),
+    "content_filtered": (502, "The model response was filtered.", False),
     "cost_settlement_violation": (
         502,
         "The provider charge exceeded its reservation.",
@@ -59,6 +82,27 @@ ERRORS: dict[str, tuple[int, str, bool]] = {
         "Service authentication state is temporarily unavailable.",
         True,
     ),
+    "privacy_route_unavailable": (
+        503,
+        "No approved private execution route is available.",
+        False,
+    ),
+    "state_store_unavailable": (
+        503,
+        "Execution state is temporarily unavailable.",
+        True,
+    ),
+    "spending_authority_exhausted": (
+        503,
+        "Execution spending authority is unavailable.",
+        False,
+    ),
+    "temporarily_unavailable": (
+        503,
+        "Model execution is temporarily unavailable.",
+        True,
+    ),
+    "deadline_exceeded": (504, "Model execution exceeded its deadline.", False),
 }
 
 
@@ -75,11 +119,31 @@ def create_shared_execution_app(
 ) -> FastAPI:
     app = FastAPI(title="Tiamat Shared Model Execution", docs_url=None, redoc_url=None)
 
+    @app.middleware("http")
+    async def route_method_gate(
+        http_request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        if http_request.url.path != PATH:
+            return _error("route_not_found", request_id=None)
+        if http_request.method != "POST":
+            return _error("method_not_allowed", request_id=None)
+        return await call_next(http_request)
+
     @app.post(PATH)
     async def inference(http_request: Request) -> JSONResponse:
-        body = await http_request.body()
-        if len(body) > 1_048_576:
-            return JSONResponse(status_code=413, content={"detail": "request rejected"})
+        framing = _content_length(http_request)
+        if framing is None:
+            return _transport_rejection(400)
+        if framing > 1_048_576:
+            return _transport_rejection(413)
+        try:
+            body = await _bounded_body(http_request, 1_048_576)
+        except (ClientDisconnect, ValueError):
+            return _transport_rejection(400)
+        if body is None:
+            return _transport_rejection(413)
+        if framing >= 0 and framing != len(body):
+            return _transport_rejection(400)
 
         request_id_text = _single(http_request, "X-Request-ID")
         idempotency_key = _single(http_request, "Idempotency-Key")
@@ -175,6 +239,37 @@ def create_shared_execution_app(
 def _single(request: Request, name: str) -> str | None:
     values = request.headers.getlist(name)
     return values[0] if len(values) == 1 else None
+
+
+def _content_length(request: Request) -> int | None:
+    lengths = request.headers.getlist("content-length")
+    transfer_encodings = request.headers.getlist("transfer-encoding")
+    if len(lengths) > 1 or len(transfer_encodings) > 1 or (lengths and transfer_encodings):
+        return None
+    if transfer_encodings:
+        return -1 if transfer_encodings[0].strip().lower() == "chunked" else None
+    if not lengths:
+        return -1
+    if not lengths[0].isascii() or not lengths[0].isdigit():
+        return None
+    return int(lengths[0])
+
+
+async def _bounded_body(request: Request, maximum: int) -> bytes | None:
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > maximum:
+            return None
+    return bytes(body)
+
+
+def _transport_rejection(status_code: int) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": "request rejected"},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _valid_uuid4(value: str | None) -> UUID | None:

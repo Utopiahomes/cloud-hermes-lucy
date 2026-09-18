@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,7 +10,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
-from lucy.shared_execution.api import ApiRelease, create_shared_execution_app
+from lucy.shared_execution.api import ERRORS, ApiRelease, create_shared_execution_app
 from lucy.shared_execution.auth import (
     InMemoryJtiReplayStore,
     WorkloadIdentity,
@@ -29,6 +30,9 @@ ISSUER = "https://homes.internal"
 SUBJECT = "stoin:synth:utopia-homes-prime"
 PROFILE = "utopia-homes.public-answer.generate.v1"
 KEY_ID = "homes-prime-local-1"
+BUNDLE = (
+    Path(__file__).resolve().parents[2] / "contracts" / "stoin-shared-model-execution-v1-rc1-bundle"
+)
 
 
 class FakeTransport:
@@ -137,9 +141,7 @@ def test_authenticated_request_returns_bound_response_and_release_headers() -> N
     client, transport, private_key, _ = setup()
     raw = body()
     request_headers = headers(private_key, raw)
-    response = client.post(
-        "/execution/v1/inference", content=raw, headers=request_headers
-    )
+    response = client.post("/execution/v1/inference", content=raw, headers=request_headers)
     assert response.status_code == 200
     assert response.json()["request_id"] == request_headers["X-Request-ID"]
     assert response.headers["cache-control"] == "no-store"
@@ -147,6 +149,18 @@ def test_authenticated_request_returns_bound_response_and_release_headers() -> N
     assert response.headers["x-stoin-execution-policy-release"] == "profiles-local.1"
     assert "set-cookie" not in response.headers
     assert transport.calls == 1
+
+
+def test_all_frozen_error_messages_and_retry_flags_are_implemented() -> None:
+    vectors = {}
+    for path in (BUNDLE / "vectors" / "positive").glob("error.pos.*.json"):
+        document = json.loads(path.read_text(encoding="utf-8"))["document"]["error"]
+        vectors[document["code"]] = (document["message"], document["retryable"])
+    assert len(vectors) == 29
+    assert set(ERRORS) == set(vectors)
+    assert {
+        code: (message, retryable) for code, (_status, message, retryable) in ERRORS.items()
+    } == vectors
 
 
 def test_fresh_jwt_replays_same_operation_without_second_provider_call() -> None:
@@ -157,9 +171,7 @@ def test_fresh_jwt_replays_same_operation_without_second_provider_call() -> None
         "/execution/v1/inference", content=raw, headers=headers(private_key, raw, key=key)
     )
     second_headers = headers(private_key, raw, key=key)
-    second = client.post(
-        "/execution/v1/inference", content=raw, headers=second_headers
-    )
+    second = client.post("/execution/v1/inference", content=raw, headers=second_headers)
     assert first.status_code == second.status_code == 200
     assert second.json()["execution_id"] == first.json()["execution_id"]
     assert second.json()["replayed"] is True
@@ -193,9 +205,7 @@ def test_invalid_token_precedes_unavailable_replay_store() -> None:
     replay.set_available(False)
     raw = body()
     invalid = headers(private_key, raw, scope="wrong")
-    invalid_response = client.post(
-        "/execution/v1/inference", content=raw, headers=invalid
-    )
+    invalid_response = client.post("/execution/v1/inference", content=raw, headers=invalid)
     valid_response = client.post(
         "/execution/v1/inference", content=raw, headers=headers(private_key, raw)
     )
@@ -226,9 +236,7 @@ def test_malformed_request_id_is_step_four_after_valid_authentication() -> None:
     raw = body()
     request_headers = headers(private_key, raw)
     request_headers["X-Request-ID"] = "not-a-uuid"
-    response = client.post(
-        "/execution/v1/inference", content=raw, headers=request_headers
-    )
+    response = client.post("/execution/v1/inference", content=raw, headers=request_headers)
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
     assert "request_id" not in response.json()
@@ -241,7 +249,94 @@ def test_unknown_path_does_not_disclose_release_headers() -> None:
     raw = body()
     response = client.post("/wrong", content=raw, headers=headers(private_key, raw))
     assert response.status_code == 404
+    assert response.json()["error"] == {
+        "code": "route_not_found",
+        "message": "The requested execution route was not found.",
+        "retryable": False,
+    }
     assert "x-stoin-execution-release" not in response.headers
+
+
+def test_unsupported_method_precedes_authentication_and_hides_release_headers() -> None:
+    client, transport, _, _ = setup()
+    response = client.get("/execution/v1/inference")
+    assert response.status_code == 405
+    assert response.json()["error"] == {
+        "code": "method_not_allowed",
+        "message": "The execution method is not allowed.",
+        "retryable": False,
+    }
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_gross_body_cap_rejects_before_authentication_without_release_headers() -> None:
+    client, transport, _, _ = setup()
+    response = client.post("/execution/v1/inference", content=b"x" * 1_048_577)
+    assert response.status_code == 413
+    assert response.json() == {"detail": "request rejected"}
+    assert response.headers["cache-control"] == "no-store"
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_malformed_content_length_rejects_before_authentication() -> None:
+    client, transport, _, _ = setup()
+    response = client.post(
+        "/execution/v1/inference",
+        content=b"{}",
+        headers={"Content-Length": "not-an-integer"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "request rejected"}
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_duplicate_content_length_rejects_at_transport_framing_gate() -> None:
+    client, transport, _, _ = setup()
+    response = client.post(
+        "/execution/v1/inference",
+        content=b"{}",
+        headers=[("Content-Length", "2"), ("Content-Length", "2")],
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "request rejected"}
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_duplicate_binding_header_is_generic_authentication_failure() -> None:
+    client, transport, private_key, _ = setup()
+    raw = body()
+    request_headers = list(headers(private_key, raw).items())
+    request_headers.append(("Idempotency-Key", str(uuid4())))
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=request_headers,
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_failed"
+    assert "x-stoin-execution-release" not in response.headers
+    assert transport.calls == 0
+
+
+def test_contract_oversize_authenticates_before_step_five_rejection() -> None:
+    client, transport, private_key, replay = setup()
+    raw = b"x" * 262_145
+    jti = uuid4()
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, jti=jti),
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_too_large"
+    assert response.headers["x-stoin-execution-release"] == "tiamat-local.1"
+    namespace = (ISSUER, SUBJECT, "utopia-homes", "local-test")
+    assert replay.consume(namespace, jti, int(time.time()) + 600) is False
+    assert transport.calls == 0
 
 
 def test_non_json_numeric_constant_is_rejected_before_provider_dispatch() -> None:
