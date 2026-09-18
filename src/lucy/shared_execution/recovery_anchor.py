@@ -99,6 +99,8 @@ class VerifiedRecoveryWitness:
     witness_revision: int
     status: WitnessStatus
     checkpoint_digest: str
+    release_heads_sha256: str
+    checkpoint_settlement_position_sha256: str
     witness_inventory_digest: str
     exact_jws: bytes
     not_before: datetime
@@ -109,6 +111,8 @@ class VerifiedRecoveryWitness:
             not 1 <= self.recovery_generation <= _MAX_SAFE_INTEGER
             or not 1 <= self.witness_revision <= _MAX_SAFE_INTEGER
             or not _hex_digest(self.checkpoint_digest)
+            or not _hex_digest(self.release_heads_sha256)
+            or not _hex_digest(self.checkpoint_settlement_position_sha256)
             or not _hex_digest(self.witness_inventory_digest)
             or not self.exact_jws
             or self.not_before.tzinfo is None

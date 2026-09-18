@@ -43,6 +43,8 @@ def _witness() -> VerifiedRecoveryWitness:
         witness_revision=1,
         status="reconciled",
         checkpoint_digest="a" * 64,
+        release_heads_sha256="c" * 64,
+        checkpoint_settlement_position_sha256="d" * 64,
         witness_inventory_digest="b" * 64,
         exact_jws=b"verified-witness",
         not_before=NOW - timedelta(minutes=1),

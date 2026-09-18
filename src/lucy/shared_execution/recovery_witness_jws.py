@@ -88,12 +88,23 @@ class RecoveryWitnessVerificationContext:
     public_key: Ed25519PublicKey
     inventory_generation: int
     inventory_jws_sha256: str
+    key_valid_from: datetime
+    key_issuance_not_after: datetime
+    key_verify_not_after: datetime
 
     def __post_init__(self) -> None:
         if (
             not self.key_id
             or not 1 <= self.inventory_generation <= 9_007_199_254_740_991
             or not _is_digest(self.inventory_jws_sha256)
+            or self.key_valid_from.tzinfo is None
+            or self.key_issuance_not_after.tzinfo is None
+            or self.key_verify_not_after.tzinfo is None
+            or not (
+                self.key_valid_from
+                <= self.key_issuance_not_after
+                <= self.key_verify_not_after
+            )
         ):
             raise ValueError("recovery witness verification context is invalid")
 
@@ -165,6 +176,9 @@ def verify_recovery_witness_inventory(
             public_key=public_key,
             inventory_generation=payload.inventory_generation,
             inventory_jws_sha256=hashlib.sha256(exact_jws).hexdigest(),
+            key_valid_from=valid_from,
+            key_issuance_not_after=issuance_not_after,
+            key_verify_not_after=verify_not_after,
         )
     except (
         RecoveryWitnessSignatureRejected,
@@ -212,6 +226,11 @@ def verify_recovery_witness(
             issued_at > not_before
             or not_before >= not_after
             or not_after - not_before > timedelta(hours=24)
+            or not (
+                context.key_valid_from <= issued_at <= context.key_issuance_not_after
+                and context.key_valid_from <= not_before
+                and not_after <= context.key_verify_not_after
+            )
         ):
             raise RecoveryWitnessSignatureRejected("recovery_witness_time_window_invalid")
         return VerifiedRecoveryWitness(
@@ -220,6 +239,10 @@ def verify_recovery_witness(
             witness_revision=payload.witness_revision,
             status=payload.status,
             checkpoint_digest=payload.checkpoint_digest,
+            release_heads_sha256=payload.release_heads_sha256,
+            checkpoint_settlement_position_sha256=(
+                payload.checkpoint_settlement_position_sha256
+            ),
             witness_inventory_digest=payload.inventory_jws_sha256,
             exact_jws=exact_jws,
             not_before=not_before,

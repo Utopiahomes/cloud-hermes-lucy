@@ -7,9 +7,13 @@ import base64
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_RECOVERY_SECRET_ROOT = (_REPOSITORY_ROOT / "secrets" / "generated" / "tiamat-recovery").resolve()
 
 
 def generate_identities(
@@ -19,6 +23,8 @@ def generate_identities(
         raise ValueError("recovery key identifiers must be nonempty and purpose-distinct")
     root = Ed25519PrivateKey.generate()
     witness = Ed25519PrivateKey.generate()
+    if root.private_bytes_raw() == witness.private_bytes_raw():  # defensive, must never share power
+        raise RuntimeError("generated recovery root and witness keys are unexpectedly identical")
     root_secret = {
         "format_version": "1",
         "root_key_id": root_key_id,
@@ -48,19 +54,43 @@ def generate_identities(
 
 def write_new(path: Path, payload: object) -> None:
     resolved = path.resolve()
-    if resolved.exists():
-        raise FileExistsError(f"refusing to overwrite recovery identity file: {resolved}")
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    if os.name == "nt":
+        raise OSError(
+            "refusing recovery key generation on Windows: this tool cannot verify a private DACL"
+        )
     try:
-        os.chmod(resolved, 0o600)
-    except OSError:
+        resolved.relative_to(_RECOVERY_SECRET_ROOT)
+    except ValueError as exc:
+        raise ValueError(
+            f"recovery identity output must remain beneath {_RECOVERY_SECRET_ROOT}"
+        ) from exc
+    _ensure_private_directory(_RECOVERY_SECRET_ROOT)
+    parent = resolved.parent
+    while parent != _RECOVERY_SECRET_ROOT:
+        _ensure_private_directory(parent)
+        parent = parent.parent
+    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor = os.open(str(resolved), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(encoded)
+    except Exception:
         resolved.unlink(missing_ok=True)
         raise
+    mode = stat.S_IMODE(resolved.stat().st_mode)
+    if mode != 0o600:
+        resolved.unlink(missing_ok=True)
+        raise OSError("recovery identity file permission verification failed")
+
+
+def _ensure_private_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o077:
+        raise OSError(f"recovery identity directory is not private: {path}")
+    getuid = getattr(os, "getuid", None)
+    if getuid is None or path.stat().st_uid != getuid():
+        raise OSError(f"recovery identity directory owner is invalid: {path}")
 
 
 def main() -> None:

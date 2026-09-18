@@ -23,6 +23,11 @@ from lucy.shared_execution.recovery_anchor_jws import (
     ANCHOR_TRANSITION_TYP,
     verify_anchor_transition,
 )
+from lucy.shared_execution.recovery_checkpoint import (
+    RecoveryCheckpoint,
+    construct_recovery_checkpoint,
+    require_day_zero_quarantine_checkpoint,
+)
 from lucy.shared_execution.recovery_witness_jws import (
     RECOVERY_WITNESS_INVENTORY_TYP,
     RECOVERY_WITNESS_TYP,
@@ -40,6 +45,7 @@ class RecoveryBootstrapArtifacts:
     inventory_jws: bytes
     witness_jws: bytes
     transition_jws: bytes
+    checkpoint: RecoveryCheckpoint
 
     @property
     def transition_sha256(self) -> str:
@@ -63,6 +69,7 @@ class RecoveryBootstrapArtifacts:
             "witness_jws_b64": base64.b64encode(self.witness_jws).decode("ascii"),
             "transition_jws_b64": base64.b64encode(self.transition_jws).decode("ascii"),
             "transition_sha256": self.transition_sha256,
+            "checkpoint": self.checkpoint.object,
         }
 
 
@@ -84,6 +91,7 @@ def verify_bootstrap_package(
         "witness_jws_b64",
         "transition_jws_b64",
         "transition_sha256",
+        "checkpoint",
     }
     if set(package) != expected or package.get("format_version") != "1":
         raise ValueError("recovery bootstrap package shape is invalid")
@@ -120,10 +128,25 @@ def verify_bootstrap_package(
     )
     decoder = RecoveryAnchorRecordDecoder(context, root_key_id, public_key)
     transition = decoder(transition_jws, witness_jws)
+    checkpoint_raw = package["checkpoint"]
+    if not isinstance(checkpoint_raw, dict):
+        raise ValueError("recovery bootstrap checkpoint is invalid")
+    checkpoint = construct_recovery_checkpoint(checkpoint_raw, identity=identity)
+    require_day_zero_quarantine_checkpoint(checkpoint)
     if transition.transition_version != 1 or transition.previous_transition_sha256 is not None:
         raise ValueError("recovery bootstrap must be the unique first transition")
     if transition.continuity != "quarantined" or transition.witness.status != "quarantined":
         raise ValueError("recovery bootstrap must fail closed in quarantine")
+    if (
+        transition.witness.recovery_generation != 1
+        or transition.witness.witness_revision != 1
+        or context.inventory_generation != 1
+        or transition.witness.checkpoint_digest != checkpoint.checkpoint_sha256
+        or transition.witness.release_heads_sha256 != checkpoint.release_heads_sha256
+        or transition.witness.checkpoint_settlement_position_sha256
+        != checkpoint.settlement_position_sha256
+    ):
+        raise ValueError("recovery bootstrap checkpoint binding is invalid")
     return identity, transition
 
 
@@ -134,9 +157,7 @@ def build_quarantined_bootstrap(
     root_private_key: Ed25519PrivateKey,
     witness_key_id: str,
     witness_private_key: Ed25519PrivateKey,
-    checkpoint_digest: str,
-    release_heads_sha256: str,
-    checkpoint_settlement_position_sha256: str,
+    checkpoint: dict[str, object],
     now: datetime,
     validity: timedelta = timedelta(hours=12),
 ) -> tuple[RecoveryBootstrapArtifacts, VerifiedAnchorTransition]:
@@ -145,9 +166,15 @@ def build_quarantined_bootstrap(
     current = now.astimezone(UTC).replace(microsecond=0)
     if not timedelta(minutes=1) <= validity <= timedelta(hours=24):
         raise ValueError("recovery witness validity must be between one minute and 24 hours")
-    _require_digest(checkpoint_digest)
-    _require_digest(release_heads_sha256)
-    _require_digest(checkpoint_settlement_position_sha256)
+    if (
+        not root_key_id
+        or not witness_key_id
+        or root_key_id == witness_key_id
+        or root_private_key.private_bytes_raw() == witness_private_key.private_bytes_raw()
+    ):
+        raise ValueError("recovery root and witness signing authority must be purpose-distinct")
+    verified_checkpoint = construct_recovery_checkpoint(checkpoint, identity=identity)
+    require_day_zero_quarantine_checkpoint(verified_checkpoint)
     public_b64 = base64.b64encode(witness_private_key.public_key().public_bytes_raw()).decode()
     root_public_b64 = base64.b64encode(root_private_key.public_key().public_bytes_raw()).decode()
     until = current + validity
@@ -207,9 +234,9 @@ def build_quarantined_bootstrap(
         "not_after": _timestamp(until),
         "inventory_generation": 1,
         "inventory_jws_sha256": inventory_context.inventory_jws_sha256,
-        "release_heads_sha256": release_heads_sha256,
-        "checkpoint_settlement_position_sha256": checkpoint_settlement_position_sha256,
-        "checkpoint_digest": checkpoint_digest,
+        "release_heads_sha256": verified_checkpoint.release_heads_sha256,
+        "checkpoint_settlement_position_sha256": verified_checkpoint.settlement_position_sha256,
+        "checkpoint_digest": verified_checkpoint.checkpoint_sha256,
     }
     witness_jws = _sign_compact(
         witness_payload,
@@ -251,6 +278,7 @@ def build_quarantined_bootstrap(
             inventory_jws=inventory_jws,
             witness_jws=witness_jws,
             transition_jws=transition_jws,
+            checkpoint=verified_checkpoint,
         ),
         transition,
     )
@@ -276,11 +304,6 @@ def _b64url(value: bytes) -> bytes:
 
 def _timestamp(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _require_digest(value: str) -> None:
-    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
-        raise ValueError("recovery bootstrap digest is invalid")
 
 
 def canonical_uuid4(value: str) -> UUID:

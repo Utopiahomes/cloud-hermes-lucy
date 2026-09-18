@@ -43,6 +43,8 @@ def witness(
         witness_revision=revision,
         status=status,  # type: ignore[arg-type]
         checkpoint_digest=checkpoint,
+        release_heads_sha256="e" * 64,
+        checkpoint_settlement_position_sha256="f" * 64,
         witness_inventory_digest=inventory,
         exact_jws=f"signed-witness:{generation}:{revision}:{status}:{checkpoint}:{marker}".encode(),
         not_before=NOW - timedelta(minutes=1),

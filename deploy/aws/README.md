@@ -275,11 +275,14 @@ Render OIDC identities. Review
 The cryptographic bootstrap is deliberately split into offline signing and online installation:
 
 1. `generate_tiamat_recovery_identity_v1.py` creates purpose-distinct root and witness Ed25519 keys
-   as four separate private/public files under ignored storage. It refuses overwrite and prints no
-   private material. Root and witness private keys can therefore have different custody and access.
-2. `prepare_tiamat_recovery_bootstrap_v1.py` runs offline with that private identity and emits a
-   public package containing only exact signed JWS artifacts and public keys. The first transition
-   is always version 1, predecessor-null and quarantined; it cannot authorize provider dispatch.
+   as four separate private/public files beneath ignored `secrets/generated/tiamat-recovery`. It
+   refuses overwrite, symlink escape, shared keys, non-private Unix directories/files, and Windows
+   plaintext generation because it cannot verify a private DACL. It prints no private material.
+2. `prepare_tiamat_recovery_bootstrap_v1.py` runs offline with that private identity and a complete
+   checkpoint JSON, computes all checkpoint digests itself, and emits a public package containing
+   only exact signed JWS artifacts, public keys, and the content-free checkpoint. The first transition
+   is always version 1, predecessor-null and quarantined; its only allowed release inventory is the
+   explicit `not_installed` day-zero sentinel, so it cannot authorize provider dispatch.
 3. `install_tiamat_recovery_bootstrap_v1.py` defaults to verification-only. `--execute` additionally
    requires the exact `bootstrap:<environment>:<ledger-id>` confirmation, uses only ambient Render
    OIDC credentials, requires an independently recorded `--expected-root-public-sha256` trust pin,

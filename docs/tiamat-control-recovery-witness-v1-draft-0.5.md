@@ -182,9 +182,16 @@ The exact combined object is:
 
 These are closed objects with exactly the displayed members. Release-head identity/state values
 retain the signed-release contract's allowed values; no ad hoc state strings are introduced.
-`release_inventory` is the active RELEASE trust inventory at the checkpoint. The witness's
+`release_inventory` is normally the active RELEASE trust inventory at the checkpoint. The witness's
 top-level `inventory_generation`/`inventory_jws_sha256` identify the RECOVERY-WITNESS trust inventory
 used to verify the witness and do not imply those two inventories share a generation or digest.
+
+The unique day-zero bootstrap instead uses the exact sentinel
+`{"state":"not_installed"}` in place of the installed inventory object. It is valid only for the
+first root-authorized quarantined transition: recovery generation one, witness revision one,
+RECOVERY-WITNESS inventory generation one, empty release heads, and empty settlement positions.
+It is not a fabricated release inventory and cannot reconcile or authorize dispatch. Reconciliation
+must first replace it with a separately verified installed RELEASE trust inventory.
 
 Reject duplicate release-head keys `(issuer, caller_id, realm, release_type, subject_id)` and duplicate
 settlement keys `(partition_id, budget_period_id)`. Sort arrays ascending by these tuples, comparing
@@ -196,7 +203,9 @@ Unicode. Hash the resulting exact structures using RFC 8785 UTF-8 bytes and SHA-
 - `checkpoint_digest`: the entire combined object, including both arrays and release inventory.
 
 Unknown members and missing members reject before hashing. Empty arrays hash as `[]`, not null.
-Recompute all three digests independently. Compare the object's environment, ledger, epoch and
+Each listed digest is exactly `SHA-256(RFC8785(value) UTF-8 bytes)` with no prefix, salt, or
+domain-separation wrapper; exact JWS bytes are separately hashed where the protocol names a JWS
+digest. Recompute all three digests independently. Compare the object's environment, ledger, epoch and
 generation to the witness and external deployment identity; mismatches reject even if a supplied
 digest matches some different object. Renewal revision and witness validity are deliberately absent
 from the checkpoint so renewal does not require spending reconciliation.

@@ -24,9 +24,7 @@ def build_package(
     environment: str,
     ledger_id: str,
     storage_epoch: str,
-    checkpoint_digest: str,
-    release_heads_sha256: str,
-    checkpoint_settlement_position_sha256: str,
+    checkpoint: dict[str, object],
     now: datetime,
     validity_hours: int,
 ) -> dict[str, object]:
@@ -56,6 +54,8 @@ def build_package(
     witness = Ed25519PrivateKey.from_private_bytes(
         base64.b64decode(str(witness_private_identity["witness_private_key_b64"]), validate=True)
     )
+    if root.private_bytes_raw() == witness.private_bytes_raw():
+        raise ValueError("recovery root and witness key material must be distinct")
     identity = RecoveryAnchorIdentity(
         environment,
         canonical_uuid4(ledger_id),
@@ -67,9 +67,7 @@ def build_package(
         root_private_key=root,
         witness_key_id=str(witness_private_identity["witness_key_id"]),
         witness_private_key=witness,
-        checkpoint_digest=checkpoint_digest,
-        release_heads_sha256=release_heads_sha256,
-        checkpoint_settlement_position_sha256=checkpoint_settlement_position_sha256,
+        checkpoint=checkpoint,
         now=now,
         validity=timedelta(hours=validity_hours),
     )
@@ -83,9 +81,12 @@ def main() -> None:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--ledger-id", required=True)
     parser.add_argument("--storage-epoch", required=True)
-    parser.add_argument("--checkpoint-digest", required=True)
-    parser.add_argument("--release-heads-sha256", required=True)
-    parser.add_argument("--settlement-position-sha256", required=True)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+        help="full day-zero checkpoint JSON; hashes are computed and verified locally",
+    )
     parser.add_argument("--validity-hours", type=int, default=12)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -99,9 +100,7 @@ def main() -> None:
         environment=args.environment,
         ledger_id=args.ledger_id,
         storage_epoch=args.storage_epoch,
-        checkpoint_digest=args.checkpoint_digest,
-        release_heads_sha256=args.release_heads_sha256,
-        checkpoint_settlement_position_sha256=args.settlement_position_sha256,
+        checkpoint=json.loads(args.checkpoint.read_text(encoding="utf-8")),
         now=datetime.now(UTC).replace(microsecond=0),
         validity_hours=args.validity_hours,
     )

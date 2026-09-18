@@ -71,6 +71,9 @@ def context(
         public_key=key.public_key(),
         inventory_generation=3,
         inventory_jws_sha256="a" * 64,
+        key_valid_from=datetime(2026, 9, 18, 11, tzinfo=UTC),
+        key_issuance_not_after=datetime(2026, 9, 18, 23, tzinfo=UTC),
+        key_verify_not_after=datetime(2026, 9, 19, 1, tzinfo=UTC),
     )
 
 

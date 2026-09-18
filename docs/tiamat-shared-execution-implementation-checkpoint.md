@@ -289,6 +289,17 @@ At local commit preparation on 2026-09-18:
   malformed and duplicate `Content-Length`, the unauthenticated 1 MiB cap, duplicate binding
   headers, and proof that the authenticated replay gate precedes the 262,144-byte contract cap.
 
+- Recovery-bootstrap hardening after independent review: bootstrap now accepts a complete validated
+  checkpoint and independently computes RFC 8785/SHA-256 component and combined digests. The sole
+  day-zero inventory is the non-authorizing `not_installed` sentinel, constrained to generation-one
+  quarantine with no release heads or settlement positions. Witness verification binds component
+  digests and signing-key authorization windows; offline root/witness keys must be distinct and the
+  generator refuses unverified Windows plaintext storage. No key, signed history, DynamoDB write,
+  Render resume, or provider dispatch occurred. Focused recovery tests: 54 passed; complete unit
+  suite: 1,225 passed with two existing dependency deprecation warnings. Strict mypy passed across
+  142 source files. Repository-wide Ruff remains blocked by 204 pre-existing violations in vendored
+  conformance bundles; touched recovery files passed Ruff.
+
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
 - Complete unit suite: 1,167 passed with two dependency deprecation warnings. The first run exposed

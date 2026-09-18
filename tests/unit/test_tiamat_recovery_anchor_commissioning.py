@@ -5,7 +5,7 @@ import importlib.util
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -22,6 +22,18 @@ from lucy.shared_execution.recovery_witness_jws import (
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=UTC)
 ROOT = Path(__file__).parents[2]
+
+
+def _day_zero_checkpoint(identity: RecoveryAnchorIdentity) -> dict[str, object]:
+    return {
+        "environment": identity.environment,
+        "ledger_id": str(identity.ledger_id),
+        "storage_epoch": str(identity.storage_epoch),
+        "recovery_generation": 1,
+        "release_inventory": {"state": "not_installed"},
+        "release_heads": [],
+        "settlement_position": [],
+    }
 
 
 def _deploy_module(name: str) -> ModuleType:
@@ -44,9 +56,7 @@ def test_offline_bootstrap_builds_self_verified_quarantined_authority() -> None:
         root_private_key=root,
         witness_key_id="tiamat-recovery-witness.staging.1",
         witness_private_key=witness,
-        checkpoint_digest="a" * 64,
-        release_heads_sha256="b" * 64,
-        checkpoint_settlement_position_sha256="c" * 64,
+        checkpoint=_day_zero_checkpoint(identity),
         now=NOW,
     )
 
@@ -76,9 +86,7 @@ def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None
         root_private_key=root,
         witness_key_id="tiamat-recovery-witness.staging.1",
         witness_private_key=witness,
-        checkpoint_digest="a" * 64,
-        release_heads_sha256="b" * 64,
-        checkpoint_settlement_position_sha256="c" * 64,
+        checkpoint=_day_zero_checkpoint(identity),
         now=NOW,
     )
 
@@ -93,18 +101,44 @@ def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None
         )
 
 
-@pytest.mark.parametrize("digest", ["", "A" * 64, "0" * 63, "g" * 64])
-def test_bootstrap_rejects_noncanonical_digest(digest: str) -> None:
-    with pytest.raises(ValueError, match="digest"):
+def test_bootstrap_rejects_non_day_zero_checkpoint() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    checkpoint = _day_zero_checkpoint(identity)
+    checkpoint["release_heads"] = [
+            {
+                "issuer": "stoin:control",
+                "caller_id": "utopia-homes",
+                "realm": "utopia-homes",
+                "release_type": "execution_profile",
+                "subject_id": "public",
+                "active_jws_sha256": "a" * 64,
+                "head_state": "active",
+        }
+    ]
+    with pytest.raises(ValueError, match="day_zero"):
         build_quarantined_bootstrap(
-            identity=RecoveryAnchorIdentity("staging", uuid4(), uuid4()),
+            identity=identity,
             root_key_id="tiamat-recovery-root.staging.1",
             root_private_key=Ed25519PrivateKey.generate(),
             witness_key_id="tiamat-recovery-witness.staging.1",
             witness_private_key=Ed25519PrivateKey.generate(),
-            checkpoint_digest=digest,
-            release_heads_sha256="b" * 64,
-            checkpoint_settlement_position_sha256="c" * 64,
+            checkpoint=checkpoint,
+            now=NOW,
+        )
+
+
+def test_bootstrap_rejects_reused_root_key_as_witness_key() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    reused = Ed25519PrivateKey.generate()
+
+    with pytest.raises(ValueError, match="purpose-distinct"):
+        build_quarantined_bootstrap(
+            identity=identity,
+            root_key_id="tiamat-recovery-root.staging.1",
+            root_private_key=reused,
+            witness_key_id="tiamat-recovery-witness.staging.1",
+            witness_private_key=reused,
+            checkpoint=_day_zero_checkpoint(identity),
             now=NOW,
         )
 
@@ -118,15 +152,14 @@ def test_identity_generator_and_package_builder_keep_private_keys_out_of_package
     )
     ledger_id = str(uuid4())
     storage_epoch = str(uuid4())
+    identity = RecoveryAnchorIdentity("staging", UUID(ledger_id), UUID(storage_epoch))
     package = preparer.build_package(
         root_private_identity=root_secret,
         witness_private_identity=witness_secret,
         environment="staging",
         ledger_id=ledger_id,
         storage_epoch=storage_epoch,
-        checkpoint_digest="a" * 64,
-        release_heads_sha256="b" * 64,
-        checkpoint_settlement_position_sha256="c" * 64,
+        checkpoint=_day_zero_checkpoint(identity),
         now=NOW,
         validity_hours=12,
     )
@@ -150,9 +183,7 @@ def test_package_tampering_is_rejected_before_online_write() -> None:
         root_private_key=Ed25519PrivateKey.generate(),
         witness_key_id="tiamat-recovery-witness.staging.1",
         witness_private_key=Ed25519PrivateKey.generate(),
-        checkpoint_digest="a" * 64,
-        release_heads_sha256="b" * 64,
-        checkpoint_settlement_position_sha256="c" * 64,
+        checkpoint=_day_zero_checkpoint(identity),
         now=NOW,
     )
     package = artifacts.public_package(identity)
@@ -174,9 +205,7 @@ def test_package_rejects_unpinned_root_even_when_self_consistent() -> None:
         root_private_key=Ed25519PrivateKey.generate(),
         witness_key_id="tiamat-recovery-witness.staging.1",
         witness_private_key=Ed25519PrivateKey.generate(),
-        checkpoint_digest="a" * 64,
-        release_heads_sha256="b" * 64,
-        checkpoint_settlement_position_sha256="c" * 64,
+        checkpoint=_day_zero_checkpoint(identity),
         now=NOW,
     )
     package = artifacts.public_package(identity)
