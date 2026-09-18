@@ -83,6 +83,10 @@
   becomes a revoked tombstone with an incremented eligibility generation; active loading fails and
   no predecessor can reappear. Applying the same revocation is idempotent, while an ambiguous,
   non-head, or conflicting target fails closed.
+- Verified spending grants stage an immutable ledger projection. Activation advances the signed
+  release head and the partition's active grant, period, allowance, contingency, concurrency, and
+  per-call ceiling in one transaction; a missing partition or invalid predecessor rolls the entire
+  change back.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -96,9 +100,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. couple spending-grant activation to the existing budget projection and complete restore
-   reconciliation against Control; verified staging, monotonic activation, signed no-fallback
-   revocation, exact active-byte loading, and restore-gate enforcement are done;
+3. complete restore reconciliation against Control and bind active release loading to the external
+   inventory/release-head witness; verified staging, monotonic activation, atomic grant projection,
+   signed no-fallback revocation, exact active-byte loading, and restore-gate enforcement are done;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
@@ -125,6 +129,9 @@ At local commit preparation on 2026-09-17:
 - The same 17-test PostgreSQL suite passed again after adding signed revocation, proving an active
   privacy-policy head becomes an idempotent revoked tombstone and is no longer loadable, without
   predecessor fallback. Its disposable container was also removed.
+- The 17-test suite passed again after grant coupling, proving bootstrap and successor grants update
+  the active signed head and budget projection atomically while the earlier missing-predecessor
+  attempt leaves the partition unchanged. The disposable container was removed.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.

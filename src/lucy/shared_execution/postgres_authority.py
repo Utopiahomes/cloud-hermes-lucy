@@ -11,6 +11,7 @@ from psycopg.rows import dict_row
 from lucy.shared_execution.postgres_ledger import _psycopg_conninfo
 from lucy.shared_execution.signed_releases import (
     RevocationRelease,
+    SpendingGrantRelease,
     TrustInventory,
     VerifiedRelease,
 )
@@ -191,6 +192,40 @@ class PostgresSignedAuthorityStore:
                     ).fetchone()
                     if existing is None or existing["jws_sha256"] != release.jws_sha256:
                         raise AuthorityTransitionRejected("release_id_conflict")
+                if isinstance(item, SpendingGrantRelease):
+                    grant = item.content
+                    connection.execute(
+                        """
+                        INSERT INTO tiamat.grant_releases (
+                            release_id, environment, caller_id, realm, partition_id,
+                            budget_period_id, predecessor_release_id, not_before, not_after,
+                            period_start, period_end, allowance_microusd, maximum_concurrency,
+                            largest_per_call_microusd, contingency_reserve_microusd,
+                            signed_artifact_digest
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
+                            %s::timestamptz, %s::timestamptz, %s, %s, %s, %s, %s
+                        ) ON CONFLICT (release_id) DO NOTHING
+                        """,
+                        (
+                            item.release_id,
+                            item.environment,
+                            item.caller_id,
+                            item.realm,
+                            grant.partition_id,
+                            grant.budget_period_id,
+                            item.predecessor_release_id,
+                            item.not_before,
+                            item.not_after,
+                            grant.period_start,
+                            grant.period_end,
+                            grant.allowance_microusd,
+                            grant.maximum_concurrency,
+                            grant.largest_per_call_microusd,
+                            grant.contingency_reserve_microusd,
+                            release.jws_sha256,
+                        ),
+                    )
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:
@@ -278,6 +313,36 @@ class PostgresSignedAuthorityStore:
                         generation,
                     ),
                 )
+                if release_type == "spending_grant":
+                    projected = connection.execute(
+                        """
+                        UPDATE tiamat.spending_partitions p
+                        SET active_grant_release_id = g.release_id,
+                            budget_period_id = g.budget_period_id,
+                            allowance_microusd = g.allowance_microusd,
+                            contingency_reserve_microusd = g.contingency_reserve_microusd,
+                            maximum_concurrency = g.maximum_concurrency,
+                            largest_per_call_microusd = g.largest_per_call_microusd,
+                            blocked = false, block_reason = NULL,
+                            generation = p.generation + 1,
+                            updated_at = clock_timestamp()
+                        FROM tiamat.grant_releases g
+                        WHERE g.release_id = %s
+                          AND p.environment = g.environment AND p.caller_id = g.caller_id
+                          AND p.realm = g.realm AND p.partition_id = g.partition_id
+                        RETURNING p.partition_id
+                        """,
+                        (release_id,),
+                    ).fetchone()
+                    if projected is None:
+                        raise AuthorityTransitionRejected("spending_partition_unavailable")
+                    connection.execute(
+                        """
+                        UPDATE tiamat.grant_releases SET activated_at = clock_timestamp()
+                        WHERE release_id = %s
+                        """,
+                        (release_id,),
+                    )
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:

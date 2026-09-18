@@ -14,8 +14,12 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from psycopg import sql
+from psycopg.rows import dict_row
 from sqlalchemy.engine import make_url
 
 from lucy.shared_execution.auth import AuthenticationStateUnavailable
@@ -195,6 +199,25 @@ def _bundle_json(*parts: str) -> dict[str, Any]:
     return value
 
 
+def _sign_synthetic_release(payload: dict[str, Any]) -> bytes:
+    header = json.dumps(
+        {
+            "alg": "EdDSA",
+            "kid": "release-key-staging-1",
+            "typ": "stoin-signed-release+jws",
+        },
+        separators=(",", ":"),
+    ).encode()
+    body = json.dumps(payload, separators=(",", ":")).encode()
+
+    def encoded(value: bytes) -> bytes:
+        return base64.urlsafe_b64encode(value).rstrip(b"=")
+
+    signing = encoded(header) + b"." + encoded(body)
+    signature = Ed25519PrivateKey.from_private_bytes(bytes(range(32))).sign(signing)
+    return signing + b"." + encoded(signature)
+
+
 def test_signed_authority_stages_activates_and_loads_exact_bytes(
     database_urls: tuple[str, str],
 ) -> None:
@@ -225,6 +248,21 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
             ) VALUES ('staging', %s, 1, 1, false, NULL, clock_timestamp())
             """,
             (uuid4(),),
+        )
+        connection.execute(
+            "SELECT set_config('tiamat.caller_id', %s, true)", ("stoin:synth:utopia-homes",)
+        )
+        connection.execute("SELECT set_config('tiamat.realm', 'utopia-homes', true)")
+        connection.execute("SELECT set_config('tiamat.partition_id', 'utopia-public', true)")
+        connection.execute(
+            """
+            INSERT INTO tiamat.spending_partitions (
+              environment, caller_id, realm, partition_id, blocked, block_reason
+            ) VALUES (
+              'staging', 'stoin:synth:utopia-homes', 'utopia-homes',
+              'utopia-public', true, 'no_active_grant'
+            )
+            """
         )
     store.activate_inventory("staging", 1)
 
@@ -300,6 +338,45 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
     store.stage_release(grant, "release-key-staging-1")
     with pytest.raises(AuthorityTransitionRejected, match="release_not_successor"):
         store.activate_release(scope, "spending_grant", "utopia-public", grant.payload.release_id)
+
+    bootstrap_payload = _bundle_json("examples", "spending-grant.json")
+    bootstrap_payload["release_id"] = "grant-utopia-public-2026-09-17.1"
+    bootstrap_payload["sequence"] = 1
+    bootstrap_payload["predecessor_release_id"] = None
+    bootstrap_jws = _sign_synthetic_release(bootstrap_payload)
+    bootstrap = verify_release(
+        bootstrap_jws,
+        inventory=inventory,
+        expected_issuer="stoin-control",
+        expected_environment="staging",
+        expected_caller_id="stoin:synth:utopia-homes",
+        expected_realm="utopia-homes",
+        now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+    )
+    store.stage_release(bootstrap, "release-key-staging-1")
+    store.activate_release(scope, "spending_grant", "utopia-public", bootstrap.payload.release_id)
+    store.activate_release(scope, "spending_grant", "utopia-public", grant.payload.release_id)
+    with psycopg.connect(migration_url, row_factory=dict_row) as connection:
+        connection.execute("SELECT set_config('tiamat.environment', 'staging', true)")
+        connection.execute("SELECT set_config('tiamat.caller_id', %s, true)", (scope.caller_id,))
+        connection.execute("SELECT set_config('tiamat.realm', %s, true)", (scope.realm,))
+        connection.execute("SELECT set_config('tiamat.partition_id', 'utopia-public', true)")
+        projected = connection.execute(
+            """
+            SELECT active_grant_release_id, budget_period_id, allowance_microusd,
+                   maximum_concurrency, largest_per_call_microusd, blocked
+            FROM tiamat.spending_partitions
+            WHERE environment = 'staging' AND caller_id = %s AND realm = %s
+              AND partition_id = 'utopia-public'
+            """,
+            (scope.caller_id, scope.realm),
+        ).fetchone()
+    assert projected is not None
+    assert projected["active_grant_release_id"] == grant.payload.release_id
+    assert projected["allowance_microusd"] == 3_000_000
+    assert projected["maximum_concurrency"] == 2
+    assert projected["largest_per_call_microusd"] == 2_000
+    assert projected["blocked"] is False
 
 
 def test_durable_replay_fencing_and_cross_scope_isolation(
