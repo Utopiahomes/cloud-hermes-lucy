@@ -1,0 +1,11 @@
+{
+  "environment": "staging",
+  "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+  "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+  "recovery_generation": 1,
+  "release_inventory": {
+    "state": "not_installed"
+  },
+  "release_heads": [],
+  "settlement_position": []
+}
