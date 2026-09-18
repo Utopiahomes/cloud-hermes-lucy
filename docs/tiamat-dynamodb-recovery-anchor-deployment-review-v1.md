@@ -1,18 +1,19 @@
 # Tiamat DynamoDB recovery anchor — deployment review v1
 
-Status: local implementation complete; no AWS resource has been provisioned.
+Status: isolated dispatch-disabled staging infrastructure commissioned; signed authority is not yet bootstrapped.
 
-AWS review checkpoint (2026-09-18): AWS accepted the template in account `429870640638`, region
-`us-east-1`. Review-only change set `review-20260918-01` is `CREATE_COMPLETE` / `AVAILABLE` under
-stack `tiamat-staging-recovery-anchor-v1`, which remains `REVIEW_IN_PROGRESS` with zero resources.
-The change set adds exactly the table and two policies described below and has not been executed.
-Evidence is in `docs/evidence/tiamat-recovery-anchor-aws-change-set-review-2026-09-18.json`.
+AWS commissioning checkpoint (2026-09-18): AWS accepted and executed reviewed change set
+`review-20260918-01` in account `429870640638`, region `us-east-1`. Stack
+`tiamat-staging-recovery-anchor-v1` is `CREATE_COMPLETE`. The retained table is active with
+PAY_PER_REQUEST billing, deletion protection, encryption and point-in-time recovery enabled.
+Evidence is in `docs/evidence/tiamat-recovery-anchor-staging-commissioning-2026-09-18.json`; the
+earlier review-only state remains recorded separately.
 
-The parameters deliberately name new roles, `tiamat-staging-executor` and
-`tiamat-staging-recovery-coordinator`. Those roles do not yet exist. Existing Lucy/Utopia roles were
-inspected only to understand the Render OIDC trust pattern and were not reused or changed. The
-change set is not eligible for execution until separately deployed Tiamat workloads provide exact
-OIDC subjects and dedicated roles are reviewed.
+Dedicated roles `tiamat-staging-executor` and `tiamat-staging-recovery-coordinator` now trust only
+their exact suspended Render staging service subjects. Existing Lucy/Utopia roles were not reused
+or changed. Both services have auto-deploy disabled, use the inert identity-only process, and remain
+manually suspended with provider dispatch disabled. Their configuration names the exact role,
+region and table; no static AWS credential is configured.
 
 ## Boundary and supported topology
 
@@ -82,23 +83,18 @@ well below **$1/month**. This is an estimate, not a spending guarantee. Cross-re
 customer-managed KMS keys, CloudTrail data events, AWS Backup, global tables, or unexpectedly
 large signed records are excluded and must be costed separately if added.
 
-## Activation procedure (requires a later provisioning approval)
+## Remaining activation procedure
 
-1. Validate the template and inspect the CloudFormation change set; do not execute it yet.
-2. Select the AWS account/region and existing reader/updater machine roles. Confirm they are not
-   PostgreSQL-host backup identities and cannot assume one another.
-3. Provision the retained table with dispatch disabled.
-4. Verify table deletion protection, PITR, encryption, tags, and absence of replicas/streams.
-5. Run IAM negatives: the reader cannot write; neither identity can delete, scan, query, change
-   the table, or access another environment's key. Verify the updater can only perform a valid CAS.
-6. Configure `TIAMAT_RECOVERY_ANCHOR_TABLE` and `AWS_REGION` for the appropriate machine roles.
-7. Bootstrap a root-signed quarantined transition, strong-read it, and independently verify its
+1. Reconfirm both services remain suspended and provider dispatch is disabled.
+2. Resume only for the bounded staging proof and verify each live Render OIDC identity assumes its
+   exact role; suspend again after evidence capture.
+3. Bootstrap a root-signed quarantined transition, strong-read it, and independently verify its
    exact bytes and predecessor state.
-8. With old-worker provider credentials disabled, execute the approved reconciliation and install
+4. With old-worker provider credentials disabled, execute the approved reconciliation and install
    the signed continuity-established transition.
-9. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
+5. Exercise startup success, AWS-unavailable startup, bounded running outage, CAS collision,
    expired authority, stale restore, quarantine race, and recovery-crash cases in staging.
-10. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
+6. Review evidence and rollback steps. Enabling model dispatch is a separate activation action.
 
 Rollback before dispatch activation is to remove the Tiamat configuration and roles while
 retaining the table and signed history. After activation, never delete or replace the authoritative

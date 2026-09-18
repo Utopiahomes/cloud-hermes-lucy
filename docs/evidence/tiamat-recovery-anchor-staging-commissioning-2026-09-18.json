@@ -1,0 +1,78 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-18",
+  "scope": "dispatch-disabled Tiamat DynamoDB recovery-anchor staging commissioning",
+  "aws": {
+    "account_id": "429870640638",
+    "region": "us-east-1",
+    "stack_name": "tiamat-staging-recovery-anchor-v1",
+    "stack_status": "CREATE_COMPLETE",
+    "table_name": "stoin-staging-tiamat-recovery-anchor-v1",
+    "table_arn": "arn:aws:dynamodb:us-east-1:429870640638:table/stoin-staging-tiamat-recovery-anchor-v1",
+    "table_status": "ACTIVE",
+    "billing_mode": "PAY_PER_REQUEST",
+    "deletion_protection": true,
+    "point_in_time_recovery": "ENABLED"
+  },
+  "render": {
+    "workspace_id": "tea-da8et5bbc2fs73a2dtng",
+    "project_id": "prj-daca8g2fngtc73clv910",
+    "environment_id": "evm-dal82elg1s2s73ei84qg",
+    "environment_name": "management-contract-staging",
+    "source_commit": "e059317e97fb7de40dd5e821be333c9f833f4aca",
+    "services": [
+      {
+        "name": "tiamat-staging-executor",
+        "service_id": "srv-damkn2bm8hqs73dh1abg",
+        "role_arn": "arn:aws:iam::429870640638:role/tiamat-staging-executor",
+        "state": "manually_suspended",
+        "provider_dispatch": false
+      },
+      {
+        "name": "tiamat-staging-recovery-coordinator",
+        "service_id": "srv-damko3m7bikc73c1b510",
+        "role_arn": "arn:aws:iam::429870640638:role/tiamat-staging-recovery-coordinator",
+        "state": "manually_suspended",
+        "provider_dispatch": false
+      }
+    ]
+  },
+  "iam": {
+    "identity_binding": "exact Render workspace/environment/service OIDC subject",
+    "static_aws_credentials_configured": false,
+    "executor_get_item": "allowed",
+    "executor_put_item": "implicitDeny",
+    "coordinator_get_item": "allowed",
+    "coordinator_put_item": "allowed",
+    "foreign_environment_reader_get_item": "implicitDeny",
+    "foreign_environment_coordinator_put_item": "implicitDeny",
+    "both_roles_forbidden_actions": {
+      "dynamodb:Scan": "implicitDeny",
+      "dynamodb:Query": "implicitDeny",
+      "dynamodb:DeleteItem": "implicitDeny",
+      "dynamodb:UpdateItem": "implicitDeny",
+      "dynamodb:CreateTable": "implicitDeny",
+      "dynamodb:DeleteTable": "implicitDeny",
+      "dynamodb:UpdateTable": "implicitDeny"
+    }
+  },
+  "configuration": {
+    "table_variable": "TIAMAT_RECOVERY_ANCHOR_TABLE",
+    "region_variable": "AWS_REGION",
+    "role_variable": "AWS_ROLE_ARN",
+    "auto_deploy": false
+  },
+  "not_yet_executed": [
+    "bootstrap a root-signed quarantine transition",
+    "assume each role from the live Render OIDC token",
+    "run restored-ledger recovery lifecycle",
+    "enable provider dispatch"
+  ],
+  "preserved_boundaries": {
+    "private_lucy_changed": false,
+    "production_changed": false,
+    "dns_changed": false,
+    "provider_dispatch_enabled": false,
+    "signed_anchor_history_bootstrapped": false
+  }
+}

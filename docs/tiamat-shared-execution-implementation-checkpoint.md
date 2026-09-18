@@ -176,8 +176,9 @@ The approved single-provider deployment choice is now represented locally withou
   coordinator policies. Neither role receives scan, query, delete, restore, or table-mutation
   permissions.
 - `docs/tiamat-dynamodb-recovery-anchor-deployment-review-v1.md` records topology, AWS-unavailable
-  behavior, permissions, cost assumptions, activation procedure, and rollback. No AWS resource,
-  role, credential, provider call, or dispatch activation was created.
+  behavior, permissions, cost assumptions, activation procedure, and rollback. The isolated AWS
+  staging table and exact Render OIDC roles are commissioned; both inert identities remain
+  suspended and provider dispatch remains disabled.
 
 ## Deliberately not yet claimed
 
@@ -221,6 +222,17 @@ At local commit preparation on 2026-09-18:
   resources. The proposed dedicated Tiamat reader/updater roles do not yet exist, and no existing
   Lucy/Utopia identity was reused or changed. Exact content-free evidence is recorded in
   `docs/evidence/tiamat-recovery-anchor-aws-change-set-review-2026-09-18.json`.
+
+- AWS/Render staging commissioning: stack `tiamat-staging-recovery-anchor-v1` reached
+  `CREATE_COMPLETE`; table `stoin-staging-tiamat-recovery-anchor-v1` is active with deletion
+  protection and PITR enabled. Exact Render identities `srv-damkn2bm8hqs73dh1abg` and
+  `srv-damko3m7bikc73c1b510` are separately bound to dedicated reader/updater roles, configured
+  without static AWS credentials, auto-deploy disabled, and manually suspended. IAM simulation
+  allowed the reader's `GetItem` while denying `PutItem`, allowed the coordinator's `GetItem` and
+  `PutItem`, and denied both identities against a foreign-environment leading key. Live Render OIDC
+  assumption and root-signed anchor bootstrap remain Claude's bounded integration proof; no signed
+  history or provider dispatch was created. Evidence is in
+  `docs/evidence/tiamat-recovery-anchor-staging-commissioning-2026-09-18.json`.
 
 - Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,
