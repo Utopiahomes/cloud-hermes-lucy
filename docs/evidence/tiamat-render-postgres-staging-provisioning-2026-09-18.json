@@ -18,6 +18,8 @@
   "observed_state": {
     "database_status": "available",
     "external_access": "disabled at the PostgreSQL resource: Render confirmed all internet traffic is blocked by PostgreSQL inbound IP rules; inherited workspace and environment rules remain unchanged",
+    "network_reverified_at": "2026-09-18T18:48:02Z",
+    "network_verification": "Render CLI reported the PostgreSQL resource ipAllowList as an empty array while the management-contract-staging environment retained its inherited 0.0.0.0/0 rule. The database dashboard reported external traffic not allowed and retained its internal hostname.",
     "credentials_or_connection_strings_recorded": false
   },
   "not_performed": [
