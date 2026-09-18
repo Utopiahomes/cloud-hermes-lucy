@@ -181,8 +181,10 @@ class SharedExecutionService:
         request: ExecutionRequest,
     ) -> ExecutionResponse:
         profile = self._profiles.get(request.execution_profile_id)
-        if profile is None or request.output.mode not in profile.allowed_modes:
+        if profile is None:
             raise PermissionError("execution profile is not authorized for this route")
+        if request.output.mode not in profile.allowed_modes:
+            raise ValueError("output contract exceeds the profile")
         if request.limits.max_output_tokens > profile.maximum_output_tokens:
             raise ValueError("output contract exceeds the profile")
         if request.limits.max_cost_microusd < profile.maximum_cost_microusd:

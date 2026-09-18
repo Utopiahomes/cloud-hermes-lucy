@@ -569,3 +569,28 @@ def test_non_json_numeric_constant_is_rejected_before_provider_dispatch() -> Non
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
     assert transport.calls == 0
+
+
+def test_valid_profile_with_unsupported_output_mode_is_step_nine_422() -> None:
+    client, transport, private_key, _ = setup()
+    payload = json.loads(body())
+    payload["output"] = {
+        "mode": "json_schema",
+        "name": "candidate",
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "output_contract_unsupported"
+    assert response.headers["x-stoin-execution-release"] == "tiamat-local.1"
+    assert transport.calls == 0

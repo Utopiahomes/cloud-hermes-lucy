@@ -109,6 +109,9 @@
   state—now passes through one fixed 50 ms minimum timing class with up to 10 ms of cryptographic
   jitter. The delay is injectable for deterministic proof, and the later raw-body digest mismatch
   remains explicitly outside that class as required by RC1.
+- Step 8 and step 9 are now distinct in the running boundary: an unknown or unauthorized profile is
+  `403 capability_forbidden`, while a valid authorized profile that cannot enforce the requested
+  output mode is `422 output_contract_unsupported` before provider dispatch.
 - All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
   checks the complete implemented code/message/retry set against the frozen positive vectors.
 - The live success envelope, all 29 generated error envelopes, and all four cost-receipt variants
@@ -196,7 +199,7 @@ At local commit preparation on 2026-09-18:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,161 passed with two dependency deprecation warnings. The first run exposed
+- Complete unit suite: 1,162 passed with two dependency deprecation warnings. The first run exposed
   an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
   first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
   code was changed in this branch.
