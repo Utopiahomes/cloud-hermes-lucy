@@ -89,7 +89,6 @@ class DynamoDbExternalRecoveryAnchor:
             raise RecoveryAnchorRejected("recovery_anchor_signed_bytes_mismatch")
 
         key = transition.witness.identity.key
-        expression_names = {"#anchor_key": "anchor_key"}
         values: dict[str, dict[str, str]] = {}
         if expected_transition_sha256 is None:
             if (
@@ -98,6 +97,7 @@ class DynamoDbExternalRecoveryAnchor:
             ):
                 raise RecoveryAnchorRejected("recovery_anchor_compare_failed")
             condition = "attribute_not_exists(#anchor_key)"
+            expression_names = {"#anchor_key": "anchor_key"}
         else:
             if transition.previous_transition_sha256 != expected_transition_sha256:
                 raise RecoveryAnchorRejected("recovery_anchor_transition_chain_invalid")
@@ -109,12 +109,10 @@ class DynamoDbExternalRecoveryAnchor:
                 "#transition_sha256 = :expected_digest AND "
                 "#transition_version = :expected_version"
             )
-            expression_names.update(
-                {
-                    "#transition_sha256": "transition_sha256",
-                    "#transition_version": "transition_version",
-                }
-            )
+            expression_names = {
+                "#transition_sha256": "transition_sha256",
+                "#transition_version": "transition_version",
+            }
             values = {
                 ":expected_digest": {"S": expected_transition_sha256},
                 ":expected_version": {"N": str(previous.transition_version)},

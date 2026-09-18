@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -70,10 +71,53 @@ class FakeDynamoDb:
         self.put_calls.append(kwargs)
         if self.failure is not None:
             raise self.failure
+        condition = str(kwargs.get("ConditionExpression", ""))
+        tokens = set(re.findall(r"[#:]\w+", condition))
+        names = kwargs.get("ExpressionAttributeNames", {})
+        values = kwargs.get("ExpressionAttributeValues", {})
+        unused_names = sorted(set(names) - tokens)
+        unused_values = sorted(set(values) - tokens)
+        if unused_names or unused_values:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationException",
+                        "Message": "unused expression attributes",
+                    }
+                },
+                "PutItem",
+            )
         self.item = kwargs["Item"]
         if self.fail_after_put:
             raise EndpointConnectionError(endpoint_url="https://dynamodb.invalid")
         return {}
+
+
+@pytest.mark.parametrize(
+    ("attribute_key", "attributes"),
+    [
+        ("ExpressionAttributeNames", {"#unused": "unused"}),
+        ("ExpressionAttributeValues", {":unused": {"S": "unused"}}),
+    ],
+)
+def test_fake_dynamodb_rejects_unused_expression_attributes(
+    attribute_key: str, attributes: dict[str, Any]
+) -> None:
+    client = FakeDynamoDb()
+    request: dict[str, Any] = {
+        "TableName": "tiamat-recovery-anchor",
+        "Item": {"anchor_key": {"S": "ENV#staging#LEDGER#test"}},
+        "ConditionExpression": "attribute_not_exists(#anchor_key)",
+        "ExpressionAttributeNames": {"#anchor_key": "anchor_key"},
+        "ExpressionAttributeValues": {},
+    }
+    request[attribute_key] = {
+        **request[attribute_key],
+        **attributes,
+    }
+
+    with pytest.raises(ClientError, match="ValidationException"):
+        client.put_item(**request)
 
 
 class Decoder:
@@ -142,7 +186,6 @@ def test_successor_uses_exact_digest_and_version_compare_and_swap() -> None:
     request = client.put_calls[-1]
     assert "#transition_sha256 = :expected_digest" in request["ConditionExpression"]
     assert request["ExpressionAttributeNames"] == {
-        "#anchor_key": "anchor_key",
         "#transition_sha256": "transition_sha256",
         "#transition_version": "transition_version",
     }
