@@ -34,7 +34,7 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
-- Dedicated Tiamat PostgreSQL migration lineage through `0002_route_settlement_retention`; Cloud Lucy remains at
+- Dedicated Tiamat PostgreSQL migration lineage through `0003_signed_release_authority`; Cloud Lucy remains at
   `0071` and does not consume migration `0072`.
 - Content-free PostgreSQL adapters for durable scoped JWT replay, coordinator-generation fencing,
   atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
@@ -71,6 +71,10 @@
 - A complete signed execution authority now requires one current profile, its exact privacy-policy
   release, and one applicable current spending grant. Missing trust inventory or grant fails closed
   before a service capable of dispatch can be constructed.
+- Migration `0003_signed_release_authority` separates immutable exact-JWS artifacts from small
+  monotonic activation heads and root-signed trust-inventory generations. Forced RLS applies to all
+  three tables; the runtime role receives read-only authority while a separate non-bypass release
+  manager receives staging/activation writes.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -84,9 +88,9 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. durable signed-release staging, monotonic activation/revocation heads, and restore reconciliation;
-   exact format/signature verification and complete-set fail-closed admission are implemented, while
-   durable release state is not yet wired to the PostgreSQL ledger;
+3. wire verified artifacts into durable staging and implement transactional monotonic
+   activation/revocation operations plus restore reconciliation; the tables and role split now
+   exist, but runtime store operations are not yet implemented;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
