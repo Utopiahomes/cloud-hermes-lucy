@@ -1,0 +1,24 @@
+{
+  "format_version": "1",
+  "release_type": "revocation",
+  "release_id": "revoke-privacy-2026-09-17.1",
+  "subject_id": "utopia-public-revocations",
+  "issuer": "stoin-control",
+  "environment": "staging",
+  "caller_id": "stoin:synth:utopia-homes",
+  "realm": "utopia-homes",
+  "issued_at": "2026-09-17T22:00:00Z",
+  "not_before": "2026-09-17T22:00:00Z",
+  "not_after": "2026-09-24T22:00:00Z",
+  "sequence": 1,
+  "predecessor_release_id": null,
+  "content_digest": "37d5c69b3d1430f32976dc962043cd0d8b8a6aaa3d49221acda781d78d1c357c",
+  "content": {
+    "target_type": "release",
+    "target_release_type": "privacy_policy",
+    "target_release_id": "privacy-2026-09-17.1",
+    "reason_code": "privacy_policy_withdrawn",
+    "effective_at": "2026-09-17T21:55:00Z",
+    "eligibility_generation": 2
+  }
+}

@@ -1,7 +1,7 @@
 # Tiamat execution ledger — local durable-state and recovery checkpoint
 
 **Status:** local implementation; not deployed or production-authorized  
-**Migration lineage:** `tiamat_migrations`, head `0001_execution_ledger`  
+**Migration lineage:** `tiamat_migrations`, head `0002_route_settlement_retention`
 **Cloud Lucy migration lineage:** unchanged at `0071`; `0072` remains available
 
 ## Boundary
@@ -55,6 +55,12 @@ evidence, and the recovery drill below.
 Restoring a backup never constitutes authorization to resume. Failure to reconcile or match the
 external witness leaves dispatch blocked.
 
+Step 2 is mandatory even when the candidate backup and the last database both report the same old
+generation. A supported restore invalidates the old external dispatch authorization before attaching
+the backup. If an outage prevents proving pre-invalidation, the recovery launcher creates a strictly
+newer quarantined external generation before issuing any serving credential. This is what detects a
+same-generation backup that predates later spending; a database-local generation alone cannot.
+
 ## Verified locally
 
 - The dedicated migration upgraded a fresh PostgreSQL 16 database.
@@ -68,13 +74,13 @@ external witness leaves dispatch blocked.
   established a newer `outcome_unknown` state, resolution preserved that uncertainty and held cost.
 - A physical stale database snapshot remained internally valid but could not resume under the newer
   deployment-owned recovery witness.
+- Backend termination inside open dispatch and settlement transactions rolled back execution,
+  spend, contingency, quarantine, and financial-event mutations atomically.
+- Exact route/rate overruns, late billing invalidation, partition blocking, reconciliation,
+  ten-minute expiry, and 30-day forfeiture tombstones passed against the real PostgreSQL adapter.
 
 ## Verification remaining before deployment
 
-- Inject actual connection loss during the dispatch-commit and settlement windows; the current
-  suite proves authoritative lookup outcomes after acknowledgement loss at stable boundaries.
-- Prove cost overrun, route quarantine, reconciliation, and 30-day tombstone expiry against the
-  durable store.
 - Demonstrate single-node loss and failover on the selected production-class database service.
 
 The local database used a loopback-only Docker service with tmpfs and synthetic credentials; it is

@@ -1,0 +1,27 @@
+{
+  "format_version": "1",
+  "release_type": "privacy_policy",
+  "release_id": "privacy-2026-09-17.1",
+  "subject_id": "utopia-public-zdr",
+  "issuer": "stoin-control",
+  "environment": "staging",
+  "caller_id": "stoin:synth:utopia-homes",
+  "realm": "utopia-homes",
+  "issued_at": "2026-09-17T20:00:00Z",
+  "not_before": "2026-09-17T20:05:00Z",
+  "not_after": "2026-09-19T08:05:00Z",
+  "sequence": 1,
+  "predecessor_release_id": null,
+  "content_digest": "b34510535b945da5426e41faa49f0648aa41d8423f6e605e5eb3d99d5f0a64f5",
+  "content": {
+    "policy_id": "utopia-public-zdr",
+    "approved_provider_route_ids": ["vertex-gemini-primary"],
+    "required_provider_privacy": ["zero_data_retention", "no_training", "no_data_collection"],
+    "data_collection": "denied",
+    "training": "denied",
+    "fallback_allowed": false,
+    "allowed_regions": ["US"],
+    "retention_ceiling_seconds": 0,
+    "eligibility_generation": 1
+  }
+}

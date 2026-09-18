@@ -1,0 +1,26 @@
+{
+  "format_version": "1",
+  "release_type": "spending_grant",
+  "release_id": "grant-utopia-public-2026-09-18.1",
+  "subject_id": "utopia-public",
+  "issuer": "stoin-control",
+  "environment": "staging",
+  "caller_id": "stoin:synth:utopia-homes",
+  "realm": "utopia-homes",
+  "issued_at": "2026-09-17T20:00:00Z",
+  "not_before": "2026-09-18T00:00:00Z",
+  "not_after": "2026-09-19T12:00:00Z",
+  "sequence": 2,
+  "predecessor_release_id": "grant-utopia-public-2026-09-17.1",
+  "content_digest": "2ba82fe3d1a836ec4bcda679625d056ed0b716a2c02e83729aed46741a234dcf",
+  "content": {
+    "partition_id": "utopia-public",
+    "budget_period_id": "2026-09-18",
+    "period_start": "2026-09-18T00:00:00Z",
+    "period_end": "2026-09-19T00:00:00Z",
+    "allowance_microusd": 3000000,
+    "maximum_concurrency": 2,
+    "largest_per_call_microusd": 2000,
+    "contingency_reserve_microusd": 8000
+  }
+}

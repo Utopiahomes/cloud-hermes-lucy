@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stoin.internal/contracts/tiamat-signed-release-v1/trust-inventory.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "inventory_generation", "previous_inventory_digest", "issued_at", "environment", "root_key_id", "keys"],
+  "properties": {
+    "format_version": { "const": "1" },
+    "inventory_generation": { "type": "integer", "minimum": 1 },
+    "previous_inventory_digest": { "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] },
+    "issued_at": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "environment": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "root_key_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kid", "issuer", "environment", "purpose", "use", "algorithm", "public_key_b64", "status", "valid_from", "issuance_not_after", "verify_not_after", "revoked_at", "active_release_policy", "authorized_scopes"],
+        "properties": {
+          "kid": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "issuer": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "environment": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "purpose": { "const": "policy_notary_v13" },
+          "use": { "const": "tiamat-signed-release" },
+          "algorithm": { "const": "EdDSA" },
+          "public_key_b64": { "type": "string", "minLength": 43, "maxLength": 44 },
+          "status": { "enum": ["staged", "active", "retired", "revoked"] },
+          "valid_from": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+          "issuance_not_after": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+          "verify_not_after": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+          "revoked_at": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, { "type": "null" }] },
+          "active_release_policy": { "enum": ["invalidate_immediately", "honor_active_until_expiry"] },
+          "authorized_scopes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["caller_id", "realm", "release_type", "subject_id"],
+              "properties": {
+                "caller_id": { "type": "string", "minLength": 1, "maxLength": 255, "not": { "const": "*" } },
+                "realm": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+                "release_type": { "enum": ["execution_profile", "privacy_policy", "spending_grant", "revocation"] },
+                "subject_id": { "type": "string", "minLength": 1, "maxLength": 128, "not": { "const": "*" } }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "revoked" } } },
+            "then": { "properties": { "revoked_at": { "type": "string" } } },
+            "else": { "properties": { "revoked_at": { "type": "null" } } }
+          }
+        ]
+      }
+    }
+  }
+}
