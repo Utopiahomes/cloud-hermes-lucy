@@ -158,8 +158,8 @@
   digest as an alias, applies forced RLS, and exposes a retention check so a key version cannot be
   retired while a retained execution still depends on it.
 
-No provider credentials, real model route, spending grant, provider call, deployment, migration, or
-production change was created.
+No provider credentials, real model route, spending grant, provider call, or production change was
+created.
 
 ### DynamoDB external recovery-anchor increment
 
@@ -254,8 +254,13 @@ At local commit preparation on 2026-09-18:
   blocked by PostgreSQL's resource-specific inbound rules; the inherited workspace and environment
   `0.0.0.0/0` rules remain unchanged. The independent lineage reached
   `0006_render_recovery_rls`; the runtime and recovery logins were successfully verified, and
-  dispatch remains disabled. The temporary bootstrap secrets were removed and the runner is suspended;
-  initialization and the capability probe remain pending. Content-free evidence is
+  dispatch remains disabled. The temporary bootstrap secrets were removed and the runner is suspended.
+  The recovery-only day-zero initializer then created ledger
+  `6177502f-3a93-429c-b68b-0ed726d1447f` at storage epoch
+  `63d24f64-e2c4-4bed-8e39-4d0674b4e6b2`, generation one, with only the non-authorizing
+  `not_installed` inventory. The read-only recovery capability probe passed under
+  `tiamat_recovery`, confirming TLS plus the required control/checkpoint/WAL functions while
+  dispatch remained blocked. Content-free evidence is
   `docs/evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json`.
 
 - Disposable bootstrap boundary: private Render service `tiamat-staging-bootstrap`
@@ -263,7 +268,9 @@ At local commit preparation on 2026-09-18:
   It migrated through `0006_render_recovery_rls`, created all three database roles, and verified only
   the runtime and recovery logins; the release-manager remains `NOLOGIN` until its own service
   boundary exists. Its temporary owner and bootstrap-password secrets were removed and the runner
-  suspended. No ledger initialization, anchor write, or provider dispatch has occurred.
+  suspended. The subsequent recovery-only initializer and capability-probe jobs completed under the
+  permanent recovery boundary; their content-free reports are recorded in the PostgreSQL provisioning
+  evidence. No anchor write or provider dispatch has occurred.
 
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.

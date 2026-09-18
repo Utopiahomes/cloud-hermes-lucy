@@ -1,8 +1,8 @@
 # Tiamat Render PostgreSQL — staging provisioning review v1
 
 **Status:** the reviewed staging database is provisioned and public access is blocked. The dedicated
-Tiamat migration lineage through `0006_render_recovery_rls` and the scoped runtime/recovery role
-bootstrap succeeded. Ledger initialization, the recovery capability probe, anchor write, and provider
+Tiamat migration lineage through `0006_render_recovery_rls`, scoped runtime/recovery role bootstrap,
+day-zero ledger initialization, and recovery capability probe succeeded. Anchor write and provider
 dispatch remain incomplete.
 
 ## Purpose and boundary
@@ -83,12 +83,12 @@ before commissioning proceeds. No static AWS credentials are permitted.
    login passwords; then deliver each resulting URL to only its corresponding Render service secret.
    The release-manager role remains `NOLOGIN` until its service exists. Remove the owner URL and all
    bootstrap-only password inputs when that job exits.
-4. The temporary bootstrap secrets were removed and the runner suspended. Next, run
-   `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
-   confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
-5. Run `deploy/postgres/verify_tiamat_render_capabilities_v1.py` as only `tiamat_recovery`. It is
-   read-only and proves TLS, exact recovery login, blocked ledger state, and access to
-   `pg_control_system()`, `pg_control_checkpoint()`, and `pg_current_wal_flush_lsn()`.
+4. The temporary bootstrap secrets were removed and the runner suspended. The recovery-only
+   initializer ran as `tiamat_recovery`, with its exact confirmation, creating the immutable ledger
+   ID and the non-authorizing `not_installed` checkpoint at recovery generation one.
+5. The read-only capability probe ran as only `tiamat_recovery`. It proved TLS, the exact recovery
+   login, blocked ledger state, and access to `pg_control_system()`, `pg_control_checkpoint()`, and
+   `pg_current_wal_flush_lsn()`.
 6. Independently review the checkpoint and capability report. A failed control/WAL query rejects
    this hosting path; it does not justify weakening continuity checks.
 7. Separate root-key and signed-package authorization is required before the DynamoDB installer can

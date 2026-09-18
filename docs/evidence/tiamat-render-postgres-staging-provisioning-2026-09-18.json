@@ -35,13 +35,37 @@
     "temporary_bootstrap_secrets": "removed after the successful job; permanent executor and recovery service secrets were not changed",
     "post_bootstrap_disposition": "runner manually suspended after credential removal; no idle billing"
   },
+  "ledger_initialization": {
+    "source_commit": "4ccd5ecda1e4c17d26d46e9047ea492db2e7d4cd",
+    "recovery_service_id": "srv-damko3m7bikc73c1b510",
+    "recovery_deploy_id": "dep-damq075g1s2s73dtt33g",
+    "job_id": "job-damq1c3m8hqs73adigmg",
+    "job_state": "succeeded",
+    "environment": "staging",
+    "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+    "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+    "recovery_generation": 1,
+    "release_inventory": {"state": "not_installed"},
+    "release_heads": [],
+    "settlement_position": [],
+    "dispatch_enabled": false
+  },
+  "recovery_capability_probe": {
+    "job_id": "job-damq1p3ncjis73ce288g",
+    "job_state": "succeeded",
+    "database_user": "tiamat_recovery",
+    "transport_tls": true,
+    "server_version_num": 160015,
+    "system_identifier": "7686944526360399911",
+    "timeline_id": 1,
+    "flushed_wal_lsn": "0/1D00B510",
+    "dispatch_blocked": true
+  },
   "not_performed": [
-    "ledger initialization",
-    "recovery capability probe",
     "root-key generation",
     "signed anchor installation",
     "DynamoDB write",
     "provider configuration or dispatch"
   ],
-  "next_required_action": "Separately initialize the ledger and run the recovery-only capability probe. The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked until later commissioning gates."
+  "next_required_action": "The release-manager role remains NOLOGIN until its own boundary exists. Root-key and signed-anchor commissioning remain separate gates; the initialized ledger must remain dispatch-blocked until those later commissioning gates pass."
 }
