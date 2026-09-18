@@ -45,8 +45,13 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
-- Dedicated Tiamat PostgreSQL migration lineage through `0004_idempotency_digest_aliases`; Cloud Lucy remains at
+- Dedicated Tiamat PostgreSQL migration lineage through `0005_ledger_identity`; Cloud Lucy remains at
   `0071` and does not consume migration `0072`.
+- Migration `0005` creates one immutable database-owned UUID inside each newly migrated Tiamat
+  ledger. The migration/recovery-only day-zero initializer refuses any existing execution, replay,
+  release, or settlement state; creates a blocked generation-one restore gate; and emits the exact
+  non-authorizing `not_installed` checkpoint needed for later signed-anchor commissioning. It has an
+  explicit exact confirmation argument, performs no AWS request, and cannot enable dispatch.
 - Content-free PostgreSQL adapters for durable scoped JWT replay, coordinator-generation fencing,
   atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
   authoritative lease reaping, and 24-hour reservation forfeiture.
@@ -230,9 +235,15 @@ At local commit preparation on 2026-09-18:
   without static AWS credentials, auto-deploy disabled, and manually suspended. IAM simulation
   allowed the reader's `GetItem` while denying `PutItem`, allowed the coordinator's `GetItem` and
   `PutItem`, and denied both identities against a foreign-environment leading key. Live Render OIDC
-  assumption and root-signed anchor bootstrap remain Claude's bounded integration proof; no signed
-  history or provider dispatch was created. Evidence is in
+  assumption was subsequently proven for both services using startup-time STS identity output; each
+  assumed exactly its own expected role, then both services were re-suspended. Root-signed anchor
+  bootstrap remains separate; no signed history or provider dispatch was created. Evidence is in
   `docs/evidence/tiamat-recovery-anchor-staging-commissioning-2026-09-18.json`.
+
+- Render OIDC proof: `docs/evidence/tiamat-recovery-anchor-oidc-role-assumption-2026-09-18.json`
+  records the executor and coordinator STS assumed-role ARNs, account match, cross-role isolation,
+  and post-proof suspended state. The scoped proof performed zero DynamoDB writes, created no root
+  key or signed history, and did not dispatch a provider request.
 
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.
@@ -299,6 +310,13 @@ At local commit preparation on 2026-09-18:
   suite: 1,225 passed with two existing dependency deprecation warnings. Strict mypy passed across
   142 source files. Repository-wide Ruff remains blocked by 204 pre-existing violations in vendored
   conformance bundles; touched recovery files passed Ruff.
+
+- Day-zero ledger initializer: 22 focused recovery, checkpoint, commissioning, and execution-ledger
+  tests passed. Ruff passed for the touched source, migration, and test files; strict mypy passed for
+  the two touched source modules. Alembic rendered the independent PostgreSQL SQL migration chain
+  through `0005_ledger_identity` without connecting to a database. No Tiamat PostgreSQL instance,
+  ledger row, root key, signed package, DynamoDB record, provider route, or production resource was
+  created by this increment.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.

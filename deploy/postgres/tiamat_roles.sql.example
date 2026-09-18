@@ -1,4 +1,4 @@
--- Run as the dedicated Tiamat database owner after migration 0003.
+-- Run as the dedicated Tiamat database owner after migration 0005.
 -- Supply passwords through the platform secret manager; never place them in this file.
 -- The serving login must not own tables, inherit the owner, or hold BYPASSRLS/SUPERUSER.
 
@@ -20,6 +20,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   tiamat.financial_events
 TO tiamat_runtime;
 GRANT SELECT, UPDATE ON tiamat.restore_gate TO tiamat_runtime;
+-- Only the migration/recovery boundary reads the database-global ledger identity. Serving
+-- processes receive neither this grant nor any ability to select another environment's state.
+GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery;
 GRANT SELECT ON tiamat.trust_inventories, tiamat.signed_releases, tiamat.release_heads
 TO tiamat_runtime;
 

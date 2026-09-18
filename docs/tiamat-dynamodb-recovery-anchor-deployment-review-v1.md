@@ -88,11 +88,17 @@ large signed records are excluded and must be costed separately if added.
 1. Reconfirm both services remain suspended and provider dispatch is disabled.
 2. Resume only for the bounded staging proof and verify each live Render OIDC identity assumes its
    exact role; suspend again after evidence capture.
-3. With reviewed ledger/storage identities and a complete day-zero checkpoint object, generate the purpose-distinct
-   root/witness identities offline under ignored local storage. Retain the root private seed only in
-   the offline recovery boundary. The builder independently computes every checkpoint digest and
-   accepts no caller-supplied digest strings. Build and independently review the public signed package.
-4. Run `install_tiamat_recovery_bootstrap_v1.py` without `--execute`; its verified preview must show
+3. Provision and migrate one dedicated Tiamat PostgreSQL database. Run
+   `deploy/postgres/initialize_tiamat_ledger_v1.py` only with the migration/recovery login and exact
+   `--confirm-initialize initialize:<environment>:<storage-epoch>` acknowledgement; it writes
+   the blocked restore gate and emits the database-owned ledger UUID plus the complete day-zero
+   checkpoint. It does not contact AWS or create authority. Independently retain that checkpoint.
+4. With the emitted ledger/storage identities and complete day-zero checkpoint object, generate the
+   purpose-distinct root/witness identities offline under ignored local storage. Retain the root
+   private seed only in the offline recovery boundary. The builder independently computes every
+   checkpoint digest and accepts no caller-supplied digest strings. Build and independently review
+   the public signed package.
+5. Run `install_tiamat_recovery_bootstrap_v1.py` without `--execute`; its verified preview must show
    version-one quarantine and the reviewed transition digest. Then run it once through the exact
    recovery-coordinator OIDC identity with `--execute` and the ledger-bound empty-bootstrap
    confirmation. Strong-read and independently verify its exact bytes and predecessor-null state.

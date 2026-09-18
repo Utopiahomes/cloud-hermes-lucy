@@ -7,6 +7,7 @@ are intended for a stopped or network-quarantined environment.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from uuid import UUID
 
 import psycopg
@@ -21,21 +22,52 @@ type ReleaseHeadKey = tuple[str, str, str, str, str]
 type ReleaseHeadValue = tuple[str, str]
 
 
+@dataclass(frozen=True)
+class DayZeroLedgerIdentity:
+    """Canonical identity emitted only after a real isolated ledger is initialized blocked."""
+
+    ledger_id: UUID
+    environment: str
+    storage_epoch: UUID
+    recovery_generation: int
+
+
 def initialize_environment(
     database_url: str,
     *,
     environment: str,
     storage_epoch: UUID,
     recovery_generation: int,
-) -> None:
+) -> DayZeroLedgerIdentity:
     """Initialize a new empty ledger in a blocked state."""
 
     if not environment or recovery_generation < 1:
         raise ValueError("recovery identity is invalid")
-    with psycopg.connect(database_url) as connection:
-        row = connection.execute("SELECT count(*) FROM tiamat.execution_records").fetchone()
-        if row is None or int(row[0]) != 0:
-            raise RecoveryRejected("initialization requires an empty execution ledger")
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        identity_row = connection.execute(
+            "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
+        ).fetchone()
+        if identity_row is None:
+            raise RecoveryRejected("ledger identity is missing")
+        ledger_id = UUID(str(identity_row[0]))
+        # A day-zero checkpoint can only describe a ledger with no authority, execution,
+        # replay, release, or settlement history. Check every mutable ledger table instead
+        # of inferring cleanliness from a small representative subset.
+        for table in (
+            "jti_replay",
+            "spending_partitions",
+            "execution_records",
+            "grant_releases",
+            "route_rate_quarantines",
+            "financial_events",
+            "trust_inventories",
+            "signed_releases",
+            "release_heads",
+            "execution_idempotency_aliases",
+        ):
+            row = connection.execute(f"SELECT count(*) FROM tiamat.{table}").fetchone()
+            if row is None or int(row[0]) != 0:
+                raise RecoveryRejected("initialization requires an empty execution ledger")
         connection.execute(
             """
             INSERT INTO tiamat.restore_gate (
@@ -45,6 +77,27 @@ def initialize_environment(
             ON CONFLICT DO NOTHING
             """,
             (environment, storage_epoch, recovery_generation),
+        )
+        gate = connection.execute(
+            """
+            SELECT storage_epoch, recovery_generation, dispatch_blocked, block_reason
+            FROM tiamat.restore_gate WHERE environment = %s
+            """,
+            (environment,),
+        ).fetchone()
+        if (
+            gate is None
+            or UUID(str(gate[0])) != storage_epoch
+            or int(gate[1]) != recovery_generation
+            or not bool(gate[2])
+            or str(gate[3]) != "initial_reconciliation_required"
+        ):
+            raise RecoveryRejected("existing restore gate differs from day-zero identity")
+        return DayZeroLedgerIdentity(
+            ledger_id=ledger_id,
+            environment=environment,
+            storage_epoch=storage_epoch,
+            recovery_generation=recovery_generation,
         )
 
 

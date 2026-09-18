@@ -19,6 +19,7 @@ SETTLEMENT_MIGRATION = (
     ROOT / "tiamat_migrations" / "versions" / "0002_route_settlement_retention.py"
 )
 AUTHORITY_MIGRATION = ROOT / "tiamat_migrations" / "versions" / "0003_signed_release_authority.py"
+IDENTITY_MIGRATION = ROOT / "tiamat_migrations" / "versions" / "0005_ledger_identity.py"
 
 
 def test_tiamat_has_an_independent_migration_lineage() -> None:
@@ -36,6 +37,7 @@ def test_ledger_schema_is_content_free_and_partition_forced() -> None:
             MIGRATION.read_text(encoding="utf-8"),
             SETTLEMENT_MIGRATION.read_text(encoding="utf-8"),
             AUTHORITY_MIGRATION.read_text(encoding="utf-8"),
+            IDENTITY_MIGRATION.read_text(encoding="utf-8"),
         )
     )
     for required in (
@@ -49,6 +51,8 @@ def test_ledger_schema_is_content_free_and_partition_forced() -> None:
         "CREATE TABLE tiamat.trust_inventories",
         "CREATE TABLE tiamat.signed_releases",
         "CREATE TABLE tiamat.release_heads",
+        "CREATE TABLE tiamat.ledger_identity",
+        "gen_random_uuid()",
         "provider_route_id",
         "rate_release_id",
         "external_liability_microusd",
@@ -81,6 +85,7 @@ def test_serving_role_cannot_bypass_rls_or_inherit_owner() -> None:
     assert "tiamat_recovery" not in runtime
     assert "GRANT SELECT ON tiamat.trust_inventories" in source
     assert "TO tiamat_release_manager" in source
+    assert "GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery" in source
 
 
 def test_recovery_witness_requires_positive_generation() -> None:
