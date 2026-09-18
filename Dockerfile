@@ -35,6 +35,10 @@ COPY deploy/postgres/provision_synthetic_authority_v1_3.py ./deploy/postgres/pro
 COPY deploy/postgres/render_security_v1_2_sql.py ./deploy/postgres/render_security_v1_2_sql.py
 COPY deploy/postgres/render_security_v1_3_sql.py ./deploy/postgres/render_security_v1_3_sql.py
 COPY deploy/postgres/render_recovery_roles_v1_3.py ./deploy/postgres/render_recovery_roles_v1_3.py
+COPY deploy/postgres/initialize_tiamat_ledger_v1.py ./deploy/postgres/initialize_tiamat_ledger_v1.py
+COPY deploy/postgres/verify_tiamat_render_capabilities_v1.py ./deploy/postgres/verify_tiamat_render_capabilities_v1.py
+COPY deploy/postgres/render_tiamat_role_template_v1.py ./deploy/postgres/render_tiamat_role_template_v1.py
+COPY deploy/postgres/tiamat_roles.sql.example ./deploy/postgres/tiamat_roles.sql.example
 COPY deploy/postgres/production_bootstrap.sql.example ./deploy/postgres/production_bootstrap.sql.example
 COPY deploy/postgres/production_roles_v1.2.sql.example ./deploy/postgres/production_roles_v1.2.sql.example
 COPY deploy/postgres/production_realm_roles_v1.3.sql.example ./deploy/postgres/production_realm_roles_v1.3.sql.example
