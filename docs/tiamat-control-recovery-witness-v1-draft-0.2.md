@@ -1,4 +1,4 @@
-# Tiamat Control Recovery Witness v1 — Draft 0.1
+# Tiamat Control Recovery Witness v1 — Draft 0.2
 
 ## Purpose and boundary
 
@@ -45,6 +45,7 @@ duplicate JSON members, unknown protected-header members, or unknown format vers
   "witness_id": "uuid-v4",
   "issuer": "stoin:control",
   "environment": "staging",
+  "ledger_id": "uuid-v4",
   "storage_epoch": "uuid-v4",
   "recovery_generation": 8,
   "status": "reconciled",
@@ -54,29 +55,55 @@ duplicate JSON members, unknown protected-header members, or unknown format vers
   "inventory_generation": 12,
   "inventory_jws_sha256": "lowercase-sha256",
   "release_heads_sha256": "lowercase-sha256",
-  "settlement_position_sha256": "lowercase-sha256",
-  "reconciliation_digest": "lowercase-sha256"
+  "checkpoint_settlement_position_sha256": "lowercase-sha256",
+  "checkpoint_digest": "lowercase-sha256"
 }
 ```
 
-`reconciliation_digest` is the RFC 8785 SHA-256 digest of the canonical content-free tuple:
+The witness attests a reconciled checkpoint, not the database's continuously changing live state.
+Successful inference, settlement, lease renewal, and ordinary spending may advance from that
+checkpoint without obtaining another witness. An ordinary restart is eligible when the external
+witness still authorizes the same ledger/epoch/generation and the local database's retained
+checkpoint anchor matches it. A snapshot that predates ordinary work is not accepted after a
+**supported** restore because the restore procedure invalidates the former external authorization
+before the snapshot is attached.
 
-```text
-environment, storage_epoch, recovery_generation,
-inventory_generation, inventory_jws_sha256, release_heads_sha256,
-settlement_position_sha256
+`checkpoint_digest` is the RFC 8785 SHA-256 digest of this exact JSON object, whose keys are
+serialized by RFC 8785 and whose arrays are sorted by the listed tuple fields:
+
+```json
+{
+  "environment": "...",
+  "ledger_id": "...",
+  "storage_epoch": "...",
+  "recovery_generation": 9,
+  "inventory": {"generation": 12, "jws_sha256": "..."},
+  "release_heads": [
+    {"issuer":"...","caller_id":"...","realm":"...","release_type":"...",
+     "subject_id":"...","active_jws_sha256":"...","head_state":"..."}
+  ],
+  "settlement_position": [
+    {"partition_id":"...","budget_period_id":"...","settled_microusd":0,
+     "reserved_microusd":0,"pending_reconciliation_count":0,
+     "forfeited_microusd":0,"contingency_used_microusd":0,
+     "external_liability_marker":"none"}
+  ]
+}
 ```
 
-`release_heads_sha256` covers the sorted current `(issuer, caller_id, realm, release_type,
-subject_id, active_jws_sha256, head_state)` set. `settlement_position_sha256` covers the sorted,
-content-free current spending position: partition/budget-period heads, settled spend, reservations,
-pending reconciliation, forfeitures, contingency use, and external-liability markers. Tiamat
-recomputes these digests from its own PostgreSQL state; it never trusts a Control-supplied database
-write or arbitrary digest value.
+`release_heads` sorts lexicographically by `(issuer, caller_id, realm, release_type, subject_id)`.
+`settlement_position` sorts lexicographically by `(partition_id, budget_period_id)`. All integer
+amounts are non-negative micro-USD integers; no floats are permitted. Tiamat recomputes this exact
+checkpoint digest at reconciliation. It never trusts a Control-supplied database write or arbitrary
+digest value.
 
 `status` is either `quarantined` or `reconciled`. A quarantined witness always blocks dispatch.
-Witnesses are monotonic by `(storage_epoch, recovery_generation)`; equal generation is accepted only
-for byte-identical authoritative replay, never to reopen a prior quarantine.
+Every authoritative witness change, including clearing quarantine, receives a strictly higher
+`recovery_generation`; equal `(ledger_id, storage_epoch, recovery_generation)` is accepted only for
+byte-identical replay. Generation increases only within one authorized storage epoch. Changing a
+storage epoch requires an explicit deployment recovery transition that provisions a new witness;
+UUIDs identify epochs but never order them. `ledger_id` names one independently recoverable Tiamat
+ledger, so multiple databases in one environment cannot accidentally share witness authority.
 
 ## Retrieval and startup
 
@@ -86,24 +113,35 @@ maximum five-minute lifetime, and request binding. The Control endpoint returns 
 bytes plus its root-signed trust-inventory bytes. Network/TLS/client authentication is defense in
 depth; signature verification is mandatory.
 
-Tiamat verifies the trust inventory, witness framing/signature/purpose/scope/times, and every local
-digest before acquiring a coordinator generation. Any mismatch keeps dispatch blocked. A valid
-release, grant, or prior witness cannot override a newer quarantined witness.
+Tiamat refreshes the witness at startup and at least every 30 seconds while Control is reachable.
+Control may additionally deliver an authenticated immediate-quarantine notification to the same
+private endpoint; receipt blocks new admission before acknowledgement. Known quarantine therefore
+acts immediately, while an offline executor remains limited by its existing bounded offline window
+and cannot react to an undiscovered later witness.
 
-When Control is unavailable, startup is permitted only for the bounded offline window already covered
-by locally current signed authority and an unexpired, `reconciled`, externally stored witness that
-matches the exact local state and every intervening budget period. Absence or uncertainty is a
-quarantine, not a degraded dispatch mode.
+At startup and reconciliation, Tiamat verifies the trust inventory, witness
+framing/signature/purpose/scope/times, ledger identity, restore gate, and exact checkpoint digest
+before acquiring a coordinator generation. During an ordinary restart it verifies the retained local
+checkpoint anchor and current witness; it does not require a live spending snapshot to equal the
+older checkpoint. Any mismatch keeps dispatch blocked. A valid release, grant, or prior witness
+cannot override a newer quarantined witness.
+
+When Control is unavailable, an ordinary restart is permitted only for the bounded offline window
+already covered by locally current signed authority, every intervening budget period, and an
+unexpired, `reconciled`, externally retained witness matching the local checkpoint anchor. Absence
+or uncertainty is a quarantine, not a degraded dispatch mode.
 
 ## Reconciliation sequence
 
-1. Control creates a newer external `quarantined` generation before a candidate restore is attached.
+1. Control creates a newer external `quarantined` generation before a candidate restore is attached,
+   thereby invalidating every prior recovery authorization.
 2. Tiamat/operations attach the restore with dispatch blocked.
 3. Control compares the inventory, active release heads, settlement position, and liabilities.
-4. After review, Control writes a `reconciled` witness for that already-created generation.
+4. After review, Control writes a `reconciled` witness with a strictly higher generation.
 5. The separately held recovery role calls the existing offline
    `authorize_reconciled_state` operation with the verified values.
-6. Tiamat rereads and verifies the exact witness and local state before acquiring a coordinator
+6. Tiamat rereads and verifies the exact witness, the retained checkpoint anchor, and local state
+   before acquiring a coordinator
    generation.
 
 No normal inference endpoint, Control request, restored database, or signed release can skip these
@@ -113,9 +151,12 @@ steps.
 
 - Tampered signature, unknown/retired/revoked key, wrong purpose/use/environment, unknown version,
   expired/future witness, duplicate JSON member, and mismatched digest all fail closed.
-- A newer external quarantined generation blocks both a live and a stale restored database.
+- A newer external quarantined generation blocks both a live and a stale restored database once
+  delivered; the refresh/notification delay is bounded and offline behavior follows the stated
+  offline window.
 - A byte-identical witness is replayable; conflicting equal-generation witnesses fail closed.
-- A release-head, inventory, or settlement change after witness issuance blocks startup.
+- Normal post-checkpoint spending and settlement permit an ordinary restart without Control.
+- A release-head, inventory, or settlement mismatch at the *reconciled checkpoint* blocks startup.
 - A Control outage uses only a matching, unexpired reconciled witness and never crosses an uncovered
   budget period.
 - Two independently deployed processes prove that Control cannot write Tiamat's database directly
