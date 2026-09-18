@@ -110,6 +110,7 @@ def test_bootstrap_stores_exact_signed_bytes_with_conditional_create() -> None:
 
     request = client.put_calls[0]
     assert request["ConditionExpression"] == "attribute_not_exists(#anchor_key)"
+    assert request["ExpressionAttributeNames"] == {"#anchor_key": "anchor_key"}
     assert request["Item"]["transition_jws"] == {"B": first.exact_jws}
     assert request["Item"]["witness_jws"] == {"B": first.witness.exact_jws}
     assert decoder.calls == [(first.exact_jws, first.witness.exact_jws)]
@@ -140,6 +141,11 @@ def test_successor_uses_exact_digest_and_version_compare_and_swap() -> None:
 
     request = client.put_calls[-1]
     assert "#transition_sha256 = :expected_digest" in request["ConditionExpression"]
+    assert request["ExpressionAttributeNames"] == {
+        "#anchor_key": "anchor_key",
+        "#transition_sha256": "transition_sha256",
+        "#transition_version": "transition_version",
+    }
     assert request["ExpressionAttributeValues"] == {
         ":expected_digest": {"S": first.exact_sha256},
         ":expected_version": {"N": "1"},
