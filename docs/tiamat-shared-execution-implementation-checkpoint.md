@@ -254,16 +254,16 @@ At local commit preparation on 2026-09-18:
   blocked by PostgreSQL's resource-specific inbound rules; the inherited workspace and environment
   `0.0.0.0/0` rules remain unchanged. The independent lineage reached
   `0006_render_recovery_rls`; the runtime and recovery logins were successfully verified, and
-  dispatch remains disabled. Temporary bootstrap secrets still require removal, while initialization
-  and the capability probe remain pending. Content-free evidence is
+  dispatch remains disabled. The temporary bootstrap secrets were removed and the runner is suspended;
+  initialization and the capability probe remain pending. Content-free evidence is
   `docs/evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json`.
 
 - Disposable bootstrap boundary: private Render service `tiamat-staging-bootstrap`
   (`srv-damoneajnfac73ai6ucg`) ran one successful exact-confirmation job at commit `d7c8335`.
   It migrated through `0006_render_recovery_rls`, created all three database roles, and verified only
   the runtime and recovery logins; the release-manager remains `NOLOGIN` until its own service
-  boundary exists. The temporary owner and bootstrap-password secrets must now be removed and the
-  runner suspended. No ledger initialization, anchor write, or provider dispatch has occurred.
+  boundary exists. Its temporary owner and bootstrap-password secrets were removed and the runner
+  suspended. No ledger initialization, anchor write, or provider dispatch has occurred.
 
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.

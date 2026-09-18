@@ -32,7 +32,8 @@
     "bootstrap_result": "Tiamat migration head 0006_render_recovery_rls; runtime and recovery logins verified; dispatch disabled",
     "hold_behavior": "private HTTP endpoint returns 503 and does not import database, AWS, signing, or executor code",
     "temporary_secret_values_recorded": false,
-    "post_bootstrap_disposition": "temporary bootstrap secrets must be removed and the runner suspended before further commissioning"
+    "temporary_bootstrap_secrets": "removed after the successful job; permanent executor and recovery service secrets were not changed",
+    "post_bootstrap_disposition": "runner manually suspended after credential removal; no idle billing"
   },
   "not_performed": [
     "ledger initialization",
@@ -42,5 +43,5 @@
     "DynamoDB write",
     "provider configuration or dispatch"
   ],
-  "next_required_action": "Remove the temporary runner's owner URL and bootstrap passwords, then suspend it. Separately initialize the ledger and run the recovery-only capability probe. The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked until later commissioning gates."
+  "next_required_action": "Separately initialize the ledger and run the recovery-only capability probe. The release-manager role remains NOLOGIN until its own boundary exists. The ledger remains dispatch-blocked until later commissioning gates."
 }

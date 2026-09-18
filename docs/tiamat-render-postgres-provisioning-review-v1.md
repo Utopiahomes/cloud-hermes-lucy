@@ -83,7 +83,7 @@ before commissioning proceeds. No static AWS credentials are permitted.
    login passwords; then deliver each resulting URL to only its corresponding Render service secret.
    The release-manager role remains `NOLOGIN` until its service exists. Remove the owner URL and all
    bootstrap-only password inputs when that job exits.
-4. Next, remove the temporary bootstrap secrets and suspend the runner. Then run
+4. The temporary bootstrap secrets were removed and the runner suspended. Next, run
    `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
    confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
 5. Run `deploy/postgres/verify_tiamat_render_capabilities_v1.py` as only `tiamat_recovery`. It is
