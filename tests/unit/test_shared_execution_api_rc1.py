@@ -77,6 +77,23 @@ class InvalidTransport(FakeTransport):
         )
 
 
+class SizedTransport(FakeTransport):
+    def __init__(self, size: int) -> None:
+        super().__init__()
+        self._size = size
+
+    def execute(self, request: ExecutionRequest, profile: ExecutionProfile) -> ProviderResult:
+        self.calls += 1
+        return ProviderResult(
+            content="x" * self._size,
+            input_tokens=10,
+            generated_tokens=4,
+            output_tokens=4,
+            reasoning_tokens=0,
+            cost_microusd=20,
+        )
+
+
 def body(question: str = "Tell me about Buttercup.") -> bytes:
     payload: dict[str, Any] = {
         "contract": "stoin.inference.execute.request.v1",
@@ -684,4 +701,31 @@ def test_lost_response_after_dispatch_replays_without_second_provider_call() -> 
     )
     assert retry.status_code == 200
     assert retry.json()["replayed"] is True
+    assert transport.calls == 1
+
+
+def test_complete_success_response_respects_raw_128_kib_cap() -> None:
+    client, transport, private_key, _ = setup(SizedTransport(65_536))
+    raw = body()
+    response = client.post(
+        "/execution/v1/inference", content=raw, headers=headers(private_key, raw)
+    )
+    assert response.status_code == 200
+    assert len(response.content) <= 131_072
+    bundle_validator("response.schema.json").validate(response.json())
+    assert transport.calls == 1
+
+
+def test_oversize_provider_content_returns_bounded_paid_failure() -> None:
+    client, transport, private_key, _ = setup(SizedTransport(65_537))
+    raw = body()
+    response = client.post(
+        "/execution/v1/inference", content=raw, headers=headers(private_key, raw)
+    )
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "provider_response_too_large"
+    assert response.json()["execution"]["state"] == "failed"
+    assert response.json()["cost"]["settlement_status"] == "settled"
+    assert len(response.content) <= 131_072
+    bundle_validator("error.schema.json").validate(response.json())
     assert transport.calls == 1
