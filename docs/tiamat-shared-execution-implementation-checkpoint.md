@@ -245,6 +245,16 @@ At local commit preparation on 2026-09-18:
   and post-proof suspended state. The scoped proof performed zero DynamoDB writes, created no root
   key or signed history, and did not dispatch a provider request.
 
+- Render PostgreSQL staging provisioning: dedicated database `tiamat-staging-ledger`
+  (`dpg-damo6cp42hec73bp5nug-a`) is available in `cloud-lucy` /
+  `management-contract-staging`, Virginia, on PostgreSQL 16 with the 0.1c-256mb plan and 1 GB storage.
+  The selected dashboard price was $6.30/month, storage autoscaling and HA are disabled, and no
+  credentials or connection strings were recorded. This is not database commissioning: inherited
+  workspace and environment `0.0.0.0/0` inbound rules are still present, so external access must be
+  explicitly disabled before any credential use, migration, role bootstrap, initialization, or
+  capability probe. Content-free evidence is
+  `docs/evidence/tiamat-render-postgres-staging-provisioning-2026-09-18.json`.
+
 - Cryptographic commissioning path: the strict recovery-witness inventory verifier now binds one
   active purpose-distinct witness key to the exact environment and ledger under the offline root.
   The offline builder creates and self-verifies the root-signed inventory, quarantined witness and

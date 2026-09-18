@@ -1,0 +1,34 @@
+{
+  "evidence_version": 1,
+  "recorded_at": "2026-09-18",
+  "scope": "Tiamat staging PostgreSQL provisioning only",
+  "render": {
+    "project": "cloud-lucy",
+    "environment": "management-contract-staging",
+    "database_name": "tiamat-staging-ledger",
+    "service_id": "dpg-damo6cp42hec73bp5nug-a",
+    "postgres_version": 16,
+    "region": "Virginia (US East)",
+    "plan": "0.1c-256mb",
+    "storage_gb": 1,
+    "storage_autoscaling": false,
+    "high_availability": false,
+    "dashboard_monthly_price_usd": "6.30"
+  },
+  "observed_state": {
+    "database_status": "available",
+    "external_access": "not yet disabled; inherited workspace and environment 0.0.0.0/0 rules remain",
+    "credentials_or_connection_strings_recorded": false
+  },
+  "not_performed": [
+    "external access restriction change",
+    "migration or role bootstrap",
+    "ledger initialization",
+    "recovery capability probe",
+    "root-key generation",
+    "signed anchor installation",
+    "DynamoDB write",
+    "provider configuration or dispatch"
+  ],
+  "next_required_action": "Resolve inherited inbound-rule scope, then explicitly disable external database access before any credential use or database commissioning."
+}
