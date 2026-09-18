@@ -295,7 +295,7 @@ At local commit preparation on 2026-09-18:
   quarantine with no release heads or settlement positions. Witness verification binds component
   digests and signing-key authorization windows; offline root/witness keys must be distinct and the
   generator refuses unverified Windows plaintext storage. No key, signed history, DynamoDB write,
-  Render resume, or provider dispatch occurred. Focused recovery tests: 54 passed; complete unit
+  Render resume, or provider dispatch occurred. Focused recovery tests: 55 passed; complete unit
   suite: 1,225 passed with two existing dependency deprecation warnings. Strict mypy passed across
   142 source files. Repository-wide Ruff remains blocked by 204 pre-existing violations in vendored
   conformance bundles; touched recovery files passed Ruff.

@@ -276,7 +276,7 @@ The cryptographic bootstrap is deliberately split into offline signing and onlin
 
 1. `generate_tiamat_recovery_identity_v1.py` creates purpose-distinct root and witness Ed25519 keys
    as four separate private/public files beneath ignored `secrets/generated/tiamat-recovery`. It
-   refuses overwrite, symlink escape, shared keys, non-private Unix directories/files, and Windows
+   refuses overwrite, symlink escape, root/witness key reuse within one generation run, non-private Unix directories/files, and Windows
    plaintext generation because it cannot verify a private DACL. It prints no private material.
 2. `prepare_tiamat_recovery_bootstrap_v1.py` runs offline with that private identity and a complete
    checkpoint JSON, computes all checkpoint digests itself, and emits a public package containing
