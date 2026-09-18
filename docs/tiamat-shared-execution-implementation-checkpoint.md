@@ -107,6 +107,9 @@
   contract-size gate. Missing or duplicate binding headers remain generic authentication failures.
 - All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
   checks the complete implemented code/message/retry set against the frozen positive vectors.
+- The live success envelope, all 29 generated error envelopes, and all four cost-receipt variants
+  are now validated directly against the frozen strict provider schemas with an independent
+  JSON-Schema implementation.
 - Post-dispatch validation failures now persist and return the stable execution ID, failed state,
   and authoritative settled, pending-reconciliation, or overrun cost receipt. Same-key duplicates
   replay that terminal content-free failure without another provider call. Invalid provider usage or
@@ -142,7 +145,7 @@ Before any deployment or real provider activation, Tier B must add and prove:
    recovery-generation binding, cold-start reverification, monotonic activation, atomic grant
    projection, signed no-fallback revocation, and exact active-byte loading are done;
 3. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
-4. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
+4. complete caller-side tolerant-consumer tests against the bundle;
 5. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
    failure injection;
 6. a separately authorized provider adapter and provider/model/rate selection;
@@ -189,7 +192,7 @@ At local commit preparation on 2026-09-18:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,154 passed with two dependency deprecation warnings. The first run exposed
+- Complete unit suite: 1,159 passed with two dependency deprecation warnings. The first run exposed
   an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
   first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
   code was changed in this branch.

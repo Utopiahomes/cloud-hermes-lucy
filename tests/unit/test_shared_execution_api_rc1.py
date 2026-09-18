@@ -7,10 +7,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import jwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
-from lucy.shared_execution.api import ERRORS, ApiRelease, create_shared_execution_app
+from lucy.shared_execution.api import ERRORS, ApiRelease, _error, create_shared_execution_app
 from lucy.shared_execution.auth import (
     InMemoryJtiReplayStore,
     WorkloadIdentity,
@@ -24,7 +27,7 @@ from lucy.shared_execution.service import (
     ProviderResult,
     SharedExecutionService,
 )
-from lucy.shared_execution.wire import ExecutionRequest
+from lucy.shared_execution.wire import CostReceipt, ExecutionRequest
 
 ISSUER = "https://homes.internal"
 SUBJECT = "stoin:synth:utopia-homes-prime"
@@ -33,6 +36,14 @@ KEY_ID = "homes-prime-local-1"
 BUNDLE = (
     Path(__file__).resolve().parents[2] / "contracts" / "stoin-shared-model-execution-v1-rc1-bundle"
 )
+
+
+def bundle_validator(name: str) -> Draft202012Validator:
+    schemas = BUNDLE / "schemas"
+    common = json.loads((schemas / "common.defs.json").read_text(encoding="utf-8"))
+    schema = json.loads((schemas / name).read_text(encoding="utf-8"))
+    registry = Registry().with_resources([(common["$id"], Resource.from_contents(common))])
+    return Draft202012Validator(schema, registry=registry)
 
 
 class FakeTransport:
@@ -164,6 +175,7 @@ def test_authenticated_request_returns_bound_response_and_release_headers() -> N
     assert response.headers["x-stoin-execution-policy-release"] == "profiles-local.1"
     assert "set-cookie" not in response.headers
     assert transport.calls == 1
+    bundle_validator("response.schema.json").validate(response.json())
 
 
 def test_all_frozen_error_messages_and_retry_flags_are_implemented() -> None:
@@ -176,6 +188,50 @@ def test_all_frozen_error_messages_and_retry_flags_are_implemented() -> None:
     assert {
         code: (message, retryable) for code, (_status, message, retryable) in ERRORS.items()
     } == vectors
+
+
+def test_every_implemented_error_envelope_passes_the_frozen_provider_schema() -> None:
+    validator = bundle_validator("error.schema.json")
+    for code in ERRORS:
+        response = _error(code, request_id=str(uuid4()))
+        validator.validate(json.loads(response.body))
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [
+        CostReceipt(
+            reserved_microusd=2_000,
+            settled_microusd=40,
+            settlement_status="settled",
+        ),
+        CostReceipt(
+            reserved_microusd=2_000,
+            settled_microusd=None,
+            settlement_status="pending_reconciliation",
+        ),
+        CostReceipt(
+            reserved_microusd=2_000,
+            settled_microusd=None,
+            settlement_status="reservation_forfeited",
+        ),
+        CostReceipt(
+            reserved_microusd=2_000,
+            settled_microusd=2_001,
+            settlement_status="settlement_overrun",
+        ),
+    ],
+)
+def test_every_cost_receipt_variant_passes_the_frozen_error_schema(
+    cost: CostReceipt,
+) -> None:
+    response = _error(
+        "provider_response_invalid",
+        request_id=str(uuid4()),
+        execution=(uuid4(), "failed"),
+        cost=cost,
+    )
+    bundle_validator("error.schema.json").validate(json.loads(response.body))
 
 
 def test_fresh_jwt_replays_same_operation_without_second_provider_call() -> None:
