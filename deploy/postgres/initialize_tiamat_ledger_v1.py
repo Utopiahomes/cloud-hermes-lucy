@@ -38,7 +38,7 @@ def initialize_day_zero(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database-url", default=os.environ.get("TIAMAT_MIGRATION_DATABASE_URL"))
+    parser.add_argument("--database-url", default=os.environ.get("TIAMAT_RECOVERY_DATABASE_URL"))
     parser.add_argument("--environment", default=os.environ.get("TIAMAT_ENVIRONMENT"))
     parser.add_argument("--storage-epoch", default=os.environ.get("TIAMAT_STORAGE_EPOCH"))
     parser.add_argument(

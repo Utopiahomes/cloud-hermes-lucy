@@ -88,9 +88,10 @@ large signed records are excluded and must be costed separately if added.
 1. Reconfirm both services remain suspended and provider dispatch is disabled.
 2. Resume only for the bounded staging proof and verify each live Render OIDC identity assumes its
    exact role; suspend again after evidence capture.
-3. Provision and migrate one dedicated Tiamat PostgreSQL database. Run
-   `deploy/postgres/initialize_tiamat_ledger_v1.py` only with the migration/recovery login and exact
-   `--confirm-initialize initialize:<environment>:<storage-epoch>` acknowledgement; it writes
+3. Provision and migrate one dedicated Tiamat PostgreSQL database using the platform-created owner
+   through a temporary migration boundary only. Apply `tiamat_roles.sql.example`, then run
+   `deploy/postgres/initialize_tiamat_ledger_v1.py` only with the separately held recovery login and
+   exact `--confirm-initialize initialize:<environment>:<storage-epoch>` acknowledgement; it writes
    the blocked restore gate and emits the database-owned ledger UUID plus the complete day-zero
    checkpoint. It does not contact AWS or create authority. Independently retain that checkpoint.
 4. With the emitted ledger/storage identities and complete day-zero checkpoint object, generate the
