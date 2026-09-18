@@ -179,6 +179,7 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
         "verify_tiamat_render_capabilities_v1.py",
         "render_tiamat_role_template_v1.py",
         "bootstrap_tiamat_staging_v1.py",
+        "bootstrap_tiamat_staging_hold_v1.py",
         "tiamat_roles.sql.example",
         "production_bootstrap.sql.example",
         "production_roles_v1.2.sql.example",

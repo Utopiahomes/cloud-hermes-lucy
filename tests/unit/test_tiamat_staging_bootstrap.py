@@ -96,3 +96,20 @@ def test_command_requires_exact_bootstrap_confirmation(
 
     with pytest.raises(module.BootstrapRejected, match="confirmation must equal"):
         module.main()
+
+
+def test_idle_hold_only_accepts_a_valid_render_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = ROOT / "deploy" / "postgres" / "bootstrap_tiamat_staging_hold_v1.py"
+    spec = importlib.util.spec_from_file_location("bootstrap_tiamat_staging_hold_v1", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("PORT", "10000")
+    assert module._address() == ("0.0.0.0", 10000)
+
+    monkeypatch.setenv("PORT", "0")
+    with pytest.raises(SystemExit, match="invalid port"):
+        module._address()
