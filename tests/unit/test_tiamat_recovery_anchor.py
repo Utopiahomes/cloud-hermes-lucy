@@ -8,6 +8,7 @@ import pytest
 from lucy.shared_execution.recovery_anchor import (
     InMemoryExternalRecoveryAnchor,
     PostgresContinuityBeacon,
+    PostgresContinuityBeaconReader,
     RecoveryAnchorIdentity,
     RecoveryAnchorRejected,
     VerifiedAnchorTransition,
@@ -226,3 +227,43 @@ def test_stale_snapshot_beacon_and_expired_or_missing_anchor_fail_closed() -> No
     blocked = transition(expired, version=2, previous=first, continuity="recovery_pending")
     with pytest.raises(RecoveryAnchorRejected, match="not_current"):
         install_successor(anchor, blocked)
+
+
+def test_postgres_beacon_reader_uses_control_identity_timeline_and_flushed_wal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Result:
+        def fetchone(self):
+            return {
+                "system_identifier": "cluster-123",
+                "timeline_id": 7,
+                "flushed_wal_lsn": "0/2A0",
+            }
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, query: str):
+            captured["query"] = query
+            return Result()
+
+    def connect(*args: object, **kwargs: object) -> Connection:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return Connection()
+
+    monkeypatch.setattr("lucy.shared_execution.recovery_anchor.psycopg.connect", connect)
+    result = PostgresContinuityBeaconReader("postgresql+psycopg://example").read(
+        checkpoint_digest=CHECKPOINT_A
+    )
+
+    assert result == PostgresContinuityBeacon("cluster-123", 7, "0/2A0", CHECKPOINT_A)
+    assert "pg_control_system" in str(captured["query"])
+    assert "pg_control_checkpoint" in str(captured["query"])
+    assert "pg_current_wal_flush_lsn" in str(captured["query"])

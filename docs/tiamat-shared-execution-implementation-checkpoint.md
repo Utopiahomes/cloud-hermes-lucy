@@ -177,10 +177,11 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 
 At local commit preparation on 2026-09-18:
 
-- Recovery-anchor unit boundary: 14 passed, including root-signed transition binding, signature/type
+- Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,
-  quarantine/recovery-pending lifecycle, stale-WAL beacon rejection, expiry and missing-anchor
-  fail-closed behavior. Ruff and strict mypy passed for the two new modules and their tests.
+  quarantine/recovery-pending lifecycle, PostgreSQL control/timeline/flush-LSN beacon query,
+  stale-WAL beacon rejection, expiry and missing-anchor fail-closed behavior. Ruff and strict mypy
+  passed for the two new modules and their tests.
 
 - Signed-release RC1 bundle: 106 independent checks passed after fresh archive extraction; raw
   content digest `51b0f943c59b685f261bf0c58abad79a92f7c9fae5074517036c18e0884978d9`.

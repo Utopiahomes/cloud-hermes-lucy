@@ -15,6 +15,9 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
+import psycopg
+from psycopg.rows import dict_row
+
 
 class RecoveryAnchorRejected(RuntimeError):
     """An anchor transition or attempted restart would weaken recovery authority."""
@@ -276,3 +279,40 @@ class InMemoryExternalRecoveryAnchor:
         if not transition.beacon.covers(observed_beacon):
             raise RecoveryAnchorRejected("recovery_continuity_beacon_mismatch")
         return witness
+
+
+class PostgresContinuityBeaconReader:
+    """Read cluster identity and durable WAL position with recovery-only database credentials."""
+
+    def __init__(self, database_url: str) -> None:
+        self._database_url = database_url
+
+    def read(self, *, checkpoint_digest: str) -> PostgresContinuityBeacon:
+        if not _hex_digest(checkpoint_digest):
+            raise ValueError("checkpoint digest is invalid")
+        try:
+            with psycopg.connect(self._connection_info(), row_factory=dict_row) as connection:
+                row = connection.execute(
+                    """
+                    SELECT
+                        (pg_control_system()).system_identifier::text AS system_identifier,
+                        (pg_control_checkpoint()).timeline_id::bigint AS timeline_id,
+                        pg_current_wal_flush_lsn()::text AS flushed_wal_lsn
+                    """
+                ).fetchone()
+        except psycopg.Error as exc:
+            raise RecoveryAnchorRejected("recovery_continuity_beacon_unavailable") from exc
+        if row is None:
+            raise RecoveryAnchorRejected("recovery_continuity_beacon_unavailable")
+        try:
+            return PostgresContinuityBeacon(
+                str(row["system_identifier"]),
+                int(row["timeline_id"]),
+                str(row["flushed_wal_lsn"]),
+                checkpoint_digest,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RecoveryAnchorRejected("recovery_continuity_beacon_invalid") from exc
+
+    def _connection_info(self) -> str:
+        return self._database_url.replace("postgresql+psycopg://", "postgresql://", 1)
