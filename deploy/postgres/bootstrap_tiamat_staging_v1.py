@@ -1,12 +1,14 @@
 """Bootstrap the isolated Tiamat staging ledger from a disposable owner-only runner.
 
 This command is intentionally one-time operational tooling. It migrates only the dedicated Tiamat
-schema through the reviewed head, creates the three least-privilege logins, verifies each login over
-the private TLS connection, and emits content-free evidence. It neither initializes the ledger,
+schema through the reviewed head, creates the three least-privilege roles, activates only the two
+roles with existing service boundaries, verifies each active login over the private TLS connection,
+and emits content-free evidence. The release-manager role remains NOLOGIN until its own boundary
+exists, so no password has to be retained without an owner. It neither initializes the ledger,
 contacts AWS, installs an anchor, nor enables provider dispatch.
 
-The owner URL and three role passwords must be Render service secrets attached only to the temporary
-runner. They are never printed, written, or returned by this command.
+The owner URL and two active-role passwords must be Render service secrets attached only to the
+temporary runner. They are never printed, written, or returned by this command.
 """
 
 from __future__ import annotations
@@ -28,15 +30,14 @@ from sqlalchemy.engine import URL, make_url
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_HEAD = "0005_ledger_identity"
 ROLE_NAMES = ("tiamat_runtime", "tiamat_recovery", "tiamat_release_manager")
+ACTIVE_BOOTSTRAP_ROLES = ("tiamat_runtime", "tiamat_recovery")
 ROLE_PASSWORD_ENV = {
     "tiamat_runtime": "TIAMAT_RUNTIME_PASSWORD",
     "tiamat_recovery": "TIAMAT_RECOVERY_PASSWORD",
-    "tiamat_release_manager": "TIAMAT_RELEASE_MANAGER_PASSWORD",
 }
 ROLE_PERMISSION_PROBES = {
     "tiamat_runtime": "SELECT count(*) FROM tiamat.execution_records",
     "tiamat_recovery": "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton",
-    "tiamat_release_manager": "SELECT count(*) FROM tiamat.signed_releases",
 }
 
 
@@ -139,14 +140,16 @@ def _assert_role_flags(connection: psycopg.Connection[Any]) -> None:
     if len(rows) != len(ROLE_NAMES):
         raise BootstrapRejected("one or more Tiamat roles are missing")
     for name, superuser, createdb, createrole, replication, bypass_rls, inherit, can_login in rows:
-        expected_bypass = str(name) == "tiamat_recovery"
+        name_text = str(name)
+        expected_bypass = name_text == "tiamat_recovery"
+        expected_login = name_text in ACTIVE_BOOTSTRAP_ROLES
         if (
             bool(superuser)
             or bool(createdb)
             or bool(createrole)
             or bool(replication)
             or bool(inherit)
-            or not bool(can_login)
+            or bool(can_login) != expected_login
             or bool(bypass_rls) != expected_bypass
         ):
             raise BootstrapRejected(f"Tiamat role flags are unsafe: {name}")
@@ -194,7 +197,7 @@ def bootstrap_tiamat_staging(config: BootstrapConfig) -> BootstrapReport:
         environment=config.environment,
         database_name=config.database_name,
         migration_head=MIGRATION_HEAD,
-        verified_logins=ROLE_NAMES,
+        verified_logins=ACTIVE_BOOTSTRAP_ROLES,
         dispatch_enabled=False,
         secrets_recorded=False,
     )

@@ -55,8 +55,10 @@ connection-string switch is a Tiamat recovery event.
 Render [the role template](../deploy/postgres/tiamat_roles.sql.example) with
 `deploy/postgres/render_tiamat_role_template_v1.py --database-name tiamat_staging`, then apply the
 result after migrations using the platform owner. The database owner URL is supplied only to a
-disposable, private bootstrap/migration runner. It creates and verifies the three database logins
-using three generated passwords that are injected into that runner only for the run.
+disposable, private bootstrap/migration runner. It creates the three distinct database roles, but
+activates and verifies only the runtime and recovery logins using two generated passwords injected
+into that runner only for the run. The release-manager role remains `NOLOGIN` until its separately
+deployed boundary exists, avoiding a credential with no service-scoped home.
 
 Each resulting connection URL belongs in exactly one protected, service-scoped Render secret:
 `TIAMAT_RUNTIME_DATABASE_URL` on the executor, `TIAMAT_RECOVERY_DATABASE_URL` on the recovery
@@ -76,9 +78,10 @@ before commissioning proceeds. No static AWS credentials are permitted.
    storage, Postgres version, and resource-specific external-access block; workspace recovery-window
    evidence remains pending.
 3. Next, in a temporary private bootstrap/migration boundary, run the independent lineage through
-   `0005_ledger_identity`; apply the rendered role template; set and verify the three generated
+   `0005_ledger_identity`; apply the rendered role template; set and verify the two existing-service
    login passwords; then deliver each resulting URL to only its corresponding Render service secret.
-   Remove the owner URL and all bootstrap-only password inputs when that job exits.
+   The release-manager role remains `NOLOGIN` until its service exists. Remove the owner URL and all
+   bootstrap-only password inputs when that job exits.
 4. Run `deploy/postgres/initialize_tiamat_ledger_v1.py` as only `tiamat_recovery`, with its exact
    confirmation. Retain the emitted content-free checkpoint and immutable ledger ID.
 5. Run `deploy/postgres/verify_tiamat_render_capabilities_v1.py` as only `tiamat_recovery`. It is

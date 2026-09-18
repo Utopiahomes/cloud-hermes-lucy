@@ -30,7 +30,6 @@ def _configure_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setenv("TIAMAT_RUNTIME_PASSWORD", "runtime-secret-material-000001")
     monkeypatch.setenv("TIAMAT_RECOVERY_PASSWORD", "recovery-secret-material-00001")
-    monkeypatch.setenv("TIAMAT_RELEASE_MANAGER_PASSWORD", "release-secret-material-000001")
 
 
 def test_bootstrap_config_derives_private_tls_urls_without_owner_reuse(
@@ -42,11 +41,11 @@ def test_bootstrap_config_derives_private_tls_urls_without_owner_reuse(
     config = module.load_config_from_environment()
 
     assert config.owner_url.username == "temporary_owner"
-    assert set(config.role_urls) == set(module.ROLE_NAMES)
+    assert set(config.role_urls) == set(module.ACTIVE_BOOTSTRAP_ROLES)
     assert all(url.host == "tiamat-private" for url in config.role_urls.values())
     assert all(url.database == "tiamat_staging" for url in config.role_urls.values())
     assert all(url.query["sslmode"] == "require" for url in config.role_urls.values())
-    assert {url.username for url in config.role_urls.values()} == set(module.ROLE_NAMES)
+    assert {url.username for url in config.role_urls.values()} == set(module.ACTIVE_BOOTSTRAP_ROLES)
 
 
 def test_bootstrap_rejects_non_tls_owner_url(monkeypatch: pytest.MonkeyPatch) -> None:
