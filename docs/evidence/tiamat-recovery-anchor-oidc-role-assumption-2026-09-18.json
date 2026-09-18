@@ -1,0 +1,42 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-18",
+  "scope": "bounded live proof: each Render staging identity assumes exactly its intended AWS IAM role via OIDC",
+  "method": {
+    "description": "Both services resumed, redeployed to commit ed631ae carrying a startup-time AWS STS GetCallerIdentity check that prints its result to the ordinary application log stream, verified there, then re-suspended. No DynamoDB call, no root key generation, no --execute, no provider dispatch.",
+    "commit": "ed631ae0de4367b8f0d48e1ccf9e83c3ea54d525",
+    "reason_for_this_route": "One-off render-cli jobs completed successfully but their stdout was not retrievable through either the render-cli logs command or the Render dashboard's Jobs log panel (both stuck/empty) at the time of this proof; a startup-time print to the already-reliable application log stream was used instead.",
+    "prior_attempt_note": "A first deploy (commit ec45d64) logged via logging.getLogger(...), which uvicorn does not attach a handler to and which was confirmed to produce no output; superseded by ed631ae which prints directly."
+  },
+  "results": {
+    "executor": {
+      "service_id": "srv-damkn2bm8hqs73dh1abg",
+      "deploy_id": "dep-dammv43m8hqs73dp1m6g",
+      "expected_role_arn": "arn:aws:iam::429870640638:role/tiamat-staging-executor",
+      "observed_assumed_role_arn": "arn:aws:sts::429870640638:assumed-role/tiamat-staging-executor/botocore-session-1789751220",
+      "account_id_observed": "429870640638",
+      "role_name_matches": true,
+      "log_timestamp": "2026-09-18T17:07:00.837634415Z"
+    },
+    "coordinator": {
+      "service_id": "srv-damko3m7bikc73c1b510",
+      "deploy_id": "dep-dammv46k1f9s739luga0",
+      "expected_role_arn": "arn:aws:iam::429870640638:role/tiamat-staging-recovery-coordinator",
+      "observed_assumed_role_arn": "arn:aws:sts::429870640638:assumed-role/tiamat-staging-recovery-coordinator/botocore-session-1789751222",
+      "account_id_observed": "429870640638",
+      "role_name_matches": true,
+      "log_timestamp": "2026-09-18T17:07:03.565855773Z"
+    },
+    "cross_contamination_check": "each service's assumed-role ARN names only its own role; neither observed ARN names the other service's role"
+  },
+  "preserved_boundaries": {
+    "private_lucy_changed": false,
+    "production_changed": false,
+    "dns_changed": false,
+    "provider_dispatch_enabled": false,
+    "signed_anchor_history_bootstrapped": false,
+    "dynamodb_write_performed": false,
+    "root_key_generated": false
+  },
+  "post_proof_state": "suspension of both services is pending human action after this evidence was captured (render-cli exposes no suspend/resume command in the version used)"
+}
