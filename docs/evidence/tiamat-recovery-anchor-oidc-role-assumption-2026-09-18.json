@@ -38,5 +38,5 @@
     "dynamodb_write_performed": false,
     "root_key_generated": false
   },
-  "post_proof_state": "suspension of both services is pending human action after this evidence was captured (render-cli exposes no suspend/resume command in the version used)"
+  "post_proof_state": "both services confirmed suspended again after this evidence was captured (state re-checked via render-cli: suspended, suspenders=[\"user\"])"
 }
