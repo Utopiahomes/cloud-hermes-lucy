@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -91,6 +92,7 @@ def body(question: str = "Tell me about Buttercup.") -> bytes:
 
 def setup(
     transport: FakeTransport | None = None,
+    authentication_failure_delay: Callable[[float], Awaitable[None]] | None = None,
 ) -> tuple[TestClient, FakeTransport, Ed25519PrivateKey, InMemoryJtiReplayStore]:
     private_key = Ed25519PrivateKey.generate()
     replay = InMemoryJtiReplayStore()
@@ -117,6 +119,7 @@ def setup(
         service,
         WorkloadJwtVerifier(identity, replay),
         ApiRelease(execution="tiamat-local.1", policy="profiles-local.1"),
+        authentication_failure_delay=authentication_failure_delay,
     )
     return TestClient(app), transport, private_key, replay
 
@@ -312,6 +315,51 @@ def test_invalid_token_precedes_unavailable_replay_store() -> None:
     assert valid_response.json()["error"]["code"] == "authentication_state_unavailable"
     assert "x-stoin-execution-release" not in valid_response.headers
     assert transport.calls == 0
+
+
+def test_all_step_three_rejections_use_the_injected_timing_class() -> None:
+    starts: list[float] = []
+
+    async def record_delay(started_at: float) -> None:
+        starts.append(started_at)
+
+    client, _, private_key, replay = setup(authentication_failure_delay=record_delay)
+    raw = body()
+    missing_binding = client.post("/execution/v1/inference", content=raw)
+    wrong_scope = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, scope="wrong"),
+    )
+    replay.set_available(False)
+    unavailable = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw),
+    )
+    assert [response.status_code for response in (missing_binding, wrong_scope, unavailable)] == [
+        401,
+        401,
+        503,
+    ]
+    assert len(starts) == 3
+
+
+def test_step_six_digest_mismatch_is_exempt_from_step_three_timing_class() -> None:
+    starts: list[float] = []
+
+    async def record_delay(started_at: float) -> None:
+        starts.append(started_at)
+
+    client, _, private_key, _ = setup(authentication_failure_delay=record_delay)
+    raw = body()
+    response = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, declared_hash=content_sha256(b"different")),
+    )
+    assert response.status_code == 401
+    assert starts == []
 
 
 def test_step_six_digest_mismatch_uses_generic_auth_failure_and_no_release_headers() -> None:

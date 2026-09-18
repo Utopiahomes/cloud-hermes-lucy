@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import secrets
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -116,8 +120,13 @@ def create_shared_execution_app(
     service: SharedExecutionService,
     verifier: WorkloadJwtVerifier,
     release: ApiRelease,
+    *,
+    authentication_failure_delay: Callable[[float], Awaitable[None]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Tiamat Shared Model Execution", docs_url=None, redoc_url=None)
+    delay_authentication_failure = (
+        authentication_failure_delay or _default_authentication_failure_delay
+    )
 
     @app.middleware("http")
     async def route_method_gate(
@@ -145,6 +154,7 @@ def create_shared_execution_app(
         if framing >= 0 and framing != len(body):
             return _transport_rejection(400)
 
+        authentication_started = time.perf_counter()
         request_id_text = _single(http_request, "X-Request-ID")
         idempotency_key = _single(http_request, "Idempotency-Key")
         declared_hash = _single(http_request, "X-Content-SHA256")
@@ -156,6 +166,7 @@ def create_shared_execution_app(
             or BODY_HASH.fullmatch(declared_hash) is None
             or authorization is None
         ):
+            await delay_authentication_failure(authentication_started)
             return _error("authentication_failed", request_id=None)
         try:
             verifier.verify(
@@ -166,8 +177,10 @@ def create_shared_execution_app(
                 declared_body_hash=declared_hash,
             )
         except AuthenticationStateUnavailable:
+            await delay_authentication_failure(authentication_started)
             return _error("authentication_state_unavailable", request_id=None)
         except AuthenticationFailed:
+            await delay_authentication_failure(authentication_started)
             return _error("authentication_failed", request_id=None)
 
         request_id = _valid_uuid4(request_id_text)
@@ -240,6 +253,15 @@ def create_shared_execution_app(
         )
 
     return app
+
+
+async def _default_authentication_failure_delay(started_at: float) -> None:
+    """Place every step-3 rejection in one fixed-minimum, bounded-jitter timing class."""
+
+    jitter = secrets.randbelow(10_001) / 1_000_000
+    remaining = 0.05 + jitter - (time.perf_counter() - started_at)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
 
 
 def _single(request: Request, name: str) -> str | None:
