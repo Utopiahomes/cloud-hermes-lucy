@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -594,3 +595,93 @@ def test_valid_profile_with_unsupported_output_mode_is_step_nine_422() -> None:
     assert response.json()["error"]["code"] == "output_contract_unsupported"
     assert response.headers["x-stoin-execution-release"] == "tiamat-local.1"
     assert transport.calls == 0
+
+
+def test_disconnect_while_streaming_body_fails_before_authentication() -> None:
+    client, transport, _, _ = setup()
+    app = client.app
+    received = iter(
+        [
+            {"type": "http.request", "body": b"{", "more_body": True},
+            {"type": "http.disconnect"},
+        ]
+    )
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return next(received)
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/execution/v1/inference",
+        "raw_path": b"/execution/v1/inference",
+        "query_string": b"",
+        "headers": [(b"content-length", b"2")],
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+        "root_path": "",
+    }
+    asyncio.run(app(scope, receive, send))
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    assert start["status"] == 400
+    response_headers = dict(start["headers"])
+    assert b"x-stoin-execution-release" not in response_headers
+    assert transport.calls == 0
+
+
+def test_lost_response_after_dispatch_replays_without_second_provider_call() -> None:
+    client, transport, private_key, _ = setup()
+    app = client.app
+    raw = body()
+    key = uuid4()
+    request_headers = headers(private_key, raw, key=key)
+    asgi_headers = [
+        (name.lower().encode("ascii"), value.encode("ascii"))
+        for name, value in request_headers.items()
+    ]
+    asgi_headers.append((b"content-length", str(len(raw)).encode("ascii")))
+    received = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal received
+        if not received:
+            received = True
+            return {"type": "http.request", "body": raw, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def disconnect_on_response_body(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.body":
+            raise ConnectionError("synthetic client disconnect")
+
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/execution/v1/inference",
+        "raw_path": b"/execution/v1/inference",
+        "query_string": b"",
+        "headers": asgi_headers,
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+        "root_path": "",
+    }
+    with pytest.raises(ConnectionError, match="synthetic client disconnect"):
+        asyncio.run(app(scope, receive, disconnect_on_response_body))
+
+    retry = client.post(
+        "/execution/v1/inference",
+        content=raw,
+        headers=headers(private_key, raw, key=key),
+    )
+    assert retry.status_code == 200
+    assert retry.json()["replayed"] is True
+    assert transport.calls == 1

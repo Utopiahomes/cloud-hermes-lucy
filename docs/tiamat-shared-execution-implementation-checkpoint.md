@@ -112,6 +112,10 @@
 - Step 8 and step 9 are now distinct in the running boundary: an unknown or unauthorized profile is
   `403 capability_forbidden`, while a valid authorized profile that cannot enforce the requested
   output mode is `422 output_contract_unsupported` before provider dispatch.
+- Direct ASGI failure injection proves a disconnect while the request body is streaming fails at
+  the transport gate with no authentication or release disclosure. A separate lost-response test
+  disconnects after the provider result was durably committed, then retries with the same
+  idempotency key and receives the stored response without a second provider call.
 - All 29 RC1 error codes are present with exact status, message, and retryability constants; a test
   checks the complete implemented code/message/retry set against the frozen positive vectors.
 - The live success envelope, all 29 generated error envelopes, and all four cost-receipt variants
@@ -144,7 +148,7 @@ The in-memory store is a test adapter. It does not establish durable or multi-re
 Before any deployment or real provider activation, Tier B must add and prove:
 
 1. finish the remaining private FastAPI ordered-gate proof from §6.3: broader cross-product
-   precedence, full response-size enforcement, and disconnect behavior; route,
+   precedence and full response-size enforcement; route,
    method, redirect avoidance, gross framing/cap, duplicate binding headers, and authenticated
    contract-size ordering are implemented;
 2. connect the implemented offline exact inventory/release-head reconciliation input to an
@@ -199,7 +203,7 @@ At local commit preparation on 2026-09-18:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,162 passed with two dependency deprecation warnings. The first run exposed
+- Complete unit suite: 1,164 passed with two dependency deprecation warnings. The first run exposed
   an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
   first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
   code was changed in this branch.
