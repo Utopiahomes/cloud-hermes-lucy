@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -182,6 +182,68 @@ class AuthorizedExecutionProfile:
     allowed_output_modes: frozenset[Literal["text", "json_schema"]]
     maximum_output_tokens: int
     maximum_reservable_microusd: int
+
+
+class ActiveAuthorityReader(Protocol):
+    def load_active_inventory_jws(self, environment: str) -> bytes: ...
+
+    def load_active_jws(self, scope: Any, release_type: str, subject_id: str) -> bytes: ...
+
+    def load_active_jws_by_release_id(
+        self, scope: Any, release_type: str, release_id: str
+    ) -> bytes: ...
+
+
+def load_authorized_profile(
+    reader: ActiveAuthorityReader,
+    *,
+    scope: Any,
+    root_key_id: str,
+    root_public_key: Ed25519PublicKey,
+    issuer: str,
+    environment: str,
+    caller_id: str,
+    realm: str,
+    profile_id: str,
+    partition_id: str,
+    now: datetime,
+) -> AuthorizedExecutionProfile:
+    """Load, reverify, and resolve the complete active authority set at cold start."""
+
+    inventory = verify_trust_inventory(
+        reader.load_active_inventory_jws(environment),
+        root_key_id=root_key_id,
+        root_public_key=root_public_key,
+        environment=environment,
+    )
+
+    def verified(exact: bytes) -> VerifiedRelease:
+        return verify_release(
+            exact,
+            inventory=inventory,
+            expected_issuer=issuer,
+            expected_environment=environment,
+            expected_caller_id=caller_id,
+            expected_realm=realm,
+            now=now,
+        )
+
+    profile = verified(reader.load_active_jws(scope, "execution_profile", profile_id))
+    if not isinstance(profile.payload, ExecutionProfileRelease):
+        raise SignedReleaseRejected("execution_profile_unavailable")
+    policy = verified(
+        reader.load_active_jws_by_release_id(
+            scope,
+            "privacy_policy",
+            profile.payload.content.privacy_policy_release_id,
+        )
+    )
+    grant = verified(reader.load_active_jws(scope, "spending_grant", partition_id))
+    return authorize_release_set(
+        [profile, policy, grant],
+        profile_id=profile_id,
+        now=now,
+    )
 
 
 def authorize_release_set(

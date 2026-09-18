@@ -31,11 +31,14 @@ def upgrade() -> None:
             state text NOT NULL CHECK (state IN ('staged', 'active', 'superseded')),
             received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             activated_at timestamptz,
+            activation_recovery_generation bigint CHECK (activation_recovery_generation >= 1),
             PRIMARY KEY (environment, inventory_generation),
             UNIQUE (environment, jws_sha256),
             CHECK (
-                (state = 'staged' AND activated_at IS NULL)
-                OR (state IN ('active', 'superseded') AND activated_at IS NOT NULL)
+                (state = 'staged' AND activated_at IS NULL
+                    AND activation_recovery_generation IS NULL)
+                OR (state IN ('active', 'superseded') AND activated_at IS NOT NULL
+                    AND activation_recovery_generation IS NOT NULL)
             )
         );
         CREATE UNIQUE INDEX trust_inventory_one_active_idx
@@ -97,6 +100,7 @@ def upgrade() -> None:
             active_sequence bigint NOT NULL CHECK (active_sequence >= 1),
             head_state text NOT NULL DEFAULT 'active' CHECK (head_state IN ('active', 'revoked')),
             revocation_release_id text CHECK (length(revocation_release_id) BETWEEN 1 AND 128),
+            recovery_generation bigint NOT NULL CHECK (recovery_generation >= 1),
             eligibility_generation bigint NOT NULL CHECK (eligibility_generation >= 1),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             PRIMARY KEY (environment, issuer, caller_id, realm, release_type, subject_id),

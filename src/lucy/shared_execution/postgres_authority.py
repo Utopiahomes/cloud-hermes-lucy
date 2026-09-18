@@ -80,7 +80,7 @@ class PostgresSignedAuthorityStore:
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_environment(connection, environment)
-                self._assert_recovery_gate_open(connection, environment)
+                recovery_generation = self._assert_recovery_gate_open(connection, environment)
                 current = connection.execute(
                     """
                     SELECT inventory_generation, jws_sha256
@@ -123,10 +123,11 @@ class PostgresSignedAuthorityStore:
                 connection.execute(
                     """
                     UPDATE tiamat.trust_inventories
-                    SET state = 'active', activated_at = clock_timestamp()
+                    SET state = 'active', activated_at = clock_timestamp(),
+                        activation_recovery_generation = %s
                     WHERE environment = %s AND inventory_generation = %s
                     """,
-                    (environment, inventory_generation),
+                    (recovery_generation, environment, inventory_generation),
                 )
         except AuthorityTransitionRejected:
             raise
@@ -237,7 +238,7 @@ class PostgresSignedAuthorityStore:
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_scope(connection, scope)
-                self._assert_recovery_gate_open(connection, scope.environment)
+                recovery_generation = self._assert_recovery_gate_open(connection, scope.environment)
                 candidate = connection.execute(
                     """
                     SELECT release_id, sequence, predecessor_release_id, jws_sha256, state
@@ -293,13 +294,14 @@ class PostgresSignedAuthorityStore:
                     INSERT INTO tiamat.release_heads (
                         environment, issuer, caller_id, realm, release_type, subject_id,
                         active_release_id, active_jws_sha256, active_sequence,
-                        eligibility_generation
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        recovery_generation, eligibility_generation
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (environment, issuer, caller_id, realm, release_type, subject_id)
                     DO UPDATE SET active_release_id = EXCLUDED.active_release_id,
                       active_jws_sha256 = EXCLUDED.active_jws_sha256,
                       active_sequence = EXCLUDED.active_sequence,
                       head_state = 'active', revocation_release_id = NULL,
+                      recovery_generation = EXCLUDED.recovery_generation,
                       eligibility_generation = EXCLUDED.eligibility_generation,
                       updated_at = clock_timestamp()
                     """,
@@ -310,6 +312,7 @@ class PostgresSignedAuthorityStore:
                         candidate["release_id"],
                         candidate["jws_sha256"],
                         candidate["sequence"],
+                        recovery_generation,
                         generation,
                     ),
                 )
@@ -352,8 +355,64 @@ class PostgresSignedAuthorityStore:
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_scope(connection, scope)
-                self._assert_recovery_gate_open(connection, scope.environment)
+                recovery_generation = self._assert_recovery_gate_open(connection, scope.environment)
                 row = connection.execute(
+                    """
+                    SELECT r.exact_jws
+                    FROM tiamat.release_heads h
+                    JOIN tiamat.restore_gate gate ON gate.environment = h.environment
+                    JOIN tiamat.signed_releases r
+                      ON r.environment = h.environment AND r.issuer = h.issuer
+                     AND r.caller_id = h.caller_id AND r.realm = h.realm
+                     AND r.release_type = h.release_type AND r.subject_id = h.subject_id
+                     AND r.release_id = h.active_release_id
+                     AND r.jws_sha256 = h.active_jws_sha256
+                    WHERE h.environment = %s AND h.issuer = %s AND h.caller_id = %s
+                      AND h.realm = %s AND h.release_type = %s AND h.subject_id = %s
+                      AND h.head_state = 'active' AND r.state = 'active'
+                      AND h.recovery_generation = gate.recovery_generation
+                    """,
+                    (*self._scope_values(scope), release_type, subject_id),
+                ).fetchone()
+                if row is None:
+                    raise AuthorityTransitionRejected("active_release_unavailable")
+                if recovery_generation < 1:
+                    raise AuthorityTransitionRejected("recovery_gate_blocked")
+                return bytes(row["exact_jws"])
+        except AuthorityTransitionRejected:
+            raise
+        except psycopg.Error as exc:
+            raise AuthorityStoreUnavailable from exc
+
+    def load_active_inventory_jws(self, environment: str) -> bytes:
+        try:
+            with self._connect() as connection, connection.transaction():
+                self._set_environment(connection, environment)
+                generation = self._assert_recovery_gate_open(connection, environment)
+                row = connection.execute(
+                    """
+                    SELECT exact_jws FROM tiamat.trust_inventories
+                    WHERE environment = %s AND state = 'active'
+                      AND activation_recovery_generation = %s
+                    """,
+                    (environment, generation),
+                ).fetchone()
+                if row is None:
+                    raise AuthorityTransitionRejected("active_inventory_unavailable")
+                return bytes(row["exact_jws"])
+        except AuthorityTransitionRejected:
+            raise
+        except psycopg.Error as exc:
+            raise AuthorityStoreUnavailable from exc
+
+    def load_active_jws_by_release_id(
+        self, scope: AuthorityScope, release_type: str, release_id: str
+    ) -> bytes:
+        try:
+            with self._connect() as connection, connection.transaction():
+                self._set_scope(connection, scope)
+                generation = self._assert_recovery_gate_open(connection, scope.environment)
+                rows = connection.execute(
                     """
                     SELECT r.exact_jws
                     FROM tiamat.release_heads h
@@ -364,14 +423,15 @@ class PostgresSignedAuthorityStore:
                      AND r.release_id = h.active_release_id
                      AND r.jws_sha256 = h.active_jws_sha256
                     WHERE h.environment = %s AND h.issuer = %s AND h.caller_id = %s
-                      AND h.realm = %s AND h.release_type = %s AND h.subject_id = %s
-                      AND h.head_state = 'active' AND r.state = 'active'
+                      AND h.realm = %s AND h.release_type = %s AND h.active_release_id = %s
+                      AND h.head_state = 'active' AND h.recovery_generation = %s
+                      AND r.state = 'active'
                     """,
-                    (*self._scope_values(scope), release_type, subject_id),
-                ).fetchone()
-                if row is None:
+                    (*self._scope_values(scope), release_type, release_id, generation),
+                ).fetchall()
+                if len(rows) != 1:
                     raise AuthorityTransitionRejected("active_release_unavailable")
-                return bytes(row["exact_jws"])
+                return bytes(rows[0]["exact_jws"])
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:
@@ -497,13 +557,14 @@ class PostgresSignedAuthorityStore:
     @staticmethod
     def _assert_recovery_gate_open(
         connection: psycopg.Connection[dict[str, Any]], environment: str
-    ) -> None:
+    ) -> int:
         row = connection.execute(
             """
-            SELECT dispatch_blocked FROM tiamat.restore_gate
+            SELECT dispatch_blocked, recovery_generation FROM tiamat.restore_gate
             WHERE environment = %s FOR SHARE
             """,
             (environment,),
         ).fetchone()
         if row is None or row["dispatch_blocked"]:
             raise AuthorityTransitionRejected("recovery_gate_blocked")
+        return int(row["recovery_generation"])

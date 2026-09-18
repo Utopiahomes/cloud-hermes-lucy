@@ -17,6 +17,8 @@ class RecoveryRejected(RuntimeError):
 
 
 _OPERATIONAL_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+type ReleaseHeadKey = tuple[str, str, str, str, str]
+type ReleaseHeadValue = tuple[str, str]
 
 
 def initialize_environment(
@@ -76,6 +78,8 @@ def authorize_reconciled_state(
     current_recovery_generation: int,
     next_recovery_generation: int,
     unresolved_provider_liabilities: int,
+    expected_inventory: tuple[int, str] | None = None,
+    expected_release_heads: dict[ReleaseHeadKey, ReleaseHeadValue] | None = None,
 ) -> None:
     """Unblock only an inspected ledger with an externally advanced generation.
 
@@ -118,6 +122,58 @@ def authorize_reconciled_state(
             ).fetchone()
             if observed is None or int(observed[0]) != unresolved_provider_liabilities:
                 raise RecoveryRejected("unresolved provider liabilities were not reconciled")
+            inventory_rows = connection.execute(
+                """
+                SELECT inventory_generation, jws_sha256
+                FROM tiamat.trust_inventories
+                WHERE environment = %s AND state = 'active'
+                """,
+                (environment,),
+            ).fetchall()
+            if expected_inventory is None:
+                if inventory_rows:
+                    raise RecoveryRejected("active trust inventory lacks external confirmation")
+            elif (
+                len(inventory_rows) != 1
+                or (int(inventory_rows[0][0]), str(inventory_rows[0][1])) != expected_inventory
+            ):
+                raise RecoveryRejected("active trust inventory differs from external confirmation")
+            head_rows = connection.execute(
+                """
+                SELECT issuer, caller_id, realm, release_type, subject_id,
+                       active_jws_sha256, head_state
+                FROM tiamat.release_heads
+                WHERE environment = %s
+                """,
+                (environment,),
+            ).fetchall()
+            observed_heads = {
+                (str(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4])): (
+                    str(row[5]),
+                    str(row[6]),
+                )
+                for row in head_rows
+            }
+            if expected_release_heads is None:
+                if observed_heads:
+                    raise RecoveryRejected("active release heads lack external confirmation")
+            elif observed_heads != expected_release_heads:
+                raise RecoveryRejected("release heads differ from external confirmation")
+            connection.execute(
+                """
+                UPDATE tiamat.trust_inventories
+                SET activation_recovery_generation = %s
+                WHERE environment = %s AND state = 'active'
+                """,
+                (next_recovery_generation, environment),
+            )
+            connection.execute(
+                """
+                UPDATE tiamat.release_heads SET recovery_generation = %s
+                WHERE environment = %s
+                """,
+                (next_recovery_generation, environment),
+            )
             connection.execute(
                 """
                 UPDATE tiamat.restore_gate

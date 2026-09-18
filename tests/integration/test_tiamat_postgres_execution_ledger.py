@@ -39,10 +39,15 @@ from lucy.shared_execution.postgres_ledger import (
     RecoveryWitness,
 )
 from lucy.shared_execution.recovery import (
+    RecoveryRejected,
     authorize_reconciled_state,
     quarantine_environment,
 )
-from lucy.shared_execution.signed_releases import verify_release, verify_trust_inventory
+from lucy.shared_execution.signed_releases import (
+    load_authorized_profile,
+    verify_release,
+    verify_trust_inventory,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATABASE_URL = os.environ.get("TIAMAT_TEST_DATABASE_URL")
@@ -238,6 +243,7 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
     store.stage_inventory(inventory_jws, inventory, inventory_digest)
     with pytest.raises(AuthorityTransitionRejected, match="recovery_gate_blocked"):
         store.activate_inventory("staging", 1)
+    staging_epoch = uuid4()
     with psycopg.connect(migration_url) as connection:
         connection.execute("SELECT set_config('tiamat.environment', 'staging', true)")
         connection.execute(
@@ -247,7 +253,7 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
               dispatch_blocked, block_reason, verified_at
             ) VALUES ('staging', %s, 1, 1, false, NULL, clock_timestamp())
             """,
-            (uuid4(),),
+            (staging_epoch,),
         )
         connection.execute(
             "SELECT set_config('tiamat.caller_id', %s, true)", ("stoin:synth:utopia-homes",)
@@ -290,7 +296,6 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
         store.load_active_jws(scope, "execution_profile", "utopia-homes.public-answer.generate.v1")
         == profile_jws
     )
-
     privacy_vector = _bundle_json("vectors", "positive", "release.pos.privacy-policy.json")
     privacy = verify_release(
         privacy_vector["compact_jws"].encode(),
@@ -377,6 +382,74 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
     assert projected["maximum_concurrency"] == 2
     assert projected["largest_per_call_microusd"] == 2_000
     assert projected["blocked"] is False
+    quarantine_environment(migration_url, environment="staging", reason="restore_test")
+    with pytest.raises(RecoveryRejected, match="external confirmation"):
+        authorize_reconciled_state(
+            migration_url,
+            environment="staging",
+            expected_storage_epoch=staging_epoch,
+            current_recovery_generation=1,
+            next_recovery_generation=2,
+            unresolved_provider_liabilities=0,
+        )
+    expected_heads = {
+        (
+            "stoin-control",
+            "stoin:synth:utopia-homes",
+            "utopia-homes",
+            "execution_profile",
+            "utopia-homes.public-answer.generate.v1",
+        ): (profile.jws_sha256, "active"),
+        (
+            "stoin-control",
+            "stoin:synth:utopia-homes",
+            "utopia-homes",
+            "privacy_policy",
+            "utopia-public-zdr",
+        ): (privacy.jws_sha256, "revoked"),
+        (
+            "stoin-control",
+            "stoin:synth:utopia-homes",
+            "utopia-homes",
+            "revocation",
+            "utopia-public-revocations",
+        ): (revocation.jws_sha256, "active"),
+        (
+            "stoin-control",
+            "stoin:synth:utopia-homes",
+            "utopia-homes",
+            "spending_grant",
+            "utopia-public",
+        ): (grant.jws_sha256, "active"),
+    }
+    authorize_reconciled_state(
+        migration_url,
+        environment="staging",
+        expected_storage_epoch=staging_epoch,
+        current_recovery_generation=1,
+        next_recovery_generation=2,
+        unresolved_provider_liabilities=0,
+        expected_inventory=(1, inventory_digest),
+        expected_release_heads=expected_heads,
+    )
+    assert (
+        store.load_active_jws(scope, "execution_profile", "utopia-homes.public-answer.generate.v1")
+        == profile_jws
+    )
+    with pytest.raises(AuthorityTransitionRejected, match="active_release_unavailable"):
+        load_authorized_profile(
+            store,
+            scope=scope,
+            root_key_id="tiamat-trust-root-staging-1",
+            root_public_key=root_key,
+            issuer="stoin-control",
+            environment="staging",
+            caller_id="stoin:synth:utopia-homes",
+            realm="utopia-homes",
+            profile_id="utopia-homes.public-answer.generate.v1",
+            partition_id="utopia-public",
+            now=datetime(2026, 9, 18, 12, tzinfo=UTC),
+        )
 
 
 def test_durable_replay_fencing_and_cross_scope_isolation(

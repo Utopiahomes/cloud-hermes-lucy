@@ -9,6 +9,7 @@ from lucy.shared_execution.signed_releases import (
     AuthorizedExecutionProfile,
     SignedReleaseRejected,
     authorize_release_set,
+    load_authorized_profile,
     verify_release,
     verify_trust_inventory,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "AuthorizedExecutionProfile",
     "SignedReleaseRejected",
     "authorize_release_set",
+    "load_authorized_profile",
     "verify_release",
     "verify_trust_inventory",
 ]

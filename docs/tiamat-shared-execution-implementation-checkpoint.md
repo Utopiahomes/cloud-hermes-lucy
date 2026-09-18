@@ -1,6 +1,6 @@
 # Tiamat Shared Model Execution — implementation checkpoint
 
-**Date:** 2026-09-17  
+**Date:** 2026-09-18
 **Contract:** Stoin Shared Model Execution v1.0 RC1  
 **Contract digest:** `a010c2cd5d501dd5586be3e1c54753ed7bf82505b9971d19c007e227bb9a75a8`  
 **Conformance-bundle digest:** `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`
@@ -87,6 +87,15 @@
   release head and the partition's active grant, period, allowance, contingency, concurrency, and
   per-call ceiling in one transaction; a missing partition or invalid predecessor rolls the entire
   change back.
+- Active inventories and release heads are now stamped with the restore-gate recovery generation.
+  Offline recovery requires an exact externally supplied inventory generation/digest and the exact
+  set of release-head digest/state pairs before restamping them for the next generation and opening
+  dispatch. Database contents alone cannot self-authorize after quarantine or restore.
+- The cold-start authority loader reads only recovery-generation-bound active records, reverifies
+  the root-signed inventory and every exact compact JWS, follows the execution profile's exact
+  privacy-policy release ID, resolves the current partition grant, and constructs dispatch-capable
+  authority only after the complete relationship set passes. A revoked linked policy remains
+  unavailable after a correctly reconciled restore.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -100,9 +109,10 @@ Before any deployment or real provider activation, Tier B must add and prove:
    cross-product precedence, timing-class, response-size, method, redirect, and disconnect proof;
 2. wire the implemented durable scoped `jti` replay adapter and prove digest-key/key rotation against
    real PostgreSQL;
-3. complete restore reconciliation against Control and bind active release loading to the external
-   inventory/release-head witness; verified staging, monotonic activation, atomic grant projection,
-   signed no-fallback revocation, exact active-byte loading, and restore-gate enforcement are done;
+3. connect the implemented offline exact inventory/release-head reconciliation input to an
+   independently authenticated Control witness in a deployment; local witness enforcement,
+   recovery-generation binding, cold-start reverification, monotonic activation, atomic grant
+   projection, signed no-fallback revocation, and exact active-byte loading are done;
 4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
 5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
 6. finish differential and adversarial coverage for the restricted-schema evaluator;
@@ -132,12 +142,17 @@ At local commit preparation on 2026-09-17:
 - The 17-test suite passed again after grant coupling, proving bootstrap and successor grants update
   the active signed head and budget projection atomically while the earlier missing-predecessor
   attempt leaves the partition unchanged. The disposable container was removed.
+- The same fresh PostgreSQL 16 suite passed all 17 tests after recovery binding and cold-start
+  loading were completed. It proves recovery rejects unconfirmed database authority, accepts only
+  an exact external inventory/head-set witness, restamps authority to the new recovery generation,
+  and still refuses a profile whose linked privacy policy is a revoked tombstone. The loopback-only
+  disposable container was stopped and removed.
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,085 passed with two dependency deprecation warnings.
+- Complete unit suite: 1,111 passed with two dependency deprecation warnings.
 - Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
-- Strict mypy: passed across 132 source files.
+- Strict mypy: passed across 134 source files.
 - Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL
   offline SQL.
 - Focused durable-ledger tests: seven unit tests and 16 real PostgreSQL integration tests passed using
