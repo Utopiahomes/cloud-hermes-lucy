@@ -163,6 +163,11 @@ The approved single-provider deployment choice is now represented locally withou
   consistent exact-key reads, re-verifies signed bytes on every read and before every write, and
   conditionally replaces only the exact predecessor digest/version. DynamoDB metadata cannot
   establish authority on its own.
+- `RecoveryAnchorRecordDecoder` provides the production exact-byte seam: it first verifies the
+  recovery witness against a separately accepted witness-inventory key/scope, then verifies the
+  root-signed anchor transition and its exact witness digest/identity binding. The environment
+  factory supplies only table and region settings; AWS credentials remain in the SDK machine
+  identity chain.
 - `RecoveryAnchorRuntimeGate` makes the approved outage behavior executable: startup requires the
   external anchor; a running process may retain only its last verified authority until signed
   expiry; a newly observed quarantine blocks immediately; recovery updates fail closed.
@@ -196,8 +201,9 @@ The existing Homes corpus remains local-test-only and is not authorized for prov
 
 At local commit preparation on 2026-09-18:
 
-- DynamoDB recovery-anchor boundary: 28 focused tests passed across the portable state machine,
-  exact-byte JWS verifier, DynamoDB adapter, runtime outage gate, and CloudFormation assertions.
+- DynamoDB recovery-anchor boundary: 44 focused tests passed across the portable state machine,
+  exact-byte witness and transition JWS verifiers, DynamoDB adapter, runtime outage gate, and
+  CloudFormation assertions.
   The suite covers strong reads, bootstrap and successor CAS, signature re-verification, unsigned
   metadata corruption, conditional races, ambiguous-write resolution, AWS-unavailable
   startup/write behavior, bounded cached
@@ -205,6 +211,10 @@ At local commit preparation on 2026-09-18:
   for all touched Python files and strict mypy passed for both recovery-anchor source modules.
   CloudFormation was structurally parsed and policy-asserted locally; AWS-side `validate-template`
   remains part of the pre-provisioning activation review because no AWS call was authorized.
+- Complete unit suite after the DynamoDB environment factory and concrete witness decoder: 1,200
+  passed with two existing dependency deprecation warnings. An initial run placed pytest's import
+  fixture inside the repository and correctly triggered three intake-boundary failures; rerunning
+  unchanged code with the temporary root outside the repository passed completely.
 
 - Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,

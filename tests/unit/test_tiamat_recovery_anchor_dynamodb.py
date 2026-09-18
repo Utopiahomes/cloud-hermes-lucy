@@ -15,7 +15,10 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedAnchorTransition,
     VerifiedRecoveryWitness,
 )
-from lucy.shared_execution.recovery_anchor_dynamodb import DynamoDbExternalRecoveryAnchor
+from lucy.shared_execution.recovery_anchor_dynamodb import (
+    DynamoDbExternalRecoveryAnchor,
+    dynamodb_recovery_anchor_from_environment,
+)
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=UTC)
 
@@ -275,3 +278,48 @@ def test_known_quarantine_immediately_replaces_cached_dispatch_authority() -> No
             observed_beacon=PostgresContinuityBeacon("system-1", 1, "0/02", "a" * 64),
             now=NOW,
         )
+
+
+def test_environment_factory_uses_sdk_machine_identity_without_credential_settings() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    first = make_transition(identity)
+    client = FakeDynamoDb()
+    calls: list[tuple[str, str]] = []
+
+    def client_factory(service: str, *, region_name: str) -> FakeDynamoDb:
+        calls.append((service, region_name))
+        return client
+
+    store = dynamodb_recovery_anchor_from_environment(
+        Decoder(first),
+        environment={
+            "TIAMAT_RECOVERY_ANCHOR_TABLE": "stoin-staging-tiamat-recovery-anchor-v1",
+            "AWS_REGION": "us-east-1",
+        },
+        client_factory=client_factory,
+    )
+
+    assert calls == [("dynamodb", "us-east-1")]
+    store.install(first, expected_transition_sha256=None, now=NOW)
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"AWS_REGION": "us-east-1"},
+        {"TIAMAT_RECOVERY_ANCHOR_TABLE": "valid-table"},
+        {
+            "TIAMAT_RECOVERY_ANCHOR_TABLE": "bad/table",
+            "AWS_REGION": "us-east-1",
+        },
+        {
+            "TIAMAT_RECOVERY_ANCHOR_TABLE": "valid-table",
+            "AWS_REGION": "not-a-region",
+        },
+    ],
+)
+def test_environment_factory_rejects_missing_or_invalid_deployment_binding(
+    environment: dict[str, str],
+) -> None:
+    with pytest.raises(ValueError):
+        dynamodb_recovery_anchor_from_environment(Decoder(), environment=environment)

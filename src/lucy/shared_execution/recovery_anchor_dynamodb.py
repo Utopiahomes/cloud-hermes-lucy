@@ -7,9 +7,13 @@ index attributes are never treated as authority.
 
 from __future__ import annotations
 
+import os
+import re
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
+import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 
 from lucy.shared_execution.recovery_anchor import (
@@ -159,3 +163,31 @@ class DynamoDbExternalRecoveryAnchor:
     @staticmethod
     def _storage_key(key: RecoveryAnchorKey) -> str:
         return f"ENV#{key.environment}#LEDGER#{key.ledger_id}"
+
+
+_TABLE_NAME = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d+$")
+
+
+def dynamodb_recovery_anchor_from_environment(
+    decode_transition: AnchorTransitionDecoder,
+    *,
+    environment: Mapping[str, str] | None = None,
+    client_factory: Any | None = None,
+) -> DynamoDbExternalRecoveryAnchor:
+    """Build the deployment adapter without accepting credentials as application settings."""
+
+    values = os.environ if environment is None else environment
+    table_name = values.get("TIAMAT_RECOVERY_ANCHOR_TABLE", "")
+    region = values.get("AWS_REGION", "")
+    if _TABLE_NAME.fullmatch(table_name) is None:
+        raise ValueError("TIAMAT_RECOVERY_ANCHOR_TABLE is invalid")
+    if _REGION.fullmatch(region) is None:
+        raise ValueError("AWS_REGION is invalid")
+    factory = boto3.client if client_factory is None else client_factory
+    client = factory("dynamodb", region_name=region)
+    return DynamoDbExternalRecoveryAnchor(
+        client=client,
+        table_name=table_name,
+        decode_transition=decode_transition,
+    )

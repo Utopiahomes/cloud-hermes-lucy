@@ -1,0 +1,171 @@
+"""Exact-byte verification for Tiamat recovery witnesses and anchor records."""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Literal
+from uuid import UUID
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from lucy.shared_execution.recovery_anchor import (
+    RecoveryAnchorIdentity,
+    VerifiedAnchorTransition,
+    VerifiedRecoveryWitness,
+)
+from lucy.shared_execution.recovery_anchor_jws import verify_anchor_transition
+from lucy.shared_execution.signed_releases import SignedReleaseRejected, _verify_compact
+
+RECOVERY_WITNESS_TYP = "stoin-tiamat-recovery-witness+jws"
+_UUID4 = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+
+
+class RecoveryWitnessSignatureRejected(ValueError):
+    """A witness failed its strict signature, scope, inventory, or time checks."""
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class _WitnessPayload(_StrictModel):
+    format_version: Literal["1"]
+    witness_id: str = Field(pattern=_UUID4)
+    issuer: Literal["stoin:control"]
+    environment: str = Field(min_length=1, max_length=128)
+    ledger_id: str = Field(pattern=_UUID4)
+    storage_epoch: str = Field(pattern=_UUID4)
+    recovery_generation: int = Field(ge=1, le=9_007_199_254_740_991)
+    witness_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    status: Literal["reconciled", "quarantined"]
+    issued_at: str
+    not_before: str
+    not_after: str
+    inventory_generation: int = Field(ge=1, le=9_007_199_254_740_991)
+    inventory_jws_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    release_heads_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_settlement_position_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True)
+class RecoveryWitnessVerificationContext:
+    identity: RecoveryAnchorIdentity
+    key_id: str
+    public_key: Ed25519PublicKey
+    inventory_generation: int
+    inventory_jws_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            not self.key_id
+            or not 1 <= self.inventory_generation <= 9_007_199_254_740_991
+            or not _is_digest(self.inventory_jws_sha256)
+        ):
+            raise ValueError("recovery witness verification context is invalid")
+
+
+def verify_recovery_witness(
+    exact_jws: bytes,
+    *,
+    context: RecoveryWitnessVerificationContext,
+) -> VerifiedRecoveryWitness:
+    """Verify strict signed witness bytes against a separately accepted trust inventory."""
+
+    try:
+        raw = _verify_compact(
+            exact_jws,
+            expected_kid=context.key_id,
+            public_key=context.public_key,
+            expected_typ=RECOVERY_WITNESS_TYP,
+        )
+        payload = _WitnessPayload.model_validate(raw)
+        identity = RecoveryAnchorIdentity(
+            payload.environment,
+            _canonical_uuid4(payload.ledger_id),
+            _canonical_uuid4(payload.storage_epoch),
+        )
+        _canonical_uuid4(payload.witness_id)
+        if identity != context.identity:
+            raise RecoveryWitnessSignatureRejected("recovery_witness_identity_invalid")
+        if (
+            payload.inventory_generation != context.inventory_generation
+            or payload.inventory_jws_sha256 != context.inventory_jws_sha256
+        ):
+            raise RecoveryWitnessSignatureRejected("recovery_witness_inventory_binding_invalid")
+        issued_at = _parse_time(payload.issued_at)
+        not_before = _parse_time(payload.not_before)
+        not_after = _parse_time(payload.not_after)
+        if (
+            issued_at > not_before
+            or not_before >= not_after
+            or not_after - not_before > timedelta(hours=24)
+        ):
+            raise RecoveryWitnessSignatureRejected("recovery_witness_time_window_invalid")
+        return VerifiedRecoveryWitness(
+            identity=identity,
+            recovery_generation=payload.recovery_generation,
+            witness_revision=payload.witness_revision,
+            status=payload.status,
+            checkpoint_digest=payload.checkpoint_digest,
+            witness_inventory_digest=payload.inventory_jws_sha256,
+            exact_jws=exact_jws,
+            not_before=not_before,
+            not_after=not_after,
+        )
+    except (
+        RecoveryWitnessSignatureRejected,
+        SignedReleaseRejected,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        if isinstance(exc, RecoveryWitnessSignatureRejected):
+            raise
+        raise RecoveryWitnessSignatureRejected("recovery_witness_invalid") from exc
+
+
+@dataclass(frozen=True)
+class RecoveryAnchorRecordDecoder:
+    """Concrete DynamoDB decoder joining witness and root transition verification."""
+
+    witness_context: RecoveryWitnessVerificationContext
+    anchor_root_key_id: str
+    anchor_root_public_key: Ed25519PublicKey
+
+    def __call__(
+        self, exact_transition_jws: bytes, exact_witness_jws: bytes
+    ) -> VerifiedAnchorTransition:
+        witness = verify_recovery_witness(exact_witness_jws, context=self.witness_context)
+        return verify_anchor_transition(
+            exact_transition_jws,
+            root_key_id=self.anchor_root_key_id,
+            root_public_key=self.anchor_root_public_key,
+            witness=witness,
+        )
+
+
+def _parse_time(value: str) -> datetime:
+    try:
+        if len(value) != 20 or not value.endswith("Z"):
+            raise ValueError
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise RecoveryWitnessSignatureRejected("recovery_witness_timestamp_invalid") from exc
+
+
+def _canonical_uuid4(value: str) -> UUID:
+    parsed = UUID(value)
+    if str(parsed) != value or parsed.version != 4:
+        raise RecoveryWitnessSignatureRejected("recovery_witness_uuid_invalid")
+    return parsed
+
+
+def _is_digest(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def recovery_witness_sha256(exact_jws: bytes) -> str:
+    return hashlib.sha256(exact_jws).hexdigest()

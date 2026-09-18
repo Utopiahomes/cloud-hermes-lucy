@@ -12,6 +12,8 @@ Status: local implementation complete; no AWS resource has been provisioned.
 - `GetItem` always uses `ConsistentRead=true`. A transition uses `PutItem` with an exact signed
   predecessor digest and transition-version condition. A lost compare-and-swap fails closed.
 - Every stored record is signature-verified on read and again before acceptance on write.
+- The concrete decoder verifies the witness against the accepted recovery-witness inventory
+  key/scope before verifying the root-signed transition and its exact witness binding.
 - This adapter implements the portable `ExternalRecoveryAnchor` interface. Global tables,
   multi-provider quorum, replicas, and additional recovery sites are explicitly out of v1 scope.
 
