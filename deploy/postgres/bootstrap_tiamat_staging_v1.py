@@ -86,7 +86,11 @@ def _parse_private_tls_url(value: str, *, expected_username: str | None = None) 
         raise BootstrapRejected("database URL has an unexpected login")
     # Render's dashboard supplies a private URL without a query string. Always set the exact
     # required mode here rather than accepting a connection whose transport would be ambiguous.
-    return parsed.update_query_dict({"sslmode": "require"})
+    # Alembic opens this URL through SQLAlchemy. Pin its psycopg v3 dialect here as
+    # well, otherwise a dashboard-supplied ``postgresql://`` URL makes SQLAlchemy
+    # try its legacy psycopg2 dialect even though the image deliberately ships
+    # psycopg v3 only.
+    return parsed.set(drivername="postgresql+psycopg").update_query_dict({"sslmode": "require"})
 
 
 def _role_url(owner_url: URL, *, role: str, password: str) -> URL:

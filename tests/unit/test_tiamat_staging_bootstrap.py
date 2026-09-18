@@ -57,6 +57,7 @@ def test_bootstrap_normalizes_render_owner_url_to_tls(monkeypatch: pytest.Monkey
     )
 
     config = module.load_config_from_environment()
+    assert config.owner_url.drivername == "postgresql+psycopg"
     assert config.owner_url.query["sslmode"] == "require"
 
 
