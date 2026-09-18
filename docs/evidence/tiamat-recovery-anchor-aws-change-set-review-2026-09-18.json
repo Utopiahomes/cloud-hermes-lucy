@@ -1,0 +1,50 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-18",
+  "scope": "review-only Tiamat DynamoDB recovery-anchor CloudFormation change set",
+  "aws": {
+    "account_id": "429870640638",
+    "region": "us-east-1",
+    "profile": "lucy-dev"
+  },
+  "stack": {
+    "name": "tiamat-staging-recovery-anchor-v1",
+    "status": "REVIEW_IN_PROGRESS",
+    "provisioned_resource_count": 0
+  },
+  "change_set": {
+    "name": "review-20260918-01",
+    "id": "arn:aws:cloudformation:us-east-1:429870640638:changeSet/review-20260918-01/e89e25c8-1243-4082-91e1-16e4f6758250",
+    "status": "CREATE_COMPLETE",
+    "execution_status": "AVAILABLE",
+    "executed": false,
+    "description": "Review only: Tiamat external recovery anchor; do not execute",
+    "parameters": {
+      "ResourceNamespace": "stoin",
+      "EnvironmentName": "staging",
+      "AnchorReaderRoleName": "tiamat-staging-executor",
+      "AnchorUpdaterRoleName": "tiamat-staging-recovery-coordinator"
+    },
+    "changes": [
+      {"action": "Add", "logical_id": "RecoveryAnchorReadPolicy", "type": "AWS::IAM::Policy"},
+      {"action": "Add", "logical_id": "RecoveryAnchorTable", "type": "AWS::DynamoDB::Table"},
+      {"action": "Add", "logical_id": "RecoveryAnchorUpdatePolicy", "type": "AWS::IAM::Policy"}
+    ]
+  },
+  "validation": {
+    "aws_validate_template": "passed",
+    "change_set_creation": "passed",
+    "stack_resource_enumeration": "empty",
+    "existing_lucy_roles_reused": false,
+    "dedicated_tiamat_roles_exist": false
+  },
+  "activation_blocker": "Dedicated Tiamat executor and recovery-coordinator workload identities must be provisioned with exact OIDC subjects before change-set execution.",
+  "excluded_actions": {
+    "change_set_execution": true,
+    "dynamodb_table_created": false,
+    "iam_policy_attached": false,
+    "render_workload_created_or_changed": false,
+    "provider_dispatch_enabled": false,
+    "dns_changed": false
+  }
+}

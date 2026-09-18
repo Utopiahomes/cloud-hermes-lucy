@@ -215,6 +215,12 @@ At local commit preparation on 2026-09-18:
   passed with two existing dependency deprecation warnings. An initial run placed pytest's import
   fixture inside the repository and correctly triggered three intake-boundary failures; rerunning
   unchanged code with the temporary root outside the repository passed completely.
+- AWS pre-provisioning review: the template passed the AWS CloudFormation validator in account
+  `429870640638`, `us-east-1`. Change set `review-20260918-01` reached `CREATE_COMPLETE` and remains
+  unexecuted/available. The stack shell is `REVIEW_IN_PROGRESS`; AWS enumerated zero provisioned
+  resources. The proposed dedicated Tiamat reader/updater roles do not yet exist, and no existing
+  Lucy/Utopia identity was reused or changed. Exact content-free evidence is recorded in
+  `docs/evidence/tiamat-recovery-anchor-aws-change-set-review-2026-09-18.json`.
 
 - Recovery-anchor unit boundary: 15 passed, including root-signed transition binding, signature/type
   substitution, predecessor-chain tampering, witness renewal, witness-inventory rotation,

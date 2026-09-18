@@ -2,6 +2,18 @@
 
 Status: local implementation complete; no AWS resource has been provisioned.
 
+AWS review checkpoint (2026-09-18): AWS accepted the template in account `429870640638`, region
+`us-east-1`. Review-only change set `review-20260918-01` is `CREATE_COMPLETE` / `AVAILABLE` under
+stack `tiamat-staging-recovery-anchor-v1`, which remains `REVIEW_IN_PROGRESS` with zero resources.
+The change set adds exactly the table and two policies described below and has not been executed.
+Evidence is in `docs/evidence/tiamat-recovery-anchor-aws-change-set-review-2026-09-18.json`.
+
+The parameters deliberately name new roles, `tiamat-staging-executor` and
+`tiamat-staging-recovery-coordinator`. Those roles do not yet exist. Existing Lucy/Utopia roles were
+inspected only to understand the Render OIDC trust pattern and were not reused or changed. The
+change set is not eligible for execution until separately deployed Tiamat workloads provide exact
+OIDC subjects and dedicated roles are reviewed.
+
 ## Boundary and supported topology
 
 - PostgreSQL remains the execution and accounting system of record.
