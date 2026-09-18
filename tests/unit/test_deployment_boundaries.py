@@ -155,6 +155,7 @@ def test_render_image_installs_only_hash_locked_runtime_dependencies() -> None:
     # omits uvloop even though uvicorn[standard] requires it in Render.
     assert "\nuvloop==" in lock
     assert "\npyjwt==" in lock
+    assert "\nrfc8785==0.1.4 " in lock
 
 
 def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files() -> None:
