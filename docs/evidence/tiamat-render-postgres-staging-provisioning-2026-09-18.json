@@ -17,11 +17,10 @@
   },
   "observed_state": {
     "database_status": "available",
-    "external_access": "not yet disabled; inherited workspace and environment 0.0.0.0/0 rules remain",
+    "external_access": "disabled at the PostgreSQL resource: Render confirmed all internet traffic is blocked by PostgreSQL inbound IP rules; inherited workspace and environment rules remain unchanged",
     "credentials_or_connection_strings_recorded": false
   },
   "not_performed": [
-    "external access restriction change",
     "migration or role bootstrap",
     "ledger initialization",
     "recovery capability probe",
@@ -30,5 +29,5 @@
     "DynamoDB write",
     "provider configuration or dispatch"
   ],
-  "next_required_action": "Resolve inherited inbound-rule scope, then explicitly disable external database access before any credential use or database commissioning."
+  "next_required_action": "Use only the internal TLS URL in a temporary migration boundary to establish serving and recovery roles; the ledger remains dispatch-blocked until later commissioning gates."
 }
