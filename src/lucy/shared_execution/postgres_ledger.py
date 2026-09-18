@@ -75,10 +75,19 @@ class LedgerAdmission:
     execution_deadline: datetime
     eligibility_generation: int
     reserved_microusd: int
+    lookup_idempotency_key_digests: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if (
-            len(self.idempotency_key_digest) != 64
+            not _is_hex_digest(self.idempotency_key_digest)
+            or any(
+                not version or not _is_hex_digest(digest)
+                for version, digest in self.lookup_idempotency_key_digests
+            )
+            or len({digest for _, digest in self.lookup_idempotency_key_digests})
+            != len(self.lookup_idempotency_key_digests)
+            or self.idempotency_key_digest
+            in {digest for _, digest in self.lookup_idempotency_key_digests}
             or len(self.identity_digest) != 64
             or not self.digest_key_version
             or not self.operation
@@ -252,6 +261,18 @@ class PostgresExecutionLedger:
                         (scope.environment,),
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
+                    digest_candidates = (
+                        (admission.digest_key_version, admission.idempotency_key_digest),
+                        *admission.lookup_idempotency_key_digests,
+                    )
+                    # Every process must acquire overlapping digest locks in the
+                    # same order, even when their configured key-version order
+                    # differs during rotation.
+                    for _, digest in sorted(digest_candidates, key=lambda item: item[1]):
+                        connection.execute(
+                            "SELECT pg_advisory_xact_lock(%s)",
+                            (_digest_lock_id(digest),),
+                        )
                     # The partition row serializes both duplicate admission and financial exposure.
                     # A waiter takes a fresh READ COMMITTED snapshot for the lookup below after the
                     # first transaction commits, avoiding a unique-key race masquerading as outage.
@@ -277,13 +298,18 @@ class PostgresExecutionLedger:
                             scope.partition_id,
                         ),
                     ).fetchone()
-                    existing = connection.execute(
+                    existing_rows = connection.execute(
                         f"""
                         SELECT {_RECORD_COLUMNS}
                         FROM tiamat.execution_records
                         WHERE issuer = %s AND caller_id = %s AND realm = %s
                           AND environment = %s AND operation = %s AND contract_major = %s
-                          AND idempotency_key_digest = %s
+                          AND execution_id IN (
+                            SELECT execution_id FROM tiamat.execution_idempotency_aliases
+                            WHERE issuer = %s AND caller_id = %s AND realm = %s
+                              AND environment = %s AND operation = %s AND contract_major = %s
+                              AND idempotency_key_digest = ANY(%s)
+                          )
                         FOR UPDATE
                         """,
                         (
@@ -293,9 +319,18 @@ class PostgresExecutionLedger:
                             scope.environment,
                             admission.operation,
                             admission.contract_major,
-                            admission.idempotency_key_digest,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            admission.operation,
+                            admission.contract_major,
+                            [digest for _, digest in digest_candidates],
                         ),
-                    ).fetchone()
+                    ).fetchall()
+                    if len(existing_rows) > 1:
+                        raise DurableIdempotencyConflict
+                    existing = existing_rows[0] if existing_rows else None
                     if existing is not None:
                         record = LedgerRecord.from_row(existing)
                         if record.identity_digest != admission.identity_digest:
@@ -407,9 +442,59 @@ class PostgresExecutionLedger:
                         ),
                     ).fetchone()
                     assert inserted is not None
+                    for version, digest in digest_candidates:
+                        connection.execute(
+                            """
+                            INSERT INTO tiamat.execution_idempotency_aliases (
+                              issuer, caller_id, realm, environment, operation, contract_major,
+                              idempotency_key_digest, digest_key_version, execution_id
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                scope.issuer,
+                                scope.caller_id,
+                                scope.realm,
+                                scope.environment,
+                                admission.operation,
+                                admission.contract_major,
+                                digest,
+                                version,
+                                execution_id,
+                            ),
+                        )
+                    self._probe_transaction("admission_before_commit", connection)
                     return LedgerRecord.from_row(inserted), True
         except (DispatchBlocked, DurableIdempotencyConflict):
             raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def digest_key_version_in_use(self, scope: LedgerScope, version: str) -> bool:
+        """Return whether a retained idempotency alias still depends on this key version."""
+
+        if not version:
+            raise ValueError("digest key version is required")
+        try:
+            with psycopg.connect(
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                _set_scope(connection, scope)
+                row = connection.execute(
+                    """
+                    SELECT 1 FROM tiamat.execution_idempotency_aliases
+                    WHERE issuer = %s AND caller_id = %s AND realm = %s AND environment = %s
+                      AND digest_key_version = %s
+                    LIMIT 1
+                    """,
+                    (
+                        scope.issuer,
+                        scope.caller_id,
+                        scope.realm,
+                        scope.environment,
+                        version,
+                    ),
+                ).fetchone()
+                return row is not None
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
@@ -831,9 +916,7 @@ class PostgresExecutionLedger:
                         ),
                     )
                     if overrun:
-                        self._quarantine_route_rate(
-                            connection, scope, execution_id, current
-                        )
+                        self._quarantine_route_rate(connection, scope, execution_id, current)
                     self._insert_financial_event(
                         connection,
                         scope,
@@ -1430,9 +1513,7 @@ class PostgresExecutionLedger:
         ):
             raise DurableFenceRejected
 
-    def _probe_transaction(
-        self, name: str, connection: psycopg.Connection[Any]
-    ) -> None:
+    def _probe_transaction(self, name: str, connection: psycopg.Connection[Any]) -> None:
         """Invoke an opt-in test probe while the transaction is still open."""
 
         if self._transaction_probe is not None:
@@ -1451,6 +1532,15 @@ def _set_scope(connection: psycopg.Connection[Any], scope: LedgerScope) -> None:
 
 def _psycopg_conninfo(database_url: str) -> str:
     return database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+
+def _is_hex_digest(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _digest_lock_id(digest: str) -> int:
+    value = int(digest[:16], 16)
+    return value - 2**64 if value >= 2**63 else value
 
 
 def _validate_partition(row: dict[str, Any] | None, reservation: int, now: datetime) -> None:

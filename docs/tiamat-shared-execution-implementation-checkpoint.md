@@ -34,7 +34,7 @@
 - Content-free fenced transition reference model with lease epochs, record generations, CAS-style
   owner checks, admitted/dispatched reaping, stale-owner rejection, outcome uncertainty, and final
   eligibility suppression.
-- Dedicated Tiamat PostgreSQL migration lineage through `0003_signed_release_authority`; Cloud Lucy remains at
+- Dedicated Tiamat PostgreSQL migration lineage through `0004_idempotency_digest_aliases`; Cloud Lucy remains at
   `0071` and does not consume migration `0072`.
 - Content-free PostgreSQL adapters for durable scoped JWT replay, coordinator-generation fencing,
   atomic create/reserve, durable-before-send dispatch, terminal settlement, outcome uncertainty,
@@ -113,6 +113,12 @@
 - Workload-key rotation is proven through the same PostgreSQL-backed HTTP boundary: old and successor
   Ed25519 keys both work during overlap, removing the old key rejects it before replay-state
   insertion or release disclosure, and the successor continues to dispatch normally.
+- Idempotency-digest-key rotation now uses a current key plus bounded predecessors to derive
+  versioned HMAC-SHA256 identities. Every newly admitted execution atomically stores aliases for all
+  configured overlap keys; per-digest advisory locks and alias lookup make old and successor
+  processes converge on one execution even when they race. Migration `0004` backfills the legacy
+  digest as an alias, applies forced RLS, and exposes a retention check so a key version cannot be
+  retired while a retained execution still depends on it.
 
 No provider credentials, real model route, spending grant, provider call, deployment, migration, or
 production change was created.
@@ -126,19 +132,17 @@ Before any deployment or real provider activation, Tier B must add and prove:
    precedence, timing classes, full response-size enforcement, and disconnect behavior; route,
    method, redirect avoidance, gross framing/cap, duplicate binding headers, and authenticated
    contract-size ordering are implemented;
-2. prove idempotency-digest-key rotation against real PostgreSQL; workload-key overlap/retirement and
-   the durable scoped `jti` adapter are proven through the HTTP/JWT application boundary;
-3. connect the implemented offline exact inventory/release-head reconciliation input to an
+2. connect the implemented offline exact inventory/release-head reconciliation input to an
    independently authenticated Control witness in a deployment; local witness enforcement,
    recovery-generation binding, cold-start reverification, monotonic activation, atomic grant
    projection, signed no-fallback revocation, and exact active-byte loading are done;
-4. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
-5. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
-6. finish differential and adversarial coverage for the restricted-schema evaluator;
-7. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
+3. add caller-side differential proof that Homes Prime produces the same RFC 8785 identity;
+4. complete every error-envelope/receipt variant and tolerant-consumer test against the bundle;
+5. finish differential and adversarial coverage for the restricted-schema evaluator;
+6. deadline, disconnect, crash, stale-owner, late-result, recovery, reconciliation, and rollback
    failure injection;
-8. a separately authorized provider adapter and provider/model/rate selection;
-9. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
+7. a separately authorized provider adapter and provider/model/rate selection;
+8. independently deployed Homes Prime ↔ Tiamat network conformance and privacy evidence.
 
 The existing Homes corpus remains local-test-only and is not authorized for provider use.
 
@@ -169,6 +173,10 @@ At local commit preparation on 2026-09-18:
   still refuses a profile whose linked privacy policy is a revoked tombstone, and proves the real API
   consumes durable scoped replay state before dispatch, and enforces old/successor key overlap and
   retirement. The loopback-only disposable container was stopped and removed.
+- A fresh PostgreSQL 16 suite then passed all 20 tests after migration `0004`, including a
+  concurrent mixed-generation race in which the successor knew digest keys `v2` and `v1` while the
+  predecessor knew only `v1`. Both admissions resolved to one execution and the durable alias set
+  preserved both key versions; no second reservation or dispatch was created.
 - Focused HTTP/service ordered-gate, receipt, and frozen-error-table suite: 41 passed. This includes
   cross-product precedence through the raw-digest gate, terminal paid-failure replay, provider
   accounting rejection, exact 404/405,
@@ -177,14 +185,14 @@ At local commit preparation on 2026-09-18:
 
 - RC1 conformance bundle: 130 independent checks passed; digest remained
   `5185680e2cb9ac9aff6006c9abc6a582b67933db077d5c7bd5dcc596f574cb85`.
-- Complete unit suite: 1,129 passed with two dependency deprecation warnings. The first run exposed
+- Complete unit suite: 1,131 passed with two dependency deprecation warnings. The first run exposed
   an unrelated probabilistic Private Lucy test nonce that began with `_` despite its alphanumeric
   first-character schema; the focused rerun and unchanged complete suite passed. No Private Lucy
   code was changed in this branch.
 - Ruff: passed for `src`, unit tests, the Tiamat migration lineage, and the new integration test.
-- Strict mypy: passed across 134 source files.
+- Strict mypy: passed across 135 source files.
 - Alembic: the independent migration lineage through `0002_route_settlement_retention` rendered successfully as PostgreSQL
   offline SQL.
-- Focused durable-ledger tests: seven unit tests and 16 real PostgreSQL integration tests passed using
+- Focused durable-ledger tests: nine unit tests and 20 real PostgreSQL integration tests passed using
   a loopback-only, tmpfs-backed PostgreSQL 16 container with synthetic credentials. This establishes
   local database behavior, not production replication or failover.

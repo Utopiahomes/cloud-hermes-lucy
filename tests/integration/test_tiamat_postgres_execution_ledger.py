@@ -33,6 +33,7 @@ from lucy.shared_execution.auth import (
     content_sha256,
     request_binding_digest,
 )
+from lucy.shared_execution.idempotency import DigestKey, IdempotencyDigestRing
 from lucy.shared_execution.postgres_authority import (
     AuthorityScope,
     AuthorityTransitionRejected,
@@ -108,7 +109,8 @@ def database_urls() -> tuple[str, str]:
             """
             GRANT SELECT, INSERT, UPDATE, DELETE ON
               tiamat.jti_replay, tiamat.spending_partitions,
-              tiamat.execution_records, tiamat.grant_releases,
+              tiamat.execution_records, tiamat.execution_idempotency_aliases,
+              tiamat.grant_releases,
               tiamat.route_rate_quarantines, tiamat.financial_events
             TO tiamat_runtime_test
             """
@@ -196,11 +198,13 @@ def _admission(
     key_digest: str,
     identity_digest: str = "c" * 64,
     owner_id: UUID | None = None,
+    digest_key_version: str = "digest-v1",
+    lookup_idempotency_key_digests: tuple[tuple[str, str], ...] = (),
 ) -> LedgerAdmission:
     return LedgerAdmission(
         idempotency_key_digest=key_digest,
         identity_digest=identity_digest,
-        digest_key_version="digest-v1",
+        digest_key_version=digest_key_version,
         operation="inference.execute",
         contract_major=1,
         execution_profile_id="profile.v1",
@@ -211,6 +215,7 @@ def _admission(
         execution_deadline=now + timedelta(seconds=15),
         eligibility_generation=1,
         reserved_microusd=2_000,
+        lookup_idempotency_key_digests=lookup_idempotency_key_digests,
     )
 
 
@@ -698,6 +703,87 @@ def test_workload_key_overlap_and_retirement_use_durable_replay_state(
             (scope.issuer, scope.caller_id, scope.realm, scope.environment),
         ).fetchone()
     assert count == (3,)
+
+
+def test_digest_key_rotation_aliases_prevent_cross_generation_double_admission(
+    database_urls: tuple[str, str],
+) -> None:
+    owner_url, runtime_url = database_urls
+    scope, witness, now = _seed(owner_url)
+    coordinator = PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+    raw_key = str(uuid4())
+    old_ring = IdempotencyDigestRing(DigestKey("digest-v1", b"o" * 32))
+    new_ring = IdempotencyDigestRing(
+        DigestKey("digest-v2", b"n" * 32),
+        (DigestKey("digest-v1", b"o" * 32),),
+    )
+    old = old_ring.candidates(raw_key)
+    new = new_ring.candidates(raw_key)
+    assert len(old) == 1 and len(new) == 2
+    admission_new = _admission(
+        now,
+        key_digest=new[0].digest,
+        digest_key_version=new[0].version,
+        lookup_idempotency_key_digests=((new[1].version, new[1].digest),),
+    )
+    admission_old = _admission(
+        now,
+        key_digest=old[0].digest,
+        digest_key_version=old[0].version,
+    )
+    inserted = Event()
+    release = Event()
+
+    def hold_successor_before_commit(name: str, _connection: psycopg.Connection[Any]) -> None:
+        if name == "admission_before_commit":
+            inserted.set()
+            assert release.wait(timeout=5)
+
+    successor = PostgresExecutionLedger(
+        runtime_url,
+        witness,
+        transaction_probe=hold_successor_before_commit,
+    )
+    predecessor = PostgresExecutionLedger(runtime_url, witness)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        successor_future = pool.submit(
+            successor.create_or_get,
+            scope,
+            admission_new,
+            coordinator_generation=coordinator,
+            now=now,
+        )
+        assert inserted.wait(timeout=5)
+        predecessor_future = pool.submit(
+            predecessor.create_or_get,
+            scope,
+            admission_old,
+            coordinator_generation=coordinator,
+            now=now,
+        )
+        release.set()
+        successor_record, successor_created = successor_future.result(timeout=5)
+        predecessor_record, predecessor_created = predecessor_future.result(timeout=5)
+
+    assert successor_created is True
+    assert predecessor_created is False
+    assert predecessor_record.execution_id == successor_record.execution_id
+    assert predecessor.digest_key_version_in_use(scope, "digest-v1")
+    assert predecessor.digest_key_version_in_use(scope, "digest-v2")
+    with psycopg.connect(owner_url) as connection:
+        aliases = connection.execute(
+            """
+            SELECT digest_key_version, execution_id
+            FROM tiamat.execution_idempotency_aliases
+            WHERE issuer = %s AND caller_id = %s AND realm = %s AND environment = %s
+            ORDER BY digest_key_version
+            """,
+            (scope.issuer, scope.caller_id, scope.realm, scope.environment),
+        ).fetchall()
+    assert aliases == [
+        ("digest-v1", successor_record.execution_id),
+        ("digest-v2", successor_record.execution_id),
+    ]
 
 
 def test_durable_replay_fencing_and_cross_scope_isolation(
