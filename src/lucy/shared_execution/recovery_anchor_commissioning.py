@@ -86,6 +86,7 @@ class ContinuedQuarantineSuccessorArtifacts:
     inventory_jws: bytes
     witness_jws: bytes
     transition_jws: bytes
+    predecessor_verified_at: datetime
 
     @property
     def transition_sha256(self) -> str:
@@ -113,6 +114,8 @@ class ContinuedQuarantineSuccessorArtifacts:
                 self.predecessor.transition_jws
             ).decode("ascii"),
             "predecessor_transition_sha256": self.predecessor.transition_sha256,
+            "predecessor_witness_key_id": self.predecessor.witness_key_id,
+            "predecessor_verified_at": _timestamp(self.predecessor_verified_at),
             "witness_key_id": self.witness_key_id,
             "inventory_jws_b64": base64.b64encode(self.inventory_jws).decode("ascii"),
             "witness_jws_b64": base64.b64encode(self.witness_jws).decode("ascii"),
@@ -527,6 +530,7 @@ def build_continued_quarantine_successor(
             inventory_jws=inventory_jws,
             witness_jws=witness_jws,
             transition_jws=transition_jws,
+            predecessor_verified_at=historical,
         ),
         transition,
     )

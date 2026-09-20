@@ -140,6 +140,42 @@ def test_expired_day_zero_quarantine_has_a_24_hour_quarantine_only_successor() -
         )
 
 
+def test_offline_successor_preparer_emits_no_private_material() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    root = Ed25519PrivateKey.generate()
+    old_witness = Ed25519PrivateKey.generate()
+    predecessor, _ = build_quarantined_bootstrap(
+        identity=identity,
+        root_key_id="tiamat-recovery-root.staging.1",
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.staging.1",
+        witness_private_key=old_witness,
+        checkpoint=_day_zero_checkpoint(identity),
+        now=NOW,
+    )
+    preparer = _deploy_module("prepare_tiamat_continued_quarantine_successor_v1")
+    package = preparer.build_package(
+        predecessor_package=predecessor.public_package(identity),
+        root_private_identity={
+            "format_version": "1",
+            "root_key_id": "tiamat-recovery-root.staging.1",
+            "root_private_key_b64": base64.b64encode(root.private_bytes_raw()).decode(),
+        },
+        replacement_witness_private_identity={
+            "format_version": "1",
+            "witness_key_id": "tiamat-recovery-witness.staging.2",
+            "witness_private_key_b64": base64.b64encode(
+                Ed25519PrivateKey.generate().private_bytes_raw()
+            ).decode(),
+        },
+        predecessor_verified_at=NOW,
+        now=NOW + timedelta(hours=13),
+    )
+    assert package["ceremony"] == "continued_quarantine_successor"
+    assert package["predecessor_transition_sha256"] == predecessor.transition_sha256
+    assert "private" not in str(package).lower()
+
+
 def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None:
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
     root = Ed25519PrivateKey.generate()
