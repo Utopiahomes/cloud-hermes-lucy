@@ -18,10 +18,14 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 
+class ProbeRejected(RuntimeError):
+    """A non-secret, stable reason code for a P1 preflight rejection."""
+
+
 def _one(cursor: psycopg.Cursor[tuple[object, ...]]) -> tuple[object, ...]:
     row = cursor.fetchone()
     if row is None:
-        raise RuntimeError("P1 expected a database row")
+        raise ProbeRejected("expected_row_missing")
     return row
 
 
@@ -67,8 +71,12 @@ def run(*, expected_ledger: str) -> dict[str, object]:
                       (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid())"""
             )
         )
-        if ledger != expected_ledger or blocked is not True or tls is not True:
-            raise RuntimeError("P1 staging identity, blocked gate, or TLS check failed")
+        if ledger != expected_ledger:
+            raise ProbeRejected("ledger_mismatch")
+        if blocked is not True:
+            raise ProbeRejected("dispatch_gate_not_blocked")
+        if tls is not True:
+            raise ProbeRejected("transport_not_tls")
 
         results: dict[str, object] = {"ledger_matches": True, "dispatch_blocked": True, "tls": True}
         results["alter_runtime_nologin"] = _attempt(
@@ -153,7 +161,7 @@ def run(*, expected_ledger: str) -> dict[str, object]:
                     runtime.execute("SELECT current_user, pg_backend_pid()")
                 )
                 if runtime_user != "tiamat_runtime":
-                    raise RuntimeError("runtime probe credential has unexpected role")
+                    raise ProbeRejected("runtime_probe_role_mismatch")
                 visible = _one(
                     connection.execute(
                         "SELECT count(*) FROM pg_stat_activity WHERE pid = %s "
@@ -187,6 +195,9 @@ def main() -> None:
     args = parser.parse_args()
     try:
         result = run(expected_ledger=args.expected_ledger_id)
+    except ProbeRejected as exc:
+        print(json.dumps({"status": "rejected", "reason": str(exc)}))
+        raise SystemExit(1) from None
     except Exception as exc:
         # In particular, never emit psycopg's connection diagnostic with credentials.
         print(json.dumps({"status": "failed", "error_type": type(exc).__name__}))
