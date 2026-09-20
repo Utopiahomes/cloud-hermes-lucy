@@ -1,0 +1,48 @@
+{
+  "evidence_type": "tiamat_anchor_pinned_trust_read",
+  "date_utc": "2026-09-20",
+  "tested_commit": "328f588",
+  "scope": "read-only verification of the deployed staging anchor record; no write of any kind",
+  "identity": {
+    "aws_account": "429870640638",
+    "region": "us-east-1",
+    "table": "stoin-staging-tiamat-recovery-anchor-v1",
+    "assumed_principal": "AWSReservedSSO_LucySecurityAdministrator (interactive SSO, operator-initiated)",
+    "environment": "staging",
+    "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f"
+  },
+  "checks": [
+    {
+      "name": "pinned_trust_assembly",
+      "result": "passed",
+      "detail": "load_anchor_trust and verified_anchor_reader built the reader from the published bootstrap package's trust fields only: root key id, root public key, its independent sha256 pin, witness key id and the root-signed witness inventory."
+    },
+    {
+      "name": "live_record_verification",
+      "result": "passed",
+      "detail": "A strongly consistent GetItem returned the single stored record, and its exact signed bytes verified under the pinned root: transition version 1, predecessor null, continuity quarantined, witness status quarantined, recovery generation 1, witness revision 1."
+    },
+    {
+      "name": "digest_matches_commissioning_evidence",
+      "result": "passed",
+      "detail": "The verified transition digest is ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b, equal to the digest recorded in the 2026-09-18 staging commissioning evidence and to the package's own transition_sha256."
+    },
+    {
+      "name": "witness_key_window_expired",
+      "result": "finding",
+      "detail": "Verification at the current date fails with recovery_witness_inventory_key_not_current. The staging witness key is valid from 2026-09-18T20:49:05Z until 2026-09-19T08:49:05Z, a twelve-hour window which lapsed before this read. The same read verified completely when evaluated at commissioning time, which isolates the cause to key validity rather than to the record, the trust material or the reader."
+    }
+  ],
+  "consequences": [
+    "The deployed record is intact and still quarantined; nothing was dispatching and nothing is broken by the lapse.",
+    "No launcher can verify this anchor as current authority today. A renewal, or the higher-generation transition recovery needs anyway, must be signed in the offline boundary first.",
+    "This is plan v0.7's D2 consequence observed rather than argued: witness validity of at most 24 hours means a live ledger needs an offline signing event at least daily, and this window was twelve hours.",
+    "A quarantine witness cannot be routinely renewed into authority under Draft 0.5 section 5, so the practical path remains a new signed transition rather than a renewal of this one."
+  ],
+  "not_performed": [
+    "any PutItem, UpdateItem or DeleteItem against the anchor table",
+    "signing, renewal or installation of any transition",
+    "staging service resume, database connection, migration or finalization",
+    "provider request or model spending"
+  ]
+}
