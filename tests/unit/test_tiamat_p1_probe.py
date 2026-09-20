@@ -128,3 +128,46 @@ def test_revoke_requires_effective_runtime_privilege_change(runtime_can_execute:
     effective = module._revoke_effective(connection, "pg_control_system")
     assert effective is (not runtime_can_execute)
     assert connection.calls == 2
+
+
+def test_termination_refuses_unidentified_session_before_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    ledger = "6177502f-3a93-429c-b68b-0ed726d1447f"
+    statements: list[str] = []
+
+    class _Cursor:
+        def __init__(self, row: tuple[object, ...] | None = None) -> None:
+            self.row = row
+
+        def fetchone(self) -> tuple[object, ...] | None:
+            return self.row
+
+    class _Connection:
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def execute(self, statement: str, _params: object = None) -> _Cursor:
+            statements.append(statement)
+            if statement.startswith("SET LOCAL"):
+                return _Cursor()
+            if "current_database()" in statement:
+                return _Cursor(("tiamat_staging_user", "tiamat_staging", ledger, True, True))
+            if "pg_stat_activity WHERE pid" in statement:
+                return _Cursor(("someone_else", "tiamat_staging"))
+            raise AssertionError("unexpected statement")
+
+    monkeypatch.setenv(
+        "TIAMAT_P1_OWNER_DATABASE_URL",
+        "postgresql://owner:private@db/tiamat?sslmode=require",
+    )
+    monkeypatch.setattr(module.psycopg, "connect", lambda *_args, **_kwargs: _Connection())
+    with pytest.raises(module.ProbeRejected, match="runtime_probe_session_not_identified"):
+        module.terminate_runtime_probe(expected_ledger=ledger, runtime_pid=1234)
+    assert not any(
+        "GRANT" in statement or "pg_terminate_backend" in statement for statement in statements
+    )
