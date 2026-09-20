@@ -64,11 +64,11 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local l
 | Ruff on touched code | passed | Post-review D1 revision; rerun after source edits. |
 | Strict mypy on `src` plus D1 finalizer | passed, 144 source files | M2 local candidate; rerun after source or deployment-tool edits. |
 | Focused D1/M2 unit tests | 34 passed | Issuer, witness binding, expiry migration, v2 runtime entrypoint, and fresh/mixed-owner finalizer paths; synthetic only. |
-| Full offline unit suite | 1276 passed, 298 skipped | M2 candidate; isolated PostgreSQL suites remain skipped because no disposable URL is configured. |
-| Alembic offline SQL generation | passed through `0009` | Proves revision chain and rendering, **not PostgreSQL execution**. |
+| Full offline unit suite | 1289 passed, 301 skipped | Latest M2 floor-writer candidate; isolated PostgreSQL suites remain skipped because no disposable URL is configured. |
+| Alembic offline SQL generation | passed through `0010` | Proves revision chain and rendering, **not PostgreSQL execution**. |
 | Actual PostgreSQL 16 D1 migration/role/function execution | 15 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
-| Actual PostgreSQL 16 M2 migration/issuer/consume execution | 16 passed | Current explicitly disposable Render PostgreSQL 16; see `evidence/tiamat-m2-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
-| Actual PostgreSQL 16 M2 database-clock/digest binding | 18 passed | Current explicitly disposable Render PostgreSQL 16; see `evidence/tiamat-m2-clock-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
+| Actual PostgreSQL 16 M2 migration/issuer/consume execution | 16 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-m2-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
+| Actual PostgreSQL 16 M2 database-clock/digest binding | 18 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-m2-clock-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
 | Recovery-gate anchor-floor writers | 10 unit tests passed; 4 integration cases **not yet run against PostgreSQL** | Added after review of `edd72d9`. Unit coverage uses a fake connection for both gate commands; the four new cases in `tests/integration/test_tiamat_d1_postgres.py` need a disposable PostgreSQL 16 run before this row counts as database evidence. |
 | Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
