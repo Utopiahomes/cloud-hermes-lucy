@@ -395,3 +395,42 @@ def test_c1t_a_checkpoint_bound_to_another_ledger_refuses(disposable: _Disposabl
 
     assert "startup_attestation_authority_unavailable" in str(refused.value)
     assert _active_claimants(disposable) == 0
+
+
+def test_the_quarantine_successor_candidate_opens_no_claimant(disposable: _Disposable) -> None:
+    """The reviewed successor must extend the chain without granting anything.
+
+    The candidate is seeded into an in-memory anchor only. DynamoDB is never written here; this
+    asks what the launcher would do if that record were already the head.
+    """
+
+    from lucy.shared_execution.recovery_anchor_commissioning import (
+        verify_continued_quarantine_successor_package,
+    )
+
+    candidate_path = (
+        ROOT / "deploy" / "aws" / "tiamat-staging-quarantine-successor-v2-public-2026-09-20.json"
+    )
+    candidate: Any = json.loads(candidate_path.read_text(encoding="utf-8"))
+    now = datetime.now(UTC).replace(microsecond=0)
+    identity, predecessor, successor, _ = verify_continued_quarantine_successor_package(
+        candidate, now=now, expected_root_public_sha256=str(candidate["root_public_key_sha256"])
+    )
+    _seed_staging_gate(disposable, _trust_document(), generation=1)
+
+    anchor = InMemoryExternalRecoveryAnchor()
+    anchor.install(predecessor, expected_transition_sha256=None, now=COMMISSIONING_TIME)
+    anchor.install(successor, expected_transition_sha256=predecessor.exact_sha256, now=now)
+    issuer = StartupAttestationIssuer(
+        anchor=anchor,
+        identity=identity,
+        recovery_database_url=disposable.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(disposable.recovery),
+    )
+
+    with pytest.raises(StartupAttestationRejected) as refused:
+        issuer.issue(now=now)
+
+    assert "recovery_continuity_not_established" in str(refused.value)
+    assert anchor.read(identity.key).exact_sha256 == str(candidate["transition_sha256"])
+    assert _active_claimants(disposable) == 0
