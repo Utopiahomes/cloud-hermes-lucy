@@ -107,7 +107,7 @@ def upgrade() -> None:
           IF requested_environment IS NULL OR
              requested_anchor_sha256 IS NULL OR
              requested_anchor_sha256 !~ '^[0-9a-f]{64}$' THEN
-            RAISE EXCEPTION 'startup attestation unavailable';
+            RAISE EXCEPTION USING ERRCODE = 'ZX101', MESSAGE = 'startup_attestation_absent';
           END IF;
           SELECT * INTO attested FROM tiamat.startup_attestations
           WHERE environment = requested_environment
@@ -116,7 +116,7 @@ def upgrade() -> None:
             AND expires_at > pg_catalog.clock_timestamp()
           FOR UPDATE;
           IF NOT FOUND THEN
-            RAISE EXCEPTION 'startup attestation unavailable';
+            RAISE EXCEPTION USING ERRCODE = 'ZX101', MESSAGE = 'startup_attestation_absent';
           END IF;
           SELECT gate.environment, gate.storage_epoch, gate.recovery_generation,
                  gate.coordinator_generation, gate.dispatch_blocked,
@@ -128,7 +128,7 @@ def upgrade() -> None:
           WHERE gate.environment = requested_environment AND identity.singleton
           FOR UPDATE OF gate;
           IF NOT FOUND THEN
-            RAISE EXCEPTION 'startup attestation is not current';
+            RAISE EXCEPTION USING ERRCODE = 'ZX102', MESSAGE = 'startup_authority_mismatch';
           END IF;
           IF gate_record.dispatch_blocked OR
              gate_record.anchor_floor_version = 0 OR
@@ -138,17 +138,19 @@ def upgrade() -> None:
              gate_record.ledger_id <> attested.ledger_id OR
              gate_record.storage_epoch <> attested.storage_epoch OR
              gate_record.recovery_generation <> attested.recovery_generation THEN
-            RAISE EXCEPTION 'startup attestation is not current';
+            RAISE EXCEPTION USING ERRCODE = 'ZX102', MESSAGE = 'startup_authority_mismatch';
           END IF;
           SELECT (pg_catalog.pg_control_system()).system_identifier::text,
                  (pg_catalog.pg_control_checkpoint()).timeline_id::bigint,
                  pg_catalog.pg_current_wal_flush_lsn()
             INTO live_identifier, live_timeline, live_lsn;
-          IF live_identifier IS NULL OR live_timeline IS NULL OR live_lsn IS NULL OR
+          IF live_identifier IS NULL OR live_timeline IS NULL OR
              live_identifier <> attested.system_identifier OR
-             live_timeline <> attested.timeline_id OR
-             live_lsn < attested.flushed_lsn THEN
-            RAISE EXCEPTION 'database continuity changed';
+             live_timeline <> attested.timeline_id THEN
+            RAISE EXCEPTION USING ERRCODE = 'ZX103', MESSAGE = 'startup_cluster_mismatch';
+          END IF;
+          IF live_lsn IS NULL OR live_lsn < attested.flushed_lsn THEN
+            RAISE EXCEPTION USING ERRCODE = 'ZX104', MESSAGE = 'startup_wal_behind';
           END IF;
           UPDATE tiamat.restore_gate
           SET coordinator_generation = coordinator_generation + 1,

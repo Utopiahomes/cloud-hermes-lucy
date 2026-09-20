@@ -42,6 +42,10 @@ def test_d1_migration_installs_locked_functions_and_single_claimant_index(
     assert sql.count("SET search_path = pg_catalog, pg_temp") == 3
     assert "pg_catalog.pg_current_wal_flush_lsn()" in sql
     assert "FOR UPDATE OF gate" in sql
+    assert "ERRCODE = 'ZX101'" in sql
+    assert "ERRCODE = 'ZX102'" in sql
+    assert "ERRCODE = 'ZX103'" in sql
+    assert "ERRCODE = 'ZX104'" in sql
     assert "REVOKE ALL ON FUNCTION tiamat.consume_startup_attestation(text) FROM PUBLIC" in sql
     assert "GRANT EXECUTE ON FUNCTION" not in sql
 
@@ -61,9 +65,22 @@ class _Result:
 
 
 class _Connection:
-    def __init__(self, ledger_id: Any, *, blocked: bool = True):
+    def __init__(
+        self,
+        ledger_id: Any,
+        *,
+        blocked: bool = True,
+        postcheck_owner: str = "tiamat_recovery",
+        postcheck_execute: bool = True,
+        postcheck_member: bool = False,
+        postcheck_create: bool = False,
+    ):
         self.ledger_id = ledger_id
         self.blocked = blocked
+        self.postcheck_owner = postcheck_owner
+        self.postcheck_execute = postcheck_execute
+        self.postcheck_member = postcheck_member
+        self.postcheck_create = postcheck_create
         self.statements: list[str] = []
 
     def __enter__(self) -> _Connection:
@@ -84,8 +101,12 @@ class _Connection:
         if "FROM pg_catalog.pg_roles" in statement:
             return _Result(rows=[("tiamat_recovery", True), ("tiamat_runtime", True)])
         if "pg_catalog.pg_has_role" in statement:
+            if sum("pg_catalog.pg_has_role" in earlier for earlier in self.statements) > 1:
+                return _Result((self.postcheck_member, self.postcheck_create))
             return _Result((False, False))
         if "pg_catalog.pg_get_userbyid" in statement:
+            if "has_function_privilege" in statement:
+                return _Result((self.postcheck_owner, self.postcheck_execute))
             return _Result(("tiamat_owner",))
         if "pg_catalog.has_table_privilege" in statement:
             return _Result((False,))
@@ -135,3 +156,27 @@ def test_finalization_transfers_then_grants_runtime_functions(
         statements.index("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
         < len(statements) - 1
     )
+    assert sum("has_function_privilege" in statement for statement in statements) == 3
+    assert sum("pg_catalog.pg_has_role" in statement for statement in statements) == 2
+
+
+@pytest.mark.parametrize(
+    ("postcheck", "message"),
+    [
+        ({"postcheck_owner": "tiamat_owner"}, "ownership or execution grant"),
+        ({"postcheck_execute": False}, "ownership or execution grant"),
+        ({"postcheck_member": True}, "temporary recovery-role privileges"),
+        ({"postcheck_create": True}, "temporary recovery-role privileges"),
+    ],
+)
+def test_finalization_rejects_incomplete_postconditions(
+    monkeypatch: pytest.MonkeyPatch, postcheck: dict[str, Any], message: str
+) -> None:
+    ledger_id = uuid4()
+    connection = _Connection(ledger_id, **postcheck)
+    monkeypatch.setattr(finalizer.psycopg, "connect", lambda _: connection)
+
+    with pytest.raises(finalizer.D1FinalizationRejected, match=message):
+        finalizer.finalize_d1(
+            "postgresql://synthetic", environment="staging", expected_ledger_id=ledger_id
+        )

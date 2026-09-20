@@ -105,6 +105,35 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
         ).fetchone()
         if remaining_update is None or bool(remaining_update[0]):
             raise D1FinalizationRejected("runtime retains direct restore-gate UPDATE")
+        post_topology = connection.execute(
+            """
+            SELECT pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'MEMBER'),
+                   pg_catalog.has_schema_privilege('tiamat_recovery', 'tiamat', 'CREATE')
+            """
+        ).fetchone()
+        if post_topology is None or bool(post_topology[0]) or bool(post_topology[1]):
+            raise D1FinalizationRejected("temporary recovery-role privileges remain")
+        for name, argument in _FUNCTIONS:
+            signature = f"tiamat.{name}({argument})"
+            function_state = connection.execute(
+                """
+                SELECT pg_catalog.pg_get_userbyid(p.proowner),
+                       pg_catalog.has_function_privilege(
+                         'tiamat_runtime', p.oid, 'EXECUTE'
+                       )
+                FROM pg_catalog.pg_proc AS p
+                WHERE p.oid = pg_catalog.to_regprocedure(%s)
+                """,
+                (signature,),
+            ).fetchone()
+            if (
+                function_state is None
+                or str(function_state[0]) != "tiamat_recovery"
+                or not bool(function_state[1])
+            ):
+                raise D1FinalizationRejected(
+                    "D1 function ownership or execution grant is incomplete"
+                )
 
 
 def main() -> None:

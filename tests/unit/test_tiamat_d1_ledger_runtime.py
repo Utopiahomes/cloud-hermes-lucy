@@ -4,6 +4,7 @@ from contextlib import nullcontext
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from lucy.shared_execution import postgres_ledger
@@ -106,6 +107,33 @@ def test_attested_acquisition_calls_single_database_function(
     assert ledger.consume_startup_attestation("a" * 64) == 7
     assert sum("tiamat.consume_startup_attestation" in sql for sql in connection.statements) == 1
     assert not any("UPDATE tiamat.restore_gate" in sql for sql in connection.statements)
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "message"),
+    [
+        ("ZX101", "attestation unavailable"),
+        ("ZX102", "authority mismatch"),
+        ("ZX103", "cluster identity changed"),
+        ("ZX104", "WAL position is behind"),
+    ],
+)
+def test_attestation_rejections_remain_distinct(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str, message: str
+) -> None:
+    ledger, _ = _ledger()
+
+    class _DatabaseRejection(psycopg.Error):
+        pass
+
+    _DatabaseRejection.sqlstate = sqlstate
+
+    def _reject(*_args: object, **_kwargs: object) -> Any:
+        raise _DatabaseRejection()
+
+    monkeypatch.setattr(postgres_ledger.psycopg, "connect", _reject)
+    with pytest.raises(DispatchBlocked, match=message):
+        ledger.consume_startup_attestation("a" * 64)
 
 
 def test_dispatch_rechecks_attestation_before_mutating_record(

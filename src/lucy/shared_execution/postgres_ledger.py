@@ -270,9 +270,15 @@ class PostgresExecutionLedger:
                 if row is None:
                     raise DispatchBlocked("startup attestation unavailable")
                 return int(row[0])
-        except psycopg.errors.RaiseException as exc:
-            raise DispatchBlocked("startup attestation unavailable") from exc
         except psycopg.Error as exc:
+            rejection = {
+                "ZX101": "startup attestation unavailable",
+                "ZX102": "startup authority mismatch",
+                "ZX103": "startup cluster identity changed",
+                "ZX104": "startup WAL position is behind",
+            }.get(exc.sqlstate or "")
+            if rejection is not None:
+                raise DispatchBlocked(rejection) from exc
             raise LedgerUnavailable from exc
 
     def verify_attestation_current(self, coordinator_generation: int) -> bool:
