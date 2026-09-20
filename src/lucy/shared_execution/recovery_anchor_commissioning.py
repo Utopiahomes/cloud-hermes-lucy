@@ -18,7 +18,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from lucy.shared_execution.recovery_anchor import RecoveryAnchorIdentity, VerifiedAnchorTransition
+from lucy.shared_execution.recovery_anchor import (
+    RecoveryAnchorIdentity,
+    VerifiedAnchorTransition,
+    validate_anchor_successor,
+)
 from lucy.shared_execution.recovery_anchor_jws import (
     ANCHOR_TRANSITION_TYP,
     verify_anchor_transition,
@@ -35,6 +39,7 @@ from lucy.shared_execution.recovery_witness_jws import (
     verify_recovery_witness,
     verify_recovery_witness_inventory,
 )
+from lucy.shared_execution.signed_releases import _verify_compact
 
 
 @dataclass(frozen=True)
@@ -146,6 +151,155 @@ class ContinuedQuarantineSuccessorDecoder:
             ):
                 return transition
         raise ValueError("continued quarantine ceremony record is not pinned")
+
+
+def verify_continued_quarantine_successor_package(
+    package: dict[str, object], *, now: datetime, expected_root_public_sha256: str
+) -> tuple[
+    RecoveryAnchorIdentity,
+    VerifiedAnchorTransition,
+    VerifiedAnchorTransition,
+    ContinuedQuarantineSuccessorDecoder,
+]:
+    """Verify the complete public chain without any signing key or storage access."""
+
+    expected = {
+        "format_version",
+        "ceremony",
+        "environment",
+        "ledger_id",
+        "storage_epoch",
+        "root_key_id",
+        "root_public_key_b64",
+        "root_public_key_sha256",
+        "predecessor_inventory_jws_b64",
+        "predecessor_witness_jws_b64",
+        "predecessor_transition_jws_b64",
+        "predecessor_transition_sha256",
+        "predecessor_witness_key_id",
+        "predecessor_verified_at",
+        "witness_key_id",
+        "inventory_jws_b64",
+        "witness_jws_b64",
+        "transition_jws_b64",
+        "transition_sha256",
+        "checkpoint",
+    }
+    if (
+        set(package) != expected
+        or package.get("format_version") != "1"
+        or package.get("ceremony") != "continued_quarantine_successor"
+    ):
+        raise ValueError("continued quarantine package shape is invalid")
+    try:
+        identity = RecoveryAnchorIdentity(
+            str(package["environment"]),
+            canonical_uuid4(str(package["ledger_id"])),
+            canonical_uuid4(str(package["storage_epoch"])),
+        )
+        root_key_id = str(package["root_key_id"])
+        root_public_bytes = base64.b64decode(str(package["root_public_key_b64"]), validate=True)
+        root_public = Ed25519PublicKey.from_public_bytes(root_public_bytes)
+        predecessor_inventory = base64.b64decode(
+            str(package["predecessor_inventory_jws_b64"]), validate=True
+        )
+        predecessor_witness = base64.b64decode(
+            str(package["predecessor_witness_jws_b64"]), validate=True
+        )
+        predecessor_transition = base64.b64decode(
+            str(package["predecessor_transition_jws_b64"]), validate=True
+        )
+        successor_inventory = base64.b64decode(str(package["inventory_jws_b64"]), validate=True)
+        successor_witness = base64.b64decode(str(package["witness_jws_b64"]), validate=True)
+        successor_transition = base64.b64decode(str(package["transition_jws_b64"]), validate=True)
+        historical = datetime.strptime(
+            str(package["predecessor_verified_at"]), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("continued quarantine package encoding is invalid") from exc
+    observed_root_digest = hashlib.sha256(root_public_bytes).hexdigest()
+    if (
+        observed_root_digest != package["root_public_key_sha256"]
+        or observed_root_digest != expected_root_public_sha256
+    ):
+        raise ValueError("continued quarantine root trust pin is invalid")
+    if (
+        hashlib.sha256(predecessor_transition).hexdigest()
+        != package["predecessor_transition_sha256"]
+        or hashlib.sha256(successor_transition).hexdigest() != package["transition_sha256"]
+    ):
+        raise ValueError("continued quarantine transition digest is invalid")
+    old_context = verify_recovery_witness_inventory(
+        predecessor_inventory,
+        root_key_id=root_key_id,
+        root_public_key=root_public,
+        identity=identity,
+        witness_key_id=str(package["predecessor_witness_key_id"]),
+        now=historical,
+    )
+    old = RecoveryAnchorRecordDecoder(old_context, root_key_id, root_public)(
+        predecessor_transition, predecessor_witness
+    )
+    checkpoint_raw = package["checkpoint"]
+    if not isinstance(checkpoint_raw, dict):
+        raise ValueError("continued quarantine checkpoint is invalid")
+    checkpoint = construct_recovery_checkpoint(checkpoint_raw, identity=identity)
+    require_day_zero_quarantine_checkpoint(checkpoint)
+    if (
+        old.transition_version != 1
+        or old.previous_transition_sha256 is not None
+        or old.continuity != "quarantined"
+        or old.witness.ordering != (1, 1)
+        or old_context.inventory_generation != 1
+        or old.witness.checkpoint_digest != checkpoint.checkpoint_sha256
+        or old.witness.release_heads_sha256 != checkpoint.release_heads_sha256
+        or old.witness.checkpoint_settlement_position_sha256
+        != checkpoint.settlement_position_sha256
+    ):
+        raise ValueError("continued quarantine predecessor binding is invalid")
+    inventory_payload = _verify_compact(
+        successor_inventory,
+        expected_kid=root_key_id,
+        public_key=root_public,
+        expected_typ=RECOVERY_WITNESS_INVENTORY_TYP,
+    )
+    if (
+        inventory_payload.get("inventory_generation") != 2
+        or inventory_payload.get("previous_inventory_digest")
+        != hashlib.sha256(predecessor_inventory).hexdigest()
+    ):
+        raise ValueError("continued quarantine inventory chain is invalid")
+    new_context = verify_recovery_witness_inventory(
+        successor_inventory,
+        root_key_id=root_key_id,
+        root_public_key=root_public,
+        identity=identity,
+        witness_key_id=str(package["witness_key_id"]),
+        now=now,
+    )
+    if (
+        new_context.public_key.public_bytes_raw() == old_context.public_key.public_bytes_raw()
+        or new_context.key_id == old_context.key_id
+    ):
+        raise ValueError("continued quarantine requires a fresh witness identity")
+    new = RecoveryAnchorRecordDecoder(new_context, root_key_id, root_public)(
+        successor_transition, successor_witness
+    )
+    validate_anchor_successor(old, new)
+    if (
+        new.transition_version != 2
+        or new.continuity != "quarantined"
+        or new.beacon is not None
+        or new.witness.status != "quarantined"
+        or new.witness.ordering != (2, 1)
+        or new.witness.checkpoint_digest != checkpoint.checkpoint_sha256
+        or new.witness.release_heads_sha256 != checkpoint.release_heads_sha256
+        or new.witness.checkpoint_settlement_position_sha256
+        != checkpoint.settlement_position_sha256
+        or not new.witness.valid_at(now)
+    ):
+        raise ValueError("continued quarantine successor authority is invalid")
+    return identity, old, new, ContinuedQuarantineSuccessorDecoder(old, new)
 
 
 def verify_bootstrap_package(

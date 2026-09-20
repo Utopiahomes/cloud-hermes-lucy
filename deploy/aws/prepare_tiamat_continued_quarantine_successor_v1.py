@@ -63,6 +63,7 @@ def build_package(
     predecessor_package: dict[str, object],
     root_private_identity: dict[str, object],
     replacement_witness_private_identity: dict[str, object],
+    expected_root_public_sha256: str,
     predecessor_verified_at: datetime,
     now: datetime,
     validity_hours: int = 24,
@@ -73,7 +74,7 @@ def build_package(
     predecessor_identity, _ = verify_bootstrap_package(
         predecessor_package,
         now=predecessor_verified_at,
-        expected_root_public_sha256=str(predecessor_package["root_public_key_sha256"]),
+        expected_root_public_sha256=expected_root_public_sha256,
     )
     if root_key_id != predecessor_package["root_key_id"]:
         raise ValueError("root signer does not match the pinned predecessor")
@@ -115,6 +116,7 @@ def main() -> None:
     parser.add_argument("--predecessor-package", type=Path, required=True)
     parser.add_argument("--root-private-identity", type=Path, required=True)
     parser.add_argument("--replacement-witness-private-identity", type=Path, required=True)
+    parser.add_argument("--expected-root-public-sha256", required=True)
     parser.add_argument("--predecessor-verified-at", required=True)
     parser.add_argument("--validity-hours", type=int, default=24)
     parser.add_argument("--output", type=Path, required=True)
@@ -127,6 +129,7 @@ def main() -> None:
         replacement_witness_private_identity=json.loads(
             args.replacement_witness_private_identity.read_text(encoding="utf-8")
         ),
+        expected_root_public_sha256=args.expected_root_public_sha256,
         predecessor_verified_at=_parse_timestamp(args.predecessor_verified_at),
         now=datetime.now(UTC).replace(microsecond=0),
         validity_hours=args.validity_hours,

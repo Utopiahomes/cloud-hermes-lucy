@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -22,6 +23,7 @@ from lucy.shared_execution.recovery_anchor_commissioning import (
     build_continued_quarantine_successor,
     build_quarantined_bootstrap,
     verify_bootstrap_package,
+    verify_continued_quarantine_successor_package,
 )
 from lucy.shared_execution.recovery_witness_jws import (
     RecoveryWitnessSignatureRejected,
@@ -116,6 +118,19 @@ def test_expired_day_zero_quarantine_has_a_24_hour_quarantine_only_successor() -
     assert successor.witness.ordering == (2, 1)
     assert successor.witness.not_after - successor.witness.not_before == timedelta(hours=24)
     assert artifacts.public_package(identity)["ceremony"] == "continued_quarantine_successor"
+    packaged_identity, packaged_old, packaged_new, packaged_decoder = (
+        verify_continued_quarantine_successor_package(
+            artifacts.public_package(identity),
+            now=NOW + timedelta(hours=13),
+            expected_root_public_sha256=str(
+                artifacts.public_package(identity)["root_public_key_sha256"]
+            ),
+        )
+    )
+    assert packaged_identity == identity
+    assert packaged_old == previous
+    assert packaged_new == successor
+    assert packaged_decoder(previous.exact_jws, previous.witness.exact_jws) == previous
     with pytest.raises(RecoveryAnchorRejected, match="continuity_not_established"):
         require_transition_dispatch_authority(
             successor,
@@ -168,12 +183,52 @@ def test_offline_successor_preparer_emits_no_private_material() -> None:
                 Ed25519PrivateKey.generate().private_bytes_raw()
             ).decode(),
         },
+        expected_root_public_sha256=str(
+            predecessor.public_package(identity)["root_public_key_sha256"]
+        ),
         predecessor_verified_at=NOW,
         now=NOW + timedelta(hours=13),
     )
     assert package["ceremony"] == "continued_quarantine_successor"
     assert package["predecessor_transition_sha256"] == predecessor.transition_sha256
     assert "private" not in str(package).lower()
+
+
+def test_staging_successor_public_package_verifies_against_original_root_pin() -> None:
+    package = json.loads(
+        (
+            ROOT
+            / "deploy"
+            / "aws"
+            / "tiamat-staging-quarantine-successor-v2-public-2026-09-20.json"
+        ).read_text(encoding="utf-8")
+    )
+    pinned_root = "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996"
+    identity, predecessor, successor, _ = verify_continued_quarantine_successor_package(
+        package,
+        now=datetime(2026, 9, 20, 17, 5, tzinfo=UTC),
+        expected_root_public_sha256=pinned_root,
+    )
+    assert identity.environment == "staging"
+    assert predecessor.exact_sha256 == (
+        "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b"
+    )
+    assert successor.exact_sha256 == (
+        "4c14dc3514213bd6d2a24d8a2571a78378e2c0e94547db6da265e08755dfd430"
+    )
+    assert successor.continuity == "quarantined"
+    with pytest.raises(ValueError, match="root trust pin"):
+        verify_continued_quarantine_successor_package(
+            package,
+            now=datetime(2026, 9, 20, 17, 5, tzinfo=UTC),
+            expected_root_public_sha256="0" * 64,
+        )
+    with pytest.raises(ValueError, match="inventory_key_not_current"):
+        verify_continued_quarantine_successor_package(
+            package,
+            now=datetime(2026, 9, 21, 17, 5, tzinfo=UTC),
+            expected_root_public_sha256=pinned_root,
+        )
 
 
 def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None:

@@ -1,0 +1,36 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-20",
+  "scope": "offline preparation of a quarantine-only staging recovery-anchor successor",
+  "environment": "staging",
+  "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+  "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+  "root_key_id": "tiamat-recovery-root.staging.1",
+  "root_public_key_sha256": "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996",
+  "replacement_witness_key_id": "tiamat-recovery-witness.staging.2",
+  "replacement_witness_public_key_sha256": "4328cefa024564fbe107ab28dbfef2c8e1d85da29fff9eb5927679be4fdfc566",
+  "predecessor_transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b",
+  "candidate_transition_sha256": "4c14dc3514213bd6d2a24d8a2571a78378e2c0e94547db6da265e08755dfd430",
+  "candidate_valid_from": "2026-09-20T17:04:50Z",
+  "candidate_valid_until": "2026-09-21T17:04:50Z",
+  "candidate_continuity": "quarantined",
+  "candidate_transition_version": 2,
+  "candidate_recovery_generation": 2,
+  "candidate_witness_revision": 1,
+  "public_package": "deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json",
+  "verification": {
+    "original_public_root_fingerprint_matches_commissioned_anchor": true,
+    "exact_predecessor_and_inventory_chain_verified": true,
+    "candidate_signatures_and_24_hour_window_verified": true,
+    "dispatch_authority": "denied_by_quarantine",
+    "focused_tests": "28 passed",
+    "ruff": "passed",
+    "strict_mypy": "passed across 144 source files"
+  },
+  "external_state": {
+    "dynamodb_write_performed": false,
+    "ledger_commissioned": false,
+    "provider_dispatch_enabled": false
+  },
+  "remaining_gate": "independent review and exact-digest confirmation before one conditional DynamoDB successor write"
+}
