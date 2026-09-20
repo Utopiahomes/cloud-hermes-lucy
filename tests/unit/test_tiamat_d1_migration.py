@@ -72,14 +72,16 @@ class _Connection:
         blocked: bool = True,
         postcheck_owner: str = "tiamat_recovery",
         postcheck_execute: bool = True,
-        postcheck_member: bool = False,
+        postcheck_set: bool = False,
+        postcheck_usage: bool = False,
         postcheck_create: bool = False,
     ):
         self.ledger_id = ledger_id
         self.blocked = blocked
         self.postcheck_owner = postcheck_owner
         self.postcheck_execute = postcheck_execute
-        self.postcheck_member = postcheck_member
+        self.postcheck_set = postcheck_set
+        self.postcheck_usage = postcheck_usage
         self.postcheck_create = postcheck_create
         self.statements: list[str] = []
 
@@ -102,8 +104,10 @@ class _Connection:
             return _Result(rows=[("tiamat_recovery", True), ("tiamat_runtime", True)])
         if "pg_catalog.pg_has_role" in statement:
             if sum("pg_catalog.pg_has_role" in earlier for earlier in self.statements) > 1:
-                return _Result((self.postcheck_member, self.postcheck_create))
-            return _Result((False, False))
+                return _Result(
+                    (self.postcheck_set, self.postcheck_usage, self.postcheck_create)
+                )
+            return _Result((False, False, False))
         if "pg_catalog.pg_get_userbyid" in statement:
             if "has_function_privilege" in statement:
                 return _Result((self.postcheck_owner, self.postcheck_execute))
@@ -165,7 +169,8 @@ def test_finalization_transfers_then_grants_runtime_functions(
     [
         ({"postcheck_owner": "tiamat_owner"}, "ownership or execution grant"),
         ({"postcheck_execute": False}, "ownership or execution grant"),
-        ({"postcheck_member": True}, "temporary recovery-role privileges"),
+        ({"postcheck_set": True}, "temporary recovery-role privileges"),
+        ({"postcheck_usage": True}, "temporary recovery-role privileges"),
         ({"postcheck_create": True}, "temporary recovery-role privileges"),
     ],
 )

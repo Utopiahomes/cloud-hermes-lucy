@@ -60,11 +60,15 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
             raise D1FinalizationRejected("required service roles are not logins")
         topology = connection.execute(
             """
-            SELECT pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'MEMBER'),
+            SELECT pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'SET'),
+                   pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'USAGE'),
                    pg_catalog.has_schema_privilege('tiamat_recovery', 'tiamat', 'CREATE')
             """
         ).fetchone()
-        if topology is None or bool(topology[0]) or bool(topology[1]):
+        # PostgreSQL 16 gives a role creator ADMIN-only membership. That cannot
+        # SET/INHERIT recovery privileges; the final revoke removes only the
+        # temporary SET/INHERIT grant, not this system-granted ADMIN row.
+        if topology is None or any(bool(value) for value in topology):
             raise D1FinalizationRejected("recovery role topology is not the expected baseline")
         for name, argument in _FUNCTIONS:
             function_owner = connection.execute(
@@ -107,11 +111,14 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
             raise D1FinalizationRejected("runtime retains direct restore-gate UPDATE")
         post_topology = connection.execute(
             """
-            SELECT pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'MEMBER'),
+            SELECT pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'SET'),
+                   pg_catalog.pg_has_role(current_user, 'tiamat_recovery', 'USAGE'),
                    pg_catalog.has_schema_privilege('tiamat_recovery', 'tiamat', 'CREATE')
             """
         ).fetchone()
-        if post_topology is None or bool(post_topology[0]) or bool(post_topology[1]):
+        # The system-granted ADMIN-only creator row remains on PostgreSQL 16;
+        # what finalization must remove is effective SET/INHERIT authority.
+        if post_topology is None or any(bool(value) for value in post_topology):
             raise D1FinalizationRejected("temporary recovery-role privileges remain")
         for name, argument in _FUNCTIONS:
             signature = f"tiamat.{name}({argument})"
