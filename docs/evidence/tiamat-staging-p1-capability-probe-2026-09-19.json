@@ -1,0 +1,70 @@
+{
+  "evidence_version": 1,
+  "recorded_at": "2026-09-19",
+  "scope": "P1 Render PostgreSQL capability probe only; no recovery transition or provider dispatch",
+  "source_commit": "6c42d87e34448e2586a3ed925edfbb940cfec40b",
+  "environment": "management-contract-staging",
+  "database_service_id": "dpg-damo6cp42hec73bp5nug-a",
+  "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+  "preflight": {
+    "job_id": "job-dank1fbm8hqs73bj6bag",
+    "job_state": "succeeded",
+    "tls": true,
+    "ledger_matches": true,
+    "staging_restore_gate_present_and_blocked": true,
+    "external_psql_from_local_machine": "blocked by the database's external IP rules"
+  },
+  "owner_capability_probe": {
+    "job_id": "job-dank3qjm8hqs73bjdgm0",
+    "job_state": "succeeded",
+    "alter_runtime_nologin": true,
+    "alter_runtime_password": true,
+    "query_runtime_sessions": true,
+    "owner_is_pg_signal_backend_member": false,
+    "self_grant_runtime_inherit": true,
+    "grant_recovery_set": true,
+    "transfer_function_to_recovery_without_schema_create": false,
+    "transfer_function_to_recovery_with_temporary_schema_create": true,
+    "effective_revoke_public_execute_pg_control_system": false,
+    "effective_revoke_public_execute_pg_control_checkpoint": false,
+    "effective_revoke_public_execute_pg_current_wal_flush_lsn": false,
+    "durable_role_or_function_changes": false,
+    "note": "The revoke probe checked effective runtime EXECUTE privilege, not merely whether REVOKE syntax was accepted. The temporary CREATE grant and function were rolled back."
+  },
+  "runtime_session_termination": {
+    "runtime_job_id": "job-dank5u142hec73ep41l0",
+    "owner_job_id": "job-dank663m8hqs73bjjs30",
+    "both_jobs_succeeded": true,
+    "runtime_job_observed_ready_then_terminated": true,
+    "owner_job_matched_exact_runtime_role_and_database": true,
+    "termination_with_temporary_self_grant_supported": true,
+    "durable_membership_change": false,
+    "runtime_credential_transferred_to_owner": false
+  },
+  "render_operational_controls": {
+    "restart_database_control_visible": true,
+    "restart_database_executed": false,
+    "logical_backup_contains_global_roles": "not established; requires a disposable restore/export check before relying on it"
+  },
+  "cleanup": {
+    "temporary_owner_url_removed_from_bootstrap_environment": true,
+    "remaining_bootstrap_variable_names": ["TIAMAT_ENVIRONMENT"],
+    "executor_service_suspended": true,
+    "bootstrap_service_suspended": true,
+    "recovery_coordinator_service_suspended": true,
+    "database_dispatch_remains_blocked": true,
+    "credential_values_in_repository_or_probe_job_output": false
+  },
+  "verification": {
+    "focused_unit_tests": "6 passed at source commit before the live probe",
+    "ruff": "passed at source commit before the live probe",
+    "mypy": "passed at source commit before the live probe",
+    "live_job_results": "read from Render one-off job output; job success alone was not counted as proof"
+  },
+  "limitations_and_next_actions": [
+    "P1 did not prove that Render logical backups include or exclude cluster-global roles; test in a disposable restore before designing any recovery path around that assumption.",
+    "D1 must account for the temporary schema CREATE permission needed for function ownership transfer; do not assume an unprivileged direct ALTER FUNCTION OWNER succeeds.",
+    "Managed owner cannot effectively revoke PUBLIC EXECUTE on the three probed pg_catalog functions; D1 must enforce that runtime cannot authorize continuity or manipulate the recovery gate.",
+    "Rotate the staging database owner credential before further privileged work because its URL appeared once in a task tool transcript during P1 setup."
+  ]
+}
