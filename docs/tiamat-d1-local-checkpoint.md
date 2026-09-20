@@ -26,7 +26,7 @@ Status: local candidate, **not database-verified or activated**. This checkpoint
 | Strict mypy on `src` | passed, 142 source files | Candidate source; rerun after source edits. |
 | Focused unit tests | 27 passed | Migration structure, finalizer preflight/order, runtime rejection, older ledger tests. |
 | Alembic offline SQL generation | passed | Proves revision chain and rendering, **not PostgreSQL execution**. |
-| Actual PostgreSQL migration/role/function execution | not run | Docker daemon absent and no disposable local PostgreSQL URL configured. Required before D1 is deployable. |
+| Actual PostgreSQL migration/role/function execution | not run | Docker Desktop was started twice on 2026-09-20, including outside the sandbox, but its Linux-engine pipe did not become available; no disposable local PostgreSQL URL is configured. Required before D1 is deployable. |
 | Staging migration or finalization | not run | Commissioned staging ledger remains at `0006` and dispatch-blocked. |
 
 ## Next action
