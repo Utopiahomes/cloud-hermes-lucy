@@ -152,7 +152,13 @@ class DynamoDbExternalRecoveryAnchor:
             stored_version = int(item["transition_version"]["N"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RecoveryAnchorRejected("recovery_anchor_record_invalid") from exc
-        transition = self._decode_transition(transition_jws, witness_jws)
+        try:
+            transition = self._decode_transition(transition_jws, witness_jws)
+        except ValueError as exc:
+            # Exact-byte witness and transition verifiers raise ValueError subclasses. A stored
+            # record which fails them is an invalid record, not an unexpected programming error,
+            # and every reader must see it as one fail-closed anchor rejection.
+            raise RecoveryAnchorRejected("recovery_anchor_record_invalid") from exc
         if (
             transition.exact_sha256 != stored_digest
             or transition.transition_version != stored_version
