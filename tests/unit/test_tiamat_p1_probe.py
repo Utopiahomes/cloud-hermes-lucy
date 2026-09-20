@@ -60,3 +60,46 @@ def test_probe_refuses_non_tls_owner_url(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("TIAMAT_P1_OWNER_DATABASE_URL", "postgresql://owner:secret@private/tiamat")
     with pytest.raises(ValueError, match="must require TLS"):
         module.run(expected_ledger="6177502f-3a93-429c-b68b-0ed726d1447f")
+
+
+def test_gate_diagnostic_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    ledger = "6177502f-3a93-429c-b68b-0ed726d1447f"
+    statements: list[str] = []
+
+    class _Cursor:
+        def __init__(self, rows: list[tuple[object, ...]]) -> None:
+            self.rows = rows
+
+        def fetchone(self) -> tuple[object, ...]:
+            return self.rows[0]
+
+        def fetchall(self) -> list[tuple[object, ...]]:
+            return self.rows
+
+    class _ReadOnlyConnection:
+        def __enter__(self) -> _ReadOnlyConnection:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def execute(self, statement: str) -> _Cursor:
+            statements.append(statement)
+            if "ledger_identity" in statement:
+                return _Cursor([(ledger,)])
+            if "restore_gate" in statement:
+                return _Cursor([("staging", True)])
+            if "pg_stat_ssl" in statement:
+                return _Cursor([(True,)])
+            raise AssertionError("unexpected statement")
+
+    monkeypatch.setenv(
+        "TIAMAT_P1_OWNER_DATABASE_URL",
+        "postgresql://owner:private@db/tiamat?sslmode=require",
+    )
+    monkeypatch.setattr(module.psycopg, "connect", lambda *_args, **_kwargs: _ReadOnlyConnection())
+    result = module.diagnose_gate(expected_ledger=ledger)
+    assert result["staging_gate_blocked"] is True
+    assert len(statements) == 3
+    assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements)

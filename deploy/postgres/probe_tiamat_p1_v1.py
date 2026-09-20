@@ -53,6 +53,32 @@ def _attempt(
         connection.execute("RELEASE SAVEPOINT p1_probe")
 
 
+def diagnose_gate(*, expected_ledger: str) -> dict[str, object]:
+    """Read only the staging identity and gate; disclose no connection material."""
+    owner_url = _connection_info("TIAMAT_P1_OWNER_DATABASE_URL")
+    if owner_url is None:
+        raise ValueError("temporary staging owner URL is required")
+    with psycopg.connect(owner_url) as connection:
+        ledger = _one(
+            connection.execute("SELECT ledger_id::text FROM tiamat.ledger_identity WHERE singleton")
+        )[0]
+        gate_rows = connection.execute(
+            "SELECT environment, dispatch_blocked FROM tiamat.restore_gate"
+        ).fetchall()
+        tls = _one(connection.execute("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()"))[
+            0
+        ]
+        return {
+            "ledger_matches": ledger == expected_ledger,
+            "transport_tls": tls is True,
+            "gate_row_count": len(gate_rows),
+            "staging_gate_present": any(row[0] == "staging" for row in gate_rows),
+            "staging_gate_blocked": next(
+                (row[1] for row in gate_rows if row[0] == "staging"), None
+            ),
+        }
+
+
 def run(*, expected_ledger: str) -> dict[str, object]:
     owner_url = _connection_info("TIAMAT_P1_OWNER_DATABASE_URL")
     runtime_url = _connection_info("TIAMAT_P1_RUNTIME_DATABASE_URL")
@@ -73,8 +99,10 @@ def run(*, expected_ledger: str) -> dict[str, object]:
         )
         if ledger != expected_ledger:
             raise ProbeRejected("ledger_mismatch")
+        if blocked is None:
+            raise ProbeRejected("staging_gate_missing")
         if blocked is not True:
-            raise ProbeRejected("dispatch_gate_not_blocked")
+            raise ProbeRejected("staging_gate_open")
         if tls is not True:
             raise ProbeRejected("transport_not_tls")
 
@@ -192,9 +220,14 @@ def run(*, expected_ledger: str) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-ledger-id", required=True)
+    parser.add_argument("--diagnose-gate-only", action="store_true")
     args = parser.parse_args()
     try:
-        result = run(expected_ledger=args.expected_ledger_id)
+        result = (
+            diagnose_gate(expected_ledger=args.expected_ledger_id)
+            if args.diagnose_gate_only
+            else run(expected_ledger=args.expected_ledger_id)
+        )
     except ProbeRejected as exc:
         print(json.dumps({"status": "rejected", "reason": str(exc)}))
         raise SystemExit(1) from None
