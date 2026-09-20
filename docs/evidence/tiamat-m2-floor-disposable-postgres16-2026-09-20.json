@@ -1,0 +1,38 @@
+{
+  "evidence_type": "tiamat_m2_floor_disposable_postgres16",
+  "date_utc": "2026-09-20",
+  "source_revision": "ab8b7c4a5cb42ef2db4de62aceb1a0d3a3aaf1e1 plus the test-fixture amendment committed with this evidence",
+  "resource": {
+    "render_id": "dpg-danvd8uk1f9s73a3v2og-a",
+    "name": "tiamat-m2-floor-disposable-20260920",
+    "database_name": "tiamat_test_d1_huzr",
+    "plan": "free",
+    "postgres_major": 16,
+    "region": "virginia",
+    "contains_production_data": false,
+    "external_access_during_test": "one temporary IPv4 /32 allowlist entry",
+    "disposition": "still present as a disposable test database; delete only after explicit user confirmation"
+  },
+  "checks": [
+    {
+      "name": "online_migration_and_role_fixture",
+      "result": "passed",
+      "detail": "Alembic reached the repository's single current head (0011_recovery_checkpoint). The fixture re-ran idempotent D1 finalization and supplied the same narrowly scoped recovery-table permissions as the staging role template."
+    },
+    {
+      "name": "d1_m2_integration_suite",
+      "result": "passed",
+      "detail": "22 PostgreSQL 16 integration cases passed. This includes all four recovery-gate anchor-floor cases: quarantine advances its floor, refuses a lower floor, requires a floor on a D1 ledger, and authorization advances the floor while unblocking with a retained checkpoint."
+    },
+    {
+      "name": "static_check",
+      "result": "passed",
+      "detail": "Ruff passed for the amended integration harness before the PostgreSQL run."
+    }
+  ],
+  "limits": [
+    "The run used synthetic ledger records and did not write DynamoDB, generate or use signing keys, dispatch a provider request, or spend model budget.",
+    "The commissioned staging ledger was not connected, migrated, finalized, or modified.",
+    "This is M2 floor-writer evidence only; anchor-integrated lifecycle, recovery commissioning, and provider activation remain separate gates."
+  ]
+}

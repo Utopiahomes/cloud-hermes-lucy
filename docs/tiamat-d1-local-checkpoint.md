@@ -69,12 +69,12 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local l
 | Actual PostgreSQL 16 D1 migration/role/function execution | 15 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
 | Actual PostgreSQL 16 M2 migration/issuer/consume execution | 16 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-m2-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
 | Actual PostgreSQL 16 M2 database-clock/digest binding | 18 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-m2-clock-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
-| Recovery-gate anchor-floor writers | 10 unit tests passed; 4 integration cases **not yet run against PostgreSQL** | Added after review of `edd72d9`. Unit coverage uses a fake connection for both gate commands; the four new cases in `tests/integration/test_tiamat_d1_postgres.py` need a disposable PostgreSQL 16 run before this row counts as database evidence. |
+| Recovery-gate anchor-floor writers | 4 PostgreSQL 16 cases passed (within 22 passing D1/M2 integration cases) | Quarantine advances its floor, rejects a lower floor, requires a floor on a D1 ledger, and authorization advances the floor while unblocking with a retained checkpoint. See `evidence/tiamat-m2-floor-disposable-postgres16-2026-09-20.json`; invalidated by recovery-gate, anchor-floor, checkpoint-binding, PostgreSQL-major, or role-topology changes. |
 | Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
 ## Next action
 
-Both M2 disposable resources were deleted after evidence capture. Neither was the commissioned ledger.
+The two earlier M2 disposable resources were deleted after evidence capture. The current M2 floor-writer disposable remains available only for the active test run and must be deleted after explicit user confirmation. None was the commissioned ledger.
 The local M2 candidate
 received an independent Astra code review and now has PostgreSQL 16 proof for online migration,
 issuer-written floor/claimant, v2 runtime consumption, finalizer topology, database-authoritative

@@ -13,12 +13,15 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from secrets import token_urlsafe
 from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
@@ -36,6 +39,7 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedAnchorTransition,
     VerifiedRecoveryWitness,
 )
+from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpoint
 from lucy.shared_execution.startup_attestation import StartupAttestationIssuer
 
 TEST_DATABASE_NAME = "tiamat_test_d1"
@@ -78,6 +82,11 @@ def _is_explicit_disposable_database(owner_url: str) -> bool:
     return confirmation == f"m2-disposable:{database_name}"
 
 
+def _migration_heads() -> tuple[str, ...]:
+    configuration = Config(str(Path("tiamat_alembic.ini").resolve()))
+    return tuple(sorted(ScriptDirectory.from_config(configuration).get_heads()))
+
+
 def _migrate_to_head(owner_url: str) -> None:
     environment = os.environ.copy()
     environment["TIAMAT_MIGRATION_DATABASE_URL"] = owner_url
@@ -109,7 +118,7 @@ def database_urls() -> _DatabaseUrls:
         version = int(owner.execute("SHOW server_version_num").fetchone()[0])
         assert 160000 <= version < 170000
         revision = owner.execute("SELECT version_num FROM tiamat.alembic_version").fetchone()
-        assert revision == ("0010_attestation_database_clock",)
+        assert revision == _migration_heads()
         for role in ("tiamat_runtime", "tiamat_recovery"):
             existing = owner.execute(
                 "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
@@ -137,6 +146,20 @@ def database_urls() -> _DatabaseUrls:
         owner.execute("GRANT USAGE ON SCHEMA tiamat TO tiamat_runtime, tiamat_recovery")
         owner.execute("GRANT SELECT, INSERT, UPDATE ON tiamat.restore_gate TO tiamat_recovery")
         owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
+        owner.execute(
+            "GRANT SELECT (environment, settlement_status) "
+            "ON tiamat.execution_records TO tiamat_recovery"
+        )
+        owner.execute(
+            "GRANT SELECT ON tiamat.trust_inventories, tiamat.release_heads TO tiamat_recovery"
+        )
+        owner.execute(
+            "GRANT UPDATE (activation_recovery_generation) "
+            "ON tiamat.trust_inventories TO tiamat_recovery"
+        )
+        owner.execute(
+            "GRANT UPDATE (recovery_generation) ON tiamat.release_heads TO tiamat_recovery"
+        )
         ledger_id = owner.execute(
             "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
         ).fetchone()[0]
@@ -148,15 +171,10 @@ def database_urls() -> _DatabaseUrls:
             "VALUES ('d1-finalizer', %s, 1, 1, true, 'test_only') ON CONFLICT DO NOTHING",
             (uuid4(),),
         )
-        function_owner = owner.execute(
-            "SELECT pg_get_userbyid(proowner) FROM pg_proc "
-            "WHERE oid = to_regprocedure('tiamat.consume_startup_attestation_v2(text)')"
-        ).fetchone()[0]
-    if function_owner != "tiamat_recovery":
-        try:
-            finalize_d1(owner_url, environment="d1-finalizer", expected_ledger_id=ledger_id)
-        except Exception as exc:
-            pytest.fail(f"D1 finalization failed: {type(exc).__name__}: {exc}", pytrace=False)
+    try:
+        finalize_d1(owner_url, environment="d1-finalizer", expected_ledger_id=ledger_id)
+    except Exception as exc:
+        pytest.fail(f"D1 finalization failed: {type(exc).__name__}: {exc}", pytrace=False)
     return _DatabaseUrls(
         owner=owner_url,
         recovery=_url_for_role(owner_url, "tiamat_recovery", role_password),
@@ -644,6 +662,23 @@ def test_authorize_advances_the_anchor_floor_and_unblocks(
             (environment,),
         ).fetchone()
     assert storage_epoch is not None
+    identity = RecoveryAnchorIdentity(
+        environment,
+        database_urls.ledger_id,
+        UUID(str(storage_epoch[0])),
+    )
+    checkpoint = construct_recovery_checkpoint(
+        {
+            "environment": environment,
+            "ledger_id": str(database_urls.ledger_id),
+            "storage_epoch": str(storage_epoch[0]),
+            "recovery_generation": 2,
+            "release_inventory": {"generation": 1, "jws_sha256": "f" * 64},
+            "release_heads": [],
+            "settlement_position": [],
+        },
+        identity=identity,
+    )
 
     authorize_reconciled_state(
         database_urls.recovery,
@@ -653,6 +688,7 @@ def test_authorize_advances_the_anchor_floor_and_unblocks(
         next_recovery_generation=2,
         unresolved_provider_liabilities=0,
         anchor_floor=AnchorFloorRecord(transition_version=4, transition_sha256="e" * 64),
+        checkpoint=checkpoint,
     )
 
     assert _gate_floor(database_urls, environment) == (4, "e" * 64, False)
