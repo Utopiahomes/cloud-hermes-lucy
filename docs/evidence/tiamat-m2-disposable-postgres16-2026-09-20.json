@@ -1,0 +1,42 @@
+{
+  "evidence_type": "tiamat_m2_disposable_postgres16",
+  "date_utc": "2026-09-20",
+  "resource": {
+    "render_id": "dpg-dann8k6gekts739hafdg-a",
+    "name": "tiamat-m2-disposable-20260920",
+    "database_name": "tiamat_test_d1_ro4r",
+    "plan": "free",
+    "postgres_major": 16,
+    "region": "virginia",
+    "contains_production_data": false,
+    "external_access_during_test": "one temporary IPv4 /32 allowlist entry",
+    "disposition": "pending explicit deletion confirmation after evidence review"
+  },
+  "checks": [
+    {
+      "name": "fresh_online_migration",
+      "result": "passed",
+      "detail": "Alembic migrated the disposable PostgreSQL 16 database through 0009_attestation_consume_v2."
+    },
+    {
+      "name": "d1_and_m2_database_boundary",
+      "result": "passed",
+      "detail": "16 integration cases passed: finalizer role topology, v1 execution revocation, v2 runtime execution, claimant/floor/fence/cluster/WAL rejection paths, expiry trigger, replay and concurrency behavior, direct gate-update denial, one-way block, and a real StartupAttestationIssuer-to-v2-consumer path."
+    },
+    {
+      "name": "m2_issuer_path",
+      "result": "passed",
+      "detail": "A recovery-role issuer read a synthetic in-memory verified anchor, observed Render PostgreSQL continuity, wrote the real anchor floor and an issuer-bounded claimant, and the runtime consumed that claimant through v2. No DynamoDB transition, signing key, provider request, or model spending occurred."
+    },
+    {
+      "name": "static_checks",
+      "result": "passed",
+      "detail": "Ruff on the changed integration test and strict mypy across src plus the D1 finalizer passed."
+    }
+  ],
+  "limits": [
+    "The test used synthetic records and an in-memory anchor only; it did not commission recovery authority.",
+    "The staging ledger was not connected, migrated, finalized, or modified.",
+    "AWS anchor availability, signed-transition verification, restore/failover recovery, and provider dispatch remain separate lifecycle evidence."
+  ]
+}

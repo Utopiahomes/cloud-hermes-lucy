@@ -8,6 +8,8 @@ the evidence run, not by this test module.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,8 +23,17 @@ from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from deploy.postgres.finalize_tiamat_d1_v1 import finalize_d1
+from lucy.shared_execution.recovery_anchor import (
+    InMemoryExternalRecoveryAnchor,
+    PostgresContinuityBeacon,
+    RecoveryAnchorIdentity,
+    VerifiedAnchorTransition,
+    VerifiedRecoveryWitness,
+)
+from lucy.shared_execution.startup_attestation import StartupAttestationIssuer
 
 TEST_DATABASE_NAME = "tiamat_test_d1"
+TEST_DATABASE_PREFIX = f"{TEST_DATABASE_NAME}_"
 ANCHOR_SHA256 = "a" * 64
 CHECKPOINT_SHA256 = "b" * 64
 
@@ -39,9 +50,41 @@ class _DatabaseUrls:
 
 
 def _url_for_role(owner_url: str, role: str, password: str) -> str:
-    return make_url(owner_url).set(username=role, password=password).render_as_string(
-        hide_password=False
+    return (
+        make_url(owner_url)
+        .set(username=role, password=password)
+        .render_as_string(hide_password=False)
     )
+
+
+class _CheckpointSource:
+    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
+        return CHECKPOINT_SHA256
+
+
+def _is_explicit_disposable_database(owner_url: str) -> bool:
+    database_name = make_url(owner_url).database
+    if database_name == TEST_DATABASE_NAME:
+        return True
+    if database_name is None or not database_name.startswith(TEST_DATABASE_PREFIX):
+        return False
+    confirmation = os.environ.get("TIAMAT_M2_TEST_CONFIRMATION")
+    return confirmation == f"m2-disposable:{database_name}"
+
+
+def _migrate_to_head(owner_url: str) -> None:
+    environment = os.environ.copy()
+    environment["TIAMAT_MIGRATION_DATABASE_URL"] = owner_url
+    completed = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", "tiamat_alembic.ini", "upgrade", "head"],
+        cwd=os.getcwd(),
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        pytest.fail("M2 integration migration failed", pytrace=False)
 
 
 @pytest.fixture(scope="module")
@@ -49,14 +92,18 @@ def database_urls() -> _DatabaseUrls:
     owner_url = os.environ.get("TIAMAT_D1_TEST_DATABASE_URL")
     if not owner_url:
         pytest.skip("TIAMAT_D1_TEST_DATABASE_URL is not configured")
-    if make_url(owner_url).database != TEST_DATABASE_NAME:
-        pytest.fail("D1 integration test requires exact disposable tiamat_test_d1 database")
+    if not _is_explicit_disposable_database(owner_url):
+        pytest.fail(
+            "M2 integration requires tiamat_test_d1 or an explicitly confirmed disposable suffix",
+            pytrace=False,
+        )
+    _migrate_to_head(owner_url)
     role_password = token_urlsafe(32)
     with psycopg.connect(owner_url, autocommit=True) as owner:
         version = int(owner.execute("SHOW server_version_num").fetchone()[0])
         assert 160000 <= version < 170000
         revision = owner.execute("SELECT version_num FROM tiamat.alembic_version").fetchone()
-        assert revision == ("0007_startup_attestation",)
+        assert revision == ("0009_attestation_consume_v2",)
         for role in ("tiamat_runtime", "tiamat_recovery"):
             existing = owner.execute(
                 "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
@@ -74,7 +121,13 @@ def database_urls() -> _DatabaseUrls:
                         sql.Identifier(role), sql.Literal(role_password)
                     )
                 )
-        owner.execute("GRANT CONNECT ON DATABASE tiamat_test_d1 TO tiamat_runtime, tiamat_recovery")
+        database_name = make_url(owner_url).database
+        assert database_name is not None
+        owner.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO tiamat_runtime, tiamat_recovery").format(
+                sql.Identifier(database_name)
+            )
+        )
         owner.execute("GRANT USAGE ON SCHEMA tiamat TO tiamat_runtime, tiamat_recovery")
         owner.execute("GRANT SELECT, INSERT, UPDATE ON tiamat.restore_gate TO tiamat_recovery")
         owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
@@ -91,7 +144,7 @@ def database_urls() -> _DatabaseUrls:
         )
         function_owner = owner.execute(
             "SELECT pg_get_userbyid(proowner) FROM pg_proc "
-            "WHERE oid = to_regprocedure('tiamat.consume_startup_attestation(text)')"
+            "WHERE oid = to_regprocedure('tiamat.consume_startup_attestation_v2(text)')"
         ).fetchone()[0]
     if function_owner != "tiamat_recovery":
         try:
@@ -168,7 +221,7 @@ def _consume(urls: _DatabaseUrls, environment: str) -> int:
     with psycopg.connect(urls.runtime) as runtime:
         runtime.execute("SELECT set_config('tiamat.environment', %s, true)", (environment,))
         row = runtime.execute(
-            "SELECT tiamat.consume_startup_attestation(%s)", (ANCHOR_SHA256,)
+            "SELECT tiamat.consume_startup_attestation_v2(%s)", (ANCHOR_SHA256,)
         ).fetchone()
         assert row is not None
         return int(row[0])
@@ -178,7 +231,6 @@ def _consume(urls: _DatabaseUrls, environment: str) -> int:
     ("options", "sqlstate"),
     [
         ({"attested": False}, "ZX101"),
-        ({"expired": True}, "ZX101"),
         ({"floor": False}, "ZX102"),
         ({"blocked": True}, "ZX102"),
         ({"system_identifier": "0"}, "ZX103"),
@@ -195,6 +247,52 @@ def test_attestation_rejection_cases(
     assert rejected.value.sqlstate == sqlstate
 
 
+def test_database_rejects_an_expired_claimant_at_write_time(
+    database_urls: _DatabaseUrls,
+) -> None:
+    """M2's issuer-bound expiry trigger prevents malformed historical claimants."""
+
+    environment = f"expired-{uuid4().hex}"
+    storage_epoch = uuid4()
+    with psycopg.connect(database_urls.recovery) as recovery:
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate
+              (environment, storage_epoch, recovery_generation, coordinator_generation,
+               dispatch_blocked, block_reason, anchor_floor_version, anchor_floor_sha256)
+            VALUES (%s, %s, 1, 1, true, 'test_only', 1, %s)
+            """,
+            (environment, storage_epoch, ANCHOR_SHA256),
+        )
+        observed = recovery.execute(
+            "SELECT (pg_catalog.pg_control_system()).system_identifier::text, "
+            "(pg_catalog.pg_control_checkpoint()).timeline_id::bigint, "
+            "pg_catalog.pg_current_wal_flush_lsn()::text"
+        ).fetchone()
+        assert observed is not None
+        with pytest.raises(psycopg.errors.RaiseException, match="issuer-bounded"):
+            recovery.execute(
+                """
+                INSERT INTO tiamat.startup_attestations
+                  (environment, anchor_transition_sha256, anchor_transition_version,
+                   system_identifier, timeline_id, flushed_lsn, checkpoint_digest,
+                   ledger_id, storage_epoch, recovery_generation, expires_at)
+                VALUES (%s, %s, 1, %s, %s, %s, %s, %s, %s, 1,
+                        clock_timestamp() - interval '1 second')
+                """,
+                (
+                    environment,
+                    ANCHOR_SHA256,
+                    str(observed[0]),
+                    int(observed[1]),
+                    str(observed[2]),
+                    CHECKPOINT_SHA256,
+                    database_urls.ledger_id,
+                    storage_epoch,
+                ),
+            )
+
+
 def test_one_successful_consumer_and_no_replay(database_urls: _DatabaseUrls) -> None:
     environment = _seed(database_urls)
     generation = _consume(database_urls, environment)
@@ -206,7 +304,7 @@ def test_one_successful_consumer_and_no_replay(database_urls: _DatabaseUrls) -> 
         ).fetchone()
         assert current == (True,)
         with pytest.raises(psycopg.Error) as replay:
-            runtime.execute("SELECT tiamat.consume_startup_attestation(%s)", (ANCHOR_SHA256,))
+            runtime.execute("SELECT tiamat.consume_startup_attestation_v2(%s)", (ANCHOR_SHA256,))
         assert replay.value.sqlstate == "ZX101"
 
 
@@ -230,10 +328,11 @@ def test_finalizer_postconditions_hold_on_postgresql_16(database_urls: _Database
             "has_table_privilege('tiamat_runtime', 'tiamat.restore_gate', 'UPDATE')"
         ).fetchone()
         assert topology == (False, False, False, False)
-        for signature in (
-            "tiamat.consume_startup_attestation(text)",
-            "tiamat.verify_attestation_current(bigint)",
-            "tiamat.block_dispatch(text)",
+        for signature, must_execute in (
+            ("tiamat.consume_startup_attestation(text)", False),
+            ("tiamat.consume_startup_attestation_v2(text)", True),
+            ("tiamat.verify_attestation_current(bigint)", True),
+            ("tiamat.block_dispatch(text)", True),
         ):
             function_state = owner.execute(
                 "SELECT pg_get_userbyid(proowner), "
@@ -241,7 +340,7 @@ def test_finalizer_postconditions_hold_on_postgresql_16(database_urls: _Database
                 "FROM pg_proc WHERE oid = to_regprocedure(%s)",
                 (signature,),
             ).fetchone()
-            assert function_state == ("tiamat_recovery", True)
+            assert function_state == ("tiamat_recovery", must_execute)
 
 
 def test_two_concurrent_consumers_have_one_winner(database_urls: _DatabaseUrls) -> None:
@@ -306,3 +405,83 @@ def test_one_way_block_invalidates_consumed_attestation(database_urls: _Database
             "SELECT tiamat.verify_attestation_current(%s)", (generation,)
         ).fetchone()
         assert current == (False,)
+
+
+def test_m2_issuer_writes_real_floor_and_v2_claimant(database_urls: _DatabaseUrls) -> None:
+    environment = f"m2-{uuid4().hex}"
+    storage_epoch = uuid4()
+    identity = RecoveryAnchorIdentity(environment, database_urls.ledger_id, storage_epoch)
+    with psycopg.connect(database_urls.recovery) as recovery:
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate
+              (environment, storage_epoch, recovery_generation, coordinator_generation,
+               dispatch_blocked, verified_at, anchor_floor_version, anchor_floor_sha256)
+            VALUES (%s, %s, 1, 1, false, clock_timestamp(), 0, NULL)
+            """,
+            (environment, storage_epoch),
+        )
+        observed = recovery.execute(
+            """
+            SELECT (pg_catalog.pg_control_system()).system_identifier::text,
+                   (pg_catalog.pg_control_checkpoint()).timeline_id::bigint,
+                   pg_catalog.pg_current_wal_flush_lsn()::text
+            """
+        ).fetchone()
+    assert observed is not None
+    now = datetime.now(UTC)
+    witness = VerifiedRecoveryWitness(
+        identity=identity,
+        recovery_generation=1,
+        witness_revision=1,
+        status="reconciled",
+        checkpoint_digest=CHECKPOINT_SHA256,
+        release_heads_sha256="c" * 64,
+        checkpoint_settlement_position_sha256="d" * 64,
+        witness_inventory_digest="e" * 64,
+        exact_jws=b"m2-integration-witness",
+        not_before=now - timedelta(minutes=1),
+        not_after=now + timedelta(minutes=30),
+    )
+    transition = VerifiedAnchorTransition(
+        witness=witness,
+        transition_version=1,
+        previous_transition_sha256=None,
+        continuity="continuity_established",
+        beacon=PostgresContinuityBeacon(
+            str(observed[0]), int(observed[1]), str(observed[2]), CHECKPOINT_SHA256
+        ),
+        exact_jws=b"m2-integration-transition",
+    )
+    anchor = InMemoryExternalRecoveryAnchor()
+    anchor.install(transition, expected_transition_sha256=None, now=now)
+    receipt = StartupAttestationIssuer(
+        anchor=anchor,
+        identity=identity,
+        recovery_database_url=database_urls.recovery,
+        checkpoint_source=_CheckpointSource(),
+    ).issue(now=now)
+    with psycopg.connect(database_urls.recovery) as recovery:
+        gate = recovery.execute(
+            """
+            SELECT anchor_floor_version, anchor_floor_sha256
+            FROM tiamat.restore_gate WHERE environment = %s
+            """,
+            (environment,),
+        ).fetchone()
+        attestation = recovery.execute(
+            """
+            SELECT created_at, expires_at FROM tiamat.startup_attestations
+            WHERE attestation_id = %s
+            """,
+            (receipt.attestation_id,),
+        ).fetchone()
+    assert gate == (1, transition.exact_sha256)
+    assert attestation is not None
+    assert attestation[1] <= attestation[0] + timedelta(minutes=10)
+    with psycopg.connect(database_urls.runtime) as runtime:
+        runtime.execute("SELECT set_config('tiamat.environment', %s, true)", (environment,))
+        generation = runtime.execute(
+            "SELECT tiamat.consume_startup_attestation_v2(%s)", (transition.exact_sha256,)
+        ).fetchone()
+    assert generation == (2,)

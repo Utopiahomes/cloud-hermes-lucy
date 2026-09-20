@@ -58,17 +58,17 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local l
 | Focused D1/M2 unit tests | 34 passed | Issuer, witness binding, expiry migration, v2 runtime entrypoint, and fresh/mixed-owner finalizer paths; synthetic only. |
 | Full offline unit suite | 1276 passed, 298 skipped | M2 candidate; isolated PostgreSQL suites remain skipped because no disposable URL is configured. |
 | Alembic offline SQL generation | passed through `0009` | Proves revision chain and rendering, **not PostgreSQL execution**. |
-| Actual PostgreSQL 16 migration/role/function execution | 15 passed | Free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
+| Actual PostgreSQL 16 D1 migration/role/function execution | 15 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
+| Actual PostgreSQL 16 M2 migration/issuer/consume execution | 16 passed | Current explicitly disposable Render PostgreSQL 16; see `evidence/tiamat-m2-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
 | Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
 ## Next action
 
-The free PostgreSQL test resource was deleted after evidence capture and is absent from Render's
-database list; the commissioned database remains listed. The local M2 candidate received an
-independent Astra code review. It next needs a fresh disposable PostgreSQL 16 run that proves issuer
-plus D1 consumption, the database expiry constraint, anchor-digest mismatch rejection, mixed-owner
-finalization, and post-lock expiry behavior. The
-commissioned staging ledger must stay at `0006` and blocked: no local candidate is authorized to
-write an external anchor or commission recovery authority. C1-A automatic restart, failover, and
-restore evidence remain separate work; this candidate does not claim to close the full lifecycle
-plan.
+The M2 disposable resource remains present only pending explicit deletion confirmation; it is not
+the commissioned ledger. The local M2 candidate received an independent Astra code review and now
+has a fresh PostgreSQL 16 proof for online migration, issuer-written floor/claimant, v2 runtime
+consumption, expiry enforcement, and finalizer topology. Remaining lifecycle evidence is the
+separate anchor-integrated launcher and recovery matrix: signed-transition verification, anchor
+availability and digest mismatch, automatic restart, failover, and restore. The commissioned
+staging ledger must stay at `0006` and blocked: no local candidate is authorized to write an
+external anchor or commission recovery authority.
