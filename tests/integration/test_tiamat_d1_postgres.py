@@ -103,7 +103,7 @@ def database_urls() -> _DatabaseUrls:
         version = int(owner.execute("SHOW server_version_num").fetchone()[0])
         assert 160000 <= version < 170000
         revision = owner.execute("SELECT version_num FROM tiamat.alembic_version").fetchone()
-        assert revision == ("0009_attestation_consume_v2",)
+        assert revision == ("0010_attestation_database_clock",)
         for role in ("tiamat_runtime", "tiamat_recovery"):
             existing = owner.execute(
                 "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
@@ -270,7 +270,7 @@ def test_database_rejects_an_expired_claimant_at_write_time(
             "pg_catalog.pg_current_wal_flush_lsn()::text"
         ).fetchone()
         assert observed is not None
-        with pytest.raises(psycopg.errors.RaiseException, match="issuer-bounded"):
+        with pytest.raises(psycopg.DatabaseError, match="startup_attestation_expired") as rejected:
             recovery.execute(
                 """
                 INSERT INTO tiamat.startup_attestations
@@ -291,6 +291,82 @@ def test_database_rejects_an_expired_claimant_at_write_time(
                     storage_epoch,
                 ),
             )
+        assert rejected.value.sqlstate == "ZX105"
+
+
+def test_database_overrides_a_future_caller_issuance_time(
+    database_urls: _DatabaseUrls,
+) -> None:
+    """A recovery caller cannot turn a supplied future timestamp into extra authority."""
+
+    environment = f"clock-{uuid4().hex}"
+    storage_epoch = uuid4()
+    with psycopg.connect(database_urls.recovery) as recovery:
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate
+              (environment, storage_epoch, recovery_generation, coordinator_generation,
+               dispatch_blocked, block_reason, anchor_floor_version, anchor_floor_sha256)
+            VALUES (%s, %s, 1, 1, true, 'test_only', 1, %s)
+            """,
+            (environment, storage_epoch, ANCHOR_SHA256),
+        )
+        observed = recovery.execute(
+            "SELECT (pg_catalog.pg_control_system()).system_identifier::text, "
+            "(pg_catalog.pg_control_checkpoint()).timeline_id::bigint, "
+            "pg_catalog.pg_current_wal_flush_lsn()::text"
+        ).fetchone()
+        assert observed is not None
+        inserted = recovery.execute(
+            """
+            INSERT INTO tiamat.startup_attestations
+              (environment, anchor_transition_sha256, anchor_transition_version,
+               system_identifier, timeline_id, flushed_lsn, checkpoint_digest,
+               ledger_id, storage_epoch, recovery_generation, created_at, expires_at)
+            VALUES (%s, %s, 1, %s, %s, %s, %s, %s, %s, 1,
+                    clock_timestamp() + interval '1 day', clock_timestamp() + interval '5 minutes')
+            RETURNING created_at, expires_at
+            """,
+            (
+                environment,
+                ANCHOR_SHA256,
+                str(observed[0]),
+                int(observed[1]),
+                str(observed[2]),
+                CHECKPOINT_SHA256,
+                database_urls.ledger_id,
+                storage_epoch,
+            ),
+        ).fetchone()
+    assert inserted is not None
+    assert inserted[1] <= inserted[0] + timedelta(minutes=10)
+    assert inserted[0] < datetime.now(UTC) + timedelta(minutes=1)
+    with (
+        psycopg.connect(database_urls.recovery) as recovery,
+        pytest.raises(psycopg.DatabaseError) as rejected,
+    ):
+        recovery.execute(
+            """
+            UPDATE tiamat.startup_attestations
+            SET expires_at = clock_timestamp() + interval '1 day'
+            WHERE environment = %s
+            """,
+            (environment,),
+        )
+    assert rejected.value.sqlstate == "ZX106"
+
+
+def test_runtime_anchor_digest_mismatch_does_not_consume_claimant(
+    database_urls: _DatabaseUrls,
+) -> None:
+    environment = _seed(database_urls)
+    other_digest = "f" * 64
+    with psycopg.connect(database_urls.runtime) as runtime:
+        runtime.execute("SELECT set_config('tiamat.environment', %s, true)", (environment,))
+        with pytest.raises(psycopg.Error) as rejected:
+            runtime.execute("SELECT tiamat.consume_startup_attestation_v2(%s)", (other_digest,))
+        assert rejected.value.sqlstate == "ZX101"
+    assert _consume(database_urls, environment) == 2
 
 
 def test_one_successful_consumer_and_no_replay(database_urls: _DatabaseUrls) -> None:

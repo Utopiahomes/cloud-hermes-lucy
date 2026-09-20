@@ -41,6 +41,15 @@ def _consume_v2_migration() -> ModuleType:
     return module
 
 
+def _database_clock_migration() -> ModuleType:
+    path = ROOT / "tiamat_migrations" / "versions" / "0010_attestation_database_clock.py"
+    spec = importlib.util.spec_from_file_location("tiamat_d1_database_clock_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_d1_migration_installs_locked_functions_and_single_claimant_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,6 +110,23 @@ def test_d1_consume_v2_rechecks_expiry_after_the_gate_lock(
     assert "REVOKE ALL ON FUNCTION tiamat.consume_startup_attestation_v2(text) FROM PUBLIC" in sql
 
 
+def test_d1_database_clock_migration_overrides_caller_issuance_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _database_clock_migration()
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "execute", statements.append)
+    migration.upgrade()
+    sql = "\n".join(statements)
+
+    assert "CREATE OR REPLACE FUNCTION tiamat.enforce_startup_attestation_expiry_bound()" in sql
+    assert "NEW.created_at := database_now" in sql
+    assert "NEW.created_at IS DISTINCT FROM OLD.created_at" in sql
+    assert "NEW.expires_at <= database_now" in sql
+    assert "ERRCODE = 'ZX105'" in sql
+    assert "ERRCODE = 'ZX106'" in sql
+
+
 class _Result:
     def __init__(
         self, row: tuple[Any, ...] | None = None, rows: list[tuple[Any, ...]] | None = None
@@ -158,17 +184,13 @@ class _Connection:
             return _Result(rows=[("tiamat_recovery", True), ("tiamat_runtime", True)])
         if "pg_catalog.pg_has_role" in statement:
             if sum("pg_catalog.pg_has_role" in earlier for earlier in self.statements) > 1:
-                return _Result(
-                    (self.postcheck_set, self.postcheck_usage, self.postcheck_create)
-                )
+                return _Result((self.postcheck_set, self.postcheck_usage, self.postcheck_create))
             return _Result((False, False, False))
         if "pg_catalog.pg_get_userbyid" in statement:
             if "has_function_privilege" in statement:
                 is_deprecated = bool(params and "consume_startup_attestation(text)" in params[0])
                 runtime_execute = (
-                    self.postcheck_deprecated_execute
-                    if is_deprecated
-                    else self.postcheck_execute
+                    self.postcheck_deprecated_execute if is_deprecated else self.postcheck_execute
                 )
                 return _Result(
                     (
@@ -226,10 +248,13 @@ def test_finalization_transfers_then_grants_runtime_functions(
     )
     # V1 is deliberately transferred without a runtime grant; each non-deprecated
     # entry receives EXECUTE before its own ownership transfer.
-    assert first_grant < statements.index(next(
-        statement for statement in statements
-        if "ALTER FUNCTION" in statement and "consume_startup_attestation_v2" in statement
-    ))
+    assert first_grant < statements.index(
+        next(
+            statement
+            for statement in statements
+            if "ALTER FUNCTION" in statement and "consume_startup_attestation_v2" in statement
+        )
+    )
     assert (
         statements.index("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
         < len(statements) - 1

@@ -60,14 +60,16 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local l
 | Alembic offline SQL generation | passed through `0009` | Proves revision chain and rendering, **not PostgreSQL execution**. |
 | Actual PostgreSQL 16 D1 migration/role/function execution | 15 passed | Deleted free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
 | Actual PostgreSQL 16 M2 migration/issuer/consume execution | 16 passed | Current explicitly disposable Render PostgreSQL 16; see `evidence/tiamat-m2-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
+| Actual PostgreSQL 16 M2 database-clock/digest binding | 18 passed | Current explicitly disposable Render PostgreSQL 16; see `evidence/tiamat-m2-clock-disposable-postgres16-2026-09-20.json`. Invalidated by M2 source, PostgreSQL major version, or role topology change. |
 | Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
 ## Next action
 
-The M2 disposable resource was deleted after evidence capture; it was not the commissioned ledger.
-The local M2 candidate received an independent Astra code review and now
-has a fresh PostgreSQL 16 proof for online migration, issuer-written floor/claimant, v2 runtime
-consumption, expiry enforcement, and finalizer topology. Remaining lifecycle evidence is the
+The first M2 disposable resource was deleted after evidence capture; the second remains present only
+pending explicit deletion confirmation. Neither was the commissioned ledger. The local M2 candidate
+received an independent Astra code review and now has PostgreSQL 16 proof for online migration,
+issuer-written floor/claimant, v2 runtime consumption, finalizer topology, database-authoritative
+issuance timestamps, and runtime anchor-digest binding. Remaining lifecycle evidence is the
 separate anchor-integrated launcher and recovery matrix: signed-transition verification, anchor
 availability and digest mismatch, automatic restart, failover, and restore. The commissioned
 staging ledger must stay at `0006` and blocked: no local candidate is authorized to write an

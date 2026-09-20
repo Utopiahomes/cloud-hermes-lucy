@@ -1,0 +1,42 @@
+{
+  "evidence_type": "tiamat_m2_database_clock_disposable_postgres16",
+  "date_utc": "2026-09-20",
+  "resource": {
+    "render_id": "dpg-danutiuk1f9s73a27htg-a",
+    "name": "tiamat-m2-clock-disposable-20260920",
+    "database_name": "tiamat_test_d1_z6g8",
+    "plan": "free",
+    "postgres_major": 16,
+    "region": "virginia",
+    "contains_production_data": false,
+    "external_access_during_test": "one temporary IPv4 /32 allowlist entry",
+    "disposition": "pending explicit deletion confirmation after evidence review"
+  },
+  "checks": [
+    {
+      "name": "fresh_online_migration",
+      "result": "passed",
+      "detail": "Alembic migrated a fresh PostgreSQL 16 database through 0010_attestation_database_clock."
+    },
+    {
+      "name": "database_authoritative_issuance_time",
+      "result": "passed",
+      "detail": "18 integration cases passed. PostgreSQL overwrote an explicitly supplied future created_at with its own clock; rejected an already-expired claimant with ZX105 and a long-lived expiry update with ZX106; a valid claimant remains bounded to ten minutes from database issuance."
+    },
+    {
+      "name": "runtime_anchor_digest_binding",
+      "result": "passed",
+      "detail": "A runtime presenting valid-shaped digest B received ZX101 and did not consume the claimant issued for digest A; the original A claimant subsequently consumed successfully."
+    },
+    {
+      "name": "local_regression_checks",
+      "result": "passed",
+      "detail": "Ruff on changed files, strict mypy across 144 source files, 27 focused D1/M2 unit tests, and 1279 offline tests passed; 301 integration/environment-dependent tests were skipped by design."
+    }
+  ],
+  "limits": [
+    "Synthetic test records and an in-memory anchor only; no DynamoDB write, signed transition, provider request, model spending, or recovery commissioning.",
+    "The staging ledger remained at 0006 and dispatch-blocked; it was not connected, migrated, or modified.",
+    "External-anchor floor persistence at quarantine and authorization, restore/failover lifecycle evidence, and production assembly remain separate increments."
+  ]
+}

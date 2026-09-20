@@ -90,48 +90,49 @@ class StartupAttestationIssuer:
                 psycopg.connect(_conninfo(self._database_url), row_factory=dict_row) as connection,
                 connection.transaction(),
             ):
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (self._identity.environment,),
+                )
+                self._require_recovery_role(connection)
+                gate = self._lock_gate(connection)
+                observed = self._observe_continuity(connection, checkpoint_digest)
+                try:
+                    witness = require_transition_dispatch_authority(
+                        transition,
+                        self._identity,
+                        observed_beacon=observed,
+                        now=now,
+                    )
+                except RecoveryAnchorRejected as exc:
+                    raise StartupAttestationRejected(str(exc)) from exc
+                self._require_gate_matches_identity(
+                    gate,
+                    transition.exact_sha256,
+                    transition.transition_version,
+                    witness.recovery_generation,
+                )
+                active = self._lock_active_claimant_nowait(connection)
+                database_now = self._database_now(connection)
+                if not witness.valid_at(database_now):
+                    raise StartupAttestationRejected("recovery_dispatch_not_authorized")
+                expires_at = min(witness.not_after, database_now + timedelta(minutes=10))
+                if expires_at <= database_now:
+                    raise StartupAttestationRejected("startup_attestation_expired")
+                if active is not None:
                     connection.execute(
-                        "SELECT set_config('tiamat.environment', %s, true)",
-                        (self._identity.environment,),
-                    )
-                    self._require_recovery_role(connection)
-                    gate = self._lock_gate(connection)
-                    observed = self._observe_continuity(connection, checkpoint_digest)
-                    try:
-                        witness = require_transition_dispatch_authority(
-                            transition,
-                            self._identity,
-                            observed_beacon=observed,
-                            now=now,
-                        )
-                    except RecoveryAnchorRejected as exc:
-                        raise StartupAttestationRejected(str(exc)) from exc
-                    self._require_gate_matches_identity(
-                        gate,
-                        transition.exact_sha256,
-                        transition.transition_version,
-                        witness.recovery_generation,
-                    )
-                    active = self._lock_active_claimant_nowait(connection)
-                    database_now = self._database_now(connection)
-                    if not witness.valid_at(database_now):
-                        raise StartupAttestationRejected("recovery_dispatch_not_authorized")
-                    expires_at = min(witness.not_after, database_now + timedelta(minutes=10))
-                    if expires_at <= database_now:
-                        raise StartupAttestationRejected("startup_attestation_expired")
-                    if active is not None:
-                        connection.execute(
-                            """
+                        """
                             UPDATE tiamat.startup_attestations
                             SET superseded_at = clock_timestamp()
                             WHERE attestation_id = %s
                             """,
-                            (active["attestation_id"],),
-                        )
-                    self._advance_floor_if_needed(connection, gate, transition.exact_sha256,
-                                                   transition.transition_version)
-                    row = connection.execute(
-                        """
+                        (active["attestation_id"],),
+                    )
+                self._advance_floor_if_needed(
+                    connection, gate, transition.exact_sha256, transition.transition_version
+                )
+                row = connection.execute(
+                    """
                         INSERT INTO tiamat.startup_attestations (
                             environment, anchor_transition_sha256, anchor_transition_version,
                             system_identifier, timeline_id, flushed_lsn, checkpoint_digest,
@@ -139,33 +140,35 @@ class StartupAttestationIssuer:
                         ) VALUES (%s, %s, %s, %s, %s, %s::pg_lsn, %s, %s, %s, %s, %s)
                         RETURNING attestation_id, expires_at
                         """,
-                        (
-                            self._identity.environment,
-                            transition.exact_sha256,
-                            transition.transition_version,
-                            observed.system_identifier,
-                            observed.timeline_id,
-                            observed.flushed_wal_lsn,
-                            checkpoint_digest,
-                            self._identity.ledger_id,
-                            self._identity.storage_epoch,
-                            witness.recovery_generation,
-                            expires_at,
-                        ),
-                    ).fetchone()
-                    if row is None:
-                        raise StartupAttestationRejected("startup_attestation_insert_failed")
-                    return StartupAttestationReceipt(
-                        attestation_id=UUID(str(row["attestation_id"])),
-                        anchor_transition_sha256=transition.exact_sha256,
-                        anchor_transition_version=transition.transition_version,
-                        expires_at=row["expires_at"],
-                    )
+                    (
+                        self._identity.environment,
+                        transition.exact_sha256,
+                        transition.transition_version,
+                        observed.system_identifier,
+                        observed.timeline_id,
+                        observed.flushed_wal_lsn,
+                        checkpoint_digest,
+                        self._identity.ledger_id,
+                        self._identity.storage_epoch,
+                        witness.recovery_generation,
+                        expires_at,
+                    ),
+                ).fetchone()
+                if row is None:
+                    raise StartupAttestationRejected("startup_attestation_insert_failed")
+                return StartupAttestationReceipt(
+                    attestation_id=UUID(str(row["attestation_id"])),
+                    anchor_transition_sha256=transition.exact_sha256,
+                    anchor_transition_version=transition.transition_version,
+                    expires_at=row["expires_at"],
+                )
         except StartupAttestationRejected:
             raise
         except psycopg.errors.LockNotAvailable as exc:
             raise StartupAttestationRejected("startup_attestation_busy") from exc
         except psycopg.Error as exc:
+            if exc.sqlstate == "ZX105":
+                raise StartupAttestationRejected("startup_attestation_expired") from exc
             raise StartupAttestationRejected("startup_attestation_store_unavailable") from exc
 
     @staticmethod

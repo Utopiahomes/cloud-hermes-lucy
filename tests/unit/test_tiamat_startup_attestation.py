@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from lucy.shared_execution.recovery_anchor import (
@@ -37,9 +38,18 @@ class _Result:
 
 
 class _Connection:
-    def __init__(self, identity: RecoveryAnchorIdentity, *, database_now: datetime) -> None:
+    def __init__(
+        self,
+        identity: RecoveryAnchorIdentity,
+        *,
+        database_now: datetime,
+        floor_version: int = 0,
+        floor_digest: str | None = None,
+    ) -> None:
         self.identity = identity
         self.database_now = database_now
+        self.floor_version = floor_version
+        self.floor_digest = floor_digest
         self.executed: list[tuple[str, tuple[Any, ...] | None]] = []
 
     def __enter__(self) -> _Connection:
@@ -64,8 +74,8 @@ class _Connection:
                     "storage_epoch": self.identity.storage_epoch,
                     "recovery_generation": 1,
                     "dispatch_blocked": False,
-                    "anchor_floor_version": 0,
-                    "anchor_floor_sha256": None,
+                    "anchor_floor_version": self.floor_version,
+                    "anchor_floor_sha256": self.floor_digest,
                     "ledger_id": self.identity.ledger_id,
                 }
             )
@@ -159,4 +169,59 @@ def test_issuer_rejects_a_checkpoint_source_that_disagrees_with_signed_authority
         checkpoint_source=_WrongCheckpoint(),
     )
     with pytest.raises(StartupAttestationRejected, match="checkpoint_digest_mismatch"):
+        issuer.issue(now=NOW)
+
+
+def test_issuer_rejects_a_conflicting_equal_version_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    anchor = InMemoryExternalRecoveryAnchor()
+    transition = _transition(identity)
+    anchor.install(transition, expected_transition_sha256=None, now=NOW)
+    connection = _Connection(
+        identity,
+        database_now=NOW,
+        floor_version=1,
+        floor_digest="f" * 64,
+    )
+    monkeypatch.setattr(
+        "lucy.shared_execution.startup_attestation.psycopg.connect",
+        lambda *_args, **_kwargs: connection,
+    )
+
+    issuer = StartupAttestationIssuer(
+        anchor=anchor,
+        identity=identity,
+        recovery_database_url="postgresql://recovery@example/tiamat",
+        checkpoint_source=_CheckpointSource(),
+    )
+    with pytest.raises(StartupAttestationRejected, match="startup_anchor_floor_rollback"):
+        issuer.issue(now=NOW)
+
+
+def test_issuer_maps_database_expiry_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    anchor = InMemoryExternalRecoveryAnchor()
+    transition = _transition(identity)
+    anchor.install(transition, expected_transition_sha256=None, now=NOW)
+
+    class _DatabaseExpiry(psycopg.DatabaseError):
+        @property
+        def sqlstate(self) -> str:
+            return "ZX105"
+
+    def reject_connection(*_args: object, **_kwargs: object) -> None:
+        raise _DatabaseExpiry("synthetic expiry rejection")
+
+    monkeypatch.setattr(
+        "lucy.shared_execution.startup_attestation.psycopg.connect", reject_connection
+    )
+    issuer = StartupAttestationIssuer(
+        anchor=anchor,
+        identity=identity,
+        recovery_database_url="postgresql://recovery@example/tiamat",
+        checkpoint_source=_CheckpointSource(),
+    )
+    with pytest.raises(StartupAttestationRejected, match="startup_attestation_expired"):
         issuer.issue(now=NOW)
