@@ -10,7 +10,7 @@
     "region": "virginia",
     "contains_production_data": false,
     "external_access_during_test": "one temporary IPv4 /32 allowlist entry",
-    "disposition": "pending explicit deletion confirmation after evidence review"
+    "disposition": "deleted after explicit user confirmation; a subsequent Render inventory query omitted dpg-danutiuk1f9s73a27htg-a"
   },
   "checks": [
     {

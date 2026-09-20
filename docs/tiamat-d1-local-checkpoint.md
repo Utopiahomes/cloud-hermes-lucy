@@ -65,8 +65,8 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local l
 
 ## Next action
 
-The first M2 disposable resource was deleted after evidence capture; the second remains present only
-pending explicit deletion confirmation. Neither was the commissioned ledger. The local M2 candidate
+Both M2 disposable resources were deleted after evidence capture. Neither was the commissioned ledger.
+The local M2 candidate
 received an independent Astra code review and now has PostgreSQL 16 proof for online migration,
 issuer-written floor/claimant, v2 runtime consumption, finalizer topology, database-authoritative
 issuance timestamps, and runtime anchor-digest binding. Remaining lifecycle evidence is the
