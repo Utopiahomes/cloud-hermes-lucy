@@ -106,3 +106,25 @@ def test_gate_diagnostic_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(statements) == 4
     assert statements[0] == "SET LOCAL tiamat.environment = 'staging'"
     assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements[1:])
+
+
+@pytest.mark.parametrize("runtime_can_execute", [True, False])
+def test_revoke_requires_effective_runtime_privilege_change(runtime_can_execute: bool) -> None:
+    module = _module()
+
+    class _Cursor:
+        def fetchone(self) -> tuple[bool]:
+            return (runtime_can_execute,)
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, _statement: object, _params: object = None) -> _Cursor:
+            self.calls += 1
+            return _Cursor()
+
+    connection = _Connection()
+    effective = module._revoke_effective(connection, "pg_control_system")
+    assert effective is (not runtime_can_execute)
+    assert connection.calls == 2

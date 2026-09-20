@@ -53,6 +53,25 @@ def _attempt(
         connection.execute("RELEASE SAVEPOINT p1_probe")
 
 
+def _revoke_effective(
+    connection: psycopg.Connection[tuple[object, ...]], function_name: str
+) -> bool:
+    connection.execute(
+        sql.SQL("REVOKE EXECUTE ON FUNCTION pg_catalog.{}() FROM PUBLIC").format(
+            sql.Identifier(function_name)
+        )
+    )
+    # PostgreSQL can warn about a no-op REVOKE without raising an error. Check the
+    # serving role's effective privilege inside the savepoint before rolling back.
+    execute_allowed = _one(
+        connection.execute(
+            "SELECT has_function_privilege('tiamat_runtime', %s, 'EXECUTE')",
+            (f"pg_catalog.{function_name}()",),
+        )
+    )[0]
+    return execute_allowed is False
+
+
 def diagnose_gate(*, expected_ledger: str) -> dict[str, object]:
     """Read only the staging identity and gate; disclose no connection material."""
     owner_url = _connection_info("TIAMAT_P1_OWNER_DATABASE_URL")
@@ -154,32 +173,47 @@ def run(*, expected_ledger: str) -> dict[str, object]:
         )
         function_name = "p1_probe_" + secrets.token_hex(6)
 
-        def transfer_function() -> None:
+        ownership_stage = "grant_membership"
+
+        def transfer_function(*, grant_schema_create: bool) -> None:
+            nonlocal ownership_stage
             connection.execute(
                 sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(
                     sql.Identifier(str(owner))
                 )
             )
+            if grant_schema_create:
+                ownership_stage = "grant_schema_create"
+                connection.execute("GRANT CREATE ON SCHEMA tiamat TO tiamat_recovery")
+            ownership_stage = "create_function"
             connection.execute(
                 sql.SQL(
                     "CREATE FUNCTION tiamat.{}() RETURNS boolean LANGUAGE sql AS 'SELECT true'"
                 ).format(sql.Identifier(function_name))
             )
+            ownership_stage = "alter_function_owner"
             connection.execute(
                 sql.SQL("ALTER FUNCTION tiamat.{}() OWNER TO tiamat_recovery").format(
                     sql.Identifier(function_name)
                 )
             )
 
-        results["transfer_function_to_recovery"] = _attempt(connection, transfer_function)
-        for name in ("pg_control_system", "pg_control_checkpoint", "pg_current_wal_flush_lsn"):
+        owner_result = _attempt(connection, lambda: transfer_function(grant_schema_create=False))
+        if owner_result["supported"] is False:
+            owner_result["stage"] = ownership_stage
+        results["transfer_function_to_recovery"] = owner_result
 
-            def revoke_public(function_name: str = name) -> object:
-                return connection.execute(
-                    sql.SQL("REVOKE EXECUTE ON FUNCTION pg_catalog.{}() FROM PUBLIC").format(
-                        sql.Identifier(function_name)
-                    )
-                )
+        ownership_stage = "grant_membership"
+        create_grant_result = _attempt(
+            connection, lambda: transfer_function(grant_schema_create=True)
+        )
+        if create_grant_result["supported"] is False:
+            create_grant_result["stage"] = ownership_stage
+        results["transfer_function_with_temporary_schema_create"] = create_grant_result
+
+        for name in ("pg_control_system", "pg_control_checkpoint", "pg_current_wal_flush_lsn"):
+            def revoke_public(function_name: str = name) -> bool:
+                return _revoke_effective(connection, function_name)
 
             results[f"revoke_public_{name}"] = _attempt(
                 connection,
