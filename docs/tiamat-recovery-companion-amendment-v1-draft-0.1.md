@@ -89,6 +89,33 @@ restore rather than substituting generated test strings in deployment evidence.
 | Tiamat serving process | Read/verify the anchor and database beacon; never write an anchor transition. |
 | Recovery-only database role | Reconcile and bind the checkpoint; never mint external authority. |
 
+## Continued quarantine after witness expiry
+
+An expired recovery-witness key deliberately prevents a new process from treating the anchor as
+current authority.  Replacing that key is an explicit offline ceremony, not a runtime renewal and
+not part of a database or provider test.
+
+For a previously verified, day-zero quarantined bootstrap only, the root signer may create one
+predecessor-linked **continued-quarantine successor**.  It must use the same environment, ledger
+and storage epoch; carry the exact checkpoint object and all three checkpoint component digests
+from the signed predecessor; use transition version `previous + 1`, recovery generation
+`previous + 1`, witness revision `1`, `continuity=quarantined`, witness `status=quarantined`, and
+no beacon.  The day-zero sentinel is inherited by exact digest: it is not rebuilt, re-authorized
+as a new bootstrap, or treated as an installed release inventory.
+
+The successor uses a new root-signed witness inventory whose generation is the predecessor
+inventory generation plus one and whose `previous_inventory_digest` is the SHA-256 of the exact
+predecessor inventory JWS.  Its selected witness key must be purpose-distinct from the unchanged
+root key and its validity interval must be no longer than 24 hours.  The ceremony verifies the
+predecessor at its recorded historical verification time, verifies the candidate against current
+time, and strongly reads the exact predecessor bytes before one conditional anchor write.
+
+This successor does not establish continuity, attach a database, unblock the ledger, provision
+serving credentials, resume a service, dispatch a provider request, or authorize a release.  Any
+of those operations require the normal reconciled recovery procedure.  A root replacement,
+different ledger or storage epoch, changed checkpoint, nonempty release inventory, or ambiguous
+write is outside this ceremony and fails closed.
+
 ## Freeze condition
 
 This amendment becomes part of a successor release only after the recovery-witness format and

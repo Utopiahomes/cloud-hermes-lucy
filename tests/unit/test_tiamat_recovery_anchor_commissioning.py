@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from uuid import UUID, uuid4
@@ -10,8 +10,16 @@ from uuid import UUID, uuid4
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from lucy.shared_execution.recovery_anchor import RecoveryAnchorIdentity
+from lucy.shared_execution.recovery_anchor import (
+    PostgresContinuityBeacon,
+    RecoveryAnchorIdentity,
+    RecoveryAnchorRejected,
+    require_transition_dispatch_authority,
+    validate_anchor_successor,
+)
 from lucy.shared_execution.recovery_anchor_commissioning import (
+    ContinuedQuarantineSuccessorDecoder,
+    build_continued_quarantine_successor,
     build_quarantined_bootstrap,
     verify_bootstrap_package,
 )
@@ -76,6 +84,62 @@ def test_offline_bootstrap_builds_self_verified_quarantined_authority() -> None:
     assert packaged_transition == transition
 
 
+def test_expired_day_zero_quarantine_has_a_24_hour_quarantine_only_successor() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+    root = Ed25519PrivateKey.generate()
+    old_witness = Ed25519PrivateKey.generate()
+    predecessor, previous = build_quarantined_bootstrap(
+        identity=identity,
+        root_key_id="tiamat-recovery-root.staging.1",
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.staging.1",
+        witness_private_key=old_witness,
+        checkpoint=_day_zero_checkpoint(identity),
+        now=NOW,
+        validity=timedelta(hours=12),
+    )
+
+    artifacts, successor = build_continued_quarantine_successor(
+        predecessor=predecessor,
+        identity=identity,
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.staging.2",
+        witness_private_key=Ed25519PrivateKey.generate(),
+        predecessor_verified_at=NOW,
+        now=NOW + timedelta(hours=13),
+        validity=timedelta(hours=24),
+    )
+
+    validate_anchor_successor(previous, successor)
+    assert successor.transition_version == 2
+    assert successor.previous_transition_sha256 == previous.exact_sha256
+    assert successor.witness.ordering == (2, 1)
+    assert successor.witness.not_after - successor.witness.not_before == timedelta(hours=24)
+    assert artifacts.public_package(identity)["ceremony"] == "continued_quarantine_successor"
+    with pytest.raises(RecoveryAnchorRejected, match="continuity_not_established"):
+        require_transition_dispatch_authority(
+            successor,
+            identity,
+            observed_beacon=PostgresContinuityBeacon("system", 1, "0/1", "a" * 64),
+            now=NOW + timedelta(hours=13),
+        )
+    decoder = ContinuedQuarantineSuccessorDecoder(previous, successor)
+    assert decoder(previous.exact_jws, previous.witness.exact_jws) == previous
+    assert decoder(successor.exact_jws, successor.witness.exact_jws) == successor
+    with pytest.raises(ValueError, match="not pinned"):
+        decoder(successor.exact_jws, previous.witness.exact_jws)
+    with pytest.raises(ValueError, match="replacement witness key"):
+        build_continued_quarantine_successor(
+            predecessor=predecessor,
+            identity=identity,
+            root_private_key=root,
+            witness_key_id="tiamat-recovery-witness.staging.2",
+            witness_private_key=old_witness,
+            predecessor_verified_at=NOW,
+            now=NOW + timedelta(hours=13),
+        )
+
+
 def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None:
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
     root = Ed25519PrivateKey.generate()
@@ -105,14 +169,14 @@ def test_bootstrap_rejects_non_day_zero_checkpoint() -> None:
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
     checkpoint = _day_zero_checkpoint(identity)
     checkpoint["release_heads"] = [
-            {
-                "issuer": "stoin:control",
-                "caller_id": "utopia-homes",
-                "realm": "utopia-homes",
-                "release_type": "execution_profile",
-                "subject_id": "public",
-                "active_jws_sha256": "a" * 64,
-                "head_state": "active",
+        {
+            "issuer": "stoin:control",
+            "caller_id": "utopia-homes",
+            "realm": "utopia-homes",
+            "release_type": "execution_profile",
+            "subject_id": "public",
+            "active_jws_sha256": "a" * 64,
+            "head_state": "active",
         }
     ]
     with pytest.raises(ValueError, match="day_zero"):
