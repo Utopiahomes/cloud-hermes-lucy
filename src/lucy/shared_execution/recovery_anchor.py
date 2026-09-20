@@ -313,6 +313,33 @@ class InMemoryExternalRecoveryAnchor:
         )
 
 
+def require_monotonic_anchor_floor(
+    *,
+    current_version: int,
+    current_sha256: str | None,
+    candidate_version: int,
+    candidate_sha256: str,
+) -> bool:
+    """Whether a stored anchor floor must advance to this candidate transition.
+
+    One rule for every floor writer: the offline recovery-gate commands and the startup
+    attestation issuer. A lower version, or an equal version with different exact bytes, is a
+    rollback attempt rather than an advance. Version zero means no floor has been recorded yet.
+    """
+
+    if candidate_version < 1 or not _hex_digest(candidate_sha256):
+        raise ValueError("anchor floor candidate is invalid")
+    if current_version < 0 or (current_version > 0 and current_sha256 is None):
+        raise ValueError("stored anchor floor is invalid")
+    if candidate_version < current_version:
+        raise RecoveryAnchorRejected("recovery_anchor_floor_rollback")
+    if candidate_version == current_version:
+        if current_sha256 != candidate_sha256:
+            raise RecoveryAnchorRejected("recovery_anchor_floor_rollback")
+        return False
+    return True
+
+
 def validate_anchor_successor(
     previous: VerifiedAnchorTransition,
     candidate: VerifiedAnchorTransition,

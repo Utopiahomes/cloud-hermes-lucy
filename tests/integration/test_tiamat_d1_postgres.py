@@ -23,6 +23,12 @@ from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from deploy.postgres.finalize_tiamat_d1_v1 import finalize_d1
+from lucy.shared_execution.recovery import (
+    AnchorFloorRecord,
+    RecoveryRejected,
+    authorize_reconciled_state,
+    quarantine_environment,
+)
 from lucy.shared_execution.recovery_anchor import (
     InMemoryExternalRecoveryAnchor,
     PostgresContinuityBeacon,
@@ -561,3 +567,92 @@ def test_m2_issuer_writes_real_floor_and_v2_claimant(database_urls: _DatabaseUrl
             "SELECT tiamat.consume_startup_attestation_v2(%s)", (transition.exact_sha256,)
         ).fetchone()
     assert generation == (2,)
+
+
+def _gate_floor(urls: _DatabaseUrls, environment: str) -> tuple[Any, ...] | None:
+    with psycopg.connect(urls.recovery) as recovery:
+        return recovery.execute(
+            """
+            SELECT anchor_floor_version, anchor_floor_sha256, dispatch_blocked
+            FROM tiamat.restore_gate WHERE environment = %s
+            """,
+            (environment,),
+        ).fetchone()
+
+
+def test_quarantine_advances_the_anchor_floor_it_was_performed_under(
+    database_urls: _DatabaseUrls,
+) -> None:
+    environment = _seed(database_urls)
+    quarantine_environment(
+        database_urls.recovery,
+        environment=environment,
+        reason="restore_review",
+        anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256="c" * 64),
+    )
+
+    assert _gate_floor(database_urls, environment) == (2, "c" * 64, True)
+    # The superseded transition is exactly what a rollback would replay.
+    with psycopg.connect(database_urls.runtime) as runtime:
+        runtime.execute("SELECT set_config('tiamat.environment', %s, true)", (environment,))
+        with pytest.raises(psycopg.Error) as rejected:
+            runtime.execute(
+                "SELECT tiamat.consume_startup_attestation_v2(%s)", (ANCHOR_SHA256,)
+            )
+    assert rejected.value.sqlstate == "ZX102"
+
+
+def test_quarantine_refuses_to_lower_the_anchor_floor(database_urls: _DatabaseUrls) -> None:
+    environment = _seed(database_urls)
+    quarantine_environment(
+        database_urls.recovery,
+        environment=environment,
+        reason="restore_review",
+        anchor_floor=AnchorFloorRecord(transition_version=3, transition_sha256="c" * 64),
+    )
+
+    with pytest.raises(RecoveryRejected, match="anchor floor cannot move backward"):
+        quarantine_environment(
+            database_urls.recovery,
+            environment=environment,
+            reason="restore_review",
+            anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256="d" * 64),
+        )
+
+    assert _gate_floor(database_urls, environment) == (3, "c" * 64, True)
+
+
+def test_quarantine_on_a_d1_ledger_requires_an_anchor_floor(
+    database_urls: _DatabaseUrls,
+) -> None:
+    environment = _seed(database_urls)
+    with pytest.raises(RecoveryRejected, match="anchor floor record is required"):
+        quarantine_environment(
+            database_urls.recovery, environment=environment, reason="restore_review"
+        )
+
+    assert _gate_floor(database_urls, environment) == (1, ANCHOR_SHA256, False)
+
+
+def test_authorize_advances_the_anchor_floor_and_unblocks(
+    database_urls: _DatabaseUrls,
+) -> None:
+    environment = _seed(database_urls, blocked=True)
+    with psycopg.connect(database_urls.recovery) as recovery:
+        storage_epoch = recovery.execute(
+            "SELECT storage_epoch FROM tiamat.restore_gate WHERE environment = %s",
+            (environment,),
+        ).fetchone()
+    assert storage_epoch is not None
+
+    authorize_reconciled_state(
+        database_urls.recovery,
+        environment=environment,
+        expected_storage_epoch=storage_epoch[0],
+        current_recovery_generation=1,
+        next_recovery_generation=2,
+        unresolved_provider_liabilities=0,
+        anchor_floor=AnchorFloorRecord(transition_version=4, transition_sha256="e" * 64),
+    )
+
+    assert _gate_floor(database_urls, environment) == (4, "e" * 64, False)

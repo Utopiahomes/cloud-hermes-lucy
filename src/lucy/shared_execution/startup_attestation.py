@@ -21,6 +21,7 @@ from lucy.shared_execution.recovery_anchor import (
     PostgresContinuityBeacon,
     RecoveryAnchorIdentity,
     RecoveryAnchorRejected,
+    require_monotonic_anchor_floor,
     require_transition_dispatch_authority,
 )
 
@@ -231,12 +232,7 @@ class StartupAttestationIssuer:
             or int(gate["recovery_generation"]) != recovery_generation
         ):
             raise StartupAttestationRejected("startup_restore_gate_not_authorized")
-        floor_version = int(gate["anchor_floor_version"])
-        floor_digest = gate["anchor_floor_sha256"]
-        if floor_version > anchor_version or (
-            floor_version == anchor_version and floor_version != 0 and floor_digest != anchor_digest
-        ):
-            raise StartupAttestationRejected("startup_anchor_floor_rollback")
+        _floor_must_advance(gate, anchor_digest, anchor_version)
 
     @staticmethod
     def _lock_active_claimant_nowait(connection: psycopg.Connection[Any]) -> dict[str, Any] | None:
@@ -264,7 +260,7 @@ class StartupAttestationIssuer:
         anchor_digest: str,
         anchor_version: int,
     ) -> None:
-        if int(gate["anchor_floor_version"]) == anchor_version:
+        if not _floor_must_advance(gate, anchor_digest, anchor_version):
             return
         connection.execute(
             """
@@ -274,6 +270,21 @@ class StartupAttestationIssuer:
             """,
             (anchor_version, anchor_digest),
         )
+
+
+def _floor_must_advance(gate: dict[str, Any], anchor_digest: str, anchor_version: int) -> bool:
+    """Apply the shared floor rule to a locked gate row, in this module's vocabulary."""
+
+    stored_digest = gate["anchor_floor_sha256"]
+    try:
+        return require_monotonic_anchor_floor(
+            current_version=int(gate["anchor_floor_version"]),
+            current_sha256=None if stored_digest is None else str(stored_digest),
+            candidate_version=anchor_version,
+            candidate_sha256=anchor_digest,
+        )
+    except RecoveryAnchorRejected as exc:
+        raise StartupAttestationRejected("startup_anchor_floor_rollback") from exc
 
 
 def _conninfo(database_url: str) -> str:

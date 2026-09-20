@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 import psycopg
+
+from lucy.shared_execution.recovery_anchor import (
+    RecoveryAnchorRejected,
+    require_monotonic_anchor_floor,
+)
 
 
 class RecoveryRejected(RuntimeError):
@@ -18,8 +24,21 @@ class RecoveryRejected(RuntimeError):
 
 
 _OPERATIONAL_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 type ReleaseHeadKey = tuple[str, str, str, str, str]
 type ReleaseHeadValue = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class AnchorFloorRecord:
+    """The exact external anchor transition a recovery-gate command was performed under."""
+
+    transition_version: int
+    transition_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.transition_version < 1 or _HEX_DIGEST.fullmatch(self.transition_sha256) is None:
+            raise ValueError("anchor floor record is invalid")
 
 
 @dataclass(frozen=True)
@@ -101,12 +120,84 @@ def initialize_environment(
         )
 
 
-def quarantine_environment(database_url: str, *, environment: str, reason: str) -> None:
-    """Fail closed before inspection, restore, or reconciliation begins."""
+def _record_anchor_floor(
+    connection: psycopg.Connection[Any],
+    *,
+    environment: str,
+    anchor_floor: AnchorFloorRecord | None,
+) -> None:
+    """Advance the stored anchor floor inside the caller's open transaction.
+
+    The gate row is locked before the comparison so a concurrent issuer cannot interleave. A
+    ledger which predates the D1 columns has no floor to record; supplying one there, or omitting
+    one where the columns exist, is rejected rather than silently ignored.
+    """
+
+    supported = connection.execute(
+        """
+        SELECT count(*) FROM information_schema.columns
+        WHERE table_schema = 'tiamat' AND table_name = 'restore_gate'
+          AND column_name = 'anchor_floor_version'
+        """
+    ).fetchone()
+    if supported is None:
+        raise RecoveryRejected("restore gate schema could not be read")
+    if int(supported[0]) == 0:
+        if anchor_floor is not None:
+            raise RecoveryRejected("ledger does not record an anchor floor")
+        return
+    if anchor_floor is None:
+        raise RecoveryRejected("anchor floor record is required on this ledger")
+    stored = connection.execute(
+        """
+        SELECT anchor_floor_version, anchor_floor_sha256
+        FROM tiamat.restore_gate WHERE environment = %s FOR UPDATE
+        """,
+        (environment,),
+    ).fetchone()
+    if stored is None:
+        raise RecoveryRejected("restore gate is not initialized")
+    try:
+        advance = require_monotonic_anchor_floor(
+            current_version=int(stored[0]),
+            current_sha256=None if stored[1] is None else str(stored[1]),
+            candidate_version=anchor_floor.transition_version,
+            candidate_sha256=anchor_floor.transition_sha256,
+        )
+    except RecoveryAnchorRejected as exc:
+        raise RecoveryRejected("anchor floor cannot move backward") from exc
+    if not advance:
+        return
+    connection.execute(
+        """
+        UPDATE tiamat.restore_gate
+        SET anchor_floor_version = %s,
+            anchor_floor_sha256 = %s,
+            updated_at = clock_timestamp()
+        WHERE environment = %s
+        """,
+        (anchor_floor.transition_version, anchor_floor.transition_sha256, environment),
+    )
+
+
+def quarantine_environment(
+    database_url: str,
+    *,
+    environment: str,
+    reason: str,
+    anchor_floor: AnchorFloorRecord | None = None,
+) -> None:
+    """Fail closed before inspection, restore, or reconciliation begins.
+
+    ``anchor_floor`` is the external anchor transition this quarantine was performed under. On a
+    ledger carrying the D1 floor columns it is mandatory: a quarantine which left the floor behind
+    would let a later replay of the superseded transition still satisfy startup.
+    """
 
     if not environment or _OPERATIONAL_CODE.fullmatch(reason) is None:
         raise ValueError("environment and reason are required")
-    with psycopg.connect(database_url) as connection:
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        _record_anchor_floor(connection, environment=environment, anchor_floor=anchor_floor)
         result = connection.execute(
             """
             UPDATE tiamat.restore_gate
@@ -133,11 +224,16 @@ def authorize_reconciled_state(
     unresolved_provider_liabilities: int,
     expected_inventory: tuple[int, str] | None = None,
     expected_release_heads: dict[ReleaseHeadKey, ReleaseHeadValue] | None = None,
+    anchor_floor: AnchorFloorRecord | None = None,
 ) -> None:
     """Unblock only an inspected ledger with an externally advanced generation.
 
     Unknown provider liabilities must be represented by pending ledger records before this command;
     the count is compared rather than trusted as a release instruction.
+
+    ``anchor_floor`` is the external anchor transition this authorization was performed under, and
+    is mandatory on a ledger carrying the D1 floor columns. Unblocking without advancing the floor
+    would leave a superseded transition acceptable to the next startup.
     """
 
     if next_recovery_generation != current_recovery_generation + 1:
@@ -148,6 +244,7 @@ def authorize_reconciled_state(
         database_url
     ) as connection:
         with connection.transaction():
+            _record_anchor_floor(connection, environment=environment, anchor_floor=anchor_floor)
             gate = connection.execute(
                 """
                 SELECT storage_epoch, recovery_generation, dispatch_blocked
