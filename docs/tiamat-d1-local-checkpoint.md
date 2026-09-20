@@ -1,6 +1,6 @@
 # Tiamat D1 local implementation checkpoint
 
-Status: local candidate, **not database-verified or activated**. This checkpoint is subordinate to
+Status: D1 candidate verified on a disposable PostgreSQL 16 instance, **not activated**. This checkpoint is subordinate to
 `tiamat-recovery-lifecycle-test-plan-v0.7.md` and the signed-release/recovery contracts.
 
 ## Scope and decisions
@@ -15,6 +15,10 @@ Status: local candidate, **not database-verified or activated**. This checkpoint
   `tiamat_recovery`, removes those temporary grants, and revokes runtime's direct gate `UPDATE`.
 - The runtime adapter defaults to attested coordinator acquisition and verifies D1 inside the
   dispatch transaction. The old path is explicitly test-only and rejects a database containing D1.
+- PostgreSQL 16 gives a role creator system-granted ADMIN-only membership in a new role. The
+  finalizer removes its temporary SET/INHERIT grant and verifies the owner has no effective SET
+  or USAGE of `tiamat_recovery`; the ADMIN-only row remains. This managed-environment distinction
+  was found and verified during the disposable database run.
 - Existing pre-D1 ledger behavior tests remain pinned to migration `0006`; they are not D1
   conformance evidence.
 - The anchor floor defaults to zero and D1 will reject every attestation until the M2
@@ -31,18 +35,17 @@ Status: local candidate, **not database-verified or activated**. This checkpoint
 | --- | --- | --- |
 | Ruff on touched code | passed | Post-review D1 revision; rerun after source edits. |
 | Strict mypy on `src` | passed, 142 source files | Post-review D1 revision; rerun after source edits. |
-| Focused D1 unit tests | 17 passed | Migration/finalizer structure and runtime rejection mapping after Claude review; synthetic only. |
-| Full offline unit suite | 1267 passed | Post-review D1 revision; first run placed temp fixtures inside repository and caused 3 environment-only failures, corrected by rerunning with OS temp outside repository. |
+| Focused D1 unit tests | 18 passed | Migration/finalizer structure and runtime rejection mapping after Claude review; synthetic only. |
+| Full offline unit suite | 1268 passed | Post-review D1 revision; OS temp used outside the repository for fixtures. |
 | Alembic offline SQL generation | passed through `0007` | Proves revision chain and rendering, **not PostgreSQL execution**. |
-| Actual PostgreSQL migration/role/function execution | not run | Docker Desktop was started twice on 2026-09-20, including outside the sandbox, but its Linux-engine pipe did not become available; no disposable local PostgreSQL URL is configured. Required before D1 is deployable. |
-| Staging migration or finalization | not run | Commissioned staging ledger remains at `0006` and dispatch-blocked. |
+| Actual PostgreSQL 16 migration/role/function execution | 15 passed | Free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
+| Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
 ## Next action
 
-Run migration `0007` and the finalizer on a disposable PostgreSQL 16 ledger, then test both the
-positive attestation flow and negative cases: absent/expired/superseded claimant, wrong anchor
-digest/floor, wrong base fence, stale LSN or timeline, two concurrent consumers, legacy-bypass
-rejection, and permission denial for direct runtime table updates. Only after that evidence and
-independent review should any commissioned staging ledger be considered for migration. The
-launcher/context-checkpoint implementation and C1-A automatic restart invocation remain separate
-work; this candidate does not claim to close the full lifecycle plan.
+The free PostgreSQL test resource was deleted after evidence capture and is absent from Render's
+database list; the commissioned database remains listed. Obtain independent review of the D1
+managed-role finding and integration results. The commissioned staging ledger must stay
+at `0006` and blocked until the M2 launcher writes and verifies a real anchor floor and the
+remaining lifecycle requirements are implemented. C1-A automatic restart, failover, and restore
+evidence remain separate work; this candidate does not claim to close the full lifecycle plan.

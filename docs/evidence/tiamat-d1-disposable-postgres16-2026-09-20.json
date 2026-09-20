@@ -1,0 +1,50 @@
+{
+  "evidence_type": "tiamat_d1_disposable_postgres16",
+  "date_utc": "2026-09-20",
+  "tested_commit": "bb436ac99955f7681b1c34b41ac7f9df7fdb6f84",
+  "resource": {
+    "render_id": "dpg-danmdhajnfac73946gj0-a",
+    "name": "tiamat-d1-disposable-20260920",
+    "database_name": "tiamat_test_d1",
+    "plan": "free",
+    "postgres_major": 16,
+    "region": "virginia",
+    "external_access_during_test": "one temporary IPv4 /32 allowlist entry",
+    "contains_production_data": false,
+    "disposition": "deleted after test; Render delete returned deleted=true and subsequent list omitted the resource",
+    "deletion_confirmed_utc": "2026-09-20T05:09:14Z"
+  },
+  "checks": [
+    {
+      "name": "tls_connectivity_and_version",
+      "result": "passed",
+      "detail": "psycopg connected with sslmode=require to the exact disposable database; server_version_num was 160015"
+    },
+    {
+      "name": "alembic_online_migration",
+      "result": "passed",
+      "detail": "fresh PostgreSQL 16 instance migrated through 0007_startup_attestation"
+    },
+    {
+      "name": "finalizer_and_d1_sql_functions",
+      "result": "passed",
+      "detail": "15 integration tests: actual function ownership/grants, success, absent/expired/superseded claimant, zero/advanced floor, blocked/changed fence, identity/timeline/WAL mismatch, replay, two-consumer race, one-way block, and direct-update denial"
+    },
+    {
+      "name": "offline_unit_suite",
+      "result": "passed",
+      "detail": "1268 unit tests"
+    },
+    {
+      "name": "ruff_and_strict_mypy",
+      "result": "passed",
+      "detail": "Ruff on changed source and tests; strict mypy across 142 source files"
+    }
+  ],
+  "managed_postgres_finding": "PostgreSQL 16 leaves the role creator with a system-granted ADMIN-only membership in the recovery role. A temporary SET/INHERIT grant can be removed, but the ADMIN row remains. Finalizer preflight and postconditions therefore require no effective SET or USAGE and no recovery schema CREATE, rather than no MEMBER row.",
+  "limits": [
+    "Synthetic test records only; no signed authority, DynamoDB anchor transition, provider request, or model spending.",
+    "The anchor floor was seeded synthetically to verify D1 mechanics; M2 launcher/floor writing and C1-A automatic restart remain unimplemented.",
+    "No Render failover, PITR restore, logical restore, or commissioned-ledger migration was tested."
+  ]
+}
