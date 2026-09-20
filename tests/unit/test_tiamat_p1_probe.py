@@ -86,6 +86,8 @@ def test_gate_diagnostic_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
         def execute(self, statement: str) -> _Cursor:
             statements.append(statement)
+            if statement.startswith("SET LOCAL tiamat.environment"):
+                return _Cursor([])
             if "ledger_identity" in statement:
                 return _Cursor([(ledger,)])
             if "restore_gate" in statement:
@@ -101,5 +103,6 @@ def test_gate_diagnostic_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module.psycopg, "connect", lambda *_args, **_kwargs: _ReadOnlyConnection())
     result = module.diagnose_gate(expected_ledger=ledger)
     assert result["staging_gate_blocked"] is True
-    assert len(statements) == 3
-    assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+    assert len(statements) == 4
+    assert statements[0] == "SET LOCAL tiamat.environment = 'staging'"
+    assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements[1:])

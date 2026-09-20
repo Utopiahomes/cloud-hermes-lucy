@@ -59,6 +59,7 @@ def diagnose_gate(*, expected_ledger: str) -> dict[str, object]:
     if owner_url is None:
         raise ValueError("temporary staging owner URL is required")
     with psycopg.connect(owner_url) as connection:
+        connection.execute("SET LOCAL tiamat.environment = 'staging'")
         ledger = _one(
             connection.execute("SELECT ledger_id::text FROM tiamat.ledger_identity WHERE singleton")
         )[0]
@@ -88,6 +89,7 @@ def run(*, expected_ledger: str) -> dict[str, object]:
         raise ValueError("expected ledger ID is required")
 
     with psycopg.connect(owner_url) as connection:
+        connection.execute("SET LOCAL tiamat.environment = 'staging'")
         owner, ledger, blocked, tls = _one(
             connection.execute(
                 """SELECT current_user,
