@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import importlib.util
+from contextlib import nullcontext
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+from uuid import uuid4
+
+import pytest
+
+from deploy.postgres import finalize_tiamat_d1_v1 as finalizer
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _migration() -> ModuleType:
+    path = ROOT / "tiamat_migrations" / "versions" / "0007_startup_attestation.py"
+    spec = importlib.util.spec_from_file_location("tiamat_d1_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_d1_migration_installs_locked_functions_and_single_claimant_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _migration()
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "execute", statements.append)
+    migration.upgrade()
+    sql = "\n".join(statements)
+
+    assert "anchor_floor_version bigint NOT NULL DEFAULT 0" in sql
+    assert "CREATE TABLE tiamat.startup_attestations" in sql
+    assert "WHERE consumed_at IS NULL AND superseded_at IS NULL" in sql
+    assert "consumed_coordinator_generation" in sql
+    assert "FORCE ROW LEVEL SECURITY" in sql
+    assert "current_user = 'tiamat_recovery'" in sql
+    assert sql.count("LANGUAGE plpgsql SECURITY DEFINER") == 3
+    assert sql.count("SET search_path = pg_catalog, pg_temp") == 3
+    assert "pg_catalog.pg_current_wal_flush_lsn()" in sql
+    assert "FOR UPDATE OF gate" in sql
+    assert "REVOKE ALL ON FUNCTION tiamat.consume_startup_attestation(text) FROM PUBLIC" in sql
+    assert "GRANT EXECUTE ON FUNCTION" not in sql
+
+
+class _Result:
+    def __init__(
+        self, row: tuple[Any, ...] | None = None, rows: list[tuple[Any, ...]] | None = None
+    ):
+        self.row = row
+        self.rows = rows or []
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self.row
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.rows
+
+
+class _Connection:
+    def __init__(self, ledger_id: Any, *, blocked: bool = True):
+        self.ledger_id = ledger_id
+        self.blocked = blocked
+        self.statements: list[str] = []
+
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def transaction(self) -> Any:
+        return nullcontext()
+
+    def execute(self, query: Any, params: Any = None) -> _Result:
+        del params
+        statement = str(query)
+        self.statements.append(statement)
+        if "FROM tiamat.ledger_identity AS i" in statement:
+            return _Result(("tiamat_owner", "tiamat_test", self.ledger_id, self.blocked))
+        if "FROM pg_catalog.pg_roles" in statement:
+            return _Result(rows=[("tiamat_recovery", True), ("tiamat_runtime", True)])
+        if "pg_catalog.pg_has_role" in statement:
+            return _Result((False, False))
+        if "pg_catalog.pg_get_userbyid" in statement:
+            return _Result(("tiamat_owner",))
+        if "pg_catalog.has_table_privilege" in statement:
+            return _Result((False,))
+        return _Result()
+
+
+def test_finalization_refuses_open_gate_before_role_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id = uuid4()
+    connection = _Connection(ledger_id, blocked=False)
+    monkeypatch.setattr(finalizer.psycopg, "connect", lambda _: connection)
+
+    with pytest.raises(finalizer.D1FinalizationRejected, match="blocked ledger"):
+        finalizer.finalize_d1(
+            "postgresql://synthetic", environment="staging", expected_ledger_id=ledger_id
+        )
+    assert not any("GRANT" in statement for statement in connection.statements)
+
+
+def test_finalization_transfers_then_grants_runtime_functions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id = uuid4()
+    connection = _Connection(ledger_id)
+    monkeypatch.setattr(finalizer.psycopg, "connect", lambda _: connection)
+
+    finalizer.finalize_d1(
+        "postgresql://synthetic", environment="staging", expected_ledger_id=ledger_id
+    )
+
+    statements = connection.statements
+    # Finalization grants no direct UPDATE; it explicitly removes the old runtime grant.
+    assert "REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime" in statements
+    assert sum("ALTER FUNCTION" in statement for statement in statements) == 3
+    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 3
+    first_grant = next(
+        index
+        for index, statement in enumerate(statements)
+        if "GRANT EXECUTE ON FUNCTION" in statement
+    )
+    first_transfer = next(
+        index for index, statement in enumerate(statements) if "ALTER FUNCTION" in statement
+    )
+    assert first_grant < first_transfer
+    assert (
+        statements.index("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
+        < len(statements) - 1
+    )

@@ -84,7 +84,9 @@ def database_urls() -> tuple[str, str]:
     config.set_main_option(
         "sqlalchemy.url", DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     )
-    command.upgrade(config, "head")
+    # These pre-D1 ledger-behavior tests deliberately exercise the legacy
+    # coordinator path. They are not D1 conformance evidence.
+    command.upgrade(config, "0006_render_recovery_rls")
     runtime_url = DATABASE_URL.replace(
         "tiamat_migration:synthetic-tiamat-only",
         "tiamat_runtime_test:synthetic-runtime-only",
@@ -710,7 +712,9 @@ def test_digest_key_rotation_aliases_prevent_cross_generation_double_admission(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    coordinator = PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+    coordinator = PostgresExecutionLedger(
+        runtime_url, witness, legacy_pre_d1_test_only=True
+    ).acquire_coordinator_generation()
     raw_key = str(uuid4())
     old_ring = IdempotencyDigestRing(DigestKey("digest-v1", b"o" * 32))
     new_ring = IdempotencyDigestRing(
@@ -743,8 +747,9 @@ def test_digest_key_rotation_aliases_prevent_cross_generation_double_admission(
         runtime_url,
         witness,
         transaction_probe=hold_successor_before_commit,
+        legacy_pre_d1_test_only=True,
     )
-    predecessor = PostgresExecutionLedger(runtime_url, witness)
+    predecessor = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     with ThreadPoolExecutor(max_workers=2) as pool:
         successor_future = pool.submit(
             successor.create_or_get,
@@ -797,7 +802,7 @@ def test_durable_replay_fencing_and_cross_scope_isolation(
     assert replay.consume(namespace, jti, int((now + timedelta(minutes=10)).timestamp()))
     assert not replay.consume(namespace, jti, int((now + timedelta(minutes=10)).timestamp()))
 
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admission = _admission(now, key_digest="b" * 64, owner_id=owner)
@@ -845,7 +850,7 @@ def test_concurrent_first_admission_creates_exactly_one_record(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     admission = _admission(now, key_digest="d" * 64)
 
@@ -866,7 +871,7 @@ def test_connection_loss_inside_dispatch_transaction_rolls_back_state(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    base_ledger = PostgresExecutionLedger(runtime_url, witness)
+    base_ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = base_ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = base_ledger.create_or_get(
@@ -887,7 +892,9 @@ def test_connection_loss_inside_dispatch_transaction_rolls_back_state(
         reached.set()
         assert release.wait(timeout=10)
 
-    faulted_ledger = PostgresExecutionLedger(runtime_url, witness, transaction_probe=probe)
+    faulted_ledger = PostgresExecutionLedger(
+        runtime_url, witness, transaction_probe=probe, legacy_pre_d1_test_only=True
+    )
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
             faulted_ledger.dispatch,
@@ -920,7 +927,7 @@ def test_connection_loss_inside_settlement_rolls_back_all_accounting(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    base_ledger = PostgresExecutionLedger(runtime_url, witness)
+    base_ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = base_ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = base_ledger.create_or_get(
@@ -948,7 +955,9 @@ def test_connection_loss_inside_settlement_rolls_back_all_accounting(
         reached.set()
         assert release.wait(timeout=10)
 
-    faulted_ledger = PostgresExecutionLedger(runtime_url, witness, transaction_probe=probe)
+    faulted_ledger = PostgresExecutionLedger(
+        runtime_url, witness, transaction_probe=probe, legacy_pre_d1_test_only=True
+    )
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(
             faulted_ledger.settle_terminal,
@@ -1003,7 +1012,7 @@ def test_failover_fences_old_coordinator_and_adopts_only_after_lease_expiry(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     first_coordinator = ledger.acquire_coordinator_generation()
     first_owner = uuid4()
     record, _ = ledger.create_or_get(
@@ -1044,7 +1053,7 @@ def test_authoritative_reaper_distinguishes_never_sent_from_ambiguous_dispatch(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
 
     admitted, _ = ledger.create_or_get(
@@ -1093,7 +1102,7 @@ def test_unclear_dispatch_commit_aborts_only_same_live_owner(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1127,7 +1136,7 @@ def test_unclear_dispatch_resolution_preserves_newer_reaper_uncertainty(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1166,7 +1175,7 @@ def test_settlement_overrun_charges_actual_and_quarantines_exact_route(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1234,7 +1243,7 @@ def test_late_overrun_blocks_partition_when_contingency_cannot_cover_liability(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1309,7 +1318,7 @@ def test_billing_evidence_can_invalidate_an_already_returned_candidate(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1366,7 +1375,7 @@ def test_expired_idempotency_tombstone_leaves_financial_evidence(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1419,7 +1428,7 @@ def test_forfeited_reservation_keeps_thirty_day_tombstone_and_financial_event(
 ) -> None:
     owner_url, runtime_url = database_urls
     scope, witness, now = _seed(owner_url)
-    ledger = PostgresExecutionLedger(runtime_url, witness)
+    ledger = PostgresExecutionLedger(runtime_url, witness, legacy_pre_d1_test_only=True)
     coordinator = ledger.acquire_coordinator_generation()
     owner = uuid4()
     admitted, _ = ledger.create_or_get(
@@ -1483,7 +1492,9 @@ def test_restore_generation_mismatch_blocks_until_offline_reconciliation(
     scope, witness, _now = _seed(owner_url)
     quarantine_environment(owner_url, environment=scope.environment, reason="stale_restore_review")
     with pytest.raises(DispatchBlocked):
-        PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+        PostgresExecutionLedger(
+            runtime_url, witness, legacy_pre_d1_test_only=True
+        ).acquire_coordinator_generation()
 
     authorize_reconciled_state(
         owner_url,
@@ -1494,9 +1505,16 @@ def test_restore_generation_mismatch_blocks_until_offline_reconciliation(
         unresolved_provider_liabilities=0,
     )
     with pytest.raises(DispatchBlocked):
-        PostgresExecutionLedger(runtime_url, witness).acquire_coordinator_generation()
+        PostgresExecutionLedger(
+            runtime_url, witness, legacy_pre_d1_test_only=True
+        ).acquire_coordinator_generation()
     next_witness = RecoveryWitness(scope.environment, witness.storage_epoch, 2)
-    assert PostgresExecutionLedger(runtime_url, next_witness).acquire_coordinator_generation() >= 2
+    assert (
+        PostgresExecutionLedger(
+            runtime_url, next_witness, legacy_pre_d1_test_only=True
+        ).acquire_coordinator_generation()
+        >= 2
+    )
 
 
 def test_stale_database_snapshot_cannot_resume_under_new_recovery_witness(
@@ -1533,7 +1551,7 @@ def test_stale_database_snapshot_cannot_resume_under_new_recovery_witness(
         current_witness = RecoveryWitness(scope.environment, witness.storage_epoch, 2)
         with pytest.raises(DispatchBlocked):
             PostgresExecutionLedger(
-                stale_runtime_url, current_witness
+                stale_runtime_url, current_witness, legacy_pre_d1_test_only=True
             ).acquire_coordinator_generation()
     finally:
         with psycopg.connect(admin_url, autocommit=True) as connection:

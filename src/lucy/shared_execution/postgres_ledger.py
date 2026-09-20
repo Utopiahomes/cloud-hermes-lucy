@@ -8,6 +8,7 @@ cannot silently resume spending under a newer recovery generation.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -189,14 +190,22 @@ class PostgresExecutionLedger:
         witness: RecoveryWitness,
         *,
         transaction_probe: Callable[[str, psycopg.Connection[Any]], None] | None = None,
+        legacy_pre_d1_test_only: bool = False,
     ) -> None:
         self._database_url = database_url
         self._witness = witness
         self._transaction_probe = transaction_probe
+        self._legacy_pre_d1_test_only = legacy_pre_d1_test_only
 
     def acquire_coordinator_generation(self) -> int:
-        """Fence an older coordinator before this process may acquire execution leases."""
+        """Legacy pre-D1 acquisition; the finalized runtime role cannot call this path.
 
+        Migration 0007's role finalization revokes direct restore-gate UPDATE. The
+        serving integration must use ``consume_startup_attestation`` instead.
+        """
+
+        if not self._legacy_pre_d1_test_only:
+            raise DispatchBlocked("startup attestation is required for coordinator acquisition")
         try:
             with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
                 _psycopg_conninfo(self._database_url), row_factory=dict_row
@@ -206,6 +215,7 @@ class PostgresExecutionLedger:
                         "SELECT set_config('tiamat.environment', %s, true)",
                         (self._witness.environment,),
                     )
+                    self._assert_pre_d1_schema(connection)
                     row = connection.execute(
                         """
                         SELECT storage_epoch, recovery_generation, coordinator_generation,
@@ -231,6 +241,74 @@ class PostgresExecutionLedger:
                     return int(updated["coordinator_generation"])
         except DispatchBlocked:
             raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def consume_startup_attestation(self, anchor_transition_sha256: str) -> int:
+        """Acquire the coordinator fence only after a fresh strong anchor read.
+
+        The digest is supplied by the executor's read-only anchor client. PostgreSQL
+        atomically checks the one active attestation, live cluster identity/WAL,
+        anchor floor and base fence before incrementing the coordinator generation.
+        """
+
+        if re.fullmatch(r"[0-9a-f]{64}", anchor_transition_sha256) is None:
+            raise ValueError("anchor transition digest must be lowercase sha256")
+        try:
+            with (
+                psycopg.connect(_psycopg_conninfo(self._database_url)) as connection,
+                connection.transaction(),
+            ):
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (self._witness.environment,),
+                )
+                row = connection.execute(
+                    "SELECT tiamat.consume_startup_attestation(%s)",
+                    (anchor_transition_sha256,),
+                ).fetchone()
+                if row is None:
+                    raise DispatchBlocked("startup attestation unavailable")
+                return int(row[0])
+        except psycopg.errors.RaiseException as exc:
+            raise DispatchBlocked("startup attestation unavailable") from exc
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def verify_attestation_current(self, coordinator_generation: int) -> bool:
+        """Check the live D1 fence at refresh and immediately before dispatch."""
+
+        if coordinator_generation < 1:
+            return False
+        try:
+            with psycopg.connect(_psycopg_conninfo(self._database_url)) as connection:
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (self._witness.environment,),
+                )
+                row = connection.execute(
+                    "SELECT tiamat.verify_attestation_current(%s)",
+                    (coordinator_generation,),
+                ).fetchone()
+                return row is not None and bool(row[0])
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def block_dispatch(self, reason: str) -> None:
+        """Persist a one-way runtime latch without direct restore-gate UPDATE."""
+
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason) is None:
+            raise ValueError("dispatch block reason is invalid")
+        try:
+            with (
+                psycopg.connect(_psycopg_conninfo(self._database_url)) as connection,
+                connection.transaction(),
+            ):
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (self._witness.environment,),
+                )
+                connection.execute("SELECT tiamat.block_dispatch(%s)", (reason,))
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
@@ -1460,6 +1538,16 @@ class PostgresExecutionLedger:
                         (scope.environment,),
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
+                    if target_state == "dispatched":
+                        if self._legacy_pre_d1_test_only:
+                            self._assert_pre_d1_schema(connection)
+                        else:
+                            attestation = connection.execute(
+                                "SELECT tiamat.verify_attestation_current(%s) AS current",
+                                (coordinator_generation,),
+                            ).fetchone()
+                            if attestation is None or not bool(attestation["current"]):
+                                raise DispatchBlocked("startup attestation is no longer current")
                     row = connection.execute(
                         f"""
                         UPDATE tiamat.execution_records
@@ -1512,6 +1600,17 @@ class PostgresExecutionLedger:
             and int(row["coordinator_generation"]) != coordinator_generation
         ):
             raise DurableFenceRejected
+
+    @staticmethod
+    def _assert_pre_d1_schema(connection: psycopg.Connection[Any]) -> None:
+        """Confine the legacy test path to databases without D1 installed."""
+
+        row = connection.execute(
+            "SELECT pg_catalog.to_regprocedure('tiamat.consume_startup_attestation(text)') "
+            "IS NULL AS pre_d1"
+        ).fetchone()
+        if row is None or not bool(row["pre_d1"]):
+            raise DispatchBlocked("legacy coordinator path is disabled on a D1 database")
 
     def _probe_transaction(self, name: str, connection: psycopg.Connection[Any]) -> None:
         """Invoke an opt-in test probe while the transaction is still open."""
