@@ -2,8 +2,8 @@
 
 This is intentionally an offline launcher primitive, not a web endpoint and not a
 deployment entrypoint.  It reads the external anchor but never signs or changes it.
-Production assembly is deliberately unavailable until a durable, independently
-maintained checkpoint-digest source is supplied.
+The checkpoint digest arrives only through an injected durable source; the ledger
+implementation here reads the immutable row bound when a generation was authorized.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from lucy.shared_execution.recovery_anchor import (
     require_monotonic_anchor_floor,
     require_transition_dispatch_authority,
 )
+from lucy.shared_execution.recovery_checkpoint import RecoveryCheckpointRejected
 
 
 class StartupAttestationRejected(RuntimeError):
@@ -39,6 +40,46 @@ class RecoveryCheckpointDigestSource(Protocol):
     """
 
     def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str: ...
+
+
+@dataclass(frozen=True)
+class LedgerRecoveryCheckpointSource:
+    """Read the immutable checkpoint digest bound to the ledger's current recovery generation.
+
+    The digest comes from the append-only row written when that generation was authorized, never
+    from live spending or release tables, and never from the caller. A ledger whose gate has moved
+    to a generation with no retained checkpoint yields nothing rather than an older digest.
+    """
+
+    recovery_database_url: str
+
+    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
+        try:
+            with psycopg.connect(
+                _conninfo(self.recovery_database_url), row_factory=dict_row
+            ) as connection:
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (identity.environment,),
+                )
+                row = connection.execute(
+                    """
+                    SELECT bound.checkpoint_sha256, bound.ledger_id, bound.storage_epoch
+                    FROM tiamat.restore_gate AS gate
+                    JOIN tiamat.recovery_checkpoints AS bound
+                      ON bound.environment = gate.environment
+                     AND bound.recovery_generation = gate.recovery_generation
+                    WHERE gate.environment = %s
+                    """,
+                    (identity.environment,),
+                ).fetchone()
+        except psycopg.Error as exc:
+            raise RecoveryCheckpointRejected("checkpoint_binding_unavailable") from exc
+        if row is None:
+            raise RecoveryCheckpointRejected("checkpoint_binding_absent")
+        if row["ledger_id"] != identity.ledger_id or row["storage_epoch"] != identity.storage_epoch:
+            raise RecoveryCheckpointRejected("checkpoint_binding_identity_mismatch")
+        return str(row["checkpoint_sha256"])
 
 
 @dataclass(frozen=True)

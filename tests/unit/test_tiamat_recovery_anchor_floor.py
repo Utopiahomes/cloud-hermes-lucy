@@ -13,9 +13,11 @@ from lucy.shared_execution.recovery import (
     quarantine_environment,
 )
 from lucy.shared_execution.recovery_anchor import (
+    RecoveryAnchorIdentity,
     RecoveryAnchorRejected,
     require_monotonic_anchor_floor,
 )
+from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpoint
 
 FIRST = "a" * 64
 SECOND = "b" * 64
@@ -44,12 +46,18 @@ class _Connection:
         floor_version: int = 0,
         floor_digest: str | None = None,
         recovery_generation: int = 1,
+        ledger_id: Any = None,
+        checkpoints_supported: bool = False,
+        bound_checkpoint_sha256: str | None = None,
     ) -> None:
         self.storage_epoch = storage_epoch
         self.floor_supported = floor_supported
         self.floor_version = floor_version
         self.floor_digest = floor_digest
         self.recovery_generation = recovery_generation
+        self.ledger_id = ledger_id or uuid4()
+        self.checkpoints_supported = checkpoints_supported
+        self.bound_checkpoint_sha256 = bound_checkpoint_sha256
         self.executed: list[str] = []
 
     def __enter__(self) -> _Connection:
@@ -66,6 +74,16 @@ class _Connection:
         self.executed.append(normalized)
         if "information_schema.columns" in normalized:
             return _Result([(1 if self.floor_supported else 0,)])
+        if "information_schema.tables" in normalized:
+            return _Result([(1 if self.checkpoints_supported else 0,)])
+        if "FROM tiamat.ledger_identity" in normalized:
+            return _Result([(self.ledger_id,)])
+        if "FROM tiamat.recovery_checkpoints" in normalized:
+            return _Result(
+                [(self.bound_checkpoint_sha256,)] if self.bound_checkpoint_sha256 else []
+            )
+        if "INSERT INTO tiamat.recovery_checkpoints" in normalized:
+            return _Result()
         if "SELECT anchor_floor_version" in normalized:
             return _Result([(self.floor_version, self.floor_digest)])
         if "SET anchor_floor_version" in normalized:
@@ -246,3 +264,120 @@ def test_authorize_on_a_d1_ledger_requires_an_anchor_floor(
         )
 
     assert not any("dispatch_blocked = false" in query for query in connection.executed)
+
+
+def _checkpoint(environment: str, ledger_id: Any, storage_epoch: Any, generation: int) -> Any:
+    return construct_recovery_checkpoint(
+        {
+            "environment": environment,
+            "ledger_id": str(ledger_id),
+            "storage_epoch": str(storage_epoch),
+            "recovery_generation": generation,
+            "release_inventory": {"state": "not_installed"},
+            "release_heads": [],
+            "settlement_position": [],
+        },
+        identity=RecoveryAnchorIdentity(environment, ledger_id, storage_epoch),
+    )
+
+
+def test_authorize_binds_the_reviewed_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger_id, storage_epoch = uuid4(), uuid4()
+    connection = _Connection(
+        storage_epoch=storage_epoch,
+        ledger_id=ledger_id,
+        floor_version=1,
+        floor_digest=FIRST,
+        checkpoints_supported=True,
+    )
+    _patch(monkeypatch, connection)
+
+    authorize_reconciled_state(
+        "postgresql://recovery@example/tiamat",
+        environment="staging",
+        expected_storage_epoch=storage_epoch,
+        current_recovery_generation=1,
+        next_recovery_generation=2,
+        unresolved_provider_liabilities=0,
+        anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256=SECOND),
+        checkpoint=_checkpoint("staging", ledger_id, storage_epoch, 2),
+    )
+
+    assert any("INSERT INTO tiamat.recovery_checkpoints" in query for query in connection.executed)
+
+
+def test_authorize_requires_a_checkpoint_where_one_can_be_retained(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id, storage_epoch = uuid4(), uuid4()
+    connection = _Connection(
+        storage_epoch=storage_epoch,
+        ledger_id=ledger_id,
+        floor_version=1,
+        floor_digest=FIRST,
+        checkpoints_supported=True,
+    )
+    _patch(monkeypatch, connection)
+
+    with pytest.raises(RecoveryRejected, match="recovery checkpoint is required"):
+        authorize_reconciled_state(
+            "postgresql://recovery@example/tiamat",
+            environment="staging",
+            expected_storage_epoch=storage_epoch,
+            current_recovery_generation=1,
+            next_recovery_generation=2,
+            unresolved_provider_liabilities=0,
+            anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256=SECOND),
+        )
+
+
+def test_authorize_rejects_a_checkpoint_for_another_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id, storage_epoch = uuid4(), uuid4()
+    connection = _Connection(
+        storage_epoch=storage_epoch,
+        ledger_id=ledger_id,
+        floor_version=1,
+        floor_digest=FIRST,
+        checkpoints_supported=True,
+    )
+    _patch(monkeypatch, connection)
+
+    with pytest.raises(RecoveryRejected, match="generation does not match"):
+        authorize_reconciled_state(
+            "postgresql://recovery@example/tiamat",
+            environment="staging",
+            expected_storage_epoch=storage_epoch,
+            current_recovery_generation=1,
+            next_recovery_generation=2,
+            unresolved_provider_liabilities=0,
+            anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256=SECOND),
+            checkpoint=_checkpoint("staging", ledger_id, storage_epoch, 3),
+        )
+
+
+def test_authorize_rejects_a_checkpoint_from_another_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id, storage_epoch = uuid4(), uuid4()
+    connection = _Connection(
+        storage_epoch=storage_epoch,
+        ledger_id=ledger_id,
+        floor_version=1,
+        floor_digest=FIRST,
+        checkpoints_supported=True,
+    )
+    _patch(monkeypatch, connection)
+
+    with pytest.raises(RecoveryRejected, match="identity does not match"):
+        authorize_reconciled_state(
+            "postgresql://recovery@example/tiamat",
+            environment="staging",
+            expected_storage_epoch=storage_epoch,
+            current_recovery_generation=1,
+            next_recovery_generation=2,
+            unresolved_provider_liabilities=0,
+            anchor_floor=AnchorFloorRecord(transition_version=2, transition_sha256=SECOND),
+            checkpoint=_checkpoint("staging", uuid4(), storage_epoch, 2),
+        )

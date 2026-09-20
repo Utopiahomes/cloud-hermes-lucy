@@ -12,11 +12,13 @@ from typing import Any
 from uuid import UUID
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from lucy.shared_execution.recovery_anchor import (
     RecoveryAnchorRejected,
     require_monotonic_anchor_floor,
 )
+from lucy.shared_execution.recovery_checkpoint import RecoveryCheckpoint
 
 
 class RecoveryRejected(RuntimeError):
@@ -118,6 +120,77 @@ def initialize_environment(
             storage_epoch=storage_epoch,
             recovery_generation=recovery_generation,
         )
+
+
+def _bind_recovery_checkpoint(
+    connection: psycopg.Connection[Any],
+    *,
+    environment: str,
+    identity_ledger_id: UUID,
+    storage_epoch: UUID,
+    recovery_generation: int,
+    checkpoint: RecoveryCheckpoint | None,
+) -> None:
+    """Append the immutable checkpoint this generation is authorized under.
+
+    The row is what a later restart recomputes its digest from, so it is written inside the same
+    transaction which unblocks the ledger. A ledger whose schema can retain one must: unblocking
+    without a retained checkpoint would leave the launcher with no independent digest source.
+    """
+
+    supported = connection.execute(
+        """
+        SELECT count(*) FROM information_schema.tables
+        WHERE table_schema = 'tiamat' AND table_name = 'recovery_checkpoints'
+        """
+    ).fetchone()
+    if supported is None:
+        raise RecoveryRejected("recovery checkpoint schema could not be read")
+    if int(supported[0]) == 0:
+        if checkpoint is not None:
+            raise RecoveryRejected("ledger does not retain recovery checkpoints")
+        return
+    if checkpoint is None:
+        raise RecoveryRejected("recovery checkpoint is required on this ledger")
+    bound_generation = checkpoint.object.get("recovery_generation")
+    if bound_generation != recovery_generation:
+        raise RecoveryRejected("recovery checkpoint generation does not match the authorization")
+    if (
+        str(checkpoint.object.get("ledger_id")) != str(identity_ledger_id)
+        or str(checkpoint.object.get("storage_epoch")) != str(storage_epoch)
+        or str(checkpoint.object.get("environment")) != environment
+    ):
+        raise RecoveryRejected("recovery checkpoint identity does not match the ledger")
+    existing = connection.execute(
+        """
+        SELECT checkpoint_sha256 FROM tiamat.recovery_checkpoints
+        WHERE environment = %s AND recovery_generation = %s
+        """,
+        (environment, recovery_generation),
+    ).fetchone()
+    if existing is not None:
+        # The table is append-only, so a repeated authorization may only reassert exact bytes.
+        if str(existing[0]) != checkpoint.checkpoint_sha256:
+            raise RecoveryRejected("a different recovery checkpoint is already bound")
+        return
+    connection.execute(
+        """
+        INSERT INTO tiamat.recovery_checkpoints (
+            environment, recovery_generation, ledger_id, storage_epoch,
+            checkpoint_sha256, release_heads_sha256, settlement_position_sha256, checkpoint
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            environment,
+            recovery_generation,
+            identity_ledger_id,
+            storage_epoch,
+            checkpoint.checkpoint_sha256,
+            checkpoint.release_heads_sha256,
+            checkpoint.settlement_position_sha256,
+            Jsonb(checkpoint.object),
+        ),
+    )
 
 
 def _record_anchor_floor(
@@ -225,6 +298,7 @@ def authorize_reconciled_state(
     expected_inventory: tuple[int, str] | None = None,
     expected_release_heads: dict[ReleaseHeadKey, ReleaseHeadValue] | None = None,
     anchor_floor: AnchorFloorRecord | None = None,
+    checkpoint: RecoveryCheckpoint | None = None,
 ) -> None:
     """Unblock only an inspected ledger with an externally advanced generation.
 
@@ -234,6 +308,12 @@ def authorize_reconciled_state(
     ``anchor_floor`` is the external anchor transition this authorization was performed under, and
     is mandatory on a ledger carrying the D1 floor columns. Unblocking without advancing the floor
     would leave a superseded transition acceptable to the next startup.
+
+    ``checkpoint`` is the reconciled checkpoint this generation is authorized under, retained
+    immutably for the launcher to recompute from later. It is mandatory on a ledger which can
+    retain one. This binds the reviewed checkpoint; the wider Draft 0.5 section 7.6 change, which
+    replaces the exact ``current + 1`` rule with an externally authorized generation jump and
+    verifies the checkpoint against reconciled ledger contents, remains separate and reviewed.
     """
 
     if next_recovery_generation != current_recovery_generation + 1:
@@ -261,6 +341,19 @@ def authorize_reconciled_state(
                 or not bool(gate[2])
             ):
                 raise RecoveryRejected("restore gate does not match the reviewed source state")
+            identity_row = connection.execute(
+                "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
+            ).fetchone()
+            if identity_row is None:
+                raise RecoveryRejected("ledger identity is missing")
+            _bind_recovery_checkpoint(
+                connection,
+                environment=environment,
+                identity_ledger_id=UUID(str(identity_row[0])),
+                storage_epoch=expected_storage_epoch,
+                recovery_generation=next_recovery_generation,
+                checkpoint=checkpoint,
+            )
             observed = connection.execute(
                 """
                 SELECT count(*)

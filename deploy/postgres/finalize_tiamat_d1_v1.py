@@ -120,6 +120,9 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
         connection.execute(
             "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
         )
+        # A table created after the roles SQL ran is not covered by its ALL TABLES grant. The
+        # checkpoint binding is append-only, so recovery receives no UPDATE or DELETE on it.
+        connection.execute("GRANT SELECT, INSERT ON tiamat.recovery_checkpoints TO tiamat_recovery")
         connection.execute("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
         remaining_update = connection.execute(
             """
