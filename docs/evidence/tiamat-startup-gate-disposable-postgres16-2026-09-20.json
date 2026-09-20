@@ -1,0 +1,83 @@
+{
+  "evidence_type": "tiamat_startup_gate_disposable_postgres16",
+  "date_utc": "2026-09-20",
+  "tested_commit": "ab8b7c4 plus the startup-gate proof module recorded with this evidence",
+  "scope": "launcher startup-gate refusal proof: plan v0.7 cases C1, C1-T and C2",
+  "resource": {
+    "render_id": "dpg-danvd8uk1f9s73a3v2og-a",
+    "name": "tiamat-m2-floor-disposable-20260920",
+    "database_name": "tiamat_test_d1_huzr",
+    "plan": "free",
+    "postgres_major": 16,
+    "reused_from": "Lyra's M2 floor proof; idle and explicitly offered for reuse",
+    "migrated_to": "0011_recovery_checkpoint",
+    "disposition": "retained; deletion awaits Ray's explicit confirmation and coordination with Lyra"
+  },
+  "aws": {
+    "account": "429870640638",
+    "region": "us-east-1",
+    "table": "stoin-staging-tiamat-recovery-anchor-v1",
+    "operations": "GetItem only, strongly consistent",
+    "record_after_proof": {
+      "transition_version": 1,
+      "transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b"
+    }
+  },
+  "checks": [
+    {
+      "case": "C1",
+      "name": "expired_witness_key_refuses_the_current_anchor",
+      "result": "passed",
+      "detail": "Evaluated at the current date, the pinned witness inventory's key window has lapsed, so the gate refuses with recovery_anchor_witness_inventory_rejected before any claimant is written."
+    },
+    {
+      "case": "C1",
+      "name": "quarantined_record_refuses_even_when_trust_is_current",
+      "result": "passed",
+      "detail": "Evaluated inside the key window, the same live record verifies and is then refused with recovery_continuity_not_established. C1's refusal is therefore doubly determined, and the two causes are recorded separately rather than as one outcome."
+    },
+    {
+      "case": "C2",
+      "name": "unreachable_anchor_store_refuses",
+      "result": "passed",
+      "detail": "With the store pointed at a table the identity cannot read, the gate refuses with startup_attestation_authority_unavailable and never opens a claimant."
+    },
+    {
+      "case": "C1-T",
+      "name": "beacon_from_another_cluster_refuses",
+      "result": "passed",
+      "detail": "A signed beacon whose system identifier differs from the live database is refused with recovery_continuity_beacon_mismatch."
+    },
+    {
+      "case": "C1-T",
+      "name": "beacon_ahead_of_this_database_refuses",
+      "result": "passed",
+      "detail": "A signed beacon whose durable WAL position is ahead of this database is refused with recovery_continuity_beacon_mismatch. This is the stale-attachment direction; the G11 catch-up boundary is unchanged by it."
+    },
+    {
+      "case": "C1-T",
+      "name": "checkpoint_the_witness_does_not_attest_refuses",
+      "result": "passed",
+      "detail": "When the retained checkpoint digest and the signed witness disagree, the gate refuses with startup_checkpoint_digest_mismatch."
+    },
+    {
+      "case": "C1-T",
+      "name": "checkpoint_bound_to_another_ledger_refuses",
+      "result": "passed",
+      "detail": "A retained checkpoint bound to a different ledger is refused before any authority is granted."
+    }
+  ],
+  "invariant": "Every case is a refusal, and each asserts that the count of active claimants for the tested environment stayed zero. No refusal left a startable claimant behind.",
+  "not_performed": [
+    "any DynamoDB write, signed transition, or commissioning",
+    "key generation or signing of any kind",
+    "dispatch enablement or provider request",
+    "any change to the commissioned staging ledger, which was never connected",
+    "deletion of the disposable database"
+  ],
+  "notes": [
+    "The synthetic established transitions used by the C1-T cases exist only in memory and were never written to DynamoDB.",
+    "The disposable database also holds claimants from the earlier D1 and M2 proofs, so the invariant is scoped to the environment under test.",
+    "The expired twelve-hour witness key remains the blocker for any live authority. Replacing it is a separate offline signing ceremony, not part of this proof."
+  ]
+}
