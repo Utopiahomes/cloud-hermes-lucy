@@ -11,7 +11,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
 COPY deploy/aws/install_tiamat_recovery_bootstrap_v1.py ./deploy/aws/install_tiamat_recovery_bootstrap_v1.py
+COPY deploy/aws/install_tiamat_continued_quarantine_successor_v1.py ./deploy/aws/install_tiamat_continued_quarantine_successor_v1.py
 COPY deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json ./deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json
+COPY deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json ./deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json
 COPY deploy/postgres/bootstrap_cloud_v1_2.py ./deploy/postgres/bootstrap_cloud_v1_2.py
 COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_realm_cloud_v1_3.py
 COPY deploy/postgres/migrate_realm_cloud_v1_3.py ./deploy/postgres/migrate_realm_cloud_v1_3.py

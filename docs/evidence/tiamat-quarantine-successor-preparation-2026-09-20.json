@@ -22,8 +22,11 @@
     "original_public_root_fingerprint_matches_commissioned_anchor": true,
     "exact_predecessor_and_inventory_chain_verified": true,
     "candidate_signatures_and_24_hour_window_verified": true,
+    "online_installer_default_preview": "verified_not_written; no AWS client constructed",
+    "online_installer_exact_digest_gate": "wrong confirmation rejected before AWS client construction",
+    "online_installer_write_behavior": "single conditional attempt with strong reads; unit-tested only",
     "dispatch_authority": "denied_by_quarantine",
-    "focused_tests": "28 passed",
+    "focused_tests": "33 passed",
     "ruff": "passed",
     "strict_mypy": "passed across 144 source files"
   },
