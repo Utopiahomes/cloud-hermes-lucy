@@ -1,0 +1,198 @@
+"""Bounded Render PostgreSQL P1 role-capability probe; leaves no durable changes.
+
+Run only against the blocked staging ledger, from a one-off job with a temporary
+owner URL. All DDL is savepoint-scoped and rolled back. Output contains no URLs,
+passwords, session text, or SQL error details.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import secrets
+from collections.abc import Callable
+
+import psycopg
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
+
+
+def _one(cursor: psycopg.Cursor[tuple[object, ...]]) -> tuple[object, ...]:
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("P1 expected a database row")
+    return row
+
+
+def _connection_info(name: str) -> str | None:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    value = value.replace("postgresql+psycopg://", "postgresql://", 1)
+    if conninfo_to_dict(value).get("sslmode") not in {"require", "verify-ca", "verify-full"}:
+        raise ValueError(f"{name} must require TLS")
+    return value
+
+
+def _attempt(
+    connection: psycopg.Connection[tuple[object, ...]], action: Callable[[], object]
+) -> dict[str, object]:
+    connection.execute("SAVEPOINT p1_probe")
+    try:
+        result = action()
+        return {"supported": result is not False}
+    except psycopg.Error as exc:
+        return {"supported": False, "sqlstate": exc.sqlstate}
+    finally:
+        connection.execute("ROLLBACK TO SAVEPOINT p1_probe")
+        connection.execute("RELEASE SAVEPOINT p1_probe")
+
+
+def run(*, expected_ledger: str) -> dict[str, object]:
+    owner_url = _connection_info("TIAMAT_P1_OWNER_DATABASE_URL")
+    runtime_url = _connection_info("TIAMAT_P1_RUNTIME_DATABASE_URL")
+    if owner_url is None:
+        raise ValueError("temporary staging owner URL is required")
+    if not expected_ledger:
+        raise ValueError("expected ledger ID is required")
+
+    with psycopg.connect(owner_url) as connection:
+        owner, ledger, blocked, tls = _one(
+            connection.execute(
+                """SELECT current_user,
+                      (SELECT ledger_id::text FROM tiamat.ledger_identity WHERE singleton),
+                      (SELECT dispatch_blocked FROM tiamat.restore_gate
+                       WHERE environment = 'staging'),
+                      (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid())"""
+            )
+        )
+        if ledger != expected_ledger or blocked is not True or tls is not True:
+            raise RuntimeError("P1 staging identity, blocked gate, or TLS check failed")
+
+        results: dict[str, object] = {"ledger_matches": True, "dispatch_blocked": True, "tls": True}
+        results["alter_runtime_nologin"] = _attempt(
+            connection,
+            lambda: connection.execute("ALTER ROLE tiamat_runtime NOLOGIN"),
+        )
+        temporary_password = secrets.token_urlsafe(36)
+        results["alter_runtime_password"] = _attempt(
+            connection,
+            lambda: connection.execute(
+                sql.SQL("ALTER ROLE tiamat_runtime PASSWORD {}").format(
+                    sql.Literal(temporary_password)
+                )
+            ),
+        )
+        temporary_password = ""
+        results["self_grant_runtime_inherit"] = _attempt(
+            connection,
+            lambda: connection.execute(
+                sql.SQL("GRANT tiamat_runtime TO {} WITH INHERIT TRUE, SET TRUE").format(
+                    sql.Identifier(str(owner))
+                )
+            ),
+        )
+        results["pg_signal_backend_member"] = bool(
+            _one(
+                connection.execute(
+                    "SELECT pg_has_role(current_user, 'pg_signal_backend', 'MEMBER')"
+                )
+            )[0]
+        )
+        results["query_runtime_sessions"] = _attempt(
+            connection,
+            lambda: connection.execute(
+                "SELECT pid, usename FROM pg_stat_activity WHERE usename = 'tiamat_runtime'"
+            ).fetchall(),
+        )
+        results["grant_recovery_set"] = _attempt(
+            connection,
+            lambda: connection.execute(
+                sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(
+                    sql.Identifier(str(owner))
+                )
+            ),
+        )
+        function_name = "p1_probe_" + secrets.token_hex(6)
+
+        def transfer_function() -> None:
+            connection.execute(
+                sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(
+                    sql.Identifier(str(owner))
+                )
+            )
+            connection.execute(
+                sql.SQL(
+                    "CREATE FUNCTION tiamat.{}() RETURNS boolean LANGUAGE sql AS 'SELECT true'"
+                ).format(sql.Identifier(function_name))
+            )
+            connection.execute(
+                sql.SQL("ALTER FUNCTION tiamat.{}() OWNER TO tiamat_recovery").format(
+                    sql.Identifier(function_name)
+                )
+            )
+
+        results["transfer_function_to_recovery"] = _attempt(connection, transfer_function)
+        for name in ("pg_control_system", "pg_control_checkpoint", "pg_current_wal_flush_lsn"):
+
+            def revoke_public(function_name: str = name) -> object:
+                return connection.execute(
+                    sql.SQL("REVOKE EXECUTE ON FUNCTION pg_catalog.{}() FROM PUBLIC").format(
+                        sql.Identifier(function_name)
+                    )
+                )
+
+            results[f"revoke_public_{name}"] = _attempt(
+                connection,
+                revoke_public,
+            )
+        if runtime_url:
+            with psycopg.connect(runtime_url, autocommit=True) as runtime:
+                runtime_user, runtime_pid = _one(
+                    runtime.execute("SELECT current_user, pg_backend_pid()")
+                )
+                if runtime_user != "tiamat_runtime":
+                    raise RuntimeError("runtime probe credential has unexpected role")
+                visible = _one(
+                    connection.execute(
+                        "SELECT count(*) FROM pg_stat_activity WHERE pid = %s "
+                        "AND usename = 'tiamat_runtime'",
+                        (runtime_pid,),
+                    )
+                )[0]
+                results["see_runtime_probe_session"] = visible == 1
+
+                def terminate_probe() -> bool:
+                    return bool(
+                        _one(connection.execute("SELECT pg_terminate_backend(%s)", (runtime_pid,)))[
+                            0
+                        ]
+                    )
+
+                results["terminate_probe_runtime_session"] = _attempt(
+                    connection,
+                    terminate_probe,
+                )
+        else:
+            results["terminate_probe_runtime_session"] = {"status": "not_run_no_runtime_probe_url"}
+        connection.rollback()
+        results["durable_role_or_function_changes"] = False
+        return results
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-ledger-id", required=True)
+    args = parser.parse_args()
+    try:
+        result = run(expected_ledger=args.expected_ledger_id)
+    except Exception as exc:
+        # In particular, never emit psycopg's connection diagnostic with credentials.
+        print(json.dumps({"status": "failed", "error_type": type(exc).__name__}))
+        raise SystemExit(1) from None
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()
