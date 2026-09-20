@@ -201,7 +201,7 @@ class PostgresExecutionLedger:
         """Legacy pre-D1 acquisition; the finalized runtime role cannot call this path.
 
         Migration 0007's role finalization revokes direct restore-gate UPDATE. The
-        serving integration must use ``consume_startup_attestation`` instead.
+        serving integration must use ``consume_startup_attestation_v2`` instead.
         """
 
         if not self._legacy_pre_d1_test_only:
@@ -264,7 +264,7 @@ class PostgresExecutionLedger:
                     (self._witness.environment,),
                 )
                 row = connection.execute(
-                    "SELECT tiamat.consume_startup_attestation(%s)",
+                    "SELECT tiamat.consume_startup_attestation_v2(%s)",
                     (anchor_transition_sha256,),
                 ).fetchone()
                 if row is None:
@@ -1612,8 +1612,9 @@ class PostgresExecutionLedger:
         """Confine the legacy test path to databases without D1 installed."""
 
         row = connection.execute(
-            "SELECT pg_catalog.to_regprocedure('tiamat.consume_startup_attestation(text)') "
-            "IS NULL AS pre_d1"
+            "SELECT pg_catalog.to_regprocedure('tiamat.consume_startup_attestation(text)') IS NULL "
+            "AND pg_catalog.to_regprocedure('tiamat.consume_startup_attestation_v2(text)') IS NULL "
+            "AS pre_d1"
         ).fetchone()
         if row is None or not bool(row["pre_d1"]):
             raise DispatchBlocked("legacy coordinator path is disabled on a D1 database")

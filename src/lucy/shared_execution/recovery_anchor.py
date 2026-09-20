@@ -161,7 +161,11 @@ class VerifiedAnchorTransition:
         ):
             raise ValueError("recovery anchor transition is invalid")
         if self.continuity == "continuity_established":
-            if self.witness.status != "reconciled" or self.beacon is None:
+            if (
+                self.witness.status != "reconciled"
+                or self.beacon is None
+                or self.beacon.checkpoint_digest != self.witness.checkpoint_digest
+            ):
                 raise ValueError("established continuity requires reconciled witness and beacon")
         elif self.continuity == "quarantined":
             if self.witness.status != "quarantined" or self.beacon is not None:

@@ -105,6 +105,19 @@ def test_ordinary_restart_requires_external_signed_beacon_after_normal_progress(
     assert restarted.exact_sha256 == first.witness.exact_sha256
 
 
+def test_established_transition_binds_the_signed_witness_and_beacon_checkpoint() -> None:
+    identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
+
+    with pytest.raises(ValueError, match="established continuity"):
+        transition(
+            witness(identity, checkpoint=CHECKPOINT_A),
+            version=1,
+            previous=None,
+            continuity="continuity_established",
+            item_beacon=beacon(checkpoint=CHECKPOINT_B),
+        )
+
+
 def test_signed_beacon_refresh_preserves_witness_and_allows_later_restart() -> None:
     anchor = InMemoryExternalRecoveryAnchor()
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
@@ -159,7 +172,7 @@ def test_anchor_rejects_invalid_witness_successors(
         version=2,
         previous=first,
         continuity="continuity_established",
-        item_beacon=beacon(),
+        item_beacon=beacon(checkpoint=str(candidate_kwargs.get("checkpoint", CHECKPOINT_A))),
     )
 
     with pytest.raises(RecoveryAnchorRejected, match=reason):

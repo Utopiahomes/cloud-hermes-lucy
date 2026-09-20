@@ -20,9 +20,11 @@ class D1FinalizationRejected(RuntimeError):
 
 _FUNCTIONS = (
     ("consume_startup_attestation", "text"),
+    ("consume_startup_attestation_v2", "text"),
     ("verify_attestation_current", "bigint"),
     ("block_dispatch", "text"),
 )
+_DEPRECATED_RUNTIME_FUNCTIONS = (("consume_startup_attestation", "text"),)
 
 
 def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID) -> None:
@@ -70,6 +72,7 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
         # temporary SET/INHERIT grant, not this system-granted ADMIN row.
         if topology is None or any(bool(value) for value in topology):
             raise D1FinalizationRejected("recovery role topology is not the expected baseline")
+        function_owners: dict[tuple[str, str], str] = {}
         for name, argument in _FUNCTIONS:
             function_owner = connection.execute(
                 """
@@ -79,21 +82,39 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
                 """,
                 (f"tiamat.{name}({argument})",),
             ).fetchone()
-            if function_owner is None or str(function_owner[0]) != owner:
-                raise D1FinalizationRejected("D1 function owner is not the migration owner")
+            if function_owner is None or str(function_owner[0]) not in {owner, "tiamat_recovery"}:
+                raise D1FinalizationRejected("D1 function owner is not eligible for finalization")
+            function_owners[(name, argument)] = str(function_owner[0])
         connection.execute(
             sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(sql.Identifier(owner))
         )
         connection.execute("GRANT CREATE ON SCHEMA tiamat TO tiamat_recovery")
-        for name, argument in _FUNCTIONS:
+        # V1 may already be recovery-owned on an upgraded ledger. Only in that
+        # case assume recovery to remove its legacy entrypoint; on a fresh
+        # ledger the migration owner still owns v1 and will revoke it below.
+        deprecated_v1 = _DEPRECATED_RUNTIME_FUNCTIONS[0]
+        if function_owners[deprecated_v1] == "tiamat_recovery":
+            connection.execute("SET LOCAL ROLE tiamat_recovery")
+            name, argument = deprecated_v1
             signature = sql.SQL("tiamat.{}({})").format(sql.Identifier(name), sql.SQL(argument))
             connection.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(signature))
             connection.execute(
-                sql.SQL("GRANT EXECUTE ON FUNCTION {} TO tiamat_runtime").format(signature)
+                sql.SQL("REVOKE ALL ON FUNCTION {} FROM tiamat_runtime").format(signature)
             )
-            connection.execute(
-                sql.SQL("ALTER FUNCTION {} OWNER TO tiamat_recovery").format(signature)
-            )
+            connection.execute("RESET ROLE")
+        for name, argument in _FUNCTIONS:
+            signature = sql.SQL("tiamat.{}({})").format(sql.Identifier(name), sql.SQL(argument))
+            if function_owners[(name, argument)] != "tiamat_recovery":
+                connection.execute(
+                    sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(signature)
+                )
+                if (name, argument) not in _DEPRECATED_RUNTIME_FUNCTIONS:
+                    connection.execute(
+                        sql.SQL("GRANT EXECUTE ON FUNCTION {} TO tiamat_runtime").format(signature)
+                    )
+                connection.execute(
+                    sql.SQL("ALTER FUNCTION {} OWNER TO tiamat_recovery").format(signature)
+                )
         connection.execute("REVOKE CREATE ON SCHEMA tiamat FROM tiamat_recovery")
         connection.execute(sql.SQL("REVOKE tiamat_recovery FROM {}").format(sql.Identifier(owner)))
         connection.execute(
@@ -121,7 +142,7 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
         if post_topology is None or any(bool(value) for value in post_topology):
             raise D1FinalizationRejected("temporary recovery-role privileges remain")
         for name, argument in _FUNCTIONS:
-            signature = f"tiamat.{name}({argument})"
+            signature_text = f"tiamat.{name}({argument})"
             function_state = connection.execute(
                 """
                 SELECT pg_catalog.pg_get_userbyid(p.proowner),
@@ -131,12 +152,13 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
                 FROM pg_catalog.pg_proc AS p
                 WHERE p.oid = pg_catalog.to_regprocedure(%s)
                 """,
-                (signature,),
+                (signature_text,),
             ).fetchone()
+            must_execute = (name, argument) not in _DEPRECATED_RUNTIME_FUNCTIONS
             if (
                 function_state is None
                 or str(function_state[0]) != "tiamat_recovery"
-                or not bool(function_state[1])
+                or bool(function_state[1]) != must_execute
             ):
                 raise D1FinalizationRejected(
                     "D1 function ownership or execution grant is incomplete"

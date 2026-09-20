@@ -55,7 +55,7 @@ class _Connection:
             return _Result({"current": self.attestation_current})
         if "to_regprocedure" in statement:
             return _Result({"pre_d1": False})
-        if "tiamat.consume_startup_attestation" in statement:
+        if "tiamat.consume_startup_attestation_v2" in statement:
             return _Result((7,))
         return _Result(None)
 
@@ -105,7 +105,7 @@ def test_attested_acquisition_calls_single_database_function(
     monkeypatch.setattr(postgres_ledger.psycopg, "connect", lambda *_a, **_kw: connection)
 
     assert ledger.consume_startup_attestation("a" * 64) == 7
-    assert sum("tiamat.consume_startup_attestation" in sql for sql in connection.statements) == 1
+    assert sum("tiamat.consume_startup_attestation_v2" in sql for sql in connection.statements) == 1
     assert not any("UPDATE tiamat.restore_gate" in sql for sql in connection.statements)
 
 

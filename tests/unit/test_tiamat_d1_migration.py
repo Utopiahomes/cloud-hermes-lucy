@@ -23,6 +23,24 @@ def _migration() -> ModuleType:
     return module
 
 
+def _expiry_migration() -> ModuleType:
+    path = ROOT / "tiamat_migrations" / "versions" / "0008_startup_attestation_expiry_bound.py"
+    spec = importlib.util.spec_from_file_location("tiamat_d1_expiry_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _consume_v2_migration() -> ModuleType:
+    path = ROOT / "tiamat_migrations" / "versions" / "0009_attestation_consume_v2.py"
+    spec = importlib.util.spec_from_file_location("tiamat_d1_consume_v2_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_d1_migration_installs_locked_functions_and_single_claimant_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -50,6 +68,39 @@ def test_d1_migration_installs_locked_functions_and_single_claimant_index(
     assert "GRANT EXECUTE ON FUNCTION" not in sql
 
 
+def test_d1_expiry_migration_enforces_the_launcher_lifetime_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _expiry_migration()
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "execute", statements.append)
+    migration.upgrade()
+    sql = "\n".join(statements)
+
+    assert "ADD COLUMN created_at timestamptz" in sql
+    assert "ALTER COLUMN created_at SET DEFAULT clock_timestamp()" in sql
+    assert "created_at IS NULL OR" in sql
+    assert "expires_at > created_at" in sql
+    assert "expires_at <= created_at + interval '10 minutes'" in sql
+    assert "CREATE FUNCTION tiamat.enforce_startup_attestation_expiry_bound()" in sql
+    assert "BEFORE INSERT OR UPDATE OF created_at, expires_at" in sql
+
+
+def test_d1_consume_v2_rechecks_expiry_after_the_gate_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _consume_v2_migration()
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "execute", statements.append)
+    migration.upgrade()
+    sql = "\n".join(statements)
+
+    assert "CREATE FUNCTION tiamat.consume_startup_attestation_v2(" in sql
+    assert "FOR UPDATE OF gate" in sql
+    assert "attested.expires_at <= pg_catalog.clock_timestamp()" in sql
+    assert "REVOKE ALL ON FUNCTION tiamat.consume_startup_attestation_v2(text) FROM PUBLIC" in sql
+
+
 class _Result:
     def __init__(
         self, row: tuple[Any, ...] | None = None, rows: list[tuple[Any, ...]] | None = None
@@ -75,6 +126,8 @@ class _Connection:
         postcheck_set: bool = False,
         postcheck_usage: bool = False,
         postcheck_create: bool = False,
+        postcheck_deprecated_execute: bool = False,
+        recovery_owned_v1: bool = False,
     ):
         self.ledger_id = ledger_id
         self.blocked = blocked
@@ -83,6 +136,8 @@ class _Connection:
         self.postcheck_set = postcheck_set
         self.postcheck_usage = postcheck_usage
         self.postcheck_create = postcheck_create
+        self.postcheck_deprecated_execute = postcheck_deprecated_execute
+        self.recovery_owned_v1 = recovery_owned_v1
         self.statements: list[str] = []
 
     def __enter__(self) -> _Connection:
@@ -95,7 +150,6 @@ class _Connection:
         return nullcontext()
 
     def execute(self, query: Any, params: Any = None) -> _Result:
-        del params
         statement = str(query)
         self.statements.append(statement)
         if "FROM tiamat.ledger_identity AS i" in statement:
@@ -110,7 +164,24 @@ class _Connection:
             return _Result((False, False, False))
         if "pg_catalog.pg_get_userbyid" in statement:
             if "has_function_privilege" in statement:
-                return _Result((self.postcheck_owner, self.postcheck_execute))
+                is_deprecated = bool(params and "consume_startup_attestation(text)" in params[0])
+                runtime_execute = (
+                    self.postcheck_deprecated_execute
+                    if is_deprecated
+                    else self.postcheck_execute
+                )
+                return _Result(
+                    (
+                        self.postcheck_owner,
+                        runtime_execute,
+                    )
+                )
+            if (
+                self.recovery_owned_v1
+                and params
+                and "consume_startup_attestation(text)" in params[0]
+            ):
+                return _Result(("tiamat_recovery",))
             return _Result(("tiamat_owner",))
         if "pg_catalog.has_table_privilege" in statement:
             return _Result((False,))
@@ -145,23 +216,44 @@ def test_finalization_transfers_then_grants_runtime_functions(
     statements = connection.statements
     # Finalization grants no direct UPDATE; it explicitly removes the old runtime grant.
     assert "REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime" in statements
-    assert sum("ALTER FUNCTION" in statement for statement in statements) == 3
+    assert sum("ALTER FUNCTION" in statement for statement in statements) == 4
     assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 3
+    assert sum("REVOKE ALL ON FUNCTION" in statement for statement in statements) == 4
     first_grant = next(
         index
         for index, statement in enumerate(statements)
         if "GRANT EXECUTE ON FUNCTION" in statement
     )
-    first_transfer = next(
-        index for index, statement in enumerate(statements) if "ALTER FUNCTION" in statement
-    )
-    assert first_grant < first_transfer
+    # V1 is deliberately transferred without a runtime grant; each non-deprecated
+    # entry receives EXECUTE before its own ownership transfer.
+    assert first_grant < statements.index(next(
+        statement for statement in statements
+        if "ALTER FUNCTION" in statement and "consume_startup_attestation_v2" in statement
+    ))
     assert (
         statements.index("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
         < len(statements) - 1
     )
-    assert sum("has_function_privilege" in statement for statement in statements) == 3
+    assert sum("has_function_privilege" in statement for statement in statements) == 4
     assert sum("pg_catalog.pg_has_role" in statement for statement in statements) == 2
+
+
+def test_finalization_revokes_legacy_entrypoint_under_its_recovery_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger_id = uuid4()
+    connection = _Connection(ledger_id, recovery_owned_v1=True)
+    monkeypatch.setattr(finalizer.psycopg, "connect", lambda _: connection)
+
+    finalizer.finalize_d1(
+        "postgresql://synthetic", environment="staging", expected_ledger_id=ledger_id
+    )
+
+    statements = connection.statements
+    assert "SET LOCAL ROLE tiamat_recovery" in statements
+    assert "RESET ROLE" in statements
+    assert sum("ALTER FUNCTION" in statement for statement in statements) == 3
+    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 3
 
 
 @pytest.mark.parametrize(
@@ -172,6 +264,7 @@ def test_finalization_transfers_then_grants_runtime_functions(
         ({"postcheck_set": True}, "temporary recovery-role privileges"),
         ({"postcheck_usage": True}, "temporary recovery-role privileges"),
         ({"postcheck_create": True}, "temporary recovery-role privileges"),
+        ({"postcheck_deprecated_execute": True}, "ownership or execution grant"),
     ],
 )
 def test_finalization_rejects_incomplete_postconditions(

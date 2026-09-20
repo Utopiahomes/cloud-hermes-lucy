@@ -130,6 +130,11 @@ def upgrade() -> None:
           IF NOT FOUND THEN
             RAISE EXCEPTION USING ERRCODE = 'ZX102', MESSAGE = 'startup_authority_mismatch';
           END IF;
+          -- The claimant was locked before the gate. Recheck expiry after any
+          -- gate-lock wait so a short-lived attestation cannot be consumed late.
+          IF attested.expires_at <= pg_catalog.clock_timestamp() THEN
+            RAISE EXCEPTION USING ERRCODE = 'ZX101', MESSAGE = 'startup_attestation_absent';
+          END IF;
           IF gate_record.dispatch_blocked OR
              gate_record.anchor_floor_version = 0 OR
              gate_record.anchor_floor_version > attested.anchor_transition_version OR

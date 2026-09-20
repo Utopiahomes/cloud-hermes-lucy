@@ -1,6 +1,7 @@
 # Tiamat D1 local implementation checkpoint
 
-Status: D1 candidate verified on a disposable PostgreSQL 16 instance, **not activated**. This checkpoint is subordinate to
+Status: D1 candidate verified on a disposable PostgreSQL 16 instance; M2 local launcher candidate added,
+**not activated**. This checkpoint is subordinate to
 `tiamat-recovery-lifecycle-test-plan-v0.7.md` and the signed-release/recovery contracts.
 
 ## Scope and decisions
@@ -28,24 +29,46 @@ Status: D1 candidate verified on a disposable PostgreSQL 16 instance, **not acti
   `ZX102` authority/fence mismatch, `ZX103` system identifier or timeline mismatch, and
   `ZX104` WAL behind. The finalizer checks all three function owners and runtime EXECUTE
   grants, plus removal of temporary schema CREATE and role membership, before commit.
+- M2 adds `StartupAttestationIssuer`: an offline recovery-role primitive that strong-reads the
+  signed external anchor, accepts a digest only through an injected independent checkpoint source,
+  locks the gate and an active claimant without a reverse-order wait, records the verified anchor
+  floor, and atomically inserts a replacement claimant. It is not exposed through HTTP, does not
+  sign or write the anchor, and has no production assembly until a durable trusted checkpoint
+  source exists.
+- Migration `0008_attestation_expiry` makes the short-lived claimant ceiling database-enforced:
+  all new inserts and expiry updates must have a non-null `created_at`, expiry after creation, and
+  no more than ten minutes later. Historical D1 rows retain NULL `created_at` rather than receiving
+  fabricated issuance times; the migration therefore works under forced RLS without privileged
+  backfill access.
+- Migration `0009_attestation_consume_v2` installs the post-gate-expiry-safe consume function and
+  moves the runtime to it. This is intentionally versioned rather than editing an already-applied
+  D1 function; the finalizer transfers the new function while preserving already recovery-owned
+  functions on an upgrade. A waiter cannot consume an attestation that expired during its gate-lock
+  wait.
+- The D1 finalizer's post-condition query variable is type-safe and deployment tools are now part
+  of the strict mypy invocation. The remaining PostgreSQL 16 ADMIN-only role membership is hygiene,
+  not a security boundary; Render database-admin access remains the relevant privileged boundary.
 
 ## Verification ledger
 
 | Check | Result | Scope / invalidation |
 | --- | --- | --- |
 | Ruff on touched code | passed | Post-review D1 revision; rerun after source edits. |
-| Strict mypy on `src` | passed, 142 source files | Post-review D1 revision; rerun after source edits. |
-| Focused D1 unit tests | 18 passed | Migration/finalizer structure and runtime rejection mapping after Claude review; synthetic only. |
-| Full offline unit suite | 1268 passed | Post-review D1 revision; OS temp used outside the repository for fixtures. |
-| Alembic offline SQL generation | passed through `0007` | Proves revision chain and rendering, **not PostgreSQL execution**. |
+| Strict mypy on `src` plus D1 finalizer | passed, 144 source files | M2 local candidate; rerun after source or deployment-tool edits. |
+| Focused D1/M2 unit tests | 34 passed | Issuer, witness binding, expiry migration, v2 runtime entrypoint, and fresh/mixed-owner finalizer paths; synthetic only. |
+| Full offline unit suite | 1276 passed, 298 skipped | M2 candidate; isolated PostgreSQL suites remain skipped because no disposable URL is configured. |
+| Alembic offline SQL generation | passed through `0009` | Proves revision chain and rendering, **not PostgreSQL execution**. |
 | Actual PostgreSQL 16 migration/role/function execution | 15 passed | Free disposable Render PostgreSQL 16; see `evidence/tiamat-d1-disposable-postgres16-2026-09-20.json`. Invalidated by D1 source, PostgreSQL major version, or role topology change. |
 | Staging migration or finalization | not run | The commissioned staging ledger was not targeted by this test; prior checkpoint recorded it at `0006` and dispatch-blocked. |
 
 ## Next action
 
 The free PostgreSQL test resource was deleted after evidence capture and is absent from Render's
-database list; the commissioned database remains listed. Obtain independent review of the D1
-managed-role finding and integration results. The commissioned staging ledger must stay
-at `0006` and blocked until the M2 launcher writes and verifies a real anchor floor and the
-remaining lifecycle requirements are implemented. C1-A automatic restart, failover, and restore
-evidence remain separate work; this candidate does not claim to close the full lifecycle plan.
+database list; the commissioned database remains listed. The local M2 candidate received an
+independent Astra code review. It next needs a fresh disposable PostgreSQL 16 run that proves issuer
+plus D1 consumption, the database expiry constraint, anchor-digest mismatch rejection, mixed-owner
+finalization, and post-lock expiry behavior. The
+commissioned staging ledger must stay at `0006` and blocked: no local candidate is authorized to
+write an external anchor or commission recovery authority. C1-A automatic restart, failover, and
+restore evidence remain separate work; this candidate does not claim to close the full lifecycle
+plan.
