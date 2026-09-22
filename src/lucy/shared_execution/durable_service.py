@@ -34,6 +34,7 @@ from lucy.shared_execution.postgres_ledger import (
     DurableIdempotencyConflict,
     LedgerAdmission,
     LedgerRecord,
+    LedgerScope,
     LedgerUnavailable,
 )
 from lucy.shared_execution.service import (
@@ -68,6 +69,7 @@ _REFUSAL_CODES = {
     "spending partition is blocked": "spending_authority_exhausted",
     "spending grant is not applicable": "spending_authority_exhausted",
     "provider route and rate release are quarantined": "privacy_route_unavailable",
+    "signed profile authority is not active": "privacy_route_unavailable",
 }
 
 
@@ -119,26 +121,67 @@ class ProfileAuthority(Protocol):
     def current(self, profile_id: str) -> ServedProfile | None: ...
 
 
-class ServedProfiles:
-    """The currently active release of each profile. Activation replaces; withdrawal removes."""
+class ProfileCatalogue:
+    """Locally known profile releases and their parameters. It never says which one is current.
+
+    Which release is current is signed authority's answer, not this process's: see
+    ``SignedProfileAuthority``. The catalogue only supplies the route, rates and bounds for a
+    release that authority has made active, and a release it does not know is refused.
+    """
 
     def __init__(self, profiles: tuple[ServedProfile, ...] = ()) -> None:
         self._lock = threading.Lock()
-        self._active: dict[str, ServedProfile] = {}
+        self._releases: dict[tuple[str, str], ServedProfile] = {}
         for profile in profiles:
-            self.activate(profile)
+            self.add(profile)
+
+    def add(self, profile: ServedProfile) -> None:
+        with self._lock:
+            self._releases[(profile.profile_id, profile.release_id)] = profile
+
+    def get(self, profile_id: str, release_id: str) -> ServedProfile | None:
+        with self._lock:
+            return self._releases.get((profile_id, release_id))
+
+
+class ActiveAuthorityReader(Protocol):
+    def active_release_id(
+        self, scope: LedgerScope, release_type: str, subject_id: str
+    ) -> str | None: ...
+
+
+class SignedProfileAuthority:
+    """The current profile release, as signed authority in the ledger database has it.
+
+    A profile is current only while its active signed release is one this process knows and
+    that release's privacy policy is itself the active signed policy. Absent, staged, revoked
+    or unknown authority yields no profile, so a successor activated in signed authority takes
+    effect here without any local step, and nothing is admitted on authority that is not active.
+    The ledger repeats the check atomically at admission; this read decides compatibility and
+    replay eligibility.
+    """
+
+    def __init__(
+        self,
+        reader: ActiveAuthorityReader,
+        scope: LedgerScope,
+        catalogue: ProfileCatalogue,
+    ) -> None:
+        self._reader = reader
+        self._scope = scope
+        self._catalogue = catalogue
 
     def current(self, profile_id: str) -> ServedProfile | None:
-        with self._lock:
-            return self._active.get(profile_id)
-
-    def activate(self, profile: ServedProfile) -> None:
-        with self._lock:
-            self._active[profile.profile_id] = profile
-
-    def withdraw(self, profile_id: str) -> None:
-        with self._lock:
-            self._active.pop(profile_id, None)
+        release_id = self._reader.active_release_id(self._scope, "execution_profile", profile_id)
+        if release_id is None:
+            return None
+        profile = self._catalogue.get(profile_id, release_id)
+        if profile is None:
+            return None
+        policy_release = self._reader.active_release_id(
+            self._scope, "privacy_policy", profile.privacy_policy_id
+        )
+        return profile if policy_release == profile.privacy_policy_release_id else None
 
 
 @dataclass(frozen=True)
@@ -244,12 +287,16 @@ class DurableExecutionService:
         request_id: UUID,
         request: ExecutionRequest,
         timeout_ms: int | None = None,
+        received_at: datetime | None = None,
     ) -> ExecutionResponse:
-        received = self._clock()
+        received = received_at or self._clock()
         executor = self._executors.get(caller)
         if executor is None:
             raise PermissionError("caller is not mapped to an execution scope")
-        profile = self._profiles.current(request.execution_profile_id)
+        try:
+            profile = self._profiles.current(request.execution_profile_id)
+        except LedgerUnavailable as exc:
+            raise ExecutionRejected("state_store_unavailable") from exc
         if profile is not None:
             _require_compatible(request, profile)
         identity = canonical_identity(request)

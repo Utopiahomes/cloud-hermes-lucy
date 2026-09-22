@@ -62,6 +62,7 @@ from tests.integration.test_tiamat_gate1a_execution import (
     _identity,
     _ledger,
     _seed_environment,
+    _seed_signed_authority,
     _SyntheticProvider,
     _unblock,
 )
@@ -94,7 +95,7 @@ def gate1b(disposable_roles: DisposableRoles) -> _Environment:
         partition_id=f"partition-{uuid4().hex[:8]}",
     )
     _seed_environment(disposable_roles.recovery, environment, storage_epoch, scope)
-    return _Environment(
+    env = _Environment(
         owner=disposable_roles.owner,
         recovery=disposable_roles.recovery,
         runtime=disposable_roles.runtime,
@@ -102,7 +103,10 @@ def gate1b(disposable_roles: DisposableRoles) -> _Environment:
         environment=environment,
         storage_epoch=storage_epoch,
         scope=scope,
+        release_manager=disposable_roles.release_manager,
     )
+    _seed_signed_authority(env)
+    return env
 
 
 def _short_lived_fence(

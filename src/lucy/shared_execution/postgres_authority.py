@@ -236,121 +236,184 @@ class PostgresSignedAuthorityStore:
     def activate_release(
         self, scope: AuthorityScope, release_type: str, subject_id: str, release_id: str
     ) -> None:
+        """Activate a staged successor under the subject's exclusive authority lock.
+
+        A revocation release is not activated here: its activation and its effect must be one
+        commit, which ``activate_revocation`` provides.
+        """
+
+        if release_type == "revocation":
+            raise AuthorityTransitionRejected("revocation_requires_activate_revocation")
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_scope(connection, scope)
                 recovery_generation = self._assert_recovery_gate_open(connection, scope.environment)
-                candidate = connection.execute(
-                    """
-                    SELECT release_id, sequence, predecessor_release_id, jws_sha256, state
-                    FROM tiamat.signed_releases
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s AND release_id = %s
-                    FOR UPDATE
-                    """,
-                    (*self._scope_values(scope), release_type, subject_id, release_id),
-                ).fetchone()
-                head = connection.execute(
-                    """
-                    SELECT active_release_id, active_sequence, eligibility_generation
-                    FROM tiamat.release_heads
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s
-                    FOR UPDATE
-                    """,
-                    (*self._scope_values(scope), release_type, subject_id),
-                ).fetchone()
-                if candidate is None or candidate["state"] != "staged":
-                    raise AuthorityTransitionRejected("release_not_staged")
-                if head is None:
-                    valid = candidate["predecessor_release_id"] is None
-                    generation = 1
-                else:
-                    valid = (
-                        candidate["sequence"] > head["active_sequence"]
-                        and candidate["predecessor_release_id"] == head["active_release_id"]
-                    )
-                    generation = head["eligibility_generation"] + 1
-                if not valid:
-                    raise AuthorityTransitionRejected("release_not_successor")
-                connection.execute(
-                    """
-                    UPDATE tiamat.signed_releases SET state = 'superseded'
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s AND state = 'active'
-                    """,
-                    (*self._scope_values(scope), release_type, subject_id),
+                _lock_subjects(connection, scope, {(release_type, subject_id)})
+                self._activate(
+                    connection, scope, recovery_generation, release_type, subject_id, release_id
                 )
-                connection.execute(
-                    """
-                    UPDATE tiamat.signed_releases
-                    SET state = 'active', activated_at = clock_timestamp()
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s AND release_id = %s
-                    """,
-                    (*self._scope_values(scope), release_type, subject_id, release_id),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO tiamat.release_heads (
-                        environment, issuer, caller_id, realm, release_type, subject_id,
-                        active_release_id, active_jws_sha256, active_sequence,
-                        recovery_generation, eligibility_generation
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (environment, issuer, caller_id, realm, release_type, subject_id)
-                    DO UPDATE SET active_release_id = EXCLUDED.active_release_id,
-                      active_jws_sha256 = EXCLUDED.active_jws_sha256,
-                      active_sequence = EXCLUDED.active_sequence,
-                      head_state = 'active', revocation_release_id = NULL,
-                      recovery_generation = EXCLUDED.recovery_generation,
-                      eligibility_generation = EXCLUDED.eligibility_generation,
-                      updated_at = clock_timestamp()
-                    """,
-                    (
-                        *self._scope_values(scope),
-                        release_type,
-                        subject_id,
-                        candidate["release_id"],
-                        candidate["jws_sha256"],
-                        candidate["sequence"],
-                        recovery_generation,
-                        generation,
-                    ),
-                )
-                if release_type == "spending_grant":
-                    projected = connection.execute(
-                        """
-                        UPDATE tiamat.spending_partitions p
-                        SET active_grant_release_id = g.release_id,
-                            budget_period_id = g.budget_period_id,
-                            allowance_microusd = g.allowance_microusd,
-                            contingency_reserve_microusd = g.contingency_reserve_microusd,
-                            maximum_concurrency = g.maximum_concurrency,
-                            largest_per_call_microusd = g.largest_per_call_microusd,
-                            blocked = false, block_reason = NULL,
-                            generation = p.generation + 1,
-                            updated_at = clock_timestamp()
-                        FROM tiamat.grant_releases g
-                        WHERE g.release_id = %s
-                          AND p.environment = g.environment AND p.caller_id = g.caller_id
-                          AND p.realm = g.realm AND p.partition_id = g.partition_id
-                        RETURNING p.partition_id
-                        """,
-                        (release_id,),
-                    ).fetchone()
-                    if projected is None:
-                        raise AuthorityTransitionRejected("spending_partition_unavailable")
-                    connection.execute(
-                        """
-                        UPDATE tiamat.grant_releases SET activated_at = clock_timestamp()
-                        WHERE release_id = %s
-                        """,
-                        (release_id,),
-                    )
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:
             raise AuthorityStoreUnavailable from exc
+
+    def activate_revocation(self, scope: AuthorityScope, revocation: VerifiedRelease) -> None:
+        """Activate a staged revocation release and apply it in the same commit.
+
+        RC1 orders a revocation by when it is activated. Activating it in one transaction and
+        applying it in another would leave a window in which it is active but not yet enforced,
+        so a completed commit could deliver under it. Both subjects' locks are taken first, in a
+        fixed order, before any row is locked.
+        """
+
+        item = revocation.payload
+        if not isinstance(item, RevocationRelease):
+            raise AuthorityTransitionRejected("release_is_not_revocation")
+        try:
+            with self._connect() as connection, connection.transaction():
+                self._set_scope(connection, scope)
+                recovery_generation = self._assert_recovery_gate_open(connection, scope.environment)
+                target_subject = self._revocation_target_subject(connection, scope, item)
+                _lock_subjects(
+                    connection,
+                    scope,
+                    {
+                        ("revocation", item.subject_id),
+                        (item.content.target_release_type, target_subject),
+                    },
+                )
+                self._activate(
+                    connection,
+                    scope,
+                    recovery_generation,
+                    "revocation",
+                    item.subject_id,
+                    item.release_id,
+                )
+                self._apply(connection, scope, item, target_subject)
+        except AuthorityTransitionRejected:
+            raise
+        except psycopg.Error as exc:
+            raise AuthorityStoreUnavailable from exc
+
+    def _activate(
+        self,
+        connection: psycopg.Connection[dict[str, Any]],
+        scope: AuthorityScope,
+        recovery_generation: int,
+        release_type: str,
+        subject_id: str,
+        release_id: str,
+    ) -> None:
+        """The activation statements. The caller holds the transaction and the subject lock."""
+
+        candidate = connection.execute(
+            """
+            SELECT release_id, sequence, predecessor_release_id, jws_sha256, state
+            FROM tiamat.signed_releases
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s AND release_id = %s
+            FOR UPDATE
+            """,
+            (*self._scope_values(scope), release_type, subject_id, release_id),
+        ).fetchone()
+        head = connection.execute(
+            """
+            SELECT active_release_id, active_sequence, eligibility_generation
+            FROM tiamat.release_heads
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s
+            FOR UPDATE
+            """,
+            (*self._scope_values(scope), release_type, subject_id),
+        ).fetchone()
+        if candidate is None or candidate["state"] != "staged":
+            raise AuthorityTransitionRejected("release_not_staged")
+        if head is None:
+            valid = candidate["predecessor_release_id"] is None
+            generation = 1
+        else:
+            valid = (
+                candidate["sequence"] > head["active_sequence"]
+                and candidate["predecessor_release_id"] == head["active_release_id"]
+            )
+            generation = head["eligibility_generation"] + 1
+        if not valid:
+            raise AuthorityTransitionRejected("release_not_successor")
+        connection.execute(
+            """
+            UPDATE tiamat.signed_releases SET state = 'superseded'
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s AND state = 'active'
+            """,
+            (*self._scope_values(scope), release_type, subject_id),
+        )
+        connection.execute(
+            """
+            UPDATE tiamat.signed_releases
+            SET state = 'active', activated_at = clock_timestamp()
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s AND release_id = %s
+            """,
+            (*self._scope_values(scope), release_type, subject_id, release_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO tiamat.release_heads (
+                environment, issuer, caller_id, realm, release_type, subject_id,
+                active_release_id, active_jws_sha256, active_sequence,
+                recovery_generation, eligibility_generation
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (environment, issuer, caller_id, realm, release_type, subject_id)
+            DO UPDATE SET active_release_id = EXCLUDED.active_release_id,
+              active_jws_sha256 = EXCLUDED.active_jws_sha256,
+              active_sequence = EXCLUDED.active_sequence,
+              head_state = 'active', revocation_release_id = NULL,
+              recovery_generation = EXCLUDED.recovery_generation,
+              eligibility_generation = EXCLUDED.eligibility_generation,
+              updated_at = clock_timestamp()
+            """,
+            (
+                *self._scope_values(scope),
+                release_type,
+                subject_id,
+                candidate["release_id"],
+                candidate["jws_sha256"],
+                candidate["sequence"],
+                recovery_generation,
+                generation,
+            ),
+        )
+        if release_type == "spending_grant":
+            projected = connection.execute(
+                """
+                UPDATE tiamat.spending_partitions p
+                SET active_grant_release_id = g.release_id,
+                    budget_period_id = g.budget_period_id,
+                    allowance_microusd = g.allowance_microusd,
+                    contingency_reserve_microusd = g.contingency_reserve_microusd,
+                    maximum_concurrency = g.maximum_concurrency,
+                    largest_per_call_microusd = g.largest_per_call_microusd,
+                    blocked = false, block_reason = NULL,
+                    generation = p.generation + 1,
+                    updated_at = clock_timestamp()
+                FROM tiamat.grant_releases g
+                WHERE g.release_id = %s
+                  AND p.environment = g.environment AND p.caller_id = g.caller_id
+                  AND p.realm = g.realm AND p.partition_id = g.partition_id
+                RETURNING p.partition_id
+                """,
+                (release_id,),
+            ).fetchone()
+            if projected is None:
+                raise AuthorityTransitionRejected("spending_partition_unavailable")
+            connection.execute(
+                """
+                UPDATE tiamat.grant_releases SET activated_at = clock_timestamp()
+                WHERE release_id = %s
+                """,
+                (release_id,),
+            )
 
     def load_active_jws(self, scope: AuthorityScope, release_type: str, subject_id: str) -> bytes:
         try:
@@ -439,114 +502,146 @@ class PostgresSignedAuthorityStore:
             raise AuthorityStoreUnavailable from exc
 
     def apply_revocation(self, scope: AuthorityScope, revocation: VerifiedRelease) -> None:
+        """Re-apply an already active revocation; applying it again is a no-op.
+
+        A new revocation is activated and applied together by ``activate_revocation``.
+        """
+
         item = revocation.payload
         if not isinstance(item, RevocationRelease):
             raise AuthorityTransitionRejected("release_is_not_revocation")
-        target = item.content
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_scope(connection, scope)
                 self._assert_recovery_gate_open(connection, scope.environment)
-                revocation_head = connection.execute(
-                    """
-                    SELECT active_release_id, head_state
-                    FROM tiamat.release_heads
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = 'revocation' AND subject_id = %s
-                    FOR SHARE
-                    """,
-                    (*self._scope_values(scope), item.subject_id),
-                ).fetchone()
-                if (
-                    revocation_head is None
-                    or revocation_head["head_state"] != "active"
-                    or revocation_head["active_release_id"] != item.release_id
-                ):
-                    raise AuthorityTransitionRejected("revocation_not_active")
-                targets = connection.execute(
-                    """
-                    SELECT subject_id, release_id, state
-                    FROM tiamat.signed_releases
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND release_id = %s
-                    FOR UPDATE
-                    """,
-                    (
-                        *self._scope_values(scope),
-                        target.target_release_type,
-                        target.target_release_id,
-                    ),
-                ).fetchall()
-                if len(targets) != 1:
-                    raise AuthorityTransitionRejected("revocation_target_ambiguous")
-                target_row = targets[0]
-                # Ordered against every dispatch and completed commit pinned to this subject:
-                # those take this lock shared, so whichever commits first is the one that counts.
-                class_id, object_id = authority_subject_lock(
-                    scope.environment,
-                    scope.caller_id,
-                    scope.realm,
-                    target.target_release_type,
-                    str(target_row["subject_id"]),
+                target_subject = self._revocation_target_subject(connection, scope, item)
+                _lock_subjects(
+                    connection, scope, {(item.content.target_release_type, target_subject)}
                 )
-                connection.execute(
-                    "SELECT pg_advisory_xact_lock(%s, %s)", (class_id, object_id)
-                )
-                head = connection.execute(
-                    """
-                    SELECT active_release_id, head_state, revocation_release_id
-                    FROM tiamat.release_heads
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s
-                    FOR UPDATE
-                    """,
-                    (
-                        *self._scope_values(scope),
-                        target.target_release_type,
-                        target_row["subject_id"],
-                    ),
-                ).fetchone()
-                if head is None or head["active_release_id"] != target.target_release_id:
-                    raise AuthorityTransitionRejected("revocation_target_not_head")
-                if head["head_state"] == "revoked":
-                    if head["revocation_release_id"] == item.release_id:
-                        return
-                    raise AuthorityTransitionRejected("revocation_conflict")
-                connection.execute(
-                    """
-                    UPDATE tiamat.signed_releases
-                    SET state = 'revoked', revoked_at = %s::timestamptz
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s AND release_id = %s
-                    """,
-                    (
-                        target.effective_at,
-                        *self._scope_values(scope),
-                        target.target_release_type,
-                        target_row["subject_id"],
-                        target.target_release_id,
-                    ),
-                )
-                connection.execute(
-                    """
-                    UPDATE tiamat.release_heads
-                    SET head_state = 'revoked', revocation_release_id = %s,
-                        eligibility_generation = eligibility_generation + 1,
-                        updated_at = clock_timestamp()
-                    WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
-                      AND release_type = %s AND subject_id = %s
-                    """,
-                    (
-                        item.release_id,
-                        *self._scope_values(scope),
-                        target.target_release_type,
-                        target_row["subject_id"],
-                    ),
-                )
+                self._apply(connection, scope, item, target_subject)
         except AuthorityTransitionRejected:
             raise
         except psycopg.Error as exc:
             raise AuthorityStoreUnavailable from exc
+
+    def _revocation_target_subject(
+        self,
+        connection: psycopg.Connection[dict[str, Any]],
+        scope: AuthorityScope,
+        item: RevocationRelease,
+    ) -> str:
+        """Find the targeted subject without locking, so its lock can be taken first."""
+
+        target = item.content
+        rows = connection.execute(
+            """
+            SELECT subject_id
+            FROM tiamat.signed_releases
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND release_id = %s
+            """,
+            (*self._scope_values(scope), target.target_release_type, target.target_release_id),
+        ).fetchall()
+        if len(rows) != 1:
+            raise AuthorityTransitionRejected("revocation_target_ambiguous")
+        return str(rows[0]["subject_id"])
+
+    def _apply(
+        self,
+        connection: psycopg.Connection[dict[str, Any]],
+        scope: AuthorityScope,
+        item: RevocationRelease,
+        target_subject: str,
+    ) -> None:
+        """The revocation statements. The caller holds the transaction and the target's lock.
+
+        Dispatch and the completed commit take that lock shared, so whichever commits first is
+        the one that counts. The subject's revocation generation increments here and nowhere
+        else, so a later successor cannot hide that the subject was revoked.
+        """
+
+        target = item.content
+        revocation_head = connection.execute(
+            """
+            SELECT active_release_id, head_state
+            FROM tiamat.release_heads
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = 'revocation' AND subject_id = %s
+            FOR SHARE
+            """,
+            (*self._scope_values(scope), item.subject_id),
+        ).fetchone()
+        if (
+            revocation_head is None
+            or revocation_head["head_state"] != "active"
+            or revocation_head["active_release_id"] != item.release_id
+        ):
+            raise AuthorityTransitionRejected("revocation_not_active")
+        target_row = connection.execute(
+            """
+            SELECT subject_id, release_id, state
+            FROM tiamat.signed_releases
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s AND release_id = %s
+            FOR UPDATE
+            """,
+            (
+                *self._scope_values(scope),
+                target.target_release_type,
+                target_subject,
+                target.target_release_id,
+            ),
+        ).fetchone()
+        if target_row is None:
+            raise AuthorityTransitionRejected("revocation_target_ambiguous")
+        head = connection.execute(
+            """
+            SELECT active_release_id, head_state, revocation_release_id
+            FROM tiamat.release_heads
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s
+            FOR UPDATE
+            """,
+            (*self._scope_values(scope), target.target_release_type, target_subject),
+        ).fetchone()
+        if head is None or head["active_release_id"] != target.target_release_id:
+            raise AuthorityTransitionRejected("revocation_target_not_head")
+        if head["head_state"] == "revoked":
+            if head["revocation_release_id"] == item.release_id:
+                return
+            raise AuthorityTransitionRejected("revocation_conflict")
+        connection.execute(
+            """
+            UPDATE tiamat.signed_releases
+            SET state = 'revoked', revoked_at = %s::timestamptz
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s AND release_id = %s
+            """,
+            (
+                target.effective_at,
+                *self._scope_values(scope),
+                target.target_release_type,
+                target_subject,
+                target.target_release_id,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE tiamat.release_heads
+            SET head_state = 'revoked', revocation_release_id = %s,
+                eligibility_generation = eligibility_generation + 1,
+                revocation_generation = revocation_generation + 1,
+                updated_at = clock_timestamp()
+            WHERE environment = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND release_type = %s AND subject_id = %s
+            """,
+            (
+                item.release_id,
+                *self._scope_values(scope),
+                target.target_release_type,
+                target_subject,
+            ),
+        )
 
     def _connect(self) -> psycopg.Connection[dict[str, Any]]:
         return psycopg.connect(_psycopg_conninfo(self._database_url), row_factory=dict_row)
@@ -583,3 +678,21 @@ class PostgresSignedAuthorityStore:
         if row is None or row["dispatch_blocked"]:
             raise AuthorityTransitionRejected("recovery_gate_blocked")
         return int(row["recovery_generation"])
+
+
+def _lock_subjects(
+    connection: psycopg.Connection[dict[str, Any]],
+    scope: AuthorityScope,
+    subjects: set[tuple[str, str]],
+) -> None:
+    """Take each subject's authority lock exclusively, in one fixed order, before any row lock.
+
+    Activation and revocation of one subject used to lock its release rows and head in opposite
+    orders and could deadlock. Taking the subject lock first serializes them outright.
+    """
+
+    for class_id, object_id in sorted(
+        authority_subject_lock(scope.environment, scope.caller_id, scope.realm, kind, subject)
+        for kind, subject in subjects
+    ):
+        connection.execute("SELECT pg_advisory_xact_lock(%s, %s)", (class_id, object_id))

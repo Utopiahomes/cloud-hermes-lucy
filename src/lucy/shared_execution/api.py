@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import re
 import secrets
@@ -10,9 +11,11 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID, uuid4
 
+import anyio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -134,6 +137,7 @@ class ExecutionService(Protocol):
         request_id: UUID,
         request: ExecutionRequest,
         timeout_ms: int | None = None,
+        received_at: datetime | None = None,
     ) -> ExecutionResponse: ...
 
 
@@ -150,6 +154,7 @@ def create_shared_execution_app(
     *,
     authentication_failure_delay: Callable[[float], Awaitable[None]] | None = None,
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
+    execution_threads: int = 32,
 ) -> FastAPI:
     app = FastAPI(
         title="Tiamat Shared Model Execution", docs_url=None, redoc_url=None, lifespan=lifespan
@@ -157,6 +162,15 @@ def create_shared_execution_app(
     delay_authentication_failure = (
         authentication_failure_delay or _default_authentication_failure_delay
     )
+    # Execution, including a duplicate's bounded wait, holds a worker thread for up to its whole
+    # deadline. It gets its own limiter so those threads can never starve authentication, which
+    # stays on the default pool. Created on first use, inside the event loop.
+    execution_limiter: list[anyio.CapacityLimiter] = []
+
+    def limiter() -> anyio.CapacityLimiter:
+        if not execution_limiter:
+            execution_limiter.append(anyio.CapacityLimiter(execution_threads))
+        return execution_limiter[0]
 
     @app.middleware("http")
     async def route_method_gate(
@@ -170,6 +184,8 @@ def create_shared_execution_app(
 
     @app.post(PATH)
     async def inference(http_request: Request) -> JSONResponse:
+        # A duplicate's attempt ceiling runs from receipt, not from when a thread frees up.
+        received_at = datetime.now(UTC)
         framing = _content_length(http_request)
         if framing is None:
             return _transport_rejection(400)
@@ -241,13 +257,17 @@ def create_shared_execution_app(
         try:
             # Execution blocks on the ledger and the provider for up to the whole deadline. On the
             # event loop it would stall every other request, including the duplicates it answers.
-            response = await run_in_threadpool(
-                service.execute,
-                caller=verifier.identity.subject,
-                idempotency_key=idempotency_key,
-                request_id=request_id,
-                request=request,
-                timeout_ms=timeout,
+            response = await anyio.to_thread.run_sync(
+                functools.partial(
+                    service.execute,
+                    caller=verifier.identity.subject,
+                    idempotency_key=idempotency_key,
+                    request_id=request_id,
+                    request=request,
+                    timeout_ms=timeout,
+                    received_at=received_at,
+                ),
+                limiter=limiter(),
             )
         except ExecutionRejected as exc:
             return _error(

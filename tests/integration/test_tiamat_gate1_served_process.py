@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from lucy.shared_execution.api import PATH, ApiRelease
 from lucy.shared_execution.auth import WorkloadIdentity
-from lucy.shared_execution.durable_service import ServedProfiles
+from lucy.shared_execution.durable_service import ProfileCatalogue
 from lucy.shared_execution.idempotency import IdempotencyDigestRing
 from lucy.shared_execution.postgres_ledger import LedgerScope
 from lucy.shared_execution.recovery_anchor import (
@@ -45,6 +45,7 @@ from tests.integration.test_tiamat_gate1a_execution import (
     _identity,
     _ledger,
     _seed_environment,
+    _seed_signed_authority,
     _unblock,
 )
 from tests.unit.test_shared_execution_api_rc1 import (
@@ -74,7 +75,7 @@ def process_env(disposable_roles: DisposableRoles) -> _Environment:
         partition_id=f"partition-{uuid4().hex[:8]}",
     )
     _seed_environment(disposable_roles.recovery, environment, storage_epoch, scope)
-    return _Environment(
+    env = _Environment(
         owner=disposable_roles.owner,
         recovery=disposable_roles.recovery,
         runtime=disposable_roles.runtime,
@@ -82,7 +83,14 @@ def process_env(disposable_roles: DisposableRoles) -> _Environment:
         environment=environment,
         storage_epoch=storage_epoch,
         scope=scope,
+        release_manager=disposable_roles.release_manager,
     )
+    _seed_signed_authority(
+        env,
+        profile=(PROFILE, RELEASE.release_id),
+        policy=(RELEASE.privacy_policy_id, RELEASE.privacy_policy_release_id),
+    )
+    return env
 
 
 class _ObservedAnchor:
@@ -121,7 +129,7 @@ def _configuration(
             keys={KEY_ID: private_key.public_key()},
             execution_profiles=frozenset({PROFILE}),
         ),
-        profiles=ServedProfiles((RELEASE,)),
+        catalogue=ProfileCatalogue((RELEASE,)),
         digests=IdempotencyDigestRing(DIGEST_KEY),
         transport=_CountingTransport(),
         release=ApiRelease(execution="tiamat-gate1.1", policy=RELEASE.release_id),
@@ -146,8 +154,10 @@ def test_a_composed_process_serves_refreshes_retires_and_restarts(
     raw, key = body(), uuid4()
 
     first = build_served_app(configuration)
-    assert first.runtime.launcher_invoked
+    # Building the application takes no claimant; its lifespan startup does.
+    assert first.process.runtime is None
     with TestClient(first.app) as client:
+        assert first.runtime.launcher_invoked
         response = client.post(PATH, content=raw, headers=headers(private_key, raw, key=key))
         assert response.status_code == 200, response.text
         reads_while_serving = anchor.reads
@@ -163,9 +173,9 @@ def test_a_composed_process_serves_refreshes_retires_and_restarts(
 
     # The next process starts through the launcher, not by taking over, with an empty cache.
     second = build_served_app(configuration)
-    assert second.runtime.launcher_invoked
-    assert second.runtime.coordinator_generation > first.runtime.coordinator_generation
     with TestClient(second.app) as client:
+        assert second.runtime.launcher_invoked
+        assert second.runtime.coordinator_generation > first.runtime.coordinator_generation
         replay = client.post(PATH, content=raw, headers=headers(private_key, raw, key=key))
     _error(replay, 409, "idempotency_recovery_unavailable")
     assert configuration.transport.calls == 1  # type: ignore[attr-defined]

@@ -11,6 +11,7 @@ staging ledger, the live DynamoDB anchor and real provider credentials are untou
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,10 @@ from lucy.shared_execution.durable_executor import (
     ExecutionRefused,
     IdempotencyRecoveryUnavailable,
     ProviderOutcome,
+)
+from lucy.shared_execution.postgres_authority import (
+    AuthorityScope,
+    PostgresSignedAuthorityStore,
 )
 from lucy.shared_execution.postgres_ledger import (
     DispatchBlocked,
@@ -47,6 +52,7 @@ from lucy.shared_execution.recovery_checkpoint import (
     RecoveryCheckpointRejected,
     construct_recovery_checkpoint,
 )
+from lucy.shared_execution.signed_releases import RELEASE_ADAPTER, VerifiedRelease
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
@@ -61,6 +67,11 @@ ROOT = Path(__file__).resolve().parents[2]
 INSTALLED_INVENTORY = {"generation": 1, "jws_sha256": "b" * 64}
 TEST_DATABASE_PREFIX = "tiamat_test_d1"
 RESERVED_MICROUSD = 2_000
+AUTHORITY_ISSUER = "stoin-control"
+# The signed authority every Gate 1A and 1B admission is pinned to.
+PROFILE_ID, PROFILE_RELEASE = "profile.v1", "profiles.1"
+POLICY_ID, POLICY_RELEASE = "policy.v1", "policy.1"
+REVOCATIONS = "gate1-revocations"
 
 
 @dataclass
@@ -103,6 +114,7 @@ class _Environment:
     environment: str
     storage_epoch: UUID
     scope: LedgerScope
+    release_manager: str = ""
 
     def __repr__(self) -> str:
         return "_Environment(credentials=redacted)"
@@ -139,7 +151,7 @@ def integrated(disposable_roles: DisposableRoles) -> _Environment:
         partition_id=partition,
     )
     _seed_environment(disposable_roles.recovery, environment, storage_epoch, scope)
-    return _Environment(
+    env = _Environment(
         owner=disposable_roles.owner,
         recovery=disposable_roles.recovery,
         runtime=disposable_roles.runtime,
@@ -147,7 +159,10 @@ def integrated(disposable_roles: DisposableRoles) -> _Environment:
         environment=environment,
         storage_epoch=storage_epoch,
         scope=scope,
+        release_manager=disposable_roles.release_manager,
     )
+    _seed_signed_authority(env)
+    return env
 
 
 def _seed_environment(
@@ -225,6 +240,152 @@ def _seed_environment(
         )
 
 
+def _authority(env: _Environment) -> AuthorityScope:
+    return AuthorityScope(env.environment, AUTHORITY_ISSUER, env.scope.caller_id, env.scope.realm)
+
+
+def _stage(
+    env: _Environment,
+    release_type: str,
+    subject_id: str,
+    release_id: str,
+    *,
+    sequence: int,
+    predecessor: str | None = None,
+) -> str:
+    """Stage one release row as ``stage_release`` would, without the signature it verifies.
+
+    Signature verification is covered by the signed-release tests; these cases test what the
+    ledger does with authority once it is in the tables.
+    """
+
+    exact = f"{env.environment}:{release_type}:{subject_id}:{release_id}".encode()
+    digest = hashlib.sha256(exact).hexdigest()
+    now = datetime.now(UTC)
+    with psycopg.connect(env.release_manager, autocommit=True) as manager:
+        manager.execute("SELECT set_config('tiamat.environment', %s, false)", (env.environment,))
+        manager.execute(
+            "SELECT set_config('tiamat.caller_id', %s, false)", (env.scope.caller_id,)
+        )
+        manager.execute("SELECT set_config('tiamat.realm', %s, false)", (env.scope.realm,))
+        manager.execute(
+            """
+            INSERT INTO tiamat.signed_releases (
+                environment, issuer, caller_id, realm, release_type, subject_id,
+                release_id, sequence, predecessor_release_id, signing_key_id,
+                not_before, not_after, content_digest, exact_jws, jws_sha256, state
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'release-key-gate1',
+                      %s, %s, %s, %s, %s, 'staged')
+            """,
+            (
+                env.environment,
+                AUTHORITY_ISSUER,
+                env.scope.caller_id,
+                env.scope.realm,
+                release_type,
+                subject_id,
+                release_id,
+                sequence,
+                predecessor,
+                now - timedelta(hours=1),
+                now + timedelta(days=1),
+                digest,
+                exact,
+                digest,
+            ),
+        )
+    return digest
+
+
+def _seed_signed_authority(
+    env: _Environment,
+    *,
+    profile: tuple[str, str] = (PROFILE_ID, PROFILE_RELEASE),
+    policy: tuple[str, str] = (POLICY_ID, POLICY_RELEASE),
+) -> None:
+    """Stage and activate the profile and privacy policy admissions are pinned to."""
+
+    store = PostgresSignedAuthorityStore(env.release_manager)
+    for release_type, (subject_id, release_id) in (
+        ("execution_profile", profile),
+        ("privacy_policy", policy),
+    ):
+        _stage(env, release_type, subject_id, release_id, sequence=1)
+        store.activate_release(_authority(env), release_type, subject_id, release_id)
+
+
+def _activate_successor(
+    env: _Environment,
+    release_type: str,
+    subject_id: str,
+    release_id: str,
+    *,
+    predecessor: str,
+    sequence: int,
+) -> None:
+    """Stage and activate a routine successor, as the release manager does."""
+
+    _stage(env, release_type, subject_id, release_id, sequence=sequence, predecessor=predecessor)
+    PostgresSignedAuthorityStore(env.release_manager).activate_release(
+        _authority(env), release_type, subject_id, release_id
+    )
+
+
+def _prepare_revocation(
+    env: _Environment,
+    target_type: str,
+    target_release_id: str,
+    *,
+    revocations: str = REVOCATIONS,
+) -> Callable[[], None]:
+    """Stage a revocation release now; return the step that activates and applies it.
+
+    Staging first lets a race put only the revocation's own commit inside the window it
+    measures, so a slow connection to the database cannot pass for a blocked lock.
+    """
+
+    release_id = f"revocation-{uuid4().hex[:8]}"
+    digest = _stage(env, "revocation", revocations, release_id, sequence=1)
+    now = datetime.now(UTC)
+    payload = RELEASE_ADAPTER.validate_python(
+        {
+            "format_version": "1",
+            "release_id": release_id,
+            "subject_id": revocations,
+            "issuer": AUTHORITY_ISSUER,
+            "environment": env.environment,
+            "caller_id": env.scope.caller_id,
+            "realm": env.scope.realm,
+            "issued_at": now.isoformat(),
+            "not_before": (now - timedelta(hours=1)).isoformat(),
+            "not_after": (now + timedelta(days=1)).isoformat(),
+            "sequence": 1,
+            "predecessor_release_id": None,
+            "content_digest": digest,
+            "release_type": "revocation",
+            "content": {
+                "target_type": "release",
+                "target_release_type": target_type,
+                "target_release_id": target_release_id,
+                "reason_code": "gate1_security_revocation",
+                "effective_at": now.isoformat(),
+                "eligibility_generation": 2,
+            },
+        }
+    )
+    store = PostgresSignedAuthorityStore(env.release_manager)
+    revocation = VerifiedRelease(payload=payload, exact_jws=b"gate1", jws_sha256=digest)
+    return lambda: store.activate_revocation(_authority(env), revocation)
+
+
+def _revoke(
+    env: _Environment, target_type: str, target_release_id: str, **options: str
+) -> None:
+    """Activate and apply one revocation, in one commit, as the release manager does."""
+
+    _prepare_revocation(env, target_type, target_release_id, **options)()
+
+
 def _admission(now: datetime, *, owner_id: UUID, key: bytes) -> LedgerAdmission:
     return LedgerAdmission(
         idempotency_key_digest=hashlib.sha256(key).hexdigest(),
@@ -232,8 +393,10 @@ def _admission(now: datetime, *, owner_id: UUID, key: bytes) -> LedgerAdmission:
         digest_key_version="digest-v1",
         operation="inference.execute",
         contract_major=1,
-        execution_profile_id="profile.v1",
-        profile_release_id="profiles.1",
+        execution_profile_id=PROFILE_ID,
+        profile_release_id=PROFILE_RELEASE,
+        privacy_policy_id=POLICY_ID,
+        privacy_policy_release_id=POLICY_RELEASE,
         provider_route_id="synthetic-local",
         rate_release_id="rates.gate-1a",
         owner_id=owner_id,

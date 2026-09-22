@@ -339,7 +339,7 @@ class DurableExecutor:
             )
             # A revocation committed after the completed commit cannot recall the original
             # response, but it does end replay.
-            or self._ledger.pinned_authority_revoked(self._scope, record)
+            or self._ledger.pinned_authority_ineligible(self._scope, record)
         ):
             raise ReplayInvalidated(record)
         cached = (

@@ -343,12 +343,16 @@ def test_signed_authority_stages_activates_and_loads_exact_bytes(
         now=datetime(2026, 9, 18, 12, tzinfo=UTC),
     )
     store.stage_release(revocation, "release-key-staging-1")
-    store.activate_release(
-        scope,
-        "revocation",
-        "utopia-public-revocations",
-        revocation.payload.release_id,
-    )
+    with pytest.raises(
+        AuthorityTransitionRejected, match="revocation_requires_activate_revocation"
+    ):
+        store.activate_release(
+            scope,
+            "revocation",
+            "utopia-public-revocations",
+            revocation.payload.release_id,
+        )
+    store.activate_revocation(scope, revocation)
     store.apply_revocation(scope, revocation)
     store.apply_revocation(scope, revocation)
     with pytest.raises(AuthorityTransitionRejected, match="active_release_unavailable"):

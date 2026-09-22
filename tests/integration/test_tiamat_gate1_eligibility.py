@@ -13,11 +13,8 @@ under test.
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -25,9 +22,7 @@ import psycopg
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from lucy.shared_execution.postgres_authority import AuthorityScope, PostgresSignedAuthorityStore
 from lucy.shared_execution.postgres_ledger import LedgerScope
-from lucy.shared_execution.signed_releases import RELEASE_ADAPTER, VerifiedRelease
 from tests.integration.conftest import DisposableRoles
 from tests.integration.test_tiamat_gate1_served_api import (
     RELEASE,
@@ -39,16 +34,32 @@ from tests.integration.test_tiamat_gate1_served_api import (
     _serve,
     _Served,
 )
-from tests.integration.test_tiamat_gate1a_execution import _Environment, _seed_environment
+from tests.integration.test_tiamat_gate1a_execution import (
+    _activate_successor,
+    _Environment,
+    _prepare_revocation,
+    _revoke,
+    _seed_environment,
+    _seed_signed_authority,
+)
 from tests.unit.test_shared_execution_api_rc1 import PROFILE, body
-
-AUTHORITY_ISSUER = "stoin-control"
-REVOCATIONS = "gate1-revocations"
 
 
 @pytest.fixture
 def authority_env(disposable_roles: DisposableRoles) -> tuple[_Environment, str]:
     """A fresh ledger identity whose profile and privacy policy are active signed authority."""
+
+    env = _bare_environment(disposable_roles)
+    _seed_signed_authority(
+        env,
+        profile=(PROFILE, RELEASE.release_id),
+        policy=(RELEASE.privacy_policy_id, RELEASE.privacy_policy_release_id),
+    )
+    return env, disposable_roles.release_manager
+
+
+def _bare_environment(disposable_roles: DisposableRoles) -> _Environment:
+    """Gate, grant and budget period, but no signed authority at all."""
 
     environment = f"g1e-{uuid4().hex[:8]}"
     storage_epoch = uuid4()
@@ -65,7 +76,7 @@ def authority_env(disposable_roles: DisposableRoles) -> tuple[_Environment, str]
         partition_id=f"partition-{uuid4().hex[:8]}",
     )
     _seed_environment(disposable_roles.recovery, environment, storage_epoch, scope)
-    env = _Environment(
+    return _Environment(
         owner=disposable_roles.owner,
         recovery=disposable_roles.recovery,
         runtime=disposable_roles.runtime,
@@ -73,130 +84,8 @@ def authority_env(disposable_roles: DisposableRoles) -> tuple[_Environment, str]
         environment=environment,
         storage_epoch=storage_epoch,
         scope=scope,
+        release_manager=disposable_roles.release_manager,
     )
-    manager = disposable_roles.release_manager
-    _stage(env, manager, "execution_profile", PROFILE, RELEASE.release_id, sequence=1)
-    _stage(
-        env,
-        manager,
-        "privacy_policy",
-        RELEASE.privacy_policy_id,
-        RELEASE.privacy_policy_release_id,
-        sequence=1,
-    )
-    store = PostgresSignedAuthorityStore(manager)
-    store.activate_release(_authority(env), "execution_profile", PROFILE, RELEASE.release_id)
-    store.activate_release(
-        _authority(env),
-        "privacy_policy",
-        RELEASE.privacy_policy_id,
-        RELEASE.privacy_policy_release_id,
-    )
-    return env, manager
-
-
-def _authority(env: _Environment) -> AuthorityScope:
-    return AuthorityScope(env.environment, AUTHORITY_ISSUER, env.scope.caller_id, env.scope.realm)
-
-
-def _stage(
-    env: _Environment,
-    manager_url: str,
-    release_type: str,
-    subject_id: str,
-    release_id: str,
-    *,
-    sequence: int,
-    predecessor: str | None = None,
-) -> str:
-    """Stage one release row as ``stage_release`` would, without the signature it verifies."""
-
-    exact = f"{env.environment}:{release_type}:{subject_id}:{release_id}".encode()
-    digest = hashlib.sha256(exact).hexdigest()
-    now = datetime.now(UTC)
-    with psycopg.connect(manager_url, autocommit=True) as manager:
-        manager.execute("SELECT set_config('tiamat.environment', %s, false)", (env.environment,))
-        manager.execute(
-            "SELECT set_config('tiamat.caller_id', %s, false)", (env.scope.caller_id,)
-        )
-        manager.execute("SELECT set_config('tiamat.realm', %s, false)", (env.scope.realm,))
-        manager.execute(
-            """
-            INSERT INTO tiamat.signed_releases (
-                environment, issuer, caller_id, realm, release_type, subject_id,
-                release_id, sequence, predecessor_release_id, signing_key_id,
-                not_before, not_after, content_digest, exact_jws, jws_sha256, state
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'release-key-gate1',
-                      %s, %s, %s, %s, %s, 'staged')
-            """,
-            (
-                env.environment,
-                AUTHORITY_ISSUER,
-                env.scope.caller_id,
-                env.scope.realm,
-                release_type,
-                subject_id,
-                release_id,
-                sequence,
-                predecessor,
-                now - timedelta(hours=1),
-                now + timedelta(days=1),
-                digest,
-                exact,
-                digest,
-            ),
-        )
-    return digest
-
-
-def _revoke(env: _Environment, manager_url: str, target_type: str, target_release_id: str) -> None:
-    """Activate one revocation release and apply it, as the release manager does."""
-
-    _prepare_revocation(env, manager_url, target_type, target_release_id)()
-
-
-def _prepare_revocation(
-    env: _Environment, manager_url: str, target_type: str, target_release_id: str
-) -> Callable[[], None]:
-    """Stage and activate a revocation release now; return the step that applies it.
-
-    Splitting them lets a race put only ``apply_revocation`` inside the window it measures, so a
-    slow connection to the database cannot pass for a revocation blocked on the lock.
-    """
-
-    release_id = f"revocation-{uuid4().hex[:8]}"
-    digest = _stage(env, manager_url, "revocation", REVOCATIONS, release_id, sequence=1)
-    store = PostgresSignedAuthorityStore(manager_url)
-    store.activate_release(_authority(env), "revocation", REVOCATIONS, release_id)
-    now = datetime.now(UTC)
-    payload = RELEASE_ADAPTER.validate_python(
-        {
-            "format_version": "1",
-            "release_id": release_id,
-            "subject_id": REVOCATIONS,
-            "issuer": AUTHORITY_ISSUER,
-            "environment": env.environment,
-            "caller_id": env.scope.caller_id,
-            "realm": env.scope.realm,
-            "issued_at": now.isoformat(),
-            "not_before": (now - timedelta(hours=1)).isoformat(),
-            "not_after": (now + timedelta(days=1)).isoformat(),
-            "sequence": 1,
-            "predecessor_release_id": None,
-            "content_digest": digest,
-            "release_type": "revocation",
-            "content": {
-                "target_type": "release",
-                "target_release_type": target_type,
-                "target_release_id": target_release_id,
-                "reason_code": "gate1_security_revocation",
-                "effective_at": now.isoformat(),
-                "eligibility_generation": 2,
-            },
-        }
-    )
-    revocation = VerifiedRelease(payload=payload, exact_jws=b"gate1", jws_sha256=digest)
-    return lambda: store.apply_revocation(_authority(env), revocation)
 
 
 def _held(env: _Environment, **options: Any) -> _Served:
@@ -244,7 +133,7 @@ def test_revocation_after_dispatch_before_commit_suppresses_the_candidate(
         first = pool.submit(served.post, raw, key)
         assert served.transport.started.wait(10)
         # The provider has the request; the revocation commits before the completed commit.
-        _revoke(env, manager, target_type, target_release)
+        _revoke(env, target_type, target_release)
         served.transport.release()
         original = first.result(timeout=20)
 
@@ -278,7 +167,7 @@ def test_a_revocation_waiting_on_the_commit_affects_replay_only(
     """Completion holds the subject lock: a revocation arriving then must wait for the commit."""
 
     env, manager = authority_env
-    apply = _prepare_revocation(env, manager, "execution_profile", RELEASE.release_id)
+    apply = _prepare_revocation(env, "execution_profile", RELEASE.release_id)
     revocation: dict[str, Future[None]] = {}
     observed: dict[str, bool] = {}
     pool = ThreadPoolExecutor(max_workers=1)
@@ -320,7 +209,7 @@ def test_a_revocation_committed_inside_settlement_is_seen_by_the_check(
 
     def probe(name: str, _connection: Any) -> None:
         if name == "settlement_before_authority_check":
-            _revoke(env, manager, "privacy_policy", RELEASE.privacy_policy_release_id)
+            _revoke(env, "privacy_policy", RELEASE.privacy_policy_release_id)
 
     served = _serve(env, private_key=Ed25519PrivateKey.generate(), transaction_probe=probe)
     raw, key = body(), uuid4()
@@ -343,19 +232,15 @@ def test_a_routine_successor_lets_the_original_finish_and_ends_replay(
     with ThreadPoolExecutor(max_workers=1) as pool:
         first = pool.submit(served.post, raw, key)
         assert served.transport.started.wait(10)
-        _stage(
+        served.catalogue.add(successor)
+        _activate_successor(
             env,
-            manager,
             "execution_profile",
             PROFILE,
             successor.release_id,
-            sequence=2,
             predecessor=RELEASE.release_id,
+            sequence=2,
         )
-        PostgresSignedAuthorityStore(manager).activate_release(
-            _authority(env), "execution_profile", PROFILE, successor.release_id
-        )
-        served.profiles.activate(successor)
         served.transport.release()
         original = first.result(timeout=20)
 
@@ -372,7 +257,7 @@ def test_a_revocation_before_dispatch_aborts_at_zero_cost(
 
     def probe(name: str, _connection: Any) -> None:
         if name == "dispatch_before_authority_check":
-            _revoke(env, manager, "execution_profile", RELEASE.release_id)
+            _revoke(env, "execution_profile", RELEASE.release_id)
 
     served = _serve(env, private_key=Ed25519PrivateKey.generate(), transaction_probe=probe)
     raw, key = body(), uuid4()

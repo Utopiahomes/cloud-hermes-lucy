@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import threading
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
@@ -204,9 +205,10 @@ class SharedExecutionService:
         request_id: UUID,
         request: ExecutionRequest,
         timeout_ms: int | None = None,
+        received_at: datetime | None = None,
     ) -> ExecutionResponse:
-        # The local store has no deadline; the durable service applies ``timeout_ms``.
-        del timeout_ms
+        # The local store has no deadline; the durable service applies both of these.
+        del timeout_ms, received_at
         profile = self._profiles.get(request.execution_profile_id)
         if profile is None:
             raise PermissionError("execution profile is not authorized for this route")

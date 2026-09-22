@@ -36,8 +36,9 @@ from lucy.shared_execution.durable_executor import (
 )
 from lucy.shared_execution.durable_service import (
     DurableExecutionService,
+    ProfileCatalogue,
     ServedProfile,
-    ServedProfiles,
+    SignedProfileAuthority,
     TransportProvider,
 )
 from lucy.shared_execution.idempotency import DigestKey, IdempotencyDigestRing
@@ -57,13 +58,16 @@ from lucy.shared_execution.startup_attestation import (
 from lucy.shared_execution.wire import ExecutionRequest
 from tests.integration.conftest import DisposableRoles
 from tests.integration.test_tiamat_gate1a_execution import (
+    _activate_successor,
     _admission,
     _bind_checkpoint,
     _Environment,
     _established_anchor_with_validity,
     _identity,
     _ledger,
+    _revoke,
     _seed_environment,
+    _seed_signed_authority,
     _SyntheticProvider,
     _unblock,
 )
@@ -115,7 +119,7 @@ def served_env(disposable_roles: DisposableRoles) -> _Environment:
         partition_id=f"partition-{uuid4().hex[:8]}",
     )
     _seed_environment(disposable_roles.recovery, environment, storage_epoch, scope)
-    return _Environment(
+    env = _Environment(
         owner=disposable_roles.owner,
         recovery=disposable_roles.recovery,
         runtime=disposable_roles.runtime,
@@ -123,7 +127,14 @@ def served_env(disposable_roles: DisposableRoles) -> _Environment:
         environment=environment,
         storage_epoch=storage_epoch,
         scope=scope,
+        release_manager=disposable_roles.release_manager,
     )
+    _seed_signed_authority(
+        env,
+        profile=(PROFILE, RELEASE.release_id),
+        policy=(RELEASE.privacy_policy_id, RELEASE.privacy_policy_release_id),
+    )
+    return env
 
 
 class _CountingTransport:
@@ -168,7 +179,7 @@ class _Clock:
 class _Served:
     client: TestClient
     transport: _CountingTransport
-    profiles: ServedProfiles
+    catalogue: ProfileCatalogue
     private_key: Ed25519PrivateKey
     runtime: ServedRuntime
     anchor: InMemoryExternalRecoveryAnchor
@@ -192,7 +203,7 @@ def _serve(
     anchor: InMemoryExternalRecoveryAnchor | None = None,
     transport: _CountingTransport | None = None,
     cache: InMemoryReplayCache | None = None,
-    profiles: ServedProfiles | None = None,
+    catalogue: ProfileCatalogue | None = None,
     transaction_probe: Callable[[str, Any], None] | None = None,
 ) -> _Served:
     """One serving process, brought up the way a deployed one is.
@@ -228,7 +239,7 @@ def _serve(
         clock=lambda: datetime.now(UTC),
     )
     transport = transport or _CountingTransport()
-    profiles = profiles or ServedProfiles((RELEASE,))
+    catalogue = catalogue if catalogue is not None else ProfileCatalogue((RELEASE,))
     # Not ``cache or ...``: an empty cache has a length of zero and is falsy.
     if cache is None:
         cache = InMemoryReplayCache(clock=lambda: datetime.now(UTC))
@@ -250,7 +261,7 @@ def _serve(
     )
     service = DurableExecutionService(
         executors={SUBJECT: executor},
-        profiles=profiles,
+        profiles=SignedProfileAuthority(ledger, env.scope, catalogue),
         digests=IdempotencyDigestRing(DIGEST_KEY),
     )
     app = create_shared_execution_app(
@@ -259,7 +270,7 @@ def _serve(
         ApiRelease(execution="tiamat-gate1.1", policy=RELEASE.release_id),
         authentication_failure_delay=_no_delay,
     )
-    return _Served(TestClient(app), transport, profiles, private_key, runtime, anchor, cache)
+    return _Served(TestClient(app), transport, catalogue, private_key, runtime, anchor, cache)
 
 
 def _record_rows(env: _Environment) -> list[tuple[Any, ...]]:
@@ -371,7 +382,17 @@ def test_a_successor_release_invalidates_replay(served_env: _Environment) -> Non
     raw, key = body(), uuid4()
     original = _original(served, raw, key)
 
-    served.profiles.activate(replace(RELEASE, release_id="profiles-gate1.2"))
+    # A routine successor, activated in signed authority and known to this process.
+    successor = replace(RELEASE, release_id="profiles-gate1.2")
+    served.catalogue.add(successor)
+    _activate_successor(
+        served_env,
+        "execution_profile",
+        PROFILE,
+        successor.release_id,
+        predecessor=RELEASE.release_id,
+        sequence=2,
+    )
     response = served.post(raw, key)
 
     document = _error(response, 409, "execution_invalidated")
@@ -390,7 +411,8 @@ def test_a_withdrawn_profile_invalidates_replay_and_admits_nothing(
     raw, key = body(), uuid4()
     _original(served, raw, key)
 
-    served.profiles.withdraw(PROFILE)
+    # Withdrawn in signed authority: the profile's active release is revoked.
+    _revoke(served_env, "execution_profile", RELEASE.release_id)
     _error(served.post(raw, key), 409, "execution_invalidated")
     # A new key finds no record and no active release to admit one under.
     fresh = _error(served.post(raw, uuid4()), 503, "privacy_route_unavailable")
@@ -558,7 +580,9 @@ def test_every_served_executor_must_hold_a_replay_cache(served_env: _Environment
     with pytest.raises(ValueError, match="replay cache"):
         DurableExecutionService(
             executors={SUBJECT: uncached},
-            profiles=ServedProfiles((RELEASE,)),
+            profiles=SignedProfileAuthority(
+                _ledger(served_env), served_env.scope, ProfileCatalogue((RELEASE,))
+            ),
             digests=IdempotencyDigestRing(DIGEST_KEY),
         )
 
@@ -568,6 +592,8 @@ def test_a_completion_without_a_cache_is_never_an_empty_success(
 ) -> None:
     """Even outside the served API, a completed duplicate without a body is RC1's 409."""
 
+    # The ledger-level admission is pinned to the Gate 1A authority, not the served profile.
+    _seed_signed_authority(served_env)
     generation, _, _ = _short_lived_fence(served_env)
     provider = _SyntheticProvider()
     executor = DurableExecutor(

@@ -7,7 +7,7 @@
     "name": "tiamat-m2-floor-disposable-20260920",
     "plan": "free",
     "postgres_major": 16,
-    "migrated_to": "0016_privacy_policy_pin",
+    "migrated_to": "0017_revocation_generation",
     "disposition": "retained; deletion awaits Ray's explicit confirmation"
   },
   "path_exercised": [
@@ -135,10 +135,12 @@
     "A duplicate whose record is still active when its wait ends, but whose lease has already elapsed, returns state_store_unavailable, since lease expiry belongs to the reaper."
   ],
   "known_gaps": [
-    "Gate 3 prerequisite, before any real provider call: a provider result without an exact charge leaves the record dispatched for the lease reaper, which resolves it to outcome_unknown, and the request returns state_store_unavailable. settle_terminal has no failed-with-pending_reconciliation path for provider_response_invalid.",
-    "The served profile set is still configured in memory (ServedProfiles). The fence reads revocation from the signed-authority tables, so a profile that was never activated there is not refused at admission. Wiring admission to require an active signed release is the follow-up that closes that split.",
-    "build_served_app composes a process from a ServedConfiguration. There is no loader yet that builds that configuration from the deployment's trust package, secrets and signed authority, and no provider transport exists, so nothing is deployable to staging traffic until those are decided.",
-    "The bounded wait polls the ledger every 100 ms per waiting duplicate."
+    "Gate 3 prerequisite, before any real provider call: a provider result without an exact charge leaves the record dispatched for the lease reaper and the request returns state_store_unavailable; settle_terminal has no failed-with-pending_reconciliation path.",
+    "Provider deadline: TransportProvider does not bound the provider call by the execution deadline, so the RC1 section 12 deadline_exceeded path is not implemented and a slow provider is not cut off. The bounded wait's limits follow from its loop but are not proven under slow storage.",
+    "The profile catalogue's parameters are local configuration keyed by signed release ID. The release's signed content is not yet verified at serving time (load_authorized_profile exists but is not wired), so the catalogue must match the signed releases it names.",
+    "There is no loader that builds a ServedConfiguration from the deployment's trust package, secrets and catalogue, and no provider transport exists, so nothing is deployable to staging traffic until those are decided.",
+    "The bounded wait opens a new ledger connection per 100 ms poll per waiting duplicate.",
+    "The disposable test grants re-type the deployed role template rather than applying it, so they can drift from it."
   ],
   "unchanged_live_state": {
     "commissioned_staging_anchor_version": 2,
@@ -150,15 +152,117 @@
   "remaining_matrix": [
     "stale restore through a Render point-in-time restore, which needs its own disposable instance",
     "attestation races under heavier concurrency than two threads",
-    "a sustained concurrent settle, revoke and activate loop for lock-ordering confidence",
+    "a sustained concurrent settle, revoke and activate loop",
     "clock rollback and excessive clock uncertainty",
-    "applying 0014, 0015 and 0016 by Alembic to a genuinely fresh database"
+    "applying 0014 to 0017 by Alembic to a genuinely fresh database"
   ],
-  "eligibility_design": {
-    "decision": "No new counter. The security/privacy eligibility named in RC1 section 11 is realised as the pinned profile and privacy-policy releases, evaluated at dispatch and at the completed commit against signed_releases.state and release_heads.head_state. A revoked pinned release, or a revoked head for its subject, suppresses; a superseded one does not, which is the RC1 split between revocation and routine replacement.",
-    "why_not_release_heads_eligibility_generation": "release_heads.eligibility_generation increments on routine successor activation as well as on revocation, so comparing against it would suppress connected originals that RC1 acceptance item 80 requires to be delivered.",
-    "ordering": "A transaction-scoped advisory lock per authority subject (environment, caller, realm, release type, subject). apply_revocation takes it exclusively before writing; dispatch and the completed commit take it shared before reading. The serving role cannot take FOR SHARE on the authority tables without UPDATE, which it must not hold.",
-    "execution_records_eligibility_generation": "unchanged and not used by this fence",
-    "advice": "An independent read-only design review (Fable) recommended this over a scope-level counter; its focused tests were adopted, with shared rather than exclusive locks on the serving side."
+  "a9c912c_results_note": "The cases above were recorded at a9c912c. They were rerun on the revised design below and still pass, except that the eligibility mechanism they describe is replaced as set out in review_closure.eligibility_design.",
+  "review_closure": {
+    "reviews": [
+      "Lyra and Astra review of a9c912c: absent or staged signed authority could admit work; records without a privacy-policy pin skipped the privacy check; route quarantine and grant invalidation were not rechecked before dispatch; A -> B -> revoke B -> C could lose the revocation; activate-versus-revoke lock ordering untested.",
+      "Fable independent review of a9c912c: revocation activation and application were separate commits; execution shared the authentication thread pool; the claimant was taken at application construction; the duplicate wait was timed from service entry; the predecessor-coverage claim was overstated."
+    ],
+    "defect_found_by_test": "activate_release and apply_revocation on one subject locked release rows and the head in opposite orders. The synchronized race test reproduced a PostgreSQL deadlock on its first iteration before the fix.",
+    "eligibility_design": {
+      "decision": "A revocation generation per authority subject (migration 0017), incremented only by applying a revocation. Admission requires the pinned profile release and privacy-policy release to be their subjects' active signed heads and records each subject's generation. Dispatch, the completed commit and replay require the pinned release to still exist as active or superseded and the generation to be unchanged.",
+      "why": "Routine replacement supersedes without incrementing, so a connected original still finishes (RC1 item 80). A revocation always increments and no later activation decrements, so A -> B -> revoke B -> C still shows the revocation. The a9c912c state check could not: after C activates, A is superseded and the head active.",
+      "ordering": "Activation, revocation and revocation activation take each affected subject's advisory lock exclusively, in sorted order, before any row lock; dispatch and the completed commit take it shared. A revocation release is activated and applied in one transaction (activate_revocation); activate_release refuses the revocation type.",
+      "fail_closed": [
+        "no signed authority, staged-only authority, or an active release this process has no parameters for: new keys get 503 privacy_route_unavailable and no record is created",
+        "admission is refused inside the ledger transaction when either pin is not the active signed head, independently of the service's own read",
+        "a record without every pin keeps its accounting but is aborted at dispatch and invalidated on replay"
+      ]
+    },
+    "cases": [
+      {
+        "case": "no signed authority",
+        "result": "passed",
+        "detail": "503 privacy_route_unavailable, no execution or cost, no record, no provider request."
+      },
+      {
+        "case": "staged but never activated authority",
+        "result": "passed",
+        "detail": "Same refusal."
+      },
+      {
+        "case": "active profile, staged privacy policy",
+        "result": "passed",
+        "detail": "Refused by the service, and a direct ledger admission pinned to the staged policy raises DispatchBlocked inside the admission transaction; no record."
+      },
+      {
+        "case": "active release unknown to this process",
+        "result": "passed",
+        "detail": "A successor activated in signed authority without local parameters admits nothing."
+      },
+      {
+        "case": "signed successor takes effect without a local step",
+        "result": "passed",
+        "detail": "After activation in signed authority, a new request is served under the successor release."
+      },
+      {
+        "case": "unpinned admitted record",
+        "result": "passed",
+        "detail": "With its pins cleared as a pre-0016 record would have them, dispatch aborts it: failed, execution_aborted, settled at zero."
+      },
+      {
+        "case": "unpinned completed record",
+        "result": "passed",
+        "detail": "The duplicate returns 409 execution_invalidated with the original receipt; the record stays completed and settled at its charge."
+      },
+      {
+        "case": "route quarantined between admission and dispatch",
+        "result": "passed",
+        "detail": "Inserted inside the dispatch transaction before its recheck: 409 execution_aborted, settled at zero, no provider request."
+      },
+      {
+        "case": "grant revoked between admission and dispatch",
+        "result": "passed",
+        "detail": "Same outcome."
+      },
+      {
+        "case": "A -> B -> revoke B -> C",
+        "result": "passed",
+        "detail": "While the provider holds an execution pinned to A, B is activated, B is revoked, and C is activated. A reads superseded and the head active at C, with revocation generation 1. The completed commit suppresses: 409 execution_invalidated, failed at the reported charge. One provider request."
+      },
+      {
+        "case": "revocation release activated without application",
+        "result": "passed",
+        "detail": "activate_release refuses the revocation type."
+      },
+      {
+        "case": "activation versus revocation, synchronized",
+        "result": "passed",
+        "detail": "Eight barrier-synchronized iterations on fresh subjects: every one serializes, either revocation first (first release revoked, successor active) or activation first (revocation refused as revocation_target_not_head)."
+      },
+      {
+        "case": "activation versus revocation, forced interleaving",
+        "result": "passed",
+        "detail": "A third transaction holds the head; activation queues first, revocation second; the head is then released. Revocation waits for activation and is refused. With activation's subject lock removed, the same test deadlocks on two runs out of two."
+      },
+      {
+        "case": "composed process startup in lifespan",
+        "result": "passed",
+        "detail": "Building the application takes no claimant; lifespan startup does."
+      }
+    ],
+    "mutation_checks": [
+      "removing the revocation-generation comparison fails the A -> B -> revoke B -> C case",
+      "removing the route and grant recheck fails both item-84 cases",
+      "letting admission proceed without active authority fails the staged-policy case",
+      "letting unpinned records skip the check fails both unpinned cases",
+      "removing activation's subject lock deadlocks the forced-interleaving case (2 of 2); the free-running synchronized loop did not catch this mutation, so the forced case is the evidence"
+    ],
+    "other_changes": [
+      "execution runs on its own thread limiter (32), so waiting duplicates cannot starve authentication on the default pool",
+      "a duplicate's attempt ceiling is measured from receipt at the HTTP layer",
+      "build_served_app starts serving in lifespan startup; the module documents that exactly one serving process runs per environment",
+      "the served composition reads the current profile from signed authority (SignedProfileAuthority over a local ProfileCatalogue of release parameters); the in-memory ServedProfiles is removed"
+    ],
+    "suite": {
+      "full_suite": "1441 passed, 1 failed, 283 skipped. The failure is test_c1_the_installed_head_refuses_under_current_trust, which reads the live staging anchor from DynamoDB read-only: the AWS SSO session had expired, so the anchor read failed and the refusal reason differed. It passed in every earlier run today, this change does not touch the startup gate or the anchor, and it needs a fresh SSO login to rerun. The skips are older tests that need a different integration database.",
+      "ruff": "passed",
+      "mypy_src": "passed",
+      "not_run": "tests/integration/test_tiamat_postgres_execution_ledger.py needs TIAMAT_TEST_DATABASE_URL and migrates only to 0006; it is skipped here, and has been incompatible with the ledger's record columns since 0015. Its revocation step was updated to activate_revocation but not run."
+    }
   }
 }

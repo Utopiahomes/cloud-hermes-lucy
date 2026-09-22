@@ -1,27 +1,37 @@
 """Compose one serving process: authority, fence, executor, service and private API.
 
-This is what a deployment runs. Everything a request depends on is built here, once, in a fixed
-order, and nothing is shared with any previous process except the ledger:
+This is what a deployment runs. Everything a request depends on is built in the application's
+lifespan startup, once, in a fixed order, and nothing is shared with any previous process except
+the ledger:
 
 1. ``start_serving`` reads the anchor, invokes the launcher when no claimant waits, and consumes
    exactly one claimant, which yields this process's fence and its runtime watch;
 2. the executor holds that fence, that watch and a fresh volatile replay cache;
-3. the service and the private API are built over it, with durable ``jti`` replay state;
+3. the service reads the current profile from signed authority in the ledger, and the private
+   API verifies callers against durable ``jti`` replay state;
 4. while the process serves, the watch is refreshed on a fixed interval off the event loop;
 5. on shutdown intake closes and the fence is drained and retired, so the next process starts
    through the launcher rather than by taking over.
 
-A startup refusal is fatal: this module never retries its way into authority.
+Startup happens in the lifespan rather than when the application object is built, so an object
+that is built but never served takes no claimant. A startup refusal fails the server's startup:
+this module never retries its way into authority.
+
+Run exactly one serving process per environment. RC1 v1 has a single admission and replay
+coordinator; a second worker would take its own fence and fence the first one out. Do not run
+this under ``--workers`` greater than one or ``--reload``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
@@ -31,7 +41,8 @@ from lucy.shared_execution.auth import WorkloadIdentity, WorkloadJwtVerifier
 from lucy.shared_execution.durable_executor import DurableExecutor, ExecutionRefused
 from lucy.shared_execution.durable_service import (
     DurableExecutionService,
-    ProfileAuthority,
+    ProfileCatalogue,
+    SignedProfileAuthority,
     TransportProvider,
 )
 from lucy.shared_execution.idempotency import IdempotencyDigestRing
@@ -44,11 +55,12 @@ from lucy.shared_execution.postgres_ledger import (
 from lucy.shared_execution.recovery_anchor import ExternalRecoveryAnchor, RecoveryAnchorIdentity
 from lucy.shared_execution.replay_cache import InMemoryReplayCache
 from lucy.shared_execution.served_startup import ServedRuntime, start_serving
-from lucy.shared_execution.service import ProviderTransport
+from lucy.shared_execution.service import ExecutionRejected, ProviderTransport
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
 )
+from lucy.shared_execution.wire import ExecutionRequest, ExecutionResponse
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +76,7 @@ class ServedConfiguration:
     recovery_generation: int
     scope: LedgerScope
     workload: WorkloadIdentity
-    profiles: ProfileAuthority
+    catalogue: ProfileCatalogue
     digests: IdempotencyDigestRing
     transport: ProviderTransport
     release: ApiRelease
@@ -82,11 +94,69 @@ class ServedConfiguration:
         return "ServedConfiguration(credentials=redacted)"
 
 
+class _Process:
+    """What lifespan startup built, and the service requests reach once it exists.
+
+    Before startup completes and after shutdown begins, a request is answered with
+    state_store_unavailable: there is no fence it could be admitted under.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._service: DurableExecutionService | None = None
+        self.runtime: ServedRuntime | None = None
+        self.executor: DurableExecutor | None = None
+
+    def bind(
+        self, service: DurableExecutionService, runtime: ServedRuntime, executor: DurableExecutor
+    ) -> None:
+        with self._lock:
+            self._service, self.runtime, self.executor = service, runtime, executor
+
+    def close(self) -> None:
+        with self._lock:
+            self._service = None
+
+    def execute(
+        self,
+        *,
+        caller: str,
+        idempotency_key: str,
+        request_id: UUID,
+        request: ExecutionRequest,
+        timeout_ms: int | None = None,
+        received_at: datetime | None = None,
+    ) -> ExecutionResponse:
+        with self._lock:
+            service = self._service
+        if service is None:
+            raise ExecutionRejected("state_store_unavailable")
+        return service.execute(
+            caller=caller,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            request=request,
+            timeout_ms=timeout_ms,
+            received_at=received_at,
+        )
+
+
 @dataclass(frozen=True)
 class ServedApplication:
     app: FastAPI
-    runtime: ServedRuntime
-    executor: DurableExecutor
+    process: _Process
+
+    @property
+    def runtime(self) -> ServedRuntime:
+        if self.process.runtime is None:
+            raise RuntimeError("the process has not started serving")
+        return self.process.runtime
+
+    @property
+    def executor(self) -> DurableExecutor:
+        if self.process.executor is None:
+            raise RuntimeError("the process has not started serving")
+        return self.process.executor
 
 
 def build_served_app(
@@ -94,52 +164,60 @@ def build_served_app(
     *,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> ServedApplication:
-    """Start one serving process, or raise ``ServedStartupRefused`` and start nothing."""
+    """Build the application. Its lifespan starts serving, or fails startup and serves nothing."""
 
-    ledger = PostgresExecutionLedger(
-        configuration.runtime_database_url,
-        RecoveryWitness(
-            environment=configuration.anchor_identity.environment,
-            storage_epoch=configuration.anchor_identity.storage_epoch,
-            recovery_generation=configuration.recovery_generation,
-        ),
-    )
-    runtime = start_serving(
-        anchor=configuration.anchor,
-        identity=configuration.anchor_identity,
-        issuer=StartupAttestationIssuer(
+    process = _Process()
+    interval = configuration.refresh_interval.total_seconds()
+
+    def start() -> None:
+        ledger = PostgresExecutionLedger(
+            configuration.runtime_database_url,
+            RecoveryWitness(
+                environment=configuration.anchor_identity.environment,
+                storage_epoch=configuration.anchor_identity.storage_epoch,
+                recovery_generation=configuration.recovery_generation,
+            ),
+        )
+        runtime = start_serving(
             anchor=configuration.anchor,
             identity=configuration.anchor_identity,
-            recovery_database_url=configuration.recovery_database_url,
-            checkpoint_source=LedgerRecoveryCheckpointSource(
-                configuration.recovery_database_url
+            issuer=StartupAttestationIssuer(
+                anchor=configuration.anchor,
+                identity=configuration.anchor_identity,
+                recovery_database_url=configuration.recovery_database_url,
+                checkpoint_source=LedgerRecoveryCheckpointSource(
+                    configuration.recovery_database_url
+                ),
             ),
-        ),
-        ledger=ledger,
-        clock=clock,
-    )
-    executor = DurableExecutor(
-        ledger=ledger,
-        scope=configuration.scope,
-        coordinator_generation=runtime.coordinator_generation,
-        provider=TransportProvider(configuration.transport),
-        watch=runtime.watch,
-        replay_cache=InMemoryReplayCache(clock=clock),
-    )
-    service = DurableExecutionService(
-        executors={configuration.workload.subject: executor},
-        profiles=configuration.profiles,
-        digests=configuration.digests,
-        clock=clock,
-    )
-    interval = configuration.refresh_interval.total_seconds()
+            ledger=ledger,
+            clock=clock,
+        )
+        executor = DurableExecutor(
+            ledger=ledger,
+            scope=configuration.scope,
+            coordinator_generation=runtime.coordinator_generation,
+            provider=TransportProvider(configuration.transport),
+            watch=runtime.watch,
+            replay_cache=InMemoryReplayCache(clock=clock),
+        )
+        service = DurableExecutionService(
+            executors={configuration.workload.subject: executor},
+            profiles=SignedProfileAuthority(ledger, configuration.scope, configuration.catalogue),
+            digests=configuration.digests,
+            clock=clock,
+        )
+        process.bind(service, runtime, executor)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        await run_in_threadpool(start)
+        runtime, executor = process.runtime, process.executor
+        assert runtime is not None and executor is not None
         refresher = asyncio.create_task(_refresh_forever(runtime, interval))
         try:
             yield
         finally:
+            process.close()
             refresher.cancel()
             with suppress(asyncio.CancelledError):
                 await refresher
@@ -151,7 +229,7 @@ def build_served_app(
                 logger.warning("tiamat_retirement_refused")
 
     app = create_shared_execution_app(
-        service,
+        process,
         WorkloadJwtVerifier(
             configuration.workload,
             PostgresJtiReplayStore(configuration.runtime_database_url),
@@ -159,7 +237,7 @@ def build_served_app(
         configuration.release,
         lifespan=lifespan,
     )
-    return ServedApplication(app=app, runtime=runtime, executor=executor)
+    return ServedApplication(app=app, process=process)
 
 
 async def _refresh_forever(runtime: ServedRuntime, interval: float) -> None:
