@@ -40,7 +40,10 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedRecoveryWitness,
 )
 from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpoint
-from lucy.shared_execution.startup_attestation import StartupAttestationIssuer
+from lucy.shared_execution.startup_attestation import (
+    RetainedCheckpoint,
+    StartupAttestationIssuer,
+)
 
 TEST_DATABASE_NAME = "tiamat_test_d1"
 TEST_DATABASE_PREFIX = f"{TEST_DATABASE_NAME}_"
@@ -68,8 +71,10 @@ def _url_for_role(owner_url: str, role: str, password: str) -> str:
 
 
 class _CheckpointSource:
-    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
-        return CHECKPOINT_SHA256
+    def read_checkpoint(self, identity: RecoveryAnchorIdentity) -> RetainedCheckpoint:
+        return RetainedCheckpoint(
+            checkpoint_sha256=CHECKPOINT_SHA256, release_inventory_installed=True
+        )
 
 
 def _is_explicit_disposable_database(owner_url: str) -> bool:

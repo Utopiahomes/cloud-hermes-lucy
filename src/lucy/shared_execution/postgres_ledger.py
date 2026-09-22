@@ -300,6 +300,31 @@ class PostgresExecutionLedger:
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
+    def in_flight_under_fence(self, scope: LedgerScope, coordinator_generation: int) -> int:
+        """Count this fence's executions which have not reached a terminal state.
+
+        A clean stop drains before retiring its fence: once the generation moves, an admitted or
+        dispatched record can no longer be settled under it, so retiring first would strand work
+        whose provider call may already have been sent.
+        """
+
+        try:
+            with psycopg.connect(
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                _set_scope(connection, scope)
+                row = connection.execute(
+                    """
+                    SELECT count(*) AS in_flight FROM tiamat.execution_records
+                    WHERE environment = %s AND coordinator_generation = %s
+                      AND state IN ('admitted', 'dispatched')
+                    """,
+                    (scope.environment, coordinator_generation),
+                ).fetchone()
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+        return 0 if row is None else int(row["in_flight"])
+
     def retire_coordinator(self, coordinator_generation: int) -> int:
         """End this coordinator's fence on a clean stop without quarantining the environment.
 

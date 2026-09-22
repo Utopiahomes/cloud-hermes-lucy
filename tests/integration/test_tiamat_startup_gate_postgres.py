@@ -77,7 +77,9 @@ def disposable(disposable_roles: DisposableRoles) -> _Disposable:
     )
 
 
-def _seed_staging_gate(disposable: _Disposable, trust: dict[str, Any], *, generation: int) -> str:
+def _seed_staging_gate(
+    disposable: _Disposable, trust: dict[str, Any], *, installed: bool = False
+) -> str:
     """Seed the gate and the retained checkpoint for the deployed staging identity."""
 
     from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpoint
@@ -87,7 +89,18 @@ def _seed_staging_gate(disposable: _Disposable, trust: dict[str, Any], *, genera
         UUID(str(trust["ledger_id"])),
         UUID(str(trust["storage_epoch"])),
     )
-    checkpoint = construct_recovery_checkpoint(dict(trust["checkpoint"]), identity=identity)
+    # The published day-zero checkpoint names the not_installed sentinel, which may not authorize
+    # dispatch at all. Cases below exercise beacon and checkpoint binding, so they bind an
+    # installed inventory; the sentinel's own refusal is proved in the Gate 1A module.
+    raw = dict(trust["checkpoint"])
+    if installed:
+        # Synthetic established authority needs an installed inventory to reach the beacon and
+        # checkpoint checks at all; it is bound at its own generation because the published
+        # day-zero binding is append-only.
+        raw["release_inventory"] = {"generation": 1, "jws_sha256": "f" * 64}
+        raw["recovery_generation"] = 2
+    generation = int(raw["recovery_generation"])
+    checkpoint = construct_recovery_checkpoint(raw, identity=identity)
     with psycopg.connect(disposable.recovery, autocommit=True) as recovery:
         recovery.execute(
             "SELECT set_config('tiamat.environment', %s, false)", (identity.environment,)
@@ -156,7 +169,7 @@ def test_c1_the_expired_witness_key_refuses_the_current_anchor(disposable: _Disp
     """C1, cause one: today the pinned inventory's key window has lapsed."""
 
     trust = _trust_document()
-    _seed_staging_gate(disposable, trust, generation=1)
+    _seed_staging_gate(disposable, trust)
 
     with pytest.raises(StartupGateRejected) as refused:
         run_startup_gate(
@@ -180,7 +193,7 @@ def test_c1_superseded_trust_cannot_verify_the_current_head(disposable: _Disposa
     """
 
     trust = _trust_document()
-    _seed_staging_gate(disposable, trust, generation=1)
+    _seed_staging_gate(disposable, trust)
 
     with pytest.raises(StartupGateRejected) as refused:
         run_startup_gate(
@@ -204,7 +217,7 @@ def test_c1_the_installed_head_refuses_under_current_trust(disposable: _Disposab
 
     trust = _trust_document()
     current: Any = json.loads(CURRENT_TRUST_PACKAGE.read_text(encoding="utf-8"))
-    _seed_staging_gate(disposable, trust, generation=1)
+    _seed_staging_gate(disposable, trust)
 
     with pytest.raises(StartupGateRejected) as refused:
         run_startup_gate(
@@ -223,7 +236,7 @@ def test_c2_an_unreachable_anchor_store_refuses(disposable: _Disposable) -> None
     """C2: the anchor store cannot be read, so no claimant may exist."""
 
     trust = _trust_document()
-    _seed_staging_gate(disposable, trust, generation=1)
+    _seed_staging_gate(disposable, trust)
 
     with pytest.raises(StartupGateRejected) as refused:
         run_startup_gate(
@@ -300,7 +313,7 @@ def test_c1t_a_beacon_from_another_cluster_refuses(disposable: _Disposable) -> N
     """C1-T: the signed continuity beacon does not describe this database."""
 
     trust = _trust_document()
-    digest = _seed_staging_gate(disposable, trust, generation=1)
+    digest = _seed_staging_gate(disposable, trust, installed=True)
     identity = RecoveryAnchorIdentity(
         str(trust["environment"]),
         UUID(str(trust["ledger_id"])),
@@ -322,7 +335,7 @@ def test_c1t_a_beacon_ahead_of_this_database_refuses(disposable: _Disposable) ->
     """C1-T: a stale attachment has not reached the signed durable WAL position."""
 
     trust = _trust_document()
-    digest = _seed_staging_gate(disposable, trust, generation=1)
+    digest = _seed_staging_gate(disposable, trust, installed=True)
     identity = RecoveryAnchorIdentity(
         str(trust["environment"]),
         UUID(str(trust["ledger_id"])),
@@ -344,7 +357,7 @@ def test_c1t_a_checkpoint_the_witness_does_not_attest_refuses(disposable: _Dispo
     """C1-T: the retained checkpoint and the signed witness must agree exactly."""
 
     trust = _trust_document()
-    digest = _seed_staging_gate(disposable, trust, generation=1)
+    digest = _seed_staging_gate(disposable, trust, installed=True)
     identity = RecoveryAnchorIdentity(
         str(trust["environment"]),
         UUID(str(trust["ledger_id"])),
@@ -365,7 +378,7 @@ def test_c1t_a_checkpoint_bound_to_another_ledger_refuses(disposable: _Disposabl
     """C1-T: the retained checkpoint must belong to the ledger being started."""
 
     trust = _trust_document()
-    digest = _seed_staging_gate(disposable, trust, generation=1)
+    digest = _seed_staging_gate(disposable, trust, installed=True)
     foreign_identity = RecoveryAnchorIdentity(
         str(trust["environment"]), uuid4(), UUID(str(trust["storage_epoch"]))
     )
@@ -399,7 +412,7 @@ def test_the_quarantine_successor_candidate_opens_no_claimant(disposable: _Dispo
     identity, predecessor, successor, _ = verify_continued_quarantine_successor_package(
         candidate, now=now, expected_root_public_sha256=str(candidate["root_public_key_sha256"])
     )
-    _seed_staging_gate(disposable, _trust_document(), generation=1)
+    _seed_staging_gate(disposable, _trust_document())
 
     anchor = InMemoryExternalRecoveryAnchor()
     anchor.install(predecessor, expected_transition_sha256=None, now=COMMISSIONING_TIME)

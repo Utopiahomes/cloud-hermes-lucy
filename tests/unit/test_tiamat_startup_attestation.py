@@ -16,6 +16,7 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedRecoveryWitness,
 )
 from lucy.shared_execution.startup_attestation import (
+    RetainedCheckpoint,
     StartupAttestationIssuer,
     StartupAttestationRejected,
 )
@@ -25,8 +26,8 @@ CHECKPOINT = "a" * 64
 
 
 class _CheckpointSource:
-    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
-        return CHECKPOINT
+    def read_checkpoint(self, identity: RecoveryAnchorIdentity) -> RetainedCheckpoint:
+        return RetainedCheckpoint(checkpoint_sha256=CHECKPOINT, release_inventory_installed=True)
 
 
 class _Result:
@@ -159,8 +160,10 @@ def test_issuer_rejects_a_checkpoint_source_that_disagrees_with_signed_authority
     anchor.install(transition, expected_transition_sha256=None, now=NOW)
 
     class _WrongCheckpoint:
-        def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
-            return "e" * 64
+        def read_checkpoint(self, identity: RecoveryAnchorIdentity) -> RetainedCheckpoint:
+            return RetainedCheckpoint(
+                checkpoint_sha256="e" * 64, release_inventory_installed=True
+            )
 
     issuer = StartupAttestationIssuer(
         anchor=anchor,

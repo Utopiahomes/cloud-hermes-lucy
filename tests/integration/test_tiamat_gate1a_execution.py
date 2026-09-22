@@ -20,8 +20,15 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from lucy.shared_execution.durable_executor import (
+    DurableExecutor,
+    ExecutionRefused,
+    ProviderOutcome,
+)
 from lucy.shared_execution.postgres_ledger import (
+    DispatchBlocked,
     LedgerAdmission,
+    LedgerRecord,
     LedgerScope,
     PostgresExecutionLedger,
     RecoveryWitness,
@@ -37,10 +44,15 @@ from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpo
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
+    StartupAttestationRejected,
 )
 from tests.integration.conftest import DisposableRoles
 
 ROOT = Path(__file__).resolve().parents[2]
+# A synthetic installed inventory: the day-zero sentinel cannot authorize dispatch, so the
+# happy path is seeded with an installed one. It is seeded, not activated through a signed
+# release, which the evidence records as a limit of this proof.
+INSTALLED_INVENTORY = {"generation": 1, "jws_sha256": "b" * 64}
 TEST_DATABASE_PREFIX = "tiamat_test_d1"
 RESERVED_MICROUSD = 2_000
 
@@ -56,33 +68,23 @@ class _Trace:
         self.steps.append(f"{step} {rendered}".strip())
 
 
-@dataclass(frozen=True)
-class _SyntheticResult:
-    content: str
-    input_tokens: int
-    output_tokens: int
-    cost_microusd: int
-
-    @property
-    def cost_reference_digest(self) -> str:
-        reference = f"synthetic:{self.input_tokens}:{self.output_tokens}:{self.cost_microusd}"
-        return hashlib.sha256(reference.encode("ascii")).hexdigest()
-
-
 class _SyntheticProvider:
-    """Deterministic in-process provider. It reaches no network and spends nothing."""
+    """Deterministic in-process provider. It reaches no network and spends nothing.
+
+    It records the ledger state it was handed, so the test can show the executor reached it only
+    from a committed dispatch rather than asserting its own call ordering.
+    """
 
     def __init__(self) -> None:
-        self.calls = 0
+        self.dispatched_states: list[str] = []
+        self.last_cost_microusd = 137
 
-    def execute(self, prompt: str) -> _SyntheticResult:
-        self.calls += 1
-        content = f"synthetic answer to {len(prompt)} characters"
-        return _SyntheticResult(
-            content=content,
-            input_tokens=len(prompt),
-            output_tokens=len(content),
-            cost_microusd=137,
+    def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome:
+        self.dispatched_states.append(dispatched.state)
+        reference = f"synthetic:{dispatched.execution_id}:{self.last_cost_microusd}"
+        return ProviderOutcome(
+            settled_microusd=self.last_cost_microusd,
+            cost_reference_digest=hashlib.sha256(reference.encode("ascii")).hexdigest(),
         )
 
 
@@ -217,6 +219,24 @@ def _seed_environment(
         )
 
 
+def _admission(now: datetime, *, owner_id: UUID, key: bytes) -> LedgerAdmission:
+    return LedgerAdmission(
+        idempotency_key_digest=hashlib.sha256(key).hexdigest(),
+        identity_digest=hashlib.sha256(b"gate-1a-canonical-request").hexdigest(),
+        digest_key_version="digest-v1",
+        operation="inference.execute",
+        contract_major=1,
+        execution_profile_id="profile.v1",
+        profile_release_id="profiles.1",
+        provider_route_id="synthetic-local",
+        rate_release_id="rates.gate-1a",
+        owner_id=owner_id,
+        execution_deadline=now + timedelta(seconds=30),
+        eligibility_generation=1,
+        reserved_microusd=RESERVED_MICROUSD,
+    )
+
+
 def _identity(integrated: _Environment) -> RecoveryAnchorIdentity:
     return RecoveryAnchorIdentity(
         integrated.environment, integrated.ledger_id, integrated.storage_epoch
@@ -233,7 +253,7 @@ def _bind_checkpoint(integrated: _Environment) -> str:
             "ledger_id": str(identity.ledger_id),
             "storage_epoch": str(identity.storage_epoch),
             "recovery_generation": 1,
-            "release_inventory": {"state": "not_installed"},
+            "release_inventory": INSTALLED_INVENTORY,
             "release_heads": [],
             "settlement_position": [],
         },
@@ -269,7 +289,178 @@ def _established_anchor(
 ) -> tuple[InMemoryExternalRecoveryAnchor, VerifiedAnchorTransition]:
     """A disposable established anchor whose beacon describes this exact database."""
 
+    return _established_anchor_for(integrated, _identity(integrated), checkpoint_digest, now)
+
+
+def _unused_established_anchor(
+    integrated: _Environment, checkpoint_digest: str, now: datetime
+) -> tuple[InMemoryExternalRecoveryAnchor, VerifiedAnchorTransition]:
+
     identity = _identity(integrated)
+    with psycopg.connect(integrated.recovery) as recovery:
+        observed = recovery.execute(
+            """
+            SELECT (pg_catalog.pg_control_system()).system_identifier::text,
+                   (pg_catalog.pg_control_checkpoint()).timeline_id::bigint,
+                   pg_catalog.pg_current_wal_flush_lsn()::text
+            """
+        ).fetchone()
+    assert observed is not None
+    witness = VerifiedRecoveryWitness(
+        identity=identity,
+        recovery_generation=1,
+        witness_revision=1,
+        status="reconciled",
+        checkpoint_digest=checkpoint_digest,
+        release_heads_sha256="c" * 64,
+        checkpoint_settlement_position_sha256="d" * 64,
+        witness_inventory_digest="e" * 64,
+        exact_jws=b"gate-1a-disposable-witness",
+        not_before=now - timedelta(minutes=5),
+        not_after=now + timedelta(hours=1),
+    )
+    transition = VerifiedAnchorTransition(
+        witness=witness,
+        transition_version=1,
+        previous_transition_sha256=None,
+        continuity="continuity_established",
+        beacon=PostgresContinuityBeacon(
+            str(observed[0]), int(observed[1]), str(observed[2]), checkpoint_digest
+        ),
+        exact_jws=b"gate-1a-disposable-transition",
+    )
+    anchor = InMemoryExternalRecoveryAnchor()
+    anchor.install(transition, expected_transition_sha256=None, now=now)
+    return anchor, transition
+
+
+def _ledger(integrated: _Environment) -> PostgresExecutionLedger:
+    return PostgresExecutionLedger(
+        integrated.runtime,
+        RecoveryWitness(
+            environment=integrated.environment,
+            storage_epoch=integrated.storage_epoch,
+            recovery_generation=1,
+        ),
+    )
+
+
+def _current_coordinator_generation(integrated: _Environment) -> int:
+    with psycopg.connect(integrated.recovery) as recovery:
+        recovery.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (integrated.environment,)
+        )
+        row = recovery.execute(
+            "SELECT coordinator_generation FROM tiamat.restore_gate WHERE environment = %s",
+            (integrated.environment,),
+        ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _gate_state(integrated: _Environment) -> tuple[bool, str | None]:
+    with psycopg.connect(integrated.recovery) as recovery:
+        recovery.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (integrated.environment,)
+        )
+        row = recovery.execute(
+            "SELECT dispatch_blocked, block_reason FROM tiamat.restore_gate WHERE environment = %s",
+            (integrated.environment,),
+        ).fetchone()
+    assert row is not None
+    return bool(row[0]), None if row[1] is None else str(row[1])
+
+
+def _unblock(integrated: _Environment) -> None:
+    """Only the recovery role may reopen a gate; the serving role has no such path."""
+
+    with psycopg.connect(integrated.recovery, autocommit=True) as recovery:
+        recovery.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (integrated.environment,)
+        )
+        recovery.execute(
+            """
+            UPDATE tiamat.restore_gate
+            SET dispatch_blocked = false, block_reason = NULL, verified_at = clock_timestamp()
+            WHERE environment = %s
+            """,
+            (integrated.environment,),
+        )
+
+
+def _fresh_fence(integrated: _Environment) -> int:
+    """Issue and consume a claimant, returning the coordinator generation it established."""
+
+    now = datetime.now(UTC)
+    digest = _bind_checkpoint(integrated)
+    anchor, transition = _established_anchor(integrated, digest, now)
+    StartupAttestationIssuer(
+        anchor=anchor,
+        identity=_identity(integrated),
+        recovery_database_url=integrated.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(integrated.recovery),
+    ).issue(now=now)
+    return _ledger(integrated).consume_startup_attestation(transition.exact_sha256)
+
+
+def _bind_sentinel_checkpoint(
+    integrated: _Environment, identity: RecoveryAnchorIdentity
+) -> str:
+    """Bind a day-zero checkpoint for a separate environment, gate unblocked at generation one."""
+
+    checkpoint = construct_recovery_checkpoint(
+        {
+            "environment": identity.environment,
+            "ledger_id": str(identity.ledger_id),
+            "storage_epoch": str(identity.storage_epoch),
+            "recovery_generation": 1,
+            "release_inventory": {"state": "not_installed"},
+            "release_heads": [],
+            "settlement_position": [],
+        },
+        identity=identity,
+    )
+    with psycopg.connect(integrated.recovery, autocommit=True) as recovery:
+        recovery.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (identity.environment,)
+        )
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate
+              (environment, storage_epoch, recovery_generation, coordinator_generation,
+               dispatch_blocked, verified_at, anchor_floor_version, anchor_floor_sha256)
+            VALUES (%s, %s, 1, 1, false, clock_timestamp(), 0, NULL)
+            ON CONFLICT (environment) DO NOTHING
+            """,
+            (identity.environment, identity.storage_epoch),
+        )
+        recovery.execute(
+            """
+            INSERT INTO tiamat.recovery_checkpoints
+              (environment, recovery_generation, ledger_id, storage_epoch,
+               checkpoint_sha256, release_heads_sha256, settlement_position_sha256, checkpoint)
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (
+                identity.environment,
+                identity.ledger_id,
+                identity.storage_epoch,
+                checkpoint.checkpoint_sha256,
+                checkpoint.release_heads_sha256,
+                checkpoint.settlement_position_sha256,
+                Jsonb(checkpoint.object),
+            ),
+        )
+    return checkpoint.checkpoint_sha256
+
+
+def _established_anchor_for(
+    integrated: _Environment,
+    identity: RecoveryAnchorIdentity,
+    checkpoint_digest: str,
+    now: datetime,
+) -> tuple[InMemoryExternalRecoveryAnchor, VerifiedAnchorTransition]:
     with psycopg.connect(integrated.recovery) as recovery:
         observed = recovery.execute(
             """
@@ -346,83 +537,35 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
     coordinator_generation = ledger.consume_startup_attestation(observed_head.exact_sha256)
     trace.record("claimant_consumed", coordinator_generation=coordinator_generation)
 
-    # 3. Admit one request against the durable ledger.
-    owner_id = uuid4()
-    key_digest = hashlib.sha256(b"gate-1a-idempotency").hexdigest()
-    identity_digest = hashlib.sha256(b"gate-1a-canonical-request").hexdigest()
-    admission = LedgerAdmission(
-        idempotency_key_digest=key_digest,
-        identity_digest=identity_digest,
-        digest_key_version="digest-v1",
-        operation="inference.execute",
-        contract_major=1,
-        execution_profile_id="profile.v1",
-        profile_release_id="profiles.1",
-        provider_route_id="synthetic-local",
-        rate_release_id="rates.gate-1a",
-        owner_id=owner_id,
-        execution_deadline=now + timedelta(seconds=30),
-        eligibility_generation=1,
-        reserved_microusd=RESERVED_MICROUSD,
-    )
-    record, created = ledger.create_or_get(
-        integrated.scope, admission, coordinator_generation=coordinator_generation, now=now
-    )
-    assert created and record.state == "admitted"
-    trace.record("admitted", reserved_microusd=record.reserved_microusd)
-
-    # 4. Commit dispatch. The ledger rechecks the claimant inside this transaction.
-    dispatched = ledger.dispatch(
-        integrated.scope,
-        record.execution_id,
-        coordinator_generation=coordinator_generation,
-        record_generation=record.record_generation,
-        owner_id=owner_id,
-    )
-    assert dispatched.state == "dispatched"
-    trace.record("dispatch_committed", record_generation=dispatched.record_generation)
-
-    # 5. Only a committed dispatch may reach a provider.
+    # 3. Serve the request through the durable executor. The provider is reachable only from
+    # inside it, after the ledger has committed the dispatch under this fence.
     provider = _SyntheticProvider()
-    result = provider.execute("what time is check-in?")
-    trace.record("provider_returned", output_tokens=result.output_tokens)
-
-    # 6. Settle durably, releasing the reservation and recording the cost.
-    settled = ledger.settle_terminal(
-        integrated.scope,
-        record.execution_id,
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=integrated.scope,
         coordinator_generation=coordinator_generation,
-        record_generation=dispatched.record_generation,
-        owner_id=owner_id,
-        state="completed",
-        settled_microusd=result.cost_microusd,
-        provider_cost_reference_digest=result.cost_reference_digest,
+        provider=provider,
     )
-    trace.record(
-        "settled",
-        state=settled.state,
-        settlement_status=settled.settlement_status,
-        settled_microusd=settled.settled_microusd,
-    )
+    owner_id = uuid4()
+    admission = _admission(now, owner_id=owner_id, key=b"gate-1a-idempotency")
+    outcome = executor.execute(admission, now=now)
+    trace.record("served", state=outcome.state, settlement_status=outcome.settlement_status)
 
-    assert settled.state == "completed"
-    assert settled.settlement_status == "settled"
-    assert settled.settled_microusd == result.cost_microusd
+    assert outcome.state == "completed"
+    assert outcome.settlement_status == "settled"
+    assert outcome.settled_microusd == provider.last_cost_microusd
+    assert provider.dispatched_states == ["dispatched"]
+    trace.record("provider_called_after_commit", dispatched_state=provider.dispatched_states[0])
 
-    # 7. Replay of the same idempotency key returns the same execution, dispatching nothing more.
-    replayed, created_again = ledger.create_or_get(
-        integrated.scope, admission, coordinator_generation=coordinator_generation, now=now
-    )
-    assert not created_again
-    assert replayed.execution_id == record.execution_id
-    # The provider call count is this test's own control flow, not a system guarantee:
-    # nothing yet gates a provider call on committed dispatch. That belongs to the service
-    # layer running on the durable ledger, which Gate 1A does not deliver.
+    # 4. Replay of the same idempotency key returns the settled execution and reaches no provider.
+    replay = executor.execute(admission, now=now)
+    assert replay.replayed and replay.execution_id == outcome.execution_id
+    assert len(provider.dispatched_states) == 1
     trace.record("replay_idempotent", execution_id_matches=True)
 
     # 8. Clean shutdown retires this fence without quarantining, so a launcher can issue the
     # next claimant. Blocking dispatch is quarantine, and an ordinary stop is not that.
-    retired = ledger.retire_coordinator(coordinator_generation)
+    retired = executor.shutdown()
     assert retired == coordinator_generation + 1
     assert not ledger.verify_attestation_current(coordinator_generation)
     trace.record("shutdown", attestation_current=False, gate_blocked=False)
@@ -439,14 +582,14 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
     assert relaunched == retired + 1
     trace.record("relaunched", coordinator_generation=relaunched)
 
-    _assert_durable_state(integrated, record.execution_id, result, coordinator_generation)
+    _assert_durable_state(integrated, outcome.execution_id, provider, coordinator_generation)
     print("\n".join(f"  {index + 1}. {step}" for index, step in enumerate(trace.steps)))
 
 
 def _assert_durable_state(
     integrated: _Environment,
     execution_id: UUID,
-    result: _SyntheticResult,
+    provider: _SyntheticProvider,
     coordinator_generation: int,
 ) -> None:
     """Everything the run claims must survive in the database, not only in memory."""
@@ -498,12 +641,12 @@ def _assert_durable_state(
 
     # The reservation must have been released and the settled cost recorded, not merely
     # echoed back on the execution row.
-    assert spending == (result.cost_microusd, 0)
+    assert spending == (provider.last_cost_microusd, 0)
     assert events is not None and int(events[0]) >= 1
     assert execution == (
         "completed",
         "settled",
-        result.cost_microusd,
+        provider.last_cost_microusd,
         "synthetic-local",
         coordinator_generation,
     )
@@ -553,3 +696,100 @@ def test_a_direct_gate_read_still_hides_other_environments(integrated: _Environm
             (integrated.environment,),
         ).fetchone()
     assert foreign == (0,)
+
+
+def test_a_stale_fence_reaches_no_provider(integrated: _Environment) -> None:
+    """The service, not the caller, refuses a provider call without a committed dispatch."""
+
+    ledger = _ledger(integrated)
+    provider = _SyntheticProvider()
+    stale = DurableExecutor(
+        ledger=ledger,
+        scope=integrated.scope,
+        coordinator_generation=1,
+        provider=provider,
+    )
+
+    with pytest.raises(ExecutionRefused):
+        stale.execute(
+            _admission(datetime.now(UTC), owner_id=uuid4(), key=b"gate-1a-stale"),
+            now=datetime.now(UTC),
+        )
+
+    assert provider.dispatched_states == []
+
+
+def test_retirement_is_generation_checked(integrated: _Environment) -> None:
+    """A stale generation cannot retire a fence it no longer holds."""
+
+    ledger = _ledger(integrated)
+    current = _current_coordinator_generation(integrated)
+
+    with pytest.raises(DispatchBlocked):
+        ledger.retire_coordinator(current - 1)
+
+    assert _current_coordinator_generation(integrated) == current
+
+
+def test_retirement_never_clears_a_dispatch_block(integrated: _Environment) -> None:
+    """Retiring a fence is not an unblock: a quarantined gate stays quarantined."""
+
+    ledger = _ledger(integrated)
+    ledger.block_dispatch("quarantine_under_test")
+    blocked_generation = _current_coordinator_generation(integrated)
+
+    retired = ledger.retire_coordinator(blocked_generation)
+
+    assert retired == blocked_generation + 1
+    assert _gate_state(integrated) == (True, "quarantine_under_test")
+    # Restore the environment for any later case: only the recovery role may unblock.
+    _unblock(integrated)
+
+
+def test_a_clean_stop_drains_before_retiring(integrated: _Environment) -> None:
+    """In-flight work must reach a terminal state before its fence is retired.
+
+    Retiring first would strand it: the fence it was admitted under no longer settles, and a
+    provider call may already have been sent.
+    """
+
+    ledger = _ledger(integrated)
+    generation = _fresh_fence(integrated)
+    admitted, created = ledger.create_or_get(
+        integrated.scope,
+        _admission(datetime.now(UTC), owner_id=uuid4(), key=b"gate-1a-drain"),
+        coordinator_generation=generation,
+        now=datetime.now(UTC),
+    )
+    assert created and admitted.state == "admitted"
+
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=integrated.scope,
+        coordinator_generation=generation,
+        provider=_SyntheticProvider(),
+    )
+    with pytest.raises(ExecutionRefused, match="drain"):
+        executor.shutdown()
+    assert _current_coordinator_generation(integrated) == generation
+
+
+def test_the_day_zero_sentinel_cannot_authorize_dispatch(integrated: _Environment) -> None:
+    """Draft 0.5 section 4: the not_installed sentinel may not authorize serving.
+
+    The launcher must refuse to mint a claimant over it, however valid the signed authority.
+    """
+
+    environment = f"g1a-sentinel-{uuid4().hex[:8]}"
+    storage_epoch = uuid4()
+    identity = RecoveryAnchorIdentity(environment, integrated.ledger_id, storage_epoch)
+    digest = _bind_sentinel_checkpoint(integrated, identity)
+    anchor, _ = _established_anchor_for(integrated, identity, digest, datetime.now(UTC))
+
+    with pytest.raises(StartupAttestationRejected, match="inventory_not_installed"):
+        StartupAttestationIssuer(
+            anchor=anchor,
+            identity=identity,
+            recovery_database_url=integrated.recovery,
+            checkpoint_source=LedgerRecoveryCheckpointSource(integrated.recovery),
+        ).issue(now=datetime.now(UTC))

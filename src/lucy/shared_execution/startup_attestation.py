@@ -31,15 +31,23 @@ class StartupAttestationRejected(RuntimeError):
     """The launcher could not safely establish a new startup claimant."""
 
 
+@dataclass(frozen=True)
+class RetainedCheckpoint:
+    """The retained checkpoint's digest and whether its release inventory is installed."""
+
+    checkpoint_sha256: str
+    release_inventory_installed: bool
+
+
 class RecoveryCheckpointDigestSource(Protocol):
-    """Read a recovery checkpoint digest from an independently durable source.
+    """Read a recovery checkpoint from an independently durable source.
 
     Implementations must derive this from an approved, immutable checkpoint record;
     the launcher deliberately never accepts a caller-provided digest or rebuilds one
     from mutable live spending/release tables.
     """
 
-    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str: ...
+    def read_checkpoint(self, identity: RecoveryAnchorIdentity) -> RetainedCheckpoint: ...
 
 
 @dataclass(frozen=True)
@@ -53,7 +61,7 @@ class LedgerRecoveryCheckpointSource:
 
     recovery_database_url: str
 
-    def read_checkpoint_digest(self, identity: RecoveryAnchorIdentity) -> str:
+    def read_checkpoint(self, identity: RecoveryAnchorIdentity) -> RetainedCheckpoint:
         try:
             with psycopg.connect(
                 _conninfo(self.recovery_database_url), row_factory=dict_row
@@ -64,7 +72,8 @@ class LedgerRecoveryCheckpointSource:
                 )
                 row = connection.execute(
                     """
-                    SELECT bound.checkpoint_sha256, bound.ledger_id, bound.storage_epoch
+                    SELECT bound.checkpoint_sha256, bound.ledger_id, bound.storage_epoch,
+                           bound.checkpoint -> 'release_inventory' AS release_inventory
                     FROM tiamat.restore_gate AS gate
                     JOIN tiamat.recovery_checkpoints AS bound
                       ON bound.environment = gate.environment
@@ -79,7 +88,15 @@ class LedgerRecoveryCheckpointSource:
             raise RecoveryCheckpointRejected("checkpoint_binding_absent")
         if row["ledger_id"] != identity.ledger_id or row["storage_epoch"] != identity.storage_epoch:
             raise RecoveryCheckpointRejected("checkpoint_binding_identity_mismatch")
-        return str(row["checkpoint_sha256"])
+        inventory = row["release_inventory"]
+        if not isinstance(inventory, dict):
+            raise RecoveryCheckpointRejected("checkpoint_binding_inventory_invalid")
+        return RetainedCheckpoint(
+            checkpoint_sha256=str(row["checkpoint_sha256"]),
+            # The day-zero sentinel is the only uninstalled form; anything else names a verified
+            # release inventory. Draft 0.5 section 4: the sentinel cannot authorize dispatch.
+            release_inventory_installed=set(inventory) != {"state"},
+        )
 
 
 @dataclass(frozen=True)
@@ -120,13 +137,22 @@ class StartupAttestationIssuer:
             raise ValueError("startup-attestation time must be aware")
         try:
             transition = self._anchor.read(self._identity.key)
-            checkpoint_digest = self._checkpoint_source.read_checkpoint_digest(self._identity)
+            retained = self._checkpoint_source.read_checkpoint(self._identity)
         except (RecoveryAnchorRejected, ValueError) as exc:
             raise StartupAttestationRejected("startup_attestation_authority_unavailable") from exc
+        checkpoint_digest = retained.checkpoint_sha256
         if not _is_hex_digest(checkpoint_digest):
             raise StartupAttestationRejected("startup_checkpoint_digest_invalid")
         if transition.witness.checkpoint_digest != checkpoint_digest:
             raise StartupAttestationRejected("startup_checkpoint_digest_mismatch")
+        # A day-zero ledger has no installed release inventory, and Draft 0.5 section 4 says that
+        # sentinel can neither reconcile nor authorize dispatch. The rule belongs to established
+        # authority: anything else is refused on continuity, which is the more specific reason.
+        if (
+            transition.continuity == "continuity_established"
+            and not retained.release_inventory_installed
+        ):
+            raise StartupAttestationRejected("startup_checkpoint_inventory_not_installed")
         try:
             with (
                 psycopg.connect(_conninfo(self._database_url), row_factory=dict_row) as connection,

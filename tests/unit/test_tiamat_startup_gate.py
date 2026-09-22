@@ -178,6 +178,7 @@ def test_a_quarantined_anchor_never_yields_a_claimant(
                         "checkpoint_sha256": _checkpoint_digest(package),
                         "ledger_id": identity.ledger_id,
                         "storage_epoch": identity.storage_epoch,
+                        "release_inventory": {"generation": 1, "jws_sha256": "f" * 64},
                     }
                 )
             if normalized == "SELECT current_user":

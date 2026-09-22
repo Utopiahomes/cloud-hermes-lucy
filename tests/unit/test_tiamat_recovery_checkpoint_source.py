@@ -60,12 +60,14 @@ def test_the_digest_comes_from_the_generation_the_gate_is_on(
             "checkpoint_sha256": DIGEST,
             "ledger_id": identity.ledger_id,
             "storage_epoch": identity.storage_epoch,
+            "release_inventory": {"generation": 1, "jws_sha256": "b" * 64},
         }
     )
 
-    digest = _source(monkeypatch, connection).read_checkpoint_digest(identity)
+    retained = _source(monkeypatch, connection).read_checkpoint(identity)
 
-    assert digest == DIGEST
+    assert retained.checkpoint_sha256 == DIGEST
+    assert retained.release_inventory_installed
     joined = " ".join(connection.executed)
     assert "JOIN tiamat.recovery_checkpoints" in joined
     assert "bound.recovery_generation = gate.recovery_generation" in joined
@@ -77,7 +79,7 @@ def test_a_generation_without_a_retained_checkpoint_yields_nothing(
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
 
     with pytest.raises(RecoveryCheckpointRejected, match="checkpoint_binding_absent"):
-        _source(monkeypatch, _Connection(None)).read_checkpoint_digest(identity)
+        _source(monkeypatch, _Connection(None)).read_checkpoint(identity)
 
 
 def test_a_checkpoint_bound_to_another_ledger_is_rejected(
@@ -87,13 +89,14 @@ def test_a_checkpoint_bound_to_another_ledger_is_rejected(
     connection = _Connection(
         {
             "checkpoint_sha256": DIGEST,
+            "release_inventory": {"generation": 1, "jws_sha256": "b" * 64},
             "ledger_id": uuid4(),
             "storage_epoch": identity.storage_epoch,
         }
     )
 
     with pytest.raises(RecoveryCheckpointRejected, match="identity_mismatch"):
-        _source(monkeypatch, connection).read_checkpoint_digest(identity)
+        _source(monkeypatch, connection).read_checkpoint(identity)
 
 
 def test_a_checkpoint_from_another_storage_epoch_is_rejected(
@@ -103,13 +106,14 @@ def test_a_checkpoint_from_another_storage_epoch_is_rejected(
     connection = _Connection(
         {
             "checkpoint_sha256": DIGEST,
+            "release_inventory": {"generation": 1, "jws_sha256": "b" * 64},
             "ledger_id": identity.ledger_id,
             "storage_epoch": uuid4(),
         }
     )
 
     with pytest.raises(RecoveryCheckpointRejected, match="identity_mismatch"):
-        _source(monkeypatch, connection).read_checkpoint_digest(identity)
+        _source(monkeypatch, connection).read_checkpoint(identity)
 
 
 def test_an_unreachable_ledger_is_a_rejection_the_issuer_can_handle(
@@ -119,4 +123,4 @@ def test_an_unreachable_ledger_is_a_rejection_the_issuer_can_handle(
     connection = _Connection(None, failure=psycopg.OperationalError("unreachable"))
 
     with pytest.raises(RecoveryCheckpointRejected, match="checkpoint_binding_unavailable"):
-        _source(monkeypatch, connection).read_checkpoint_digest(identity)
+        _source(monkeypatch, connection).read_checkpoint(identity)

@@ -62,6 +62,11 @@ def upgrade() -> None:
         """
     )
     op.execute("REVOKE ALL ON FUNCTION tiamat.share_locked_restore_gate() FROM PUBLIC")
+    # An earlier revision of this migration created an overload taking the environment as an
+    # argument, which let a caller name an environment its own row-level security policy
+    # hides. Rewriting the definition leaves that overload in place on any database where the
+    # first version ran, so it is removed explicitly rather than left callable.
+    op.execute("DROP FUNCTION IF EXISTS tiamat.share_locked_restore_gate(text)")
 
 
 def downgrade() -> None:
