@@ -4,8 +4,9 @@
 
 Ray accepted a basic configuration-level separation check and authorized starting the
 synthetic-memory work. See [separation audit](personal-lucy-separation-audit-2026-09-22.md).
-The first new increment is implemented and verified locally on top of `a04eef6`; production
-remains at its previously recorded revision. The historical entries below are retained.
+The first new increment is implemented and verified locally on top of `a04eef6`.
+Raymond's quarantined cloud database advanced to `0073` on 2026-09-22; policy and routine
+remain suspended. The historical entries below are retained.
 
 The new scoped memory path had a concrete correction gap: `supersedes_candidate_id` was
 stored but not applied to recall. Two regression cases reproduced both Plan A and Plan B
@@ -19,7 +20,8 @@ target is rejected. Promotions serialize per scope. Replays cannot reactivate th
 and loss of the replacement source cannot make the old decision reappear.
 
 Runtime and recovery admission recognize this exact new schema alongside the existing
-milestones; the realm bootstrap target advances to it. No deployed migration was run.
+milestones; the realm bootstrap target advances to it. The Raymond-only deployed migration
+and separate six-check head verification later succeeded on pinned commit `d126f706`.
 
 ### Observed synthetic demonstration
 
@@ -467,9 +469,10 @@ content identity. A pre-intake recheck rejects local plaintext changed after man
 ## Remaining work before the 12–20 conversation pilot
 
 1. Deploy the disabled public proxy and temporary private executor against Raymond's verified
-   `0072` realm; then pass the synthetic cloud acceptance before registering the exact campaign
+   `0073` realm; then pass the synthetic cloud acceptance before registering the exact campaign
    and transport commitments.
-2. Upload and execute only the exact authorized 13-batch pilot after a fresh local preflight.
+2. Obtain a fresh exact pilot authorization (the saved one expired on 2026-09-21), then
+   upload and execute only that authorized selection after a fresh local preflight.
 3. Add dependency invalidation for summaries, embeddings, catalogs, briefings, caches, and
    review previews as those artifact classes are introduced. The current slice fences claims
    and their evidence provenance; those later artifact types do not yet exist in this path.
