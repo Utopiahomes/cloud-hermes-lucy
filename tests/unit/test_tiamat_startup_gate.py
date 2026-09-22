@@ -173,12 +173,14 @@ def test_a_quarantined_anchor_never_yields_a_claimant(
             if "set_config" in normalized:
                 return _Row(None)
             if "recovery_checkpoints" in normalized:
+                # The source validates and rehashes this object, so it must be the real one the
+                # package's witness attests.
                 return _Row(
                     {
                         "checkpoint_sha256": _checkpoint_digest(package),
                         "ledger_id": identity.ledger_id,
                         "storage_epoch": identity.storage_epoch,
-                        "release_inventory": {"generation": 1, "jws_sha256": "f" * 64},
+                        "checkpoint": package["checkpoint"],
                     }
                 )
             if normalized == "SELECT current_user":

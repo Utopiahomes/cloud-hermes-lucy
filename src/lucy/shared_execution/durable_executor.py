@@ -11,6 +11,7 @@ terminal settlement; profile authority, wire validation and the HTTP surface sta
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -75,24 +76,30 @@ class DurableExecutor:
         self._scope = scope
         self._coordinator_generation = coordinator_generation
         self._provider = provider
+        self._intake_closed = False
+        self._lock = threading.Lock()
 
     def shutdown(self) -> int:
-        """Drain, then retire this fence. Retirement is generation-checked, not identity-checked.
+        """Close intake, then drain and retire. Retirement is generation-checked.
 
-        Retiring while work is still admitted or dispatched would strand it: the fence it was
-        admitted under no longer settles, and a provider call may already have been sent. This
-        does not quarantine; a gate already blocked stays blocked.
+        Intake closes first so this executor admits nothing further, and the ledger performs the
+        drain check and the generation move in one transaction, so a request cannot slip in
+        between them. Retiring while work is still admitted or dispatched would strand it: the
+        fence it was admitted under no longer settles, and a provider call may already have been
+        sent. This does not quarantine; a gate already blocked stays blocked.
         """
 
-        in_flight = self._ledger.in_flight_under_fence(self._scope, self._coordinator_generation)
-        if in_flight:
-            raise ExecutionRefused("in-flight work must drain before the fence is retired")
+        with self._lock:
+            self._intake_closed = True
         try:
             return self._ledger.retire_coordinator(self._coordinator_generation)
         except (DispatchBlocked, DurableFenceRejected) as exc:
             raise ExecutionRefused(str(exc) or type(exc).__name__) from exc
 
     def execute(self, admission: LedgerAdmission, *, now: datetime) -> ExecutionOutcome:
+        with self._lock:
+            if self._intake_closed:
+                raise ExecutionRefused("intake is closed for shutdown")
         try:
             record, created = self._ledger.create_or_get(
                 self._scope,

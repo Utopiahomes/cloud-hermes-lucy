@@ -11,6 +11,7 @@ staging ledger, the live DynamoDB anchor and real provider credentials are untou
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,6 +28,7 @@ from lucy.shared_execution.durable_executor import (
 )
 from lucy.shared_execution.postgres_ledger import (
     DispatchBlocked,
+    DurableFenceRejected,
     LedgerAdmission,
     LedgerRecord,
     LedgerScope,
@@ -40,7 +42,10 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedAnchorTransition,
     VerifiedRecoveryWitness,
 )
-from lucy.shared_execution.recovery_checkpoint import construct_recovery_checkpoint
+from lucy.shared_execution.recovery_checkpoint import (
+    RecoveryCheckpointRejected,
+    construct_recovery_checkpoint,
+)
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
@@ -793,3 +798,100 @@ def test_the_day_zero_sentinel_cannot_authorize_dispatch(integrated: _Environmen
             recovery_database_url=integrated.recovery,
             checkpoint_source=LedgerRecoveryCheckpointSource(integrated.recovery),
         ).issue(now=datetime.now(UTC))
+
+
+def test_shutdown_and_a_concurrent_admission_cannot_both_win(
+    integrated: _Environment,
+) -> None:
+    """A request admitted beside a shutdown must not be stranded by the retirement.
+
+    The drain check and the generation move share one transaction, so either the admission
+    commits first and the retirement refuses, or the retirement wins and the admission fails its
+    own fence. Both succeeding would leave work that can never settle.
+    """
+
+    ledger = _ledger(integrated)
+    generation = _fresh_fence(integrated)
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=integrated.scope,
+        coordinator_generation=generation,
+        provider=_SyntheticProvider(),
+    )
+    admission = _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes)
+
+    outcomes: dict[str, object] = {}
+
+    def _admit() -> None:
+        try:
+            outcomes["admitted"] = ledger.create_or_get(
+                integrated.scope,
+                admission,
+                coordinator_generation=generation,
+                now=datetime.now(UTC),
+            )[1]
+        except (DispatchBlocked, DurableFenceRejected) as exc:
+            outcomes["admitted"] = f"refused:{type(exc).__name__}"
+
+    def _retire() -> None:
+        try:
+            outcomes["retired"] = executor.shutdown()
+        except ExecutionRefused as exc:
+            outcomes["retired"] = f"refused:{exc}"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tasks = [pool.submit(_admit), pool.submit(_retire)]
+        for task in tasks:
+            task.result()
+
+    admitted_won = outcomes["admitted"] is True
+    retired_won = isinstance(outcomes["retired"], int)
+    assert admitted_won != retired_won, outcomes
+
+    if admitted_won:
+        # The fence still owns the work, so it can still be settled under it.
+        assert _current_coordinator_generation(integrated) == generation
+    else:
+        assert _current_coordinator_generation(integrated) == generation + 1
+        assert ledger.in_flight_under_fence(integrated.scope, generation) == 0
+
+
+def test_a_malformed_retained_checkpoint_is_not_installed_authority(
+    integrated: _Environment,
+) -> None:
+    """A checkpoint whose object does not validate must never read as installed authority."""
+
+    environment = f"g1a-malformed-{uuid4().hex[:8]}"
+    identity = RecoveryAnchorIdentity(environment, integrated.ledger_id, uuid4())
+    with psycopg.connect(integrated.recovery, autocommit=True) as recovery:
+        recovery.execute("SELECT set_config('tiamat.environment', %s, false)", (environment,))
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate
+              (environment, storage_epoch, recovery_generation, coordinator_generation,
+               dispatch_blocked, verified_at, anchor_floor_version, anchor_floor_sha256)
+            VALUES (%s, %s, 1, 1, false, clock_timestamp(), 0, NULL)
+            """,
+            (environment, identity.storage_epoch),
+        )
+        # An object that would pass the old key-shape test but is not a valid checkpoint.
+        recovery.execute(
+            """
+            INSERT INTO tiamat.recovery_checkpoints
+              (environment, recovery_generation, ledger_id, storage_epoch,
+               checkpoint_sha256, release_heads_sha256, settlement_position_sha256, checkpoint)
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                environment,
+                identity.ledger_id,
+                identity.storage_epoch,
+                "a" * 64,
+                "b" * 64,
+                "c" * 64,
+                Jsonb({"release_inventory": {"generation": 1, "jws_sha256": "f" * 64}}),
+            ),
+        )
+
+    with pytest.raises(RecoveryCheckpointRejected):
+        LedgerRecoveryCheckpointSource(integrated.recovery).read_checkpoint(identity)

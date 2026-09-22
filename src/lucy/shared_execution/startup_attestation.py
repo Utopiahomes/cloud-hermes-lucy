@@ -24,7 +24,10 @@ from lucy.shared_execution.recovery_anchor import (
     require_monotonic_anchor_floor,
     require_transition_dispatch_authority,
 )
-from lucy.shared_execution.recovery_checkpoint import RecoveryCheckpointRejected
+from lucy.shared_execution.recovery_checkpoint import (
+    RecoveryCheckpointRejected,
+    construct_recovery_checkpoint,
+)
 
 
 class StartupAttestationRejected(RuntimeError):
@@ -73,7 +76,7 @@ class LedgerRecoveryCheckpointSource:
                 row = connection.execute(
                     """
                     SELECT bound.checkpoint_sha256, bound.ledger_id, bound.storage_epoch,
-                           bound.checkpoint -> 'release_inventory' AS release_inventory
+                           bound.checkpoint AS checkpoint
                     FROM tiamat.restore_gate AS gate
                     JOIN tiamat.recovery_checkpoints AS bound
                       ON bound.environment = gate.environment
@@ -88,14 +91,18 @@ class LedgerRecoveryCheckpointSource:
             raise RecoveryCheckpointRejected("checkpoint_binding_absent")
         if row["ledger_id"] != identity.ledger_id or row["storage_epoch"] != identity.storage_epoch:
             raise RecoveryCheckpointRejected("checkpoint_binding_identity_mismatch")
-        inventory = row["release_inventory"]
-        if not isinstance(inventory, dict):
-            raise RecoveryCheckpointRejected("checkpoint_binding_inventory_invalid")
+        stored = row["checkpoint"]
+        if not isinstance(stored, dict):
+            raise RecoveryCheckpointRejected("checkpoint_binding_object_invalid")
+        # Validate the retained object's full schema and recompute its digest rather than trusting
+        # the stored one. A malformed object must not be read as installed authority, and a digest
+        # that disagrees with its own object means the binding cannot be relied on at all.
+        checkpoint = construct_recovery_checkpoint(stored, identity=identity)
+        if checkpoint.checkpoint_sha256 != str(row["checkpoint_sha256"]):
+            raise RecoveryCheckpointRejected("checkpoint_binding_digest_mismatch")
         return RetainedCheckpoint(
-            checkpoint_sha256=str(row["checkpoint_sha256"]),
-            # The day-zero sentinel is the only uninstalled form; anything else names a verified
-            # release inventory. Draft 0.5 section 4: the sentinel cannot authorize dispatch.
-            release_inventory_installed=set(inventory) != {"state"},
+            checkpoint_sha256=checkpoint.checkpoint_sha256,
+            release_inventory_installed=checkpoint.release_inventory_installed,
         )
 
 

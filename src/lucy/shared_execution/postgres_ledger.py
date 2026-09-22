@@ -352,6 +352,8 @@ class PostgresExecutionLedger:
         except psycopg.Error as exc:
             if exc.sqlstate == "ZX109":
                 raise DispatchBlocked("coordinator retirement was stale") from exc
+            if exc.sqlstate == "ZX110":
+                raise DispatchBlocked("in-flight work must drain before retirement") from exc
             raise LedgerUnavailable from exc
 
     def block_dispatch(self, reason: str) -> None:
