@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -297,46 +297,21 @@ def _established_anchor(
     return _established_anchor_for(integrated, _identity(integrated), checkpoint_digest, now)
 
 
-def _unused_established_anchor(
-    integrated: _Environment, checkpoint_digest: str, now: datetime
+def _established_anchor_with_validity(
+    integrated: _Environment,
+    identity: RecoveryAnchorIdentity,
+    checkpoint_digest: str,
+    now: datetime,
+    *,
+    not_after: datetime,
 ) -> tuple[InMemoryExternalRecoveryAnchor, VerifiedAnchorTransition]:
+    """An established anchor whose witness stops being valid at ``not_after``."""
 
-    identity = _identity(integrated)
-    with psycopg.connect(integrated.recovery) as recovery:
-        observed = recovery.execute(
-            """
-            SELECT (pg_catalog.pg_control_system()).system_identifier::text,
-                   (pg_catalog.pg_control_checkpoint()).timeline_id::bigint,
-                   pg_catalog.pg_current_wal_flush_lsn()::text
-            """
-        ).fetchone()
-    assert observed is not None
-    witness = VerifiedRecoveryWitness(
-        identity=identity,
-        recovery_generation=1,
-        witness_revision=1,
-        status="reconciled",
-        checkpoint_digest=checkpoint_digest,
-        release_heads_sha256="c" * 64,
-        checkpoint_settlement_position_sha256="d" * 64,
-        witness_inventory_digest="e" * 64,
-        exact_jws=b"gate-1a-disposable-witness",
-        not_before=now - timedelta(minutes=5),
-        not_after=now + timedelta(hours=1),
-    )
-    transition = VerifiedAnchorTransition(
-        witness=witness,
-        transition_version=1,
-        previous_transition_sha256=None,
-        continuity="continuity_established",
-        beacon=PostgresContinuityBeacon(
-            str(observed[0]), int(observed[1]), str(observed[2]), checkpoint_digest
-        ),
-        exact_jws=b"gate-1a-disposable-transition",
-    )
+    _, transition = _established_anchor_for(integrated, identity, checkpoint_digest, now)
+    bounded = replace(transition, witness=replace(transition.witness, not_after=not_after))
     anchor = InMemoryExternalRecoveryAnchor()
-    anchor.install(transition, expected_transition_sha256=None, now=now)
-    return anchor, transition
+    anchor.install(bounded, expected_transition_sha256=None, now=now)
+    return anchor, bounded
 
 
 def _ledger(integrated: _Environment) -> PostgresExecutionLedger:
