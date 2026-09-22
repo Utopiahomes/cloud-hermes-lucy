@@ -1,0 +1,37 @@
+{
+  "evidence_version": "1.0",
+  "recorded_at": "2026-09-22",
+  "scope": "fresh offline staging quarantine successor after prior candidate expired without installation",
+  "environment": "staging",
+  "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+  "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+  "root_key_id": "tiamat-recovery-root.staging.1",
+  "root_public_key_sha256": "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996",
+  "replacement_witness_key_id": "tiamat-recovery-witness.staging.3",
+  "replacement_witness_public_key_sha256": "7f1b290a4034a74eaede3efa65b95d5191599bf8f1fd5fd43a727ca54eae72ff",
+  "predecessor_transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b",
+  "candidate_transition_sha256": "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459",
+  "candidate_valid_from": "2026-09-22T14:53:24Z",
+  "candidate_valid_until": "2026-09-23T14:53:24Z",
+  "candidate_continuity": "quarantined",
+  "candidate_transition_version": 2,
+  "candidate_recovery_generation": 2,
+  "candidate_witness_revision": 1,
+  "public_package": "deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json",
+  "verification": {
+    "original_public_root_fingerprint_matches_commissioned_anchor": true,
+    "exact_predecessor_and_inventory_chain_verified_locally": true,
+    "candidate_signatures_and_24_hour_window_verified_locally": true,
+    "dispatch_authority": "denied_by_quarantine",
+    "focused_unit_tests": "34 passed",
+    "ruff": "passed",
+    "live_dynamodb_head": "not read by this preparation run; independent review required",
+    "claimant_refusal_integration": "candidate-specific test updated; not executed against PostgreSQL this run"
+  },
+  "external_state": {
+    "dynamodb_write_performed": false,
+    "ledger_commissioned": false,
+    "provider_dispatch_enabled": false
+  },
+  "remaining_gate": "independent live-head review and exact-digest confirmation before one conditional DynamoDB successor write"
+}

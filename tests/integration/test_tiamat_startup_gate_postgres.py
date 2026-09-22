@@ -409,10 +409,12 @@ def test_the_quarantine_successor_candidate_opens_no_claimant(disposable: _Dispo
     )
 
     candidate_path = (
-        ROOT / "deploy" / "aws" / "tiamat-staging-quarantine-successor-v2-public-2026-09-20.json"
+        ROOT / "deploy" / "aws" / "tiamat-staging-quarantine-successor-v3-public-2026-09-22.json"
     )
     candidate: Any = json.loads(candidate_path.read_text(encoding="utf-8"))
-    now = datetime.now(UTC).replace(microsecond=0)
+    # Use a fixed instant within this exact signed candidate's window so the refusal proof
+    # remains reproducible after its deliberately short-lived authority expires.
+    now = datetime(2026, 9, 22, 15, tzinfo=UTC)
     identity, predecessor, successor, _ = verify_continued_quarantine_successor_package(
         candidate, now=now, expected_root_public_sha256=str(candidate["root_public_key_sha256"])
     )

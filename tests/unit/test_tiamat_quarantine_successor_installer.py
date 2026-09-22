@@ -18,9 +18,9 @@ from lucy.shared_execution.recovery_anchor_commissioning import (
 )
 
 ROOT = Path(__file__).parents[2]
-PACKAGE = ROOT / "deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json"
+PACKAGE = ROOT / "deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json"
 PIN = "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996"
-NOW = datetime(2026, 9, 20, 17, 5, tzinfo=UTC)
+NOW = datetime(2026, 9, 22, 15, tzinfo=UTC)
 
 
 def _installer() -> ModuleType:

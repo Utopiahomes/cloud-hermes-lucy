@@ -231,6 +231,44 @@ def test_staging_successor_public_package_verifies_against_original_root_pin() -
         )
 
 
+def test_renewed_staging_successor_is_quarantine_only_and_expires_in_24_hours() -> None:
+    package = json.loads(
+        (
+            ROOT
+            / "deploy"
+            / "aws"
+            / "tiamat-staging-quarantine-successor-v3-public-2026-09-22.json"
+        ).read_text(encoding="utf-8")
+    )
+    pinned_root = "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996"
+    identity, predecessor, successor, _ = verify_continued_quarantine_successor_package(
+        package,
+        now=datetime(2026, 9, 22, 15, tzinfo=UTC),
+        expected_root_public_sha256=pinned_root,
+    )
+    assert predecessor.exact_sha256 == (
+        "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b"
+    )
+    assert successor.exact_sha256 == (
+        "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459"
+    )
+    assert successor.continuity == "quarantined"
+    assert successor.witness.not_after - successor.witness.not_before == timedelta(hours=24)
+    with pytest.raises(RecoveryAnchorRejected, match="continuity_not_established"):
+        require_transition_dispatch_authority(
+            successor,
+            identity,
+            observed_beacon=PostgresContinuityBeacon("system", 1, "0/1", "a" * 64),
+            now=datetime(2026, 9, 22, 15, tzinfo=UTC),
+        )
+    with pytest.raises(ValueError, match="inventory_key_not_current"):
+        verify_continued_quarantine_successor_package(
+            package,
+            now=datetime(2026, 9, 23, 14, 54, tzinfo=UTC),
+            expected_root_public_sha256=pinned_root,
+        )
+
+
 def test_witness_inventory_rejects_wrong_root_scope_and_duplicate_keys() -> None:
     identity = RecoveryAnchorIdentity("staging", uuid4(), uuid4())
     root = Ed25519PrivateKey.generate()
