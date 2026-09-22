@@ -14,7 +14,7 @@ from __future__ import annotations
 import threading
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -26,7 +26,7 @@ from lucy.shared_execution.postgres_ledger import (
     LedgerScope,
     PostgresExecutionLedger,
 )
-from lucy.shared_execution.replay_cache import ReplayCache, require_matching_output
+from lucy.shared_execution.replay_cache import ReplayCache, require_matching_response
 from lucy.shared_execution.runtime_anchor_watch import (
     RuntimeAnchorWatch,
     RuntimeAuthorityClosed,
@@ -35,6 +35,14 @@ from lucy.shared_execution.runtime_anchor_watch import (
 
 class ExecutionRefused(RuntimeError):
     """The ledger refused this execution, so no provider was reached."""
+
+
+class IdempotencyRecoveryUnavailable(RuntimeError):
+    """RC1's 409 idempotency_recovery_unavailable: completed durably, body no longer held."""
+
+    def __init__(self, execution_id: UUID) -> None:
+        super().__init__("idempotency_recovery_unavailable")
+        self.execution_id = execution_id
 
 
 @dataclass(frozen=True)
@@ -81,7 +89,6 @@ class DurableExecutor:
         provider: DispatchedProvider,
         watch: RuntimeAnchorWatch | None = None,
         replay_cache: ReplayCache | None = None,
-        replay_window: timedelta = timedelta(hours=24),
     ) -> None:
         if coordinator_generation < 1:
             raise ValueError("coordinator generation is invalid")
@@ -94,7 +101,6 @@ class DurableExecutor:
         # Present when this executor serves a contract that replays response bodies. The cache is
         # not authority: the ledger records the digest, and a replay is served only if they agree.
         self._replay_cache = replay_cache
-        self._replay_window = replay_window
         self._intake_closed = False
         self._lock = threading.Lock()
 
@@ -183,9 +189,9 @@ class DurableExecutor:
                 )
             raise
         outcome = self._provider(dispatched)
-        # Cache the body before the ledger calls this complete. A failed cache write must not
-        # produce a clean completion whose replay cannot be honoured; an orphaned cache entry
-        # after a failed settlement is harmless and expires on its own.
+        # Hold the body in volatile memory before the ledger calls this complete, so a clean
+        # completion always has its replay available for the window RC1 allows. The window runs
+        # from admission. The ledger records only the body's digest, never the body.
         response_digest: str | None = None
         if self._replay_cache is not None and outcome.response_body is not None:
             response_digest = self._replay_cache.put(
@@ -193,7 +199,7 @@ class DurableExecutor:
                 idempotency_key_digest=admission.idempotency_key_digest,
                 execution_id=record.execution_id,
                 response_body=outcome.response_body,
-                expires_at=now + self._replay_window,
+                admitted_at=now,
             )
         settled = self._ledger.settle_terminal(
             self._scope,
@@ -217,7 +223,11 @@ class DurableExecutor:
         )
 
     def _replayed_body(self, admission: LedgerAdmission, record: LedgerRecord) -> Any | None:
-        """Serve a replayed body only when the ledger and the cache agree on what it was."""
+        """Serve a replayed body only when the ledger and the cache agree on what it was.
+
+        With the body gone, RC1 already defines the reply: the durable completion stands, the
+        result is no longer available, and nothing is dispatched again under this key.
+        """
 
         if self._replay_cache is None or record.state != "completed":
             return None
@@ -226,7 +236,9 @@ class DurableExecutor:
             idempotency_key_digest=admission.idempotency_key_digest,
         )
         if cached is None:
-            # The replay window has passed, or the cache was lost. The execution and its
-            # accounting are unaffected; only the body is gone.
-            raise ExecutionRefused("replayable output is no longer retained")
-        return require_matching_output(cached, record.response_body_sha256)
+            # The window passed, the entry was evicted, or this process restarted. The execution,
+            # its accounting and its deduplication are unaffected; only the body is gone.
+            raise IdempotencyRecoveryUnavailable(record.execution_id)
+        return require_matching_response(
+            cached, execution_id=record.execution_id, ledger_digest=record.response_body_sha256
+        )
