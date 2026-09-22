@@ -44,6 +44,9 @@ from lucy.shared_execution.startup_attestation import (
 
 ROOT = Path(__file__).resolve().parents[2]
 TRUST_PACKAGE = ROOT / "deploy" / "aws" / "tiamat-staging-recovery-bootstrap-public-2026-09-18.json"
+CURRENT_TRUST_PACKAGE = (
+    ROOT / "deploy" / "aws" / "tiamat-staging-quarantine-successor-v3-public-2026-09-22.json"
+)
 TEST_DATABASE_PREFIX = "tiamat_test_d1"
 STAGING_STORE = {
     "TIAMAT_RECOVERY_ANCHOR_TABLE": "stoin-staging-tiamat-recovery-anchor-v1",
@@ -217,10 +220,13 @@ def test_c1_the_expired_witness_key_refuses_the_current_anchor(disposable: _Disp
     assert _active_claimants(disposable) == 0
 
 
-def test_c1_the_quarantined_record_refuses_even_when_trust_is_current(
-    disposable: _Disposable,
-) -> None:
-    """C1, cause two: evaluated inside the key window, the record is still quarantined."""
+def test_c1_superseded_trust_cannot_verify_the_current_head(disposable: _Disposable) -> None:
+    """C1, cause two: the day-zero inventory no longer authorizes the installed head.
+
+    Until the version-2 successor was installed, this case refused on continuity. Now the live
+    record is signed by the successor's fresh witness key, which the day-zero inventory does not
+    authorize, so a launcher pinned to superseded trust cannot verify the chain at all.
+    """
 
     trust = _trust_document()
     _seed_staging_gate(disposable, trust, generation=1)
@@ -231,6 +237,30 @@ def test_c1_the_quarantined_record_refuses_even_when_trust_is_current(
             recovery_database_url=disposable.recovery,
             expected_ledger_id=UUID(str(trust["ledger_id"])),
             now=COMMISSIONING_TIME,
+            environment_values=STAGING_STORE,
+        )
+
+    assert "startup_attestation_authority_unavailable" in str(refused.value)
+    assert _active_claimants(disposable) == 0
+
+
+def test_c1_the_installed_head_refuses_under_current_trust(disposable: _Disposable) -> None:
+    """C1, cause three: with current trust the live head verifies and is still quarantined.
+
+    This reads the real installed record from DynamoDB rather than an in-memory anchor, so the
+    refusal comes from the deployed chain itself.
+    """
+
+    trust = _trust_document()
+    current: Any = json.loads(CURRENT_TRUST_PACKAGE.read_text(encoding="utf-8"))
+    _seed_staging_gate(disposable, trust, generation=1)
+
+    with pytest.raises(StartupGateRejected) as refused:
+        run_startup_gate(
+            trust_document=current,
+            recovery_database_url=disposable.recovery,
+            expected_ledger_id=UUID(str(current["ledger_id"])),
+            now=datetime.now(UTC),
             environment_values=STAGING_STORE,
         )
 

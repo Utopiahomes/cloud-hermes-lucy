@@ -1,0 +1,63 @@
+{
+  "evidence_type": "tiamat_quarantine_successor_install",
+  "date_utc": "2026-09-22",
+  "installed_at_utc": "2026-09-22T15:07Z",
+  "candidate_commit": "928dde7",
+  "package": "deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json",
+  "execution_path": {
+    "identity": "AWSReservedSSO_LucySecurityAdministrator (interactive human SSO session)",
+    "account": "429870640638",
+    "region": "us-east-1",
+    "staging_exception": "Version 2 successor installed through the reviewed human SSO commissioning path. Cryptographic validation and conditional-write semantics are identical to the machine path; the intended recovery-coordinator OIDC execution path was not exercised by this transition.",
+    "standing_decision": "Render's narrow recovery-coordinator role remains the operational standard, and is required before Tiamat becomes operational. This exception covers one reviewed, signed, quarantine-only staging write and does not redefine the architecture."
+  },
+  "approval": {
+    "reviewed_by": "Claude, independently of the preparing tooling",
+    "approved_digest": "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459",
+    "authorized_by": "Ray, explicit one-time approval naming that exact digest",
+    "prior_candidate": "4c14dc3514213bd6d2a24d8a2571a78378e2c0e94547db6da265e08755dfd430 was reviewed clean but expired unused on 2026-09-21T17:04:50Z; it was never installed."
+  },
+  "pre_write_confirmation": {
+    "caller_verified": true,
+    "account_and_region_verified": true,
+    "live_head_before": {
+      "transition_version": 1,
+      "transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b"
+    },
+    "installer_preview": "verified_not_written"
+  },
+  "write": {
+    "operation": "one conditional PutItem, compare-and-swap against the exact predecessor digest",
+    "installer": "deploy/aws/install_tiamat_continued_quarantine_successor_v1.py",
+    "reported_status": "installed_and_verified"
+  },
+  "strong_read_after": {
+    "transition_version": 2,
+    "transition_sha256": "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459",
+    "previous_transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b",
+    "continuity": "quarantined",
+    "witness_status": "quarantined",
+    "recovery_generation": 2,
+    "beacon_present": false,
+    "witness_not_after": "2026-09-23T14:53:24Z",
+    "verified_independently": "read back through the pinned-trust reader, not by trusting the installer's own report"
+  },
+  "post_install_refusal_proofs": {
+    "result": "9 integration cases passed against the disposable PostgreSQL 16 database",
+    "dispatch": "the installed record is refused with recovery_continuity_not_established",
+    "claimant": "the launcher opens no claimant against the installed record; active claimant count for the environment stayed zero",
+    "live_case_added": "C1 now reads the real installed record from DynamoDB under current trust rather than an in-memory anchor",
+    "superseded_trust_case": "a launcher pinned to the day-zero inventory can no longer verify the head, because the successor is signed by a fresh witness key that inventory does not authorize. That case previously refused on continuity and now refuses earlier, on trust."
+  },
+  "not_performed": [
+    "dispatch enablement, provider request or model spending",
+    "ledger commissioning or activation",
+    "any change to the commissioned staging PostgreSQL ledger, which was not connected",
+    "key generation or signing of any kind; the successor was signed offline before this step"
+  ],
+  "open_items": [
+    "Durable root-key custody remains unresolved: the only known copies of the root and witness keys live in one WSL directory on one machine. Two separately stored encrypted offline copies are still needed, with a non-secret note recording location and public fingerprint.",
+    "The installed authority expires 2026-09-23T14:53:24Z. Extending the chain again requires another offline ceremony.",
+    "M4, the validating sole writer, remains the gate before the commissioned ledger may reach continuity_established."
+  ]
+}
