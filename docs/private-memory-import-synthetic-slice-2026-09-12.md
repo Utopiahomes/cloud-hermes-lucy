@@ -1,5 +1,82 @@
 # Private memory import synthetic-slice checkpoint
 
+## Personal Lucy development resumed: 2026-09-22
+
+Ray accepted a basic configuration-level separation check and authorized starting the
+synthetic-memory work. See [separation audit](personal-lucy-separation-audit-2026-09-22.md).
+The first new increment is implemented and verified locally on top of `a04eef6`; production
+remains at its previously recorded revision. The historical entries below are retained.
+
+The new scoped memory path had a concrete correction gap: `supersedes_candidate_id` was
+stored but not applied to recall. Two regression cases reproduced both Plan A and Plan B
+being returned after approving Plan B, in ordinary and protected recall.
+
+Migration `0073_memory_candidate_correction` adds an immutable, content-free supersession
+ledger. Exact approved promotion atomically records the replacement; all three scoped recall
+functions omit superseded claims before applying their result limits. Original claims and
+evidence remain unchanged. A missing, already superseded, ambiguous, unrelated or unchanged
+target is rejected. Promotions serialize per scope. Replays cannot reactivate the old claim,
+and loss of the replacement source cannot make the old decision reappear.
+
+Runtime and recovery admission recognize this exact new schema alongside the existing
+milestones; the realm bootstrap target advances to it. No deployed migration was run.
+
+### Observed synthetic demonstration
+
+| Operation | Result |
+|---|---|
+| Import | Synthetic fixture archived with exact manifest/source bindings and replay suppression |
+| Review | Exact candidate review contracts and loopback review-console tests pass; unapproved correction does not change recall |
+| Remember and cite | Approved claims return their source evidence IDs; fixture quote spans retain source provenance |
+| Correct | Plan A is recalled initially; after exact Plan B approval, only Plan B is recalled in ordinary and protected paths |
+| Preserve history | Both claims and three source links survive, with one immutable correction record |
+| Forget / source withdrawal | Replacement disappears when its source becomes unavailable; old Plan A stays excluded; existing deletion/restore tests also pass |
+
+This is a local, deterministic demonstration with synthetic actors and provider boundaries,
+not a live Telegram conversation, owner review session, cloud IAM test or real-history import.
+
+### Fresh verification ledger
+
+[Machine-readable receipt](evidence/personal-lucy-synthetic-memory-2026-09-22.json).
+
+- Two correction regression cases failed as expected on `0072`, returning both plans.
+- Clean disposable PostgreSQL migrated `0001` through `0072`, then applied `0073` successfully.
+- All 19 focused import integration cases passed, including five new correction cases.
+- 28 import/review/transport unit tests passed; 52 readiness/bootstrap/verifier unit tests passed.
+- Ruff passed on changed Python files; strict mypy passed on the three changed source files.
+- Evidence applies to this local increment. Changes to promotion, recall, schema, readiness,
+  bootstrap, test fixture or PostgreSQL image invalidate the corresponding check.
+
+Docker startup was restored by backing up both inaccessible runtime socket directories under
+`C:\Users\Forti\AppData\Local` and allowing Docker to recreate them. Images and volumes were
+not reset. Windows reserved port 54329, so this run used 55429. `compose.test.yaml` now accepts
+`LUCY_TEST_POSTGRES_PORT` (default 54329); the memory-import test cleanup guard permits only
+the exact loopback `lucy_test` database on 54329 or 55429. Other integration files may still
+require their documented default ports. Socket backups have the suffixes
+`.personal-lucy-backup-20260922` and `.personal-lucy-combined-20260922`.
+
+### Exact next action
+
+The [cloud staging package](personal-lucy-cloud-stage-2026-09-22.md) is prepared. The release
+image builds and passes its network-disabled packaging check. Head verification and commissioning
+now pin 0073; 34 focused checks pass. A new local operator prepares credential staging for the
+two existing suspended Raymond services without a provider key or pilot authorization; its three
+focused tests pass, including rollback after an uncertain second write. Ray approved the exact
+staging, and independent Render GETs confirmed both services remain suspended with matching
+credentials, disabled capture/ingress/executor/intake and saved rollback snapshots. Publish/pin
+the source and prepare the cloud migration and demonstration. Coordinate the new migration
+number with shared-repository work.
+
+Automatic approval review blocked the historical mixed-purpose commissioning helper because
+it supports persistent secret/configuration changes. It was not run. No cloud mutation was made.
+The actual saved real-history pilot authorization expired September 21, 2026; synthetic staging
+does not depend on it, and real import needs fresh exact authorization later.
+
+The active Telegram bot still points to Utopia. Its eventual Raymond cutover needs an exact
+service/routing plan and a decision on existing transcript history; this does not block local
+Personal Lucy development. No personal records, paid provider requests or live channel changes
+occurred during this increment.
+
 Date: 2026-09-12
 Branch: `codex/r1-tenant-foundation`
 Starting revision: `207d3af6c782747e104fa24f2b72a2a2c4eea8ff`

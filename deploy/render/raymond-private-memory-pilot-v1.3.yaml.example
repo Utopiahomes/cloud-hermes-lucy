@@ -109,7 +109,7 @@ services:
       - {key: LUCY_MEMORY_PILOT_GATEWAY_TOKEN, sync: false}
 
 # Commissioning order:
-# 1. migrate the quarantined Raymond database through 0072;
+# 1. migrate the quarantined Raymond database through 0073;
 # 2. deploy the policy and private executor with public intake disabled;
 # 3. prove policy readiness, then enable the private executor and prove synthetic replay;
 # 4. enable the public proxy and prove wrong-token/redirect/logging failures;

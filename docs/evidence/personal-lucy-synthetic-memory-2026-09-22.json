@@ -1,0 +1,29 @@
+{
+  "contract": "lucy.personal-synthetic-memory-checkpoint.v1",
+  "date": "2026-09-22",
+  "base_revision": "a04eef6",
+  "tested_tree": "local uncommitted correction increment",
+  "database": "disposable lucy_test on 127.0.0.1:55429",
+  "schema": "0073_memory_candidate_correction",
+  "regression_before_fix": {
+    "schema": "0072_memory_pilot_auth_context",
+    "cases": 2,
+    "result": "failed as expected",
+    "actual_recall": ["Plan B", "Plan A"],
+    "expected_recall": ["Plan B"],
+    "paths": ["ordinary_private", "protected"]
+  },
+  "checks": [
+    {"name": "import, candidate review, review console, transport runner unit tests", "passed": 28},
+    {"name": "complete memory import slice including five new correction cases", "passed": 19},
+    {"name": "runtime readiness, recovery boundary, realm bootstrap and verifier unit tests", "passed": 52},
+    {"name": "Ruff on changed Python files", "result": "passed"},
+    {"name": "strict mypy on changed readiness, bootstrap and migration sources", "result": "passed"}
+  ],
+  "production_changes": false,
+  "real_history_processed": false,
+  "provider_calls": 0,
+  "model_spend": 0,
+  "telegram_demo_executed": false,
+  "cloud_demo_executed": false
+}

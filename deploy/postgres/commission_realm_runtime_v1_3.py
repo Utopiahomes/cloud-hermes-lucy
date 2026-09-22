@@ -19,7 +19,7 @@ import psycopg
 from pydantic import ValidationError
 from sqlalchemy.engine import URL, make_url
 
-from lucy.readiness import ADMISSION_LOCK, PRIVATE_MEMORY_SCHEMA_REVISION
+from lucy.readiness import ADMISSION_LOCK, MEMORY_CORRECTION_SCHEMA_REVISION
 from lucy.realm_provisioning import RealmSecurityStampV1
 
 Action = Literal["status", "open", "quarantine"]
@@ -192,7 +192,7 @@ def _verify_target_boundary(
 def _verify_reviewed_revision(connection: psycopg.Connection[Any]) -> None:
     if (
         _scalar(connection, "SELECT version_num FROM public.alembic_version")
-        != PRIVATE_MEMORY_SCHEMA_REVISION
+        != MEMORY_CORRECTION_SCHEMA_REVISION
     ):
         raise CommissionError("database is not at the reviewed V1.3 revision")
 

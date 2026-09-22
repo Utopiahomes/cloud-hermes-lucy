@@ -153,7 +153,10 @@ class _ImportArchiveBackend:
 def clean_private_realm() -> None:
     assert OWNER_URL is not None
     parsed = make_url(OWNER_URL)
-    if (parsed.database, parsed.host, parsed.port) != ("lucy_test", "127.0.0.1", 54329):
+    # Windows can reserve 54329 for Hyper-V; 55429 is the documented test-only fallback.
+    if (parsed.database, parsed.host) != ("lucy_test", "127.0.0.1") or parsed.port not in {
+        54329, 55429,
+    }:
         raise RuntimeError("refusing to clear a non-synthetic database")
     engine = create_engine(OWNER_URL)
     with engine.begin() as connection:
@@ -757,6 +760,95 @@ def test_fixture_drives_exact_manifest_candidates_and_governed_recall() -> None:
     )
     assert len(protected) == 1
     assert len(protected[0].source_evidence_ids) == 2
+
+
+@pytest.mark.parametrize("protection", list(ProtectionClass))
+def test_approved_correction_retires_old_recall_without_erasing_sources(
+    protection: ProtectionClass,
+) -> None:
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    scope_id, evidence_ids = _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    policy = GovernedMemoryPolicy(create_session_factory(POLICY_URL))
+    reader = GovernedMemoryReader(create_session_factory(RAYMOND_URL))
+
+    def recall() -> tuple[object, ...]:
+        if protection == ProtectionClass.PROTECTED:
+            return policy.protected_recall(
+                "selected_architecture", owner_interaction_ref=uuid4(),
+                reason_code="synthetic_correction_demo",
+            )
+        return reader.ordinary_recall("selected_architecture")
+
+    old = _candidate(scope_id, evidence_ids[:1], protection=protection, object_text="Plan A")
+    extractor.stage(old)
+    old_approval = policy.approve(old, owner_approval_ref=uuid4(), owner_actor_id="raymond-owner")
+    original = policy.promote(old_approval.approval_id, expected_digest=old.digest)
+    replacement = _candidate(
+        scope_id, evidence_ids, protection=protection, object_text="Plan B"
+    ).model_copy(update={"supersedes_candidate_id": old.candidate_id})
+    extractor.stage(replacement)
+    # Staging a correction does not alter approved recall.
+    assert [item.object for item in recall()] == ["Plan A"]
+    approval = policy.approve(
+        replacement, owner_approval_ref=uuid4(), owner_actor_id="raymond-owner"
+    )
+    promoted = policy.promote(approval.approval_id, expected_digest=replacement.digest)
+    assert [item.object for item in recall()] == ["Plan B"]
+    assert set(recall()[0].source_evidence_ids) == set(evidence_ids)
+    restarted = GovernedMemoryPolicy(create_session_factory(POLICY_URL))
+    assert restarted.promote(approval.approval_id, expected_digest=replacement.digest).replayed
+    assert restarted.promote(old_approval.approval_id, expected_digest=old.digest).replayed
+    assert [item.object for item in recall()] == ["Plan B"]
+
+    competing = replacement.model_copy(update={"candidate_id": uuid4(), "object": "Plan C"})
+    extractor.stage(competing)
+    competing_approval = policy.approve(
+        competing, owner_approval_ref=uuid4(), owner_actor_id="raymond-owner"
+    )
+    with pytest.raises(GovernedMemoryUnavailable, match="promotion"):
+        policy.promote(competing_approval.approval_id, expected_digest=competing.digest)
+
+    owner = create_session_factory(OWNER_URL)
+    with owner() as session:
+        history = session.execute(text(
+            "SELECT prior_claim_id,successor_claim_id,approval_id "
+            "FROM lucy.scoped_memory_supersessions_v1"
+        )).one()
+        assert history == (original.claim_id, promoted.claim_id, approval.approval_id)
+        assert session.scalar(text("SELECT count(*) FROM lucy.scoped_memory_claims_v1")) == 2
+        assert session.scalar(text("SELECT count(*) FROM lucy.scoped_memory_claim_sources_v2")) == 3
+
+    # Losing the replacement source hides it and never resurrects the old decision.
+    _make_source_unavailable(evidence_ids[1])
+    assert recall() == ()
+
+
+@pytest.mark.parametrize("invalid_target", ["missing", "different_subject", "unchanged"])
+def test_correction_rejects_invalid_target_atomically(invalid_target: str) -> None:
+    assert all((OWNER_URL, RAYMOND_URL, POLICY_URL))
+    scope_id, evidence_ids = _provision()
+    extractor = GovernedMemoryExtractor(create_session_factory(RAYMOND_URL))
+    policy = GovernedMemoryPolicy(create_session_factory(POLICY_URL))
+    old = _candidate(scope_id, evidence_ids, protection=ProtectionClass.ORDINARY_PRIVATE)
+    extractor.stage(old)
+    approved = policy.approve(old, owner_approval_ref=uuid4(), owner_actor_id="raymond-owner")
+    policy.promote(approved.approval_id, expected_digest=old.digest)
+    replacement = old.model_copy(update={
+        "candidate_id": uuid4(),
+        "supersedes_candidate_id": uuid4() if invalid_target == "missing" else old.candidate_id,
+        "subject": "Other person" if invalid_target == "different_subject" else old.subject,
+        "object": old.object if invalid_target == "unchanged" else "Corrected plan",
+    })
+    extractor.stage(replacement)
+    approval = policy.approve(
+        replacement, owner_approval_ref=uuid4(), owner_actor_id="raymond-owner"
+    )
+    with pytest.raises(GovernedMemoryUnavailable, match="promotion"):
+        policy.promote(approval.approval_id, expected_digest=replacement.digest)
+    with create_session_factory(OWNER_URL)() as session:
+        assert session.scalar(text("SELECT count(*) FROM lucy.scoped_memory_claims_v1")) == 1
+        assert session.scalar(text("SELECT count(*) FROM lucy.scoped_memory_supersessions_v1")) == 0
 
 
 def test_v2_executable_manifest_round_trips_through_exact_campaign_authorization() -> None:

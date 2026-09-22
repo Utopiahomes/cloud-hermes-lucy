@@ -85,6 +85,13 @@ def test_unknown_diagnostic_check_fails_closed() -> None:
         _check_sql("database_dump")
 
 
+def test_head_check_matches_the_commissioning_migration_target() -> None:
+    from deploy.postgres.bootstrap_realm_cloud_v1_3 import EXPECTED_REVISION
+
+    _, parameters = _check_sql("revision")
+    assert parameters["expected"] == EXPECTED_REVISION
+
+
 def test_requested_check_parses_the_module_command_line() -> None:
     assert _requested_check(()) == ALL_CHECKS
     assert _requested_check(("--check", "revision")) == "revision"

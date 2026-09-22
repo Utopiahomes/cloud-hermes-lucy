@@ -19,6 +19,7 @@ MEMORY_IMPORT_SCHEMA_REVISION = "0056_memory_import_budget"
 PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
 WORKSPACES_SCHEMA_REVISION = "0068_workspaces_service_auth"
 PRIVATE_MEMORY_SCHEMA_REVISION = "0072_memory_pilot_auth_context"
+MEMORY_CORRECTION_SCHEMA_REVISION = "0073_memory_candidate_correction"
 V13_RECOVERY_SCHEMA_REVISIONS = frozenset(
     {
         R1_SCHEMA_REVISION,
@@ -27,6 +28,7 @@ V13_RECOVERY_SCHEMA_REVISIONS = frozenset(
         PUBLIC_CONVERSATION_SCHEMA_REVISION,
         WORKSPACES_SCHEMA_REVISION,
         PRIVATE_MEMORY_SCHEMA_REVISION,
+        MEMORY_CORRECTION_SCHEMA_REVISION,
     }
 )
 SERVICE_ROLES = {
@@ -134,6 +136,7 @@ class ServiceReadiness:
                         PUBLIC_CONVERSATION_SCHEMA_REVISION,
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
+                        MEMORY_CORRECTION_SCHEMA_REVISION,
                     }
                 elif os.getenv("LUCY_TELEGRAM_STAGE") == "2":
                     expected_revisions = {
@@ -142,6 +145,7 @@ class ServiceReadiness:
                         PUBLIC_CONVERSATION_SCHEMA_REVISION,
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
+                        MEMORY_CORRECTION_SCHEMA_REVISION,
                     }
                     # The bridge release must remain healthy before and after
                     # the additive private-memory and public-conversation migrations.
@@ -153,6 +157,7 @@ class ServiceReadiness:
                         PUBLIC_CONVERSATION_SCHEMA_REVISION,
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
+                        MEMORY_CORRECTION_SCHEMA_REVISION,
                     }
             if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
