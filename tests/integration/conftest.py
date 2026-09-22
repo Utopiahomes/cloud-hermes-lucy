@@ -101,6 +101,21 @@ def disposable_roles() -> DisposableRoles:
             "tiamat.release_heads TO tiamat_release_manager"
         )
         owner.execute("GRANT SELECT ON tiamat.restore_gate TO tiamat_release_manager")
+        # As deployed: staging a grant records it, activating one projects it onto its partition.
+        owner.execute("GRANT SELECT, INSERT ON tiamat.grant_releases TO tiamat_release_manager")
+        owner.execute(
+            "GRANT UPDATE (activated_at) ON tiamat.grant_releases TO tiamat_release_manager"
+        )
+        owner.execute("GRANT SELECT ON tiamat.spending_partitions TO tiamat_release_manager")
+        owner.execute(
+            """
+            GRANT UPDATE (
+              active_grant_release_id, budget_period_id, allowance_microusd,
+              contingency_reserve_microusd, maximum_concurrency, largest_per_call_microusd,
+              blocked, block_reason, generation, updated_at
+            ) ON tiamat.spending_partitions TO tiamat_release_manager
+            """
+        )
         owner.execute(
             "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
         )

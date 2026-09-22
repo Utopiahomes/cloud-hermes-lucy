@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 
 from lucy.shared_execution.api import PATH, ApiRelease
 from lucy.shared_execution.auth import WorkloadIdentity
-from lucy.shared_execution.durable_service import ProfileCatalogue
 from lucy.shared_execution.idempotency import IdempotencyDigestRing
 from lucy.shared_execution.postgres_ledger import LedgerScope
 from lucy.shared_execution.recovery_anchor import (
@@ -45,8 +44,14 @@ from tests.integration.test_tiamat_gate1a_execution import (
     _identity,
     _ledger,
     _seed_environment,
-    _seed_signed_authority,
     _unblock,
+)
+from tests.integration.tiamat_signed_trust import (
+    AUTHORITY_ISSUER,
+    ROOT_KEY_ID,
+    SignedProfile,
+    SyntheticReleaseTrust,
+    install_signed_authority,
 )
 from tests.unit.test_shared_execution_api_rc1 import (
     ISSUER,
@@ -59,7 +64,11 @@ from tests.unit.test_shared_execution_api_rc1 import (
 
 
 @pytest.fixture
-def process_env(disposable_roles: DisposableRoles) -> _Environment:
+def signed_process(
+    disposable_roles: DisposableRoles,
+) -> tuple[_Environment, SyntheticReleaseTrust]:
+    """A throwaway environment whose profile, policy and grant are genuinely signed releases."""
+
     environment = f"g1p-{uuid4().hex[:8]}"
     storage_epoch = uuid4()
     with psycopg.connect(disposable_roles.owner) as owner:
@@ -85,12 +94,21 @@ def process_env(disposable_roles: DisposableRoles) -> _Environment:
         scope=scope,
         release_manager=disposable_roles.release_manager,
     )
-    _seed_signed_authority(
-        env,
-        profile=(PROFILE, RELEASE.release_id),
-        policy=(RELEASE.privacy_policy_id, RELEASE.privacy_policy_release_id),
+    trust = SyntheticReleaseTrust(environment, scope.caller_id, scope.realm)
+    install_signed_authority(
+        trust,
+        disposable_roles.release_manager,
+        disposable_roles.recovery,
+        SignedProfile(
+            profile_id=PROFILE,
+            release_id=RELEASE.release_id,
+            policy_id=RELEASE.privacy_policy_id,
+            policy_release_id=RELEASE.privacy_policy_release_id,
+            provider_route_id=RELEASE.provider_route_id,
+            rate_release_id=RELEASE.rate_release_id,
+        ),
     )
-    return env
+    return env, trust
 
 
 class _ObservedAnchor:
@@ -112,7 +130,10 @@ class _ObservedAnchor:
 
 
 def _configuration(
-    env: _Environment, anchor: _ObservedAnchor, private_key: Ed25519PrivateKey
+    env: _Environment,
+    trust: SyntheticReleaseTrust,
+    anchor: _ObservedAnchor,
+    private_key: Ed25519PrivateKey,
 ) -> ServedConfiguration:
     return ServedConfiguration(
         anchor=anchor,
@@ -129,7 +150,9 @@ def _configuration(
             keys={KEY_ID: private_key.public_key()},
             execution_profiles=frozenset({PROFILE}),
         ),
-        catalogue=ProfileCatalogue((RELEASE,)),
+        authority_issuer=AUTHORITY_ISSUER,
+        release_root_key_id=ROOT_KEY_ID,
+        release_root_public_key=trust.root_public_key,
         digests=IdempotencyDigestRing(DIGEST_KEY),
         transport=_CountingTransport(),
         release=ApiRelease(execution="tiamat-gate1.1", policy=RELEASE.release_id),
@@ -146,11 +169,12 @@ def _anchor(env: _Environment) -> _ObservedAnchor:
 
 
 def test_a_composed_process_serves_refreshes_retires_and_restarts(
-    process_env: _Environment,
+    signed_process: tuple[_Environment, SyntheticReleaseTrust],
 ) -> None:
+    process_env, trust = signed_process
     private_key = Ed25519PrivateKey.generate()
     anchor = _anchor(process_env)
-    configuration = _configuration(process_env, anchor, private_key)
+    configuration = _configuration(process_env, trust, anchor, private_key)
     raw, key = body(), uuid4()
 
     first = build_served_app(configuration)
@@ -183,11 +207,12 @@ def test_a_composed_process_serves_refreshes_retires_and_restarts(
 
 
 def test_a_refresh_that_finds_authority_withdrawn_closes_the_process(
-    process_env: _Environment,
+    signed_process: tuple[_Environment, SyntheticReleaseTrust],
 ) -> None:
+    process_env, trust = signed_process
     private_key = Ed25519PrivateKey.generate()
     anchor = _anchor(process_env)
-    configuration = _configuration(process_env, anchor, private_key)
+    configuration = _configuration(process_env, trust, anchor, private_key)
     served = build_served_app(configuration)
     raw = body()
 

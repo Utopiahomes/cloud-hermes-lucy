@@ -36,6 +36,7 @@ from lucy.shared_execution.durable_executor import (
 )
 from lucy.shared_execution.durable_service import (
     DurableExecutionService,
+    ProfileAuthority,
     ProfileCatalogue,
     ServedProfile,
     SignedProfileAuthority,
@@ -204,6 +205,7 @@ def _serve(
     transport: _CountingTransport | None = None,
     cache: InMemoryReplayCache | None = None,
     catalogue: ProfileCatalogue | None = None,
+    profiles: ProfileAuthority | None = None,
     transaction_probe: Callable[[str, Any], None] | None = None,
 ) -> _Served:
     """One serving process, brought up the way a deployed one is.
@@ -261,7 +263,11 @@ def _serve(
     )
     service = DurableExecutionService(
         executors={SUBJECT: executor},
-        profiles=SignedProfileAuthority(ledger, env.scope, catalogue),
+        profiles=(
+            profiles
+            if profiles is not None
+            else SignedProfileAuthority(ledger, env.scope, catalogue)
+        ),
         digests=IdempotencyDigestRing(DIGEST_KEY),
     )
     app = create_shared_execution_app(

@@ -182,6 +182,12 @@ class AuthorizedExecutionProfile:
     allowed_output_modes: frozenset[Literal["text", "json_schema"]]
     maximum_output_tokens: int
     maximum_reservable_microusd: int
+    # What serving needs from the same verified releases: the exact route and rates, the
+    # deadline ceiling, and the policy subject a revocation of the policy would target.
+    provider_route_id: str
+    rate_release_id: str
+    timeout_ceiling_ms: int
+    privacy_policy_id: str
 
 
 class ActiveAuthorityReader(Protocol):
@@ -289,6 +295,10 @@ def authorize_release_set(
         allowed_output_modes=frozenset(profile.content.allowed_output_modes),
         maximum_output_tokens=profile.content.maximum_output_tokens,
         maximum_reservable_microusd=profile.content.maximum_reservable_microusd,
+        provider_route_id=profile.content.provider_route_id,
+        rate_release_id=profile.content.rate_release_id,
+        timeout_ceiling_ms=profile.content.timeout_ceiling_ms,
+        privacy_policy_id=policy.content.policy_id,
     )
 
 

@@ -1,4 +1,13 @@
 {
+  "gate_1": {
+    "status": "closed",
+    "closed_as": "a successful disposable synthetic system proof; not a claim of full RC1 conformance or production readiness",
+    "closed_at_commit": "a3cb588",
+    "decided_by": "Lyra, via Ray, 2026-09-22",
+    "open_rc1_gaps": "as listed in known_gaps; provider deadlines and unknown-cost settlement stay on the pre-real-call list",
+    "outstanding_rerun": "test_c1_the_installed_head_refuses_under_current_trust, when AWS SSO is next refreshed",
+    "further_hardening": "none unless a later test exposes a material failure"
+  },
   "evidence_type": "tiamat_gate1_served_api",
   "date_utc": "2026-09-22",
   "scope": "RC1 inference.execute served through create_shared_execution_app onto the durable fenced ledger, on disposable infrastructure; synthetic in-process transport only",

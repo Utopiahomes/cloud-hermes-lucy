@@ -196,6 +196,11 @@ class PostgresSignedAuthorityStore:
                         raise AuthorityTransitionRejected("release_id_conflict")
                 if isinstance(item, SpendingGrantRelease):
                     grant = item.content
+                    # Grant rows are scoped by partition under row-level security.
+                    connection.execute(
+                        "SELECT set_config('tiamat.partition_id', %s, true)",
+                        (grant.partition_id,),
+                    )
                     connection.execute(
                         """
                         INSERT INTO tiamat.grant_releases (
@@ -385,6 +390,10 @@ class PostgresSignedAuthorityStore:
             ),
         )
         if release_type == "spending_grant":
+            # A grant's subject is its partition, which scopes both rows it projects between.
+            connection.execute(
+                "SELECT set_config('tiamat.partition_id', %s, true)", (subject_id,)
+            )
             projected = connection.execute(
                 """
                 UPDATE tiamat.spending_partitions p

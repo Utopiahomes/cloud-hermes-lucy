@@ -7,8 +7,8 @@ the ledger:
 1. ``start_serving`` reads the anchor, invokes the launcher when no claimant waits, and consumes
    exactly one claimant, which yields this process's fence and its runtime watch;
 2. the executor holds that fence, that watch and a fresh volatile replay cache;
-3. the service reads the current profile from signed authority in the ledger, and the private
-   API verifies callers against durable ``jti`` replay state;
+3. the service takes the current profile only from signed releases verified against the pinned
+   release root, and the private API verifies callers against durable ``jti`` replay state;
 4. while the process serves, the watch is refreshed on a fixed interval off the event loop;
 5. on shutdown intake closes and the fence is drained and retired, so the next process starts
    through the launcher rather than by taking over.
@@ -33,19 +33,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
 from lucy.shared_execution.api import ApiRelease, create_shared_execution_app
 from lucy.shared_execution.auth import WorkloadIdentity, WorkloadJwtVerifier
 from lucy.shared_execution.durable_executor import DurableExecutor, ExecutionRefused
-from lucy.shared_execution.durable_service import (
-    DurableExecutionService,
-    ProfileCatalogue,
-    SignedProfileAuthority,
-    TransportProvider,
-)
+from lucy.shared_execution.durable_service import DurableExecutionService, TransportProvider
 from lucy.shared_execution.idempotency import IdempotencyDigestRing
+from lucy.shared_execution.postgres_authority import PostgresSignedAuthorityStore
 from lucy.shared_execution.postgres_ledger import (
     LedgerScope,
     PostgresExecutionLedger,
@@ -60,6 +57,7 @@ from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
 )
+from lucy.shared_execution.verified_profiles import VerifiedProfileAuthority
 from lucy.shared_execution.wire import ExecutionRequest, ExecutionResponse
 
 logger = logging.getLogger(__name__)
@@ -76,7 +74,9 @@ class ServedConfiguration:
     recovery_generation: int
     scope: LedgerScope
     workload: WorkloadIdentity
-    catalogue: ProfileCatalogue
+    authority_issuer: str
+    release_root_key_id: str
+    release_root_public_key: Ed25519PublicKey
     digests: IdempotencyDigestRing
     transport: ProviderTransport
     release: ApiRelease
@@ -202,7 +202,14 @@ def build_served_app(
         )
         service = DurableExecutionService(
             executors={configuration.workload.subject: executor},
-            profiles=SignedProfileAuthority(ledger, configuration.scope, configuration.catalogue),
+            profiles=VerifiedProfileAuthority(
+                store=PostgresSignedAuthorityStore(configuration.runtime_database_url),
+                scope=configuration.scope,
+                authority_issuer=configuration.authority_issuer,
+                root_key_id=configuration.release_root_key_id,
+                root_public_key=configuration.release_root_public_key,
+                clock=clock,
+            ),
             digests=configuration.digests,
             clock=clock,
         )
