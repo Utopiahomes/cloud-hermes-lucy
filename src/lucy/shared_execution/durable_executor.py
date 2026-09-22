@@ -12,6 +12,7 @@ terminal settlement; profile authority, wire validation and the HTTP surface sta
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,7 +27,11 @@ from lucy.shared_execution.postgres_ledger import (
     LedgerScope,
     PostgresExecutionLedger,
 )
-from lucy.shared_execution.replay_cache import ReplayCache, require_matching_response
+from lucy.shared_execution.replay_cache import (
+    ReplayCache,
+    ReplayOutputMismatch,
+    require_matching_response,
+)
 from lucy.shared_execution.runtime_anchor_watch import (
     RuntimeAnchorWatch,
     RuntimeAuthorityClosed,
@@ -40,9 +45,19 @@ class ExecutionRefused(RuntimeError):
 class IdempotencyRecoveryUnavailable(RuntimeError):
     """RC1's 409 idempotency_recovery_unavailable: completed durably, body no longer held."""
 
-    def __init__(self, execution_id: UUID) -> None:
+    def __init__(self, record: LedgerRecord) -> None:
         super().__init__("idempotency_recovery_unavailable")
-        self.execution_id = execution_id
+        self.record = record
+        self.execution_id = record.execution_id
+
+
+class ReplayInvalidated(RuntimeError):
+    """RC1's 409 execution_invalidated: the completion stands, but may no longer be replayed."""
+
+    def __init__(self, record: LedgerRecord) -> None:
+        super().__init__("execution_invalidated")
+        self.record = record
+        self.execution_id = record.execution_id
 
 
 @dataclass(frozen=True)
@@ -62,9 +77,13 @@ class ProviderOutcome:
 
 
 class DispatchedProvider(Protocol):
-    """Invoked only with a record the ledger has already committed as dispatched."""
+    """Invoked only with a record the ledger has already committed as dispatched.
 
-    def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome: ...
+    ``work`` is what the caller handed ``execute`` for this one execution - the validated
+    request, for the served API. It reaches the provider only through a committed dispatch.
+    """
+
+    def __call__(self, dispatched: LedgerRecord, work: Any) -> ProviderOutcome: ...
 
 
 @dataclass(frozen=True)
@@ -75,6 +94,8 @@ class ExecutionOutcome:
     settled_microusd: int | None
     replayed: bool
     response_body: Any | None = None
+    reserved_microusd: int | None = None
+    failure_code: str | None = None
 
 
 class DurableExecutor:
@@ -104,6 +125,49 @@ class DurableExecutor:
         self._intake_closed = False
         self._lock = threading.Lock()
 
+    @property
+    def replays_responses(self) -> bool:
+        return self._replay_cache is not None
+
+    def lookup(
+        self,
+        *,
+        operation: str,
+        contract_major: int,
+        identity_digest: str,
+        idempotency_key_digests: tuple[str, ...],
+    ) -> LedgerRecord | None:
+        """RC1 step 10: find the record a key already names, without admitting anything."""
+
+        self._require_authority()
+        return self._ledger.find_existing(
+            self._scope,
+            operation=operation,
+            contract_major=contract_major,
+            identity_digest=identity_digest,
+            idempotency_key_digests=idempotency_key_digests,
+        )
+
+    def replay(
+        self,
+        record: LedgerRecord,
+        *,
+        idempotency_key_digest: str,
+        replay_eligible: Callable[[LedgerRecord], bool] | None = None,
+    ) -> ExecutionOutcome:
+        """Answer a duplicate from its durable record, and from the cache only when eligible."""
+
+        return ExecutionOutcome(
+            execution_id=record.execution_id,
+            state=record.state,
+            settlement_status=record.settlement_status,
+            settled_microusd=record.settled_microusd,
+            replayed=True,
+            response_body=self._replayed_body(idempotency_key_digest, record, replay_eligible),
+            reserved_microusd=record.reserved_microusd,
+            failure_code=record.failure_code,
+        )
+
     def _require_authority(self) -> None:
         if self._watch is None:
             return
@@ -129,7 +193,14 @@ class DurableExecutor:
         except (DispatchBlocked, DurableFenceRejected) as exc:
             raise ExecutionRefused(str(exc) or type(exc).__name__) from exc
 
-    def execute(self, admission: LedgerAdmission, *, now: datetime) -> ExecutionOutcome:
+    def execute(
+        self,
+        admission: LedgerAdmission,
+        *,
+        now: datetime,
+        work: Any = None,
+        replay_eligible: Callable[[LedgerRecord], bool] | None = None,
+    ) -> ExecutionOutcome:
         with self._lock:
             if self._intake_closed:
                 raise ExecutionRefused("intake is closed for shutdown")
@@ -148,13 +219,10 @@ class DurableExecutor:
         if not created:
             # A settled execution replays from the ledger. An unsettled one belongs to whoever
             # holds its lease; this executor does not race it to the provider.
-            return ExecutionOutcome(
-                execution_id=record.execution_id,
-                state=record.state,
-                settlement_status=record.settlement_status,
-                settled_microusd=record.settled_microusd,
-                replayed=True,
-                response_body=self._replayed_body(admission, record),
+            return self.replay(
+                record,
+                idempotency_key_digest=admission.idempotency_key_digest,
+                replay_eligible=replay_eligible,
             )
         try:
             dispatched = self._ledger.dispatch(
@@ -188,7 +256,7 @@ class DurableExecutor:
                     owner_id=admission.owner_id,
                 )
             raise
-        outcome = self._provider(dispatched)
+        outcome = self._provider(dispatched, work)
         # Hold the body in volatile memory before the ledger calls this complete, so a clean
         # completion always has its replay available for the window RC1 allows. The window runs
         # from admission. The ledger records only the body's digest, never the body.
@@ -219,26 +287,55 @@ class DurableExecutor:
             settlement_status=settled.settlement_status,
             settled_microusd=settled.settled_microusd,
             replayed=False,
-            response_body=outcome.response_body,
+            # The ledger can turn a reported success into a failure, as it does for an overrun.
+            # Only a durably completed execution returns its body.
+            response_body=outcome.response_body if settled.state == "completed" else None,
+            reserved_microusd=settled.reserved_microusd,
+            failure_code=settled.failure_code,
         )
 
-    def _replayed_body(self, admission: LedgerAdmission, record: LedgerRecord) -> Any | None:
-        """Serve a replayed body only when the ledger and the cache agree on what it was.
+    def _replayed_body(
+        self,
+        idempotency_key_digest: str,
+        record: LedgerRecord,
+        replay_eligible: Callable[[LedgerRecord], bool] | None,
+    ) -> Any | None:
+        """Serve a replayed body only when it is eligible and the ledger and cache agree on it.
 
-        With the body gone, RC1 already defines the reply: the durable completion stands, the
-        result is no longer available, and nothing is dispatched again under this key.
+        Eligibility is settled before the cache is read, so content that may no longer be served
+        is never touched. With the body gone, RC1 already defines the reply: the durable
+        completion stands, the result is no longer available, and nothing is dispatched again.
         """
 
-        if self._replay_cache is None or record.state != "completed":
+        if record.state != "completed":
             return None
-        cached = self._replay_cache.get(
-            caller_id=self._scope.caller_id,
-            idempotency_key_digest=admission.idempotency_key_digest,
+        if (
+            record.settlement_status == "settlement_overrun"
+            or (replay_eligible is not None and not replay_eligible(record))
+            or self._ledger.route_quarantined(
+                self._scope,
+                provider_route_id=record.provider_route_id,
+                rate_release_id=record.rate_release_id,
+            )
+        ):
+            raise ReplayInvalidated(record)
+        cached = (
+            None
+            if self._replay_cache is None
+            else self._replay_cache.get(
+                caller_id=self._scope.caller_id,
+                idempotency_key_digest=idempotency_key_digest,
+            )
         )
         if cached is None:
-            # The window passed, the entry was evicted, or this process restarted. The execution,
-            # its accounting and its deduplication are unaffected; only the body is gone.
-            raise IdempotencyRecoveryUnavailable(record.execution_id)
-        return require_matching_response(
-            cached, execution_id=record.execution_id, ledger_digest=record.response_body_sha256
-        )
+            # The window passed, the entry was evicted, the process restarted, or this executor
+            # holds no cache at all. The execution, its accounting and its deduplication are
+            # unaffected; only the body is gone, and a completion is never answered without one.
+            raise IdempotencyRecoveryUnavailable(record)
+        try:
+            return require_matching_response(
+                cached, execution_id=record.execution_id, ledger_digest=record.response_body_sha256
+            )
+        except ReplayOutputMismatch as exc:
+            # A body the ledger does not vouch for is no recovery of the durable result.
+            raise IdempotencyRecoveryUnavailable(record) from exc

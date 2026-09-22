@@ -9,6 +9,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
@@ -27,10 +28,10 @@ from lucy.shared_execution.auth import (
 from lucy.shared_execution.service import (
     ExecutionFailure,
     ExecutionInProgress,
+    ExecutionRejected,
     IdempotencyConflict,
-    SharedExecutionService,
 )
-from lucy.shared_execution.wire import CostReceipt, ExecutionRequest
+from lucy.shared_execution.wire import CostReceipt, ExecutionRequest, ExecutionResponse
 
 PATH = "/execution/v1/inference"
 UUID4 = re.compile(
@@ -110,6 +111,30 @@ ERRORS: dict[str, tuple[int, str, bool]] = {
 }
 
 
+# RC1 section 16: the only codes that carry Retry-After.
+RETRY_AFTER_CODES = frozenset(
+    {
+        "request_in_progress",
+        "rate_limited",
+        "authentication_state_unavailable",
+        "state_store_unavailable",
+        "temporarily_unavailable",
+    }
+)
+
+
+class ExecutionService(Protocol):
+    def execute(
+        self,
+        *,
+        caller: str,
+        idempotency_key: str,
+        request_id: UUID,
+        request: ExecutionRequest,
+        timeout_ms: int | None = None,
+    ) -> ExecutionResponse: ...
+
+
 @dataclass(frozen=True)
 class ApiRelease:
     execution: str
@@ -117,7 +142,7 @@ class ApiRelease:
 
 
 def create_shared_execution_app(
-    service: SharedExecutionService,
+    service: ExecutionService,
     verifier: WorkloadJwtVerifier,
     release: ApiRelease,
     *,
@@ -212,6 +237,20 @@ def create_shared_execution_app(
                 idempotency_key=idempotency_key,
                 request_id=request_id,
                 request=request,
+                timeout_ms=timeout,
+            )
+        except ExecutionRejected as exc:
+            return _error(
+                exc.code,
+                request_id=request_id_text,
+                release=release,
+                retry_after=1 if exc.code in RETRY_AFTER_CODES else None,
+                execution=(
+                    None
+                    if exc.execution_id is None or exc.execution_state is None
+                    else (exc.execution_id, exc.execution_state)
+                ),
+                cost=exc.cost,
             )
         except IdempotencyConflict:
             return _error("idempotency_conflict", request_id=request_id_text, release=release)

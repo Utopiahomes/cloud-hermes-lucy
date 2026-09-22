@@ -24,6 +24,7 @@ from psycopg.types.json import Jsonb
 from lucy.shared_execution.durable_executor import (
     DurableExecutor,
     ExecutionRefused,
+    IdempotencyRecoveryUnavailable,
     ProviderOutcome,
 )
 from lucy.shared_execution.postgres_ledger import (
@@ -84,7 +85,7 @@ class _SyntheticProvider:
         self.dispatched_states: list[str] = []
         self.last_cost_microusd = 137
 
-    def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome:
+    def __call__(self, dispatched: LedgerRecord, work: object = None) -> ProviderOutcome:
         self.dispatched_states.append(dispatched.state)
         reference = f"synthetic:{dispatched.execution_id}:{self.last_cost_microusd}"
         return ProviderOutcome(
@@ -537,11 +538,14 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
     assert provider.dispatched_states == ["dispatched"]
     trace.record("provider_called_after_commit", dispatched_state=provider.dispatched_states[0])
 
-    # 4. Replay of the same idempotency key returns the settled execution and reaches no provider.
-    replay = executor.execute(admission, now=now)
-    assert replay.replayed and replay.execution_id == outcome.execution_id
+    # 4. A duplicate of the same idempotency key reaches no provider. This executor holds no
+    # volatile body, so RC1 answers the durable completion with idempotency_recovery_unavailable
+    # rather than an empty success; the served API's body replay is proven in its own tests.
+    with pytest.raises(IdempotencyRecoveryUnavailable) as unavailable:
+        executor.execute(admission, now=now)
+    assert unavailable.value.execution_id == outcome.execution_id
     assert len(provider.dispatched_states) == 1
-    trace.record("replay_idempotent", execution_id_matches=True)
+    trace.record("replay_idempotent", execution_id_matches=True, body="recovery_unavailable")
 
     # 8. Clean shutdown retires this fence without quarantining, so a launcher can issue the
     # next claimant. Blocking dispatch is quarantine, and an ordinary stop is not that.

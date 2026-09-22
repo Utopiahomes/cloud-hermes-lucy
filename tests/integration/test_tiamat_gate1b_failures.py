@@ -817,8 +817,8 @@ def _cache() -> InMemoryReplayCache:
 class _AnsweringProvider(_SyntheticProvider):
     """A synthetic provider that returns a replayable body as well as a cost."""
 
-    def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome:
-        outcome = super().__call__(dispatched)
+    def __call__(self, dispatched: LedgerRecord, work: object = None) -> ProviderOutcome:
+        outcome = super().__call__(dispatched, work)
         return replace(
             outcome,
             response_body={
@@ -951,8 +951,12 @@ def test_a_cached_body_from_another_execution_is_not_served(gate1b: _Environment
     )
     cache._entries[(gate1b.scope.caller_id, admission.idempotency_key_digest)] = forged
 
-    with pytest.raises(ReplayOutputMismatch, match="another execution"):
+    # Content the ledger does not vouch for is no recovery of the result: RC1's 409.
+    with pytest.raises(IdempotencyRecoveryUnavailable) as refused:
         _serve(gate1b, generation, admission, cache)
+    assert isinstance(refused.value.__cause__, ReplayOutputMismatch)
+    assert "another execution" in str(refused.value.__cause__)
+    assert refused.value.execution_id == first.execution_id
 
 
 def test_a_cached_body_that_does_not_hash_to_the_ledger_digest_is_not_served(
@@ -969,6 +973,7 @@ def test_a_cached_body_that_does_not_hash_to_the_ledger_digest_is_not_served(
     )
     cache._entries[key] = tampered
 
-    with pytest.raises(ReplayOutputMismatch):
+    with pytest.raises(IdempotencyRecoveryUnavailable) as refused:
         _serve(gate1b, generation, admission, cache)
+    assert isinstance(refused.value.__cause__, ReplayOutputMismatch)
     assert first.execution_id == tampered.execution_id

@@ -84,6 +84,30 @@ class ExecutionFailure(RuntimeError):
         self.cost = cost
 
 
+class ExecutionRejected(RuntimeError):
+    """An RC1 error code, with the execution and receipt only when authoritative state has them.
+
+    RC1 section 16 includes ``execution`` and ``cost`` only when the authoritative store
+    establishes them, so both are optional here and are never filled from local memory.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        execution_id: UUID | None = None,
+        execution_state: str | None = None,
+        cost: CostReceipt | None = None,
+    ) -> None:
+        super().__init__(code)
+        if (execution_id is None) != (execution_state is None):
+            raise ValueError("an execution needs both its id and its state")
+        self.code = code
+        self.execution_id = execution_id
+        self.execution_state = execution_state
+        self.cost = cost
+
+
 class InMemoryExecutionStore:
     """Atomic local test store; replace with durable fenced state before deployment."""
 
@@ -179,7 +203,10 @@ class SharedExecutionService:
         idempotency_key: str,
         request_id: UUID,
         request: ExecutionRequest,
+        timeout_ms: int | None = None,
     ) -> ExecutionResponse:
+        # The local store has no deadline; the durable service applies ``timeout_ms``.
+        del timeout_ms
         profile = self._profiles.get(request.execution_profile_id)
         if profile is None:
             raise PermissionError("execution profile is not authorized for this route")
@@ -216,7 +243,7 @@ class SharedExecutionService:
         # it, while the production adapter must add fencing, leases, and ambiguous-commit recovery.
         self._store.transition(caller, idempotency_key, "admitted", "dispatched")
         result = self._transport.execute(request, profile)
-        if not _provider_accounting_is_valid(result):
+        if not provider_accounting_is_valid(result):
             self._fail_after_dispatch(
                 caller,
                 idempotency_key,
@@ -234,54 +261,17 @@ class SharedExecutionService:
                 settled_microusd=result.cost_microusd,
                 settlement_status="settlement_overrun",
             )
-        if result.generated_tokens > request.limits.max_output_tokens:
+        output_failure = provider_output_failure(request, result)
+        if output_failure is not None:
             self._fail_after_dispatch(
                 caller,
                 idempotency_key,
                 record,
-                "output_limit_reached",
+                output_failure,
                 settled_microusd=result.cost_microusd,
             )
 
         output_mode = request.output.mode
-        if output_mode == "text" and not isinstance(result.content, str):
-            self._fail_after_dispatch(
-                caller,
-                idempotency_key,
-                record,
-                "provider_response_invalid",
-                settled_microusd=result.cost_microusd,
-            )
-        if isinstance(result.content, str) and len(result.content.encode("utf-8")) > 65_536:
-            self._fail_after_dispatch(
-                caller,
-                idempotency_key,
-                record,
-                "provider_response_too_large",
-                settled_microusd=result.cost_microusd,
-            )
-        if isinstance(request.output, JsonSchemaOutput) and (
-            not isinstance(result.content, dict)
-            or not validate_output(request.output.schema_, result.content)
-        ):
-            self._fail_after_dispatch(
-                caller,
-                idempotency_key,
-                record,
-                "provider_response_invalid",
-                settled_microusd=result.cost_microusd,
-            )
-        if isinstance(result.content, dict):
-            output_bytes = canonical_json_bytes(result.content)
-            if len(output_bytes) > 65_536:
-                self._fail_after_dispatch(
-                    caller,
-                    idempotency_key,
-                    record,
-                    "provider_response_too_large",
-                    settled_microusd=result.cost_microusd,
-                )
-
         response = ExecutionResponse(
             contract="stoin.inference.execute.response.v1",
             request_id=request_id,
@@ -350,6 +340,30 @@ class SharedExecutionService:
         )
 
 
+def provider_output_failure(request: ExecutionRequest, result: ProviderResult) -> str | None:
+    """The RC1 code for a candidate that cannot be delivered, or None when it can.
+
+    These are the checks after accounting and cost: the output bound, the requested mode and
+    schema, and the candidate's byte bounds. The complete-envelope bound is checked separately,
+    once the envelope exists.
+    """
+
+    if result.generated_tokens > request.limits.max_output_tokens:
+        return "output_limit_reached"
+    if request.output.mode == "text" and not isinstance(result.content, str):
+        return "provider_response_invalid"
+    if isinstance(result.content, str) and len(result.content.encode("utf-8")) > 65_536:
+        return "provider_response_too_large"
+    if isinstance(request.output, JsonSchemaOutput) and (
+        not isinstance(result.content, dict)
+        or not validate_output(request.output.schema_, result.content)
+    ):
+        return "provider_response_invalid"
+    if isinstance(result.content, dict) and len(canonical_json_bytes(result.content)) > 65_536:
+        return "provider_response_too_large"
+    return None
+
+
 def canonical_identity(request: ExecutionRequest) -> str:
     """Hash the RFC 8785 canonical request identity used by idempotency."""
 
@@ -358,7 +372,7 @@ def canonical_identity(request: ExecutionRequest) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _provider_accounting_is_valid(result: ProviderResult) -> bool:
+def provider_accounting_is_valid(result: ProviderResult) -> bool:
     exact_integers = (result.input_tokens, result.generated_tokens, result.cost_microusd)
     if any(
         not isinstance(value, int) or isinstance(value, bool) or value < 0

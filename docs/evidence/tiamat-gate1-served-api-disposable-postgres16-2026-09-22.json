@@ -1,0 +1,108 @@
+{
+  "evidence_type": "tiamat_gate1_served_api",
+  "date_utc": "2026-09-22",
+  "scope": "RC1 inference.execute served through create_shared_execution_app onto the durable fenced ledger, on disposable infrastructure; synthetic in-process transport only",
+  "resource": {
+    "render_id": "dpg-danvd8uk1f9s73a3v2og-a",
+    "name": "tiamat-m2-floor-disposable-20260920",
+    "plan": "free",
+    "postgres_major": 16,
+    "migrated_to": "0015_replay_cache",
+    "disposition": "retained; deletion awaits Ray's explicit confirmation"
+  },
+  "path_exercised": [
+    "HTTP request through create_shared_execution_app: authentication, header, size, digest and schema checks unchanged",
+    "each serving process started by start_serving: anchor read, launcher when no claimant waits, one claimant consumed",
+    "DurableExecutionService: profile compatibility, RFC 8785 canonical identity, keyed idempotency digests, read-only step-10 lookup",
+    "DurableExecutor holding the process's fence, runtime watch and bounded in-memory replay cache",
+    "PostgresExecutionLedger on the disposable database; the ledger stores the response digest and no content"
+  ],
+  "cases": [
+    {
+      "case": "original response",
+      "result": "passed",
+      "detail": "200 with replayed false, validated against the frozen response schema, settled at the synthetic charge. One provider request."
+    },
+    {
+      "case": "eligible replay",
+      "result": "passed",
+      "detail": "The one permitted retry (same body and key, fresh token and request ID) returns 200 with replayed true, the new request ID, and the original execution ID, output, usage, profile release and cost. Provider requests remain one."
+    },
+    {
+      "case": "restart loses the body",
+      "result": "passed",
+      "detail": "A second process from the same anchor runs the launcher, takes a higher fence and has an empty cache. The duplicate returns 409 idempotency_recovery_unavailable with the completed execution and its settled receipt, no Retry-After, and the new process makes no provider request. One record exists."
+    },
+    {
+      "case": "expired body",
+      "result": "passed",
+      "detail": "Ten minutes after admission by the cache's clock the body is gone and the duplicate returns 409 idempotency_recovery_unavailable. No second provider request."
+    },
+    {
+      "case": "successor profile release",
+      "result": "passed",
+      "detail": "Activating a successor release of the same profile and route makes the duplicate 409 execution_invalidated with the completed execution and receipt. Eligibility is decided before the cache is read. No second provider request."
+    },
+    {
+      "case": "withdrawn profile",
+      "result": "passed",
+      "detail": "With no active release, the duplicate returns 409 execution_invalidated, and a new key returns 503 privacy_route_unavailable with no execution or cost and creates no record. No second provider request."
+    },
+    {
+      "case": "quarantined route",
+      "result": "passed",
+      "detail": "An active route and rate quarantine makes the duplicate 409 execution_invalidated. No second provider request."
+    },
+    {
+      "case": "terminal failure",
+      "result": "passed",
+      "detail": "An unusable candidate commits failed and returns 502 provider_response_invalid with the failed execution and settled receipt; the duplicate returns the same stored error and receipt. One provider request."
+    },
+    {
+      "case": "duplicate while running",
+      "result": "passed",
+      "detail": "A duplicate arriving while the original is dispatched returns 409 request_in_progress with Retry-After 1, the dispatched execution and a pending_reconciliation receipt. The original then completes with the same execution ID. One provider request."
+    },
+    {
+      "case": "closed runtime latch",
+      "result": "passed",
+      "detail": "Once the watch closes, both a new key and a duplicate return 503 state_store_unavailable with no execution or cost; nothing is admitted and no provider request is made."
+    },
+    {
+      "case": "every serving configuration holds the cache",
+      "result": "passed",
+      "detail": "DurableExecutionService refuses an executor without a replay cache, and an executor without one answers a completed duplicate with IdempotencyRecoveryUnavailable, never an empty success."
+    }
+  ],
+  "provider_requests_by_replay_cases": 0,
+  "suite": {
+    "full_suite": "1419 passed, 283 skipped; the skips are older vertical-slice tests that need a different integration database",
+    "served_api_cases": "11 passed",
+    "ruff": "passed",
+    "mypy_src": "passed"
+  },
+  "interpretations_for_review": [
+    "RC1 section 6.3 places capability authorization at step 8. That remains the static allowlist on the workload identity. A profile with no active release is treated as policy state: a duplicate gets step-10 execution_invalidated, as section 11 requires, and a new key gets step-11 privacy_route_unavailable. Please confirm or correct the new-key code.",
+    "A cached body that disagrees with the ledger's execution ID or digest is answered as idempotency_recovery_unavailable, since the durable result cannot be recovered from it."
+  ],
+  "known_gaps": [
+    "A duplicate while active returns request_in_progress immediately. RC1 section 11's bounded wait for a state change before answering is not implemented.",
+    "A provider result without an exact charge leaves the record dispatched for the lease reaper, which resolves it to outcome_unknown, and the request returns state_store_unavailable. settle_terminal has no failed-with-pending_reconciliation path for provider_response_invalid.",
+    "The HTTP endpoint is async and calls the blocking service inline, so a slow provider or database call blocks the event loop. It needs to run in a worker thread before real traffic.",
+    "The served proofs compose start_serving, the executor, the service and the app in the test. There is no deployable entrypoint that does this composition yet.",
+    "The completed commit does not recheck the eligibility generation (RC1 section 11); a revocation between dispatch and settlement is not yet mapped."
+  ],
+  "unchanged_live_state": {
+    "commissioned_staging_anchor_version": 2,
+    "commissioned_staging_ledger": "not connected; remains at 0006 and dispatch-blocked",
+    "staging_services": "all three suspended",
+    "provider_requests": 0,
+    "model_spending_microusd": 0
+  },
+  "remaining_matrix": [
+    "stale restore through a Render point-in-time restore, which needs its own disposable instance",
+    "attestation races under heavier concurrency than two threads",
+    "clock rollback and excessive clock uncertainty",
+    "applying 0014 and 0015 by Alembic to a genuinely fresh database"
+  ]
+}

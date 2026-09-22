@@ -121,6 +121,9 @@ class LedgerRecord:
     provider_route_id: str
     rate_release_id: str
     response_body_sha256: str | None = None
+    # What the record was admitted under, so a replay can be checked against current authority.
+    execution_profile_id: str | None = None
+    profile_release_id: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> LedgerRecord:
@@ -140,6 +143,8 @@ class LedgerRecord:
             provider_route_id=row["provider_route_id"],
             rate_release_id=row["rate_release_id"],
             response_body_sha256=row.get("response_body_sha256"),
+            execution_profile_id=row.get("execution_profile_id"),
+            profile_release_id=row.get("profile_release_id"),
         )
 
 
@@ -147,7 +152,8 @@ _RECORD_COLUMNS = """
 execution_id, identity_digest, state, coordinator_generation, record_generation,
 lease_owner_id, lease_expires_at, execution_deadline, reserved_microusd,
 settlement_status, settled_microusd, failure_code,
-provider_route_id, rate_release_id, response_body_sha256
+provider_route_id, rate_release_id, response_body_sha256,
+execution_profile_id, profile_release_id
 """
 
 
@@ -607,6 +613,104 @@ class PostgresExecutionLedger:
             raise
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
+
+    def find_existing(
+        self,
+        scope: LedgerScope,
+        *,
+        operation: str,
+        contract_major: int,
+        identity_digest: str,
+        idempotency_key_digests: tuple[str, ...],
+    ) -> LedgerRecord | None:
+        """Read-only step-10 lookup: the record this scoped key already names, if any.
+
+        It takes no lock and changes nothing, so it can answer a duplicate even when no profile
+        is currently active to admit a new execution under. A key naming a different canonical
+        request is a conflict, as it is at admission.
+        """
+
+        if not idempotency_key_digests or not all(
+            _is_hex_digest(digest) for digest in idempotency_key_digests
+        ):
+            raise ValueError("idempotency key digests are invalid")
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    rows = connection.execute(
+                        f"""
+                        SELECT {_RECORD_COLUMNS}
+                        FROM tiamat.execution_records
+                        WHERE issuer = %s AND caller_id = %s AND realm = %s
+                          AND environment = %s AND operation = %s AND contract_major = %s
+                          AND execution_id IN (
+                            SELECT execution_id FROM tiamat.execution_idempotency_aliases
+                            WHERE issuer = %s AND caller_id = %s AND realm = %s
+                              AND environment = %s AND operation = %s AND contract_major = %s
+                              AND idempotency_key_digest = ANY(%s)
+                          )
+                        """,
+                        (
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            operation,
+                            contract_major,
+                            scope.issuer,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.environment,
+                            operation,
+                            contract_major,
+                            list(idempotency_key_digests),
+                        ),
+                    ).fetchall()
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+        if len(rows) > 1:
+            raise DurableIdempotencyConflict
+        if not rows:
+            return None
+        record = LedgerRecord.from_row(rows[0])
+        if record.identity_digest != identity_digest:
+            raise DurableIdempotencyConflict
+        return record
+
+    def route_quarantined(
+        self, scope: LedgerScope, *, provider_route_id: str, rate_release_id: str
+    ) -> bool:
+        """Whether this exact route and rate release is quarantined for the partition."""
+
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    row = connection.execute(
+                        """
+                        SELECT 1
+                        FROM tiamat.route_rate_quarantines
+                        WHERE environment = %s AND caller_id = %s AND realm = %s
+                          AND partition_id = %s AND provider_route_id = %s
+                          AND rate_release_id = %s AND cleared_at IS NULL
+                        """,
+                        (
+                            scope.environment,
+                            scope.caller_id,
+                            scope.realm,
+                            scope.partition_id,
+                            provider_route_id,
+                            rate_release_id,
+                        ),
+                    ).fetchone()
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+        return row is not None
 
     def digest_key_version_in_use(self, scope: LedgerScope, version: str) -> bool:
         """Return whether a retained idempotency alias still depends on this key version."""
