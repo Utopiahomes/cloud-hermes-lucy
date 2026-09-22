@@ -63,10 +63,19 @@ inspect remote state and the rollback snapshot before any retry. No credentials 
   authorization before cloud access, and restoration of both environments after an uncertain
   second write. Ruff and strict mypy pass for the staging operator.
 - Schema/runtime sources in this image are based on `a04eef6` plus the current local increment;
-  source has not yet been published to a deployment branch. The image is locally built, not
-  deployed. The staging tool is a local operator utility, not copied into the service image.
+  source is locally committed as `92c75b6fac5dabe795dafc15716637e8440d35a8` on
+  `codex/personal-lucy-memory-20260922`. The image is locally built, not deployed. The
+  staging tool is a local operator utility, not copied into the service image.
 
-After staging, publish/pin the release, advance the quarantined Raymond database through 0073
+The branch is **not published**. The existing origin is
+`https://github.com/Utopiahomes/cloud-hermes-lucy.git`, and its shared branch resolves to
+the exact base commit `a04eef6`. All 16 committed paths are code, tests or documentation;
+the credential stage and rollback files are ignored by Git. Automatic approval review still
+rejected the push because the remote was not independently verified as a trusted private
+organization repository and Ray has not explicitly authorized export of this branch's code
+and documentation. Do not try another route to publish without that authorization.
+
+After a specifically authorized branch push, pin the release, advance the quarantined Raymond database through 0073
 using the existing migration-only operator, and re-run the content-free head verifier. Preserve
 the additive correction ledger on rollback; suspend services and quarantine admission rather
 than downgrading it. Prepare the bounded synthetic cloud execution before opening private
