@@ -44,8 +44,9 @@ class ProviderOutcome:
     settled_microusd: int
     cost_reference_digest: str | None = None
     failure_code: str | None = None
-    # The replayable body. It goes to the cache, never to the ledger, which keeps only its digest.
-    output: Any | None = None
+    # The replayable response body: the output object and its usage counts. It goes to
+    # the cache, never to the ledger, which keeps only its digest.
+    response_body: Any | None = None
 
     @property
     def state(self) -> str:
@@ -65,7 +66,7 @@ class ExecutionOutcome:
     settlement_status: str
     settled_microusd: int | None
     replayed: bool
-    output: Any | None = None
+    response_body: Any | None = None
 
 
 class DurableExecutor:
@@ -147,7 +148,7 @@ class DurableExecutor:
                 settlement_status=record.settlement_status,
                 settled_microusd=record.settled_microusd,
                 replayed=True,
-                output=self._replayed_output(admission, record),
+                response_body=self._replayed_body(admission, record),
             )
         try:
             dispatched = self._ledger.dispatch(
@@ -186,12 +187,12 @@ class DurableExecutor:
         # produce a clean completion whose replay cannot be honoured; an orphaned cache entry
         # after a failed settlement is harmless and expires on its own.
         response_digest: str | None = None
-        if self._replay_cache is not None and outcome.output is not None:
+        if self._replay_cache is not None and outcome.response_body is not None:
             response_digest = self._replay_cache.put(
                 caller_id=self._scope.caller_id,
                 idempotency_key_digest=admission.idempotency_key_digest,
                 execution_id=record.execution_id,
-                output=outcome.output,
+                response_body=outcome.response_body,
                 expires_at=now + self._replay_window,
             )
         settled = self._ledger.settle_terminal(
@@ -204,7 +205,7 @@ class DurableExecutor:
             settled_microusd=outcome.settled_microusd,
             failure_code=outcome.failure_code,
             provider_cost_reference_digest=outcome.cost_reference_digest,
-            response_output_sha256=response_digest,
+            response_body_sha256=response_digest,
         )
         return ExecutionOutcome(
             execution_id=settled.execution_id,
@@ -212,10 +213,10 @@ class DurableExecutor:
             settlement_status=settled.settlement_status,
             settled_microusd=settled.settled_microusd,
             replayed=False,
-            output=outcome.output,
+            response_body=outcome.response_body,
         )
 
-    def _replayed_output(self, admission: LedgerAdmission, record: LedgerRecord) -> Any | None:
+    def _replayed_body(self, admission: LedgerAdmission, record: LedgerRecord) -> Any | None:
         """Serve a replayed body only when the ledger and the cache agree on what it was."""
 
         if self._replay_cache is None or record.state != "completed":
@@ -228,4 +229,4 @@ class DurableExecutor:
             # The replay window has passed, or the cache was lost. The execution and its
             # accounting are unaffected; only the body is gone.
             raise ExecutionRefused("replayable output is no longer retained")
-        return require_matching_output(cached, record.response_output_sha256)
+        return require_matching_output(cached, record.response_body_sha256)

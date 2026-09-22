@@ -1,11 +1,11 @@
-"""The ephemeral output a replay needs, kept apart from the ledger that records the execution.
+"""The ephemeral response body a replay needs, kept apart from the ledger that records it.
 
 The interface is deliberately small - put, get, expire - so the backing store can be replaced
 without touching its callers. Today it is a table beside the ledger; the content may later belong
 to the realm rather than to Tiamat, and that move should be a storage change, not a redesign.
 
-Nothing here is authority. The ledger states what the output was, by digest; this only holds the
-bytes, and only until the replay guarantee it serves expires.
+Nothing here is authority. The ledger states what the response was, by digest; this only holds
+it, and only until the replay guarantee it serves expires.
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ class ReplayOutputMismatch(RuntimeError):
     """Cached output disagrees with the digest the ledger recorded, so it is not served."""
 
 
-def output_digest(output: object) -> str:
-    """Digest the exact response output, canonically, so both sides agree on the bytes."""
+def response_body_digest(response_body: object) -> str:
+    """Digest the exact response body, canonically, so both sides agree on the bytes."""
 
     return hashlib.sha256(
-        json.dumps(output, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        json.dumps(response_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
             "utf-8"
         )
     ).hexdigest()
@@ -43,8 +43,8 @@ def output_digest(output: object) -> str:
 @dataclass(frozen=True)
 class CachedOutput:
     execution_id: UUID
-    output: Any
-    output_sha256: str
+    response_body: Any
+    response_body_sha256: str
 
 
 class ReplayCache(Protocol):
@@ -56,7 +56,7 @@ class ReplayCache(Protocol):
         caller_id: str,
         idempotency_key_digest: str,
         execution_id: UUID,
-        output: Any,
+        response_body: Any,
         expires_at: datetime,
     ) -> str: ...
 
@@ -76,7 +76,7 @@ class PostgresReplayCache:
         caller_id: str,
         idempotency_key_digest: str,
         execution_id: UUID,
-        output: Any,
+        response_body: Any,
         expires_at: datetime,
     ) -> str:
         """Store the output idempotently and return its digest.
@@ -85,7 +85,7 @@ class PostgresReplayCache:
         execution's output under the same key is refused rather than overwritten.
         """
 
-        digest = output_digest(output)
+        digest = response_body_digest(response_body)
         try:
             with (
                 psycopg.connect(_conninfo(self.database_url), row_factory=dict_row) as connection,
@@ -96,14 +96,14 @@ class PostgresReplayCache:
                     """
                     INSERT INTO tiamat.replay_cache (
                         environment, caller_id, idempotency_key_digest, execution_id,
-                        output_sha256, output, expires_at
+                        response_body_sha256, response_body, expires_at
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (environment, caller_id, idempotency_key_digest) DO UPDATE
-                      SET output = EXCLUDED.output,
-                          output_sha256 = EXCLUDED.output_sha256,
+                      SET response_body = EXCLUDED.response_body,
+                          response_body_sha256 = EXCLUDED.response_body_sha256,
                           expires_at = EXCLUDED.expires_at
                       WHERE tiamat.replay_cache.execution_id = EXCLUDED.execution_id
-                    RETURNING output_sha256
+                    RETURNING response_body_sha256
                     """,
                     (
                         self.environment,
@@ -111,7 +111,7 @@ class PostgresReplayCache:
                         idempotency_key_digest,
                         execution_id,
                         digest,
-                        Jsonb(output),
+                        Jsonb(response_body),
                         expires_at,
                     ),
                 ).fetchone()
@@ -119,7 +119,7 @@ class PostgresReplayCache:
             raise ReplayCacheUnavailable("replay cache write failed") from exc
         if row is None:
             raise ReplayCacheUnavailable("replay cache holds another execution for this key")
-        return str(row["output_sha256"])
+        return str(row["response_body_sha256"])
 
     def get(self, *, caller_id: str, idempotency_key_digest: str) -> CachedOutput | None:
         try:
@@ -129,7 +129,8 @@ class PostgresReplayCache:
                 self._scope(connection, caller_id)
                 row = connection.execute(
                     """
-                    SELECT execution_id, output, output_sha256 FROM tiamat.replay_cache
+                    SELECT execution_id, response_body, response_body_sha256
+                    FROM tiamat.replay_cache
                     WHERE environment = %s AND caller_id = %s AND idempotency_key_digest = %s
                       AND expires_at > clock_timestamp()
                     """,
@@ -141,8 +142,8 @@ class PostgresReplayCache:
             return None
         return CachedOutput(
             execution_id=UUID(str(row["execution_id"])),
-            output=row["output"],
-            output_sha256=str(row["output_sha256"]),
+            response_body=row["response_body"],
+            response_body_sha256=str(row["response_body_sha256"]),
         )
 
     def expire(self, *, now: datetime) -> int:
@@ -174,11 +175,11 @@ class PostgresReplayCache:
 def require_matching_output(cached: CachedOutput, ledger_digest: str | None) -> Any:
     """Serve cached output only when the ledger agrees it is what that execution produced."""
 
-    if ledger_digest is None or cached.output_sha256 != ledger_digest:
+    if ledger_digest is None or cached.response_body_sha256 != ledger_digest:
         raise ReplayOutputMismatch("cached output does not match the recorded response digest")
-    if output_digest(cached.output) != ledger_digest:
+    if response_body_digest(cached.response_body) != ledger_digest:
         raise ReplayOutputMismatch("cached output does not hash to its recorded digest")
-    return cached.output
+    return cached.response_body
 
 
 def _conninfo(database_url: str) -> str:

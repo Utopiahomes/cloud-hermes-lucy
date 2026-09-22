@@ -120,7 +120,7 @@ class LedgerRecord:
     failure_code: str | None
     provider_route_id: str
     rate_release_id: str
-    response_output_sha256: str | None = None
+    response_body_sha256: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> LedgerRecord:
@@ -139,7 +139,7 @@ class LedgerRecord:
             failure_code=row["failure_code"],
             provider_route_id=row["provider_route_id"],
             rate_release_id=row["rate_release_id"],
-            response_output_sha256=row.get("response_output_sha256"),
+            response_body_sha256=row.get("response_body_sha256"),
         )
 
 
@@ -147,7 +147,7 @@ _RECORD_COLUMNS = """
 execution_id, identity_digest, state, coordinator_generation, record_generation,
 lease_owner_id, lease_expires_at, execution_deadline, reserved_microusd,
 settlement_status, settled_microusd, failure_code,
-provider_route_id, rate_release_id, response_output_sha256
+provider_route_id, rate_release_id, response_body_sha256
 """
 
 
@@ -675,7 +675,7 @@ class PostgresExecutionLedger:
         settled_microusd: int,
         failure_code: str | None = None,
         provider_cost_reference_digest: str | None = None,
-        response_output_sha256: str | None = None,
+        response_body_sha256: str | None = None,
     ) -> LedgerRecord:
         """Atomically settle a dispatched result and release its financial exposure."""
 
@@ -686,7 +686,7 @@ class PostgresExecutionLedger:
                 provider_cost_reference_digest is not None
                 and len(provider_cost_reference_digest) != 64
             )
-            or (response_output_sha256 is not None and len(response_output_sha256) != 64)
+            or (response_body_sha256 is not None and len(response_body_sha256) != 64)
         ):
             raise ValueError("terminal settlement is invalid")
         try:
@@ -758,7 +758,7 @@ class PostgresExecutionLedger:
                             settled_microusd = %s,
                             failure_code = %s,
                             provider_cost_reference_digest = %s,
-                            response_output_sha256 = %s,
+                            response_body_sha256 = %s,
                             terminal_at = clock_timestamp(),
                             updated_at = clock_timestamp()
                         WHERE execution_id = %s AND issuer = %s AND caller_id = %s
@@ -773,7 +773,7 @@ class PostgresExecutionLedger:
                             settled_microusd,
                             target_failure,
                             provider_cost_reference_digest,
-                            response_output_sha256,
+                            response_body_sha256,
                             execution_id,
                             scope.issuer,
                             scope.caller_id,

@@ -6,17 +6,17 @@ somewhere to keep the minimum material RC1 needs to reproduce a response, and no
 
 This is a cache, not a second system of record:
 
-* it holds only what RC1 reproduces - the output, its digest, its execution and idempotency keys,
+* it holds only what RC1 reproduces - the response body, its digest, its execution and idempotency keys,
   and an expiry. No prompt, no transcript, no memory, no tool trace, no caller profile;
-* it expires with the replay guarantee itself, after which the output disappears while the
+* it expires with the replay guarantee itself, after which the response body disappears while the
   ledger's accounting remains;
 * it takes no part in recovery. It is not in a recovery checkpoint, not under the anchor, not in
   any continuity proof, and not in the day-zero emptiness check, because its contents are not
   authority. Losing it degrades replay; it does not make what Tiamat did, or what it spent,
   uncertain.
 
-``execution_records`` gains the digest that binds the two: the ledger states what the output was,
-the cache holds the bytes, and a replay is served only when they agree.
+``execution_records`` gains the digest that binds the two: the ledger states what the response was,
+the cache holds it, and a replay is served only when they agree.
 
 Revision ID: 0015_replay_cache
 Revises: 0014_attestation_expiry
@@ -37,8 +37,8 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE tiamat.execution_records
-          ADD COLUMN response_output_sha256 text
-            CHECK (response_output_sha256 ~ '^[0-9a-f]{64}$')
+          ADD COLUMN response_body_sha256 text
+            CHECK (response_body_sha256 ~ '^[0-9a-f]{64}$')
         """
     )
     op.execute(
@@ -50,8 +50,9 @@ def upgrade() -> None:
           idempotency_key_digest text NOT NULL
             CHECK (idempotency_key_digest ~ '^[0-9a-f]{64}$'),
           execution_id uuid NOT NULL,
-          output_sha256 text NOT NULL CHECK (output_sha256 ~ '^[0-9a-f]{64}$'),
-          output jsonb NOT NULL,
+          response_body_sha256 text NOT NULL
+            CHECK (response_body_sha256 ~ '^[0-9a-f]{64}$'),
+          response_body jsonb NOT NULL,
           created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
           expires_at timestamptz NOT NULL,
           PRIMARY KEY (environment, caller_id, idempotency_key_digest),

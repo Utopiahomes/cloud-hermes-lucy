@@ -41,7 +41,7 @@ from lucy.shared_execution.recovery_anchor import (
 from lucy.shared_execution.replay_cache import (
     PostgresReplayCache,
     ReplayOutputMismatch,
-    output_digest,
+    response_body_digest,
 )
 from lucy.shared_execution.runtime_anchor_watch import RuntimeAnchorWatch
 from lucy.shared_execution.served_startup import ServedStartupRefused, start_serving
@@ -819,7 +819,16 @@ class _AnsweringProvider(_SyntheticProvider):
     def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome:
         outcome = super().__call__(dispatched)
         return replace(
-            outcome, output={"mode": "text", "content": f"answer for {dispatched.execution_id}"}
+            outcome,
+            response_body={
+                "output": {"mode": "text", "content": "synthetic answer"},
+                "usage": {
+                    "input_tokens": 8,
+                    "generated_tokens": 4,
+                    "output_tokens": 4,
+                    "reasoning_tokens": 0,
+                },
+            },
         )
 
 
@@ -864,7 +873,7 @@ def test_a_replay_after_restart_returns_the_same_body(gate1b: _Environment) -> N
 
     assert replayed.replayed
     assert replayed.execution_id == first.execution_id
-    assert replayed.output == first.output
+    assert replayed.response_body == first.response_body
     assert replayed_provider.dispatched_states == []
 
 
@@ -878,17 +887,17 @@ def test_the_ledger_keeps_the_digest_and_never_the_body(gate1b: _Environment) ->
     with psycopg.connect(gate1b.recovery) as recovery:
         _scoped(gate1b, recovery)
         row = recovery.execute(
-            "SELECT response_output_sha256 FROM tiamat.execution_records WHERE execution_id = %s",
+            "SELECT response_body_sha256 FROM tiamat.execution_records WHERE execution_id = %s",
             (outcome.execution_id,),
         ).fetchone()
         columns = recovery.execute(
             """
             SELECT count(*) FROM information_schema.columns
             WHERE table_schema = 'tiamat' AND table_name = 'execution_records'
-              AND column_name IN ('output', 'response', 'content')
+              AND column_name IN ('response_body', 'output', 'content')
             """
         ).fetchone()
-    assert row is not None and row[0] == output_digest(outcome.output)
+    assert row is not None and row[0] == response_body_digest(outcome.response_body)
     assert columns == (0,)
 
 
@@ -934,11 +943,11 @@ def test_cached_output_that_disagrees_with_the_ledger_is_not_served(
         _scoped(gate1b, runtime)
         runtime.execute(
             """
-            UPDATE tiamat.replay_cache SET output = %s
+            UPDATE tiamat.replay_cache SET response_body = %s
             WHERE environment = %s AND idempotency_key_digest = %s
             """,
             (
-                Jsonb({"mode": "text", "content": "tampered"}),
+                Jsonb({"output": {"mode": "text", "content": "tampered"}}),
                 gate1b.environment,
                 admission.idempotency_key_digest,
             ),
