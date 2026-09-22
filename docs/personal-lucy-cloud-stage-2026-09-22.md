@@ -141,10 +141,25 @@ operator restored both prior configurations, and an independent GET confirmed bo
 remain suspended on their original branch and commands, with no new deployment. The
 gitignored receipt is `secrets/generated/raymond-synthetic-deploy-state-v1.json`.
 
-The next rollout needs a controlled resume and readiness plan, including admission,
-one-off synthetic execution, and recovery. The suspended-deploy approval did not authorize
-resuming either service or opening the Raymond realm. Keep the current services suspended
-until that complete sequence is prepared and specifically authorized.
+Ray subsequently authorized a bounded synthetic activation. On 2026-09-22, the temporary
+Raymond-only Render job verified the quarantined `0073` head, ran the audited empty-realm
+recovery, and opened admission with capture disabled. An initial recovery job failed because
+the new command was absent from the Docker image's explicit copy list; commit `188f9d1`
+added it, and the corrected job succeeded. The existing policy and routine services then
+deployed exact commit `188f9d1a00a81f297d991e3ad447c5f8aada3350` and reached Render
+`live`. A same-network one-off check of both private `/ready` endpoints succeeded. The two
+services were suspended again, the quarantine job succeeded, and the temporary utility was
+deleted. Independent Render GETs confirmed both services suspended, capture, product ingress,
+pilot executor and pilot intake all `false`, and no temporary utility remaining. The
+gitignored job and deploy receipts are `secrets/generated/raymond-synthetic-activation-state-v1.json`
+and `secrets/generated/raymond-live-deploy-state-v1.json`.
+
+This is deployed startup/admission evidence, not a cloud import/remember/correct/forget
+acceptance. The local synthetic memory flow passed separately; the cloud synthetic import
+still needs its purpose-built runner. No Telegram route, real-history import or provider call
+was part of this activation. The lifecycle is now `ready` after audited recovery, while
+runtime admission is quarantined; the former offline-head verifier's lifecycle predicate is
+therefore intentionally stale. A future opening must recheck admission and service state.
 
 ## Authorization and blockers
 
