@@ -19,6 +19,9 @@ class D1FinalizationRejected(RuntimeError):
 
 
 _FUNCTIONS = (
+    # The serving role cannot take the restore gate's shared lock directly once its UPDATE is
+    # revoked, so that lock is taken inside a definer function running in its transaction.
+    ("share_locked_restore_gate", "text"),
     ("consume_startup_attestation", "text"),
     ("consume_startup_attestation_v2", "text"),
     ("verify_attestation_current", "bigint"),

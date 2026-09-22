@@ -238,9 +238,9 @@ def test_finalization_transfers_then_grants_runtime_functions(
     statements = connection.statements
     # Finalization grants no direct UPDATE; it explicitly removes the old runtime grant.
     assert "REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime" in statements
-    assert sum("ALTER FUNCTION" in statement for statement in statements) == 4
-    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 3
-    assert sum("REVOKE ALL ON FUNCTION" in statement for statement in statements) == 4
+    assert sum("ALTER FUNCTION" in statement for statement in statements) == 5
+    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 4
+    assert sum("REVOKE ALL ON FUNCTION" in statement for statement in statements) == 5
     first_grant = next(
         index
         for index, statement in enumerate(statements)
@@ -259,7 +259,7 @@ def test_finalization_transfers_then_grants_runtime_functions(
         statements.index("REVOKE UPDATE ON tiamat.restore_gate FROM tiamat_runtime")
         < len(statements) - 1
     )
-    assert sum("has_function_privilege" in statement for statement in statements) == 4
+    assert sum("has_function_privilege" in statement for statement in statements) == 5
     assert sum("pg_catalog.pg_has_role" in statement for statement in statements) == 2
 
 
@@ -277,8 +277,8 @@ def test_finalization_revokes_legacy_entrypoint_under_its_recovery_owner(
     statements = connection.statements
     assert "SET LOCAL ROLE tiamat_recovery" in statements
     assert "RESET ROLE" in statements
-    assert sum("ALTER FUNCTION" in statement for statement in statements) == 3
-    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 3
+    assert sum("ALTER FUNCTION" in statement for statement in statements) == 4
+    assert sum("GRANT EXECUTE ON FUNCTION" in statement for statement in statements) == 4
 
 
 @pytest.mark.parametrize(

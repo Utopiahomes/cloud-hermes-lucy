@@ -336,11 +336,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -640,11 +638,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -872,11 +868,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1036,9 +1030,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate WHERE environment = %s FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1120,11 +1114,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1194,11 +1186,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1277,11 +1267,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1383,11 +1371,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()
@@ -1535,11 +1521,9 @@ class PostgresExecutionLedger:
                     _set_scope(connection, scope)
                     gate = connection.execute(
                         """
-                        SELECT storage_epoch, recovery_generation, coordinator_generation,
-                               dispatch_blocked
-                        FROM tiamat.restore_gate
-                        WHERE environment = %s
-                        FOR SHARE
+                        SELECT storage_epoch, recovery_generation,
+                               coordinator_generation, dispatch_blocked
+                        FROM tiamat.share_locked_restore_gate(%s)
                         """,
                         (scope.environment,),
                     ).fetchone()

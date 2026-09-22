@@ -42,7 +42,7 @@ class _Connection:
     def execute(self, statement: str, params: Any = None) -> _Result:
         del params
         self.statements.append(statement)
-        if "FROM tiamat.restore_gate" in statement:
+        if "restore_gate" in statement and "UPDATE" not in statement:
             return _Result(
                 {
                     "storage_epoch": self.witness.storage_epoch,

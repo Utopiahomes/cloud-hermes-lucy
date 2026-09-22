@@ -10,20 +10,14 @@ consistent GetItem and verified locally; nothing is written, signed or commissio
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from secrets import token_urlsafe
 from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from psycopg import sql
-from sqlalchemy.engine import make_url
 
 from deploy.postgres.issue_tiamat_startup_attestation_v1 import (
     StartupGateRejected,
@@ -41,6 +35,7 @@ from lucy.shared_execution.startup_attestation import (
     StartupAttestationIssuer,
     StartupAttestationRejected,
 )
+from tests.integration.conftest import DisposableRoles
 
 ROOT = Path(__file__).resolve().parents[2]
 TRUST_PACKAGE = ROOT / "deploy" / "aws" / "tiamat-staging-recovery-bootstrap-public-2026-09-18.json"
@@ -59,6 +54,7 @@ COMMISSIONING_TIME = datetime(2026, 9, 18, 21, tzinfo=UTC)
 class _Disposable:
     owner: str
     recovery: str
+    runtime: str
     environment: str
 
     def __repr__(self) -> str:
@@ -72,58 +68,13 @@ def _trust_document() -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def disposable() -> _Disposable:
-    owner_url = os.environ.get("TIAMAT_D1_TEST_DATABASE_URL")
-    if not owner_url:
-        pytest.skip("TIAMAT_D1_TEST_DATABASE_URL is not configured")
-    database = make_url(owner_url).database or ""
-    if not database.startswith(TEST_DATABASE_PREFIX):
-        pytest.fail("the startup-gate proof runs only on a disposable database", pytrace=False)
-    environment = os.environ.copy()
-    environment["TIAMAT_MIGRATION_DATABASE_URL"] = owner_url
-    migrated = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "tiamat_alembic.ini", "upgrade", "head"],
-        cwd=str(ROOT),
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
+def disposable(disposable_roles: DisposableRoles) -> _Disposable:
+    return _Disposable(
+        owner=disposable_roles.owner,
+        recovery=disposable_roles.recovery,
+        runtime=disposable_roles.runtime,
+        environment="staging",
     )
-    if migrated.returncode != 0:
-        pytest.fail("startup-gate proof migration failed", pytrace=False)
-    password = token_urlsafe(32)
-    with psycopg.connect(owner_url, autocommit=True) as owner:
-        existing = owner.execute(
-            "SELECT 1 FROM pg_roles WHERE rolname = 'tiamat_recovery'"
-        ).fetchone()
-        if existing:
-            # Only the password is reset: a managed owner may not touch role attributes it does
-            # not hold, and the role's existing least-privilege attributes are the ones under test.
-            owner.execute(
-                sql.SQL("ALTER ROLE tiamat_recovery LOGIN PASSWORD {}").format(
-                    sql.Literal(password)
-                )
-            )
-        else:
-            owner.execute(
-                sql.SQL(
-                    "CREATE ROLE tiamat_recovery LOGIN NOINHERIT NOSUPERUSER NOCREATEDB "
-                    "NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}"
-                ).format(sql.Literal(password))
-            )
-        owner.execute("GRANT USAGE ON SCHEMA tiamat TO tiamat_recovery")
-        owner.execute(
-            "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
-        )
-        owner.execute("GRANT SELECT, INSERT ON tiamat.recovery_checkpoints TO tiamat_recovery")
-        owner.execute("GRANT SELECT, INSERT, UPDATE ON tiamat.restore_gate TO tiamat_recovery")
-        owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
-    recovery_url = (
-        make_url(owner_url)
-        .set(username="tiamat_recovery", password=password)
-        .render_as_string(hide_password=False)
-    )
-    return _Disposable(owner=owner_url, recovery=recovery_url, environment="staging")
 
 
 def _seed_staging_gate(disposable: _Disposable, trust: dict[str, Any], *, generation: int) -> str:
