@@ -10,10 +10,12 @@ The claimant's ``expires_at`` is set by the issuer to no later than the signed w
 the check inside the same statement the dispatch transaction already makes, rather than relying on
 a process to notice its own expiry.
 
-Deployment note: this replaces a function which finalization has already transferred to
-``tiamat_recovery``. On a finalized ledger the migration owner can no longer replace it, so this
-revision must be applied through that owner, exactly as the finalizer transfers ownership. On a
-fresh ledger it runs normally, before any transfer.
+This replaces a function which finalization may already have transferred to
+``tiamat_recovery``. On a fresh ledger the migration owner still owns it and this runs
+normally. On a finalized ledger the migration owner can no longer replace it, so
+``deploy/postgres/apply_tiamat_definer_migration_v1.py`` applies the same statement through a
+temporary ownership handoff and advances Alembic in the same transaction. The statement is
+exported so that runner applies exactly this text rather than a copy of it.
 
 Revision ID: 0014_attestation_expiry
 Revises: 0013_retire_coordinator
@@ -30,9 +32,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def upgrade() -> None:
-    op.execute(
-        """
+DEFINER_STATEMENT = """
         CREATE OR REPLACE FUNCTION tiamat.verify_attestation_current(
           expected_coordinator_generation bigint
         ) RETURNS boolean
@@ -93,7 +93,10 @@ def upgrade() -> None:
         END;
         $function$
         """
-    )
+
+
+def upgrade() -> None:
+    op.execute(DEFINER_STATEMENT)
 
 
 def downgrade() -> None:

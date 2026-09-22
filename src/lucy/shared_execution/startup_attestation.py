@@ -29,6 +29,8 @@ from lucy.shared_execution.recovery_checkpoint import (
     construct_recovery_checkpoint,
 )
 
+_MAXIMUM_CLAIMANT_LIFETIME = timedelta(minutes=10)
+
 
 class StartupAttestationRejected(RuntimeError):
     """The launcher could not safely establish a new startup claimant."""
@@ -126,11 +128,17 @@ class StartupAttestationIssuer:
         identity: RecoveryAnchorIdentity,
         recovery_database_url: str,
         checkpoint_source: RecoveryCheckpointDigestSource,
+        claimant_lifetime: timedelta = _MAXIMUM_CLAIMANT_LIFETIME,
     ) -> None:
+        if not timedelta(seconds=1) <= claimant_lifetime <= _MAXIMUM_CLAIMANT_LIFETIME:
+            raise ValueError("claimant lifetime must be between one second and ten minutes")
         self._anchor = anchor
         self._identity = identity
         self._database_url = recovery_database_url
         self._checkpoint_source = checkpoint_source
+        # A claimant never outlives its witness, and never exceeds the database's own ceiling.
+        # A shorter lifetime means more frequent renewal under the same signed authority.
+        self._claimant_lifetime = claimant_lifetime
 
     def issue(self, *, now: datetime) -> StartupAttestationReceipt:
         """Strong-read authority, then atomically supersede and issue a claimant.
@@ -191,7 +199,7 @@ class StartupAttestationIssuer:
                 database_now = self._database_now(connection)
                 if not witness.valid_at(database_now):
                     raise StartupAttestationRejected("recovery_dispatch_not_authorized")
-                expires_at = min(witness.not_after, database_now + timedelta(minutes=10))
+                expires_at = min(witness.not_after, database_now + self._claimant_lifetime)
                 if expires_at <= database_now:
                     raise StartupAttestationRejected("startup_attestation_expired")
                 if active is not None:
