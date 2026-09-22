@@ -15,7 +15,9 @@ Parameters:
   AnchorUpdaterRoleName:
     Type: String
     AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
-    Description: Existing recovery-coordinator role; receives conditional update access
+    Description: >-
+      Existing recovery-coordinator role; receives strong-read access only. Writes go through the
+      M4 anchor writer (tiamat-anchor-writer-v1), whose role is the only PutItem principal.
 
 Resources:
   RecoveryAnchorTable:
@@ -72,11 +74,10 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: CompareAndSwapRecoveryAnchorOnly
+          # M4: the coordinator no longer holds PutItem. It reads the head and asks the writer.
+          - Sid: StrongReadRecoveryAnchorOnly
             Effect: Allow
-            Action:
-              - dynamodb:GetItem
-              - dynamodb:PutItem
+            Action: dynamodb:GetItem
             Resource: !GetAtt RecoveryAnchorTable.Arn
             Condition:
               ForAllValues:StringLike:

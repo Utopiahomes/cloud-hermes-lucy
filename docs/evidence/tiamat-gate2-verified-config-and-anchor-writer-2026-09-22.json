@@ -1,0 +1,111 @@
+{
+  "evidence_type": "tiamat_gate2_local_increment",
+  "date_utc": "2026-09-22",
+  "scope": "Gate 2, smallest staging path, the parts provable without touching live infrastructure: verified signed configuration and releases, and the M4 validating sole anchor writer. Nothing here is deployed; the deployed synthetic execution needs the approvals listed below.",
+  "resource": {
+    "disposable_database": "tiamat-m2-floor-disposable-20260920, migrated to 0017_revocation_generation, retained",
+    "aws": "untouched",
+    "render": "untouched",
+    "commissioned_staging_ledger": "untouched; remains dispatch-blocked"
+  },
+  "verified_signed_configuration": {
+    "change": "The served process takes its profile only from signed releases: the trust inventory is verified against the pinned release root, then the active profile, the privacy policy it names and the partition's spending grant are verified to their exact bytes and resolved as one set (VerifiedProfileAuthority over load_authorized_profile). Route, rates, bounds, deadline and policy all come from verified content; nothing is local.",
+    "cases": [
+      {
+        "case": "served profile is the verified signed content",
+        "result": "passed"
+      },
+      {
+        "case": "a request is served under verified authority",
+        "result": "passed"
+      },
+      {
+        "case": "altered stored bytes are not authority",
+        "result": "passed",
+        "detail": "503 privacy_route_unavailable, no record, no provider request."
+      },
+      {
+        "case": "releases under a different root are not authority",
+        "result": "passed"
+      },
+      {
+        "case": "a policy that does not approve the route is not authority",
+        "result": "passed"
+      },
+      {
+        "case": "a verified profile the contract cannot serve is not current",
+        "result": "passed",
+        "detail": "A 500 ms deadline ceiling is below RC1's attempt floor."
+      },
+      {
+        "case": "the composed process serves under genuinely signed authority",
+        "result": "passed",
+        "detail": "build_served_app with a synthetic release root: launcher start, 200, refresh, retire, restart; and the refresh-withdrawal case."
+      }
+    ],
+    "method": "Each case mints its own release root and release key, signs a real inventory and real profile, policy and grant releases, and installs them through the authority store's ordinary verify, stage and activate path as the release manager.",
+    "defect_found": "The release manager, holding exactly its deployed grants, could not activate a spending grant: the role template granted nothing on grant_releases or spending_partitions, and the authority store never set tiamat.partition_id, which both tables' row-level security requires. The only earlier grant-activation test ran as the database owner. Fixed: the store scopes the partition for grant writes, and the template and the disposable fixture grant the narrowest rights grant staging and projection need."
+  },
+  "m4_anchor_writer": {
+    "contract_points": [
+      "strong-reads the head itself; the caller never supplies it",
+      "verifies the candidate's exact transition, witness and inventory bytes against a root held in its own configuration per anchor key, at its own clock",
+      "verifies the head it read against the same pinned root, as of the head's own signed validity window, using a head-era inventory that must itself verify against that root",
+      "applies the shared successor rules, now including G9, then writes conditionally on the exact prior version and digest",
+      "strong-rereads and returns the digest it read back",
+      "treats a request for the bytes already at the head as success"
+    ],
+    "g9": "Found unimplemented although listed as confirmed and scheduled: validate_anchor_successor never examined continuity. It now refuses quarantined -> continuity_established (recovery_continuity_requires_pending) and requires recovery_pending -> continuity_established to carry the pending witness unchanged. It applies to every adapter, not only the writer.",
+    "cases": [
+      "first transition installed and read back",
+      "identical retry succeeds without a second write (C4 vii)",
+      "successor under a rotated witness key installed over an expired head",
+      "a head is not verified under an inventory that never signed it",
+      "candidate under another root refused",
+      "altered candidate bytes refused",
+      "unconfigured anchor key refused",
+      "candidate for another ledger under this key refused",
+      "raw malformed head refused and not overwritten (C4 v)",
+      "a second version-one transition refused (C4 iii)",
+      "a write racing another loses the compare (C4 i)",
+      "G9: quarantine cannot skip recovery_pending (C4 x)",
+      "G9: establishing continuity confirms the pending witness exactly",
+      "Lambda client installs through the real handler, including the idempotent retry",
+      "a refusal reaches the caller as its reason code",
+      "the handler refuses a malformed request and leaks no internal detail",
+      "an unknown invocation outcome is unavailable, never success",
+      "incomplete writer configuration is refused",
+      "the published staging v3 successor package installs through the real writer over its real v2 predecessor, with its real witness-key rotation",
+      "the successor installer keeps its exact-digest discipline when writing through the writer"
+    ],
+    "infrastructure_as_code": {
+      "tiamat-recovery-anchor-v1.yaml": "the coordinator's PutItem is removed; it keeps GetItem",
+      "tiamat-anchor-writer-v1.yaml": "new: writer role (the only PutItem principal, LeadingKeys-scoped), function with reserved concurrency 1 from a pinned artifact version and code digest, invoke permission for the coordinator role only, a CloudTrail trail recording every write data event on the anchor table, and an EventBridge rule alarming on any table write by a principal other than the writer role, including non-role identities",
+      "template_tests": "structural tests assert the PutItem boundary, the invoke boundary, the pinned artifact and the alarm pattern; the templates are not deployed and have not been run through cfn-lint"
+    },
+    "lambda_packaging": "The writer's import chain no longer loads psycopg (the continuity beacon reader imports it lazily). It still needs rfc8785, which is not in the hash-locked Lambda dependency list, and the artifact builder packages only lucy.contracts and lucy.executors today."
+  },
+  "suite": {
+    "full_suite": "1475 passed, 1 failed, 283 skipped. The failure is the live staging-anchor read, test_c1_the_installed_head_refuses_under_current_trust, whose AWS SSO session had expired; it is unrelated and awaits a fresh login. The skips are older tests that need a different integration database.",
+    "ruff": "passed",
+    "mypy_src": "passed"
+  },
+  "for_review": [
+    "The writer verifies an existing head as of its own signed validity window, with the head-era inventory supplied by the caller but trusted only if it verifies against the writer's pinned root. This is the same historical verification the continued-quarantine ceremony uses. Lyra: please confirm or correct.",
+    "G9 as implemented: quarantined -> established refused; pending -> established must keep the pending witness. Other continuity transitions are unchanged.",
+    "The foreign-writer alarm goes to an existing SNS topic supplied as a parameter."
+  ],
+  "needs_approval_before_deployment": [
+    "Staging release-signing root and signed releases: serving now requires a signed inventory and a signed profile, privacy policy and spending grant for staging. Who signs them, under which root, is a Control decision.",
+    "Lambda artifact: add rfc8785 (hash-locked) to the writer's dependency lock and let the builder include lucy.shared_execution; build, record the code digest.",
+    "AWS: deploy tiamat-anchor-writer-v1 and update tiamat-recovery-anchor-v1 to remove coordinator PutItem. This changes IAM and adds a trail and an alarm rule in the staging account.",
+    "AWS: an SNS topic for the foreign-writer alarm.",
+    "Staging database: apply the release-manager grant corrections from the role template.",
+    "Render: deploy the served process with a synthetic transport and dispatch still blocked on the commissioned ledger, then run one synthetic execution."
+  ],
+  "not_in_this_increment": [
+    "M3 DynamoDB Streams alarm (detection only)",
+    "C4 xi on staging: coordinator raw PutItem gets AccessDenied and the alarm fires; needs the deployed stacks",
+    "the commissioned-ledger continuity path through M4 (plan step 6)"
+  ]
+}

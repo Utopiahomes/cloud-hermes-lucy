@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -12,10 +13,17 @@ from unittest.mock import Mock
 
 import pytest
 
+from lucy.shared_execution.anchor_writer import (
+    AnchorWriter,
+    AnchorWriteRequest,
+    AnchorWriteResult,
+    WriterRoot,
+)
 from lucy.shared_execution.recovery_anchor import RecoveryAnchorRejected
 from lucy.shared_execution.recovery_anchor_commissioning import (
     verify_continued_quarantine_successor_package,
 )
+from tests.unit.test_tiamat_anchor_writer import ConditionalTable
 
 ROOT = Path(__file__).parents[2]
 PACKAGE = ROOT / "deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json"
@@ -135,3 +143,69 @@ def test_execute_without_exact_digest_never_constructs_aws_client(
     with pytest.raises(ValueError, match="confirm-successor-sha256"):
         installer.main()
     client_factory.assert_not_called()
+
+
+def test_through_the_writer_the_installer_keeps_its_exact_digest_discipline() -> None:
+    identity, old, new, _ = _verified()
+    store = Mock()
+    store.read.side_effect = [old, new]
+    write = Mock(
+        return_value=AnchorWriteResult(
+            outcome="installed", transition_sha256=new.exact_sha256, transition_version=3
+        )
+    )
+    request = AnchorWriteRequest("key", new.exact_jws, new.witness.exact_jws, b"inventory")
+
+    status = _installer().install_through_writer(
+        store,
+        write,
+        request,
+        predecessor_sha256=old.exact_sha256,
+        successor_sha256=new.exact_sha256,
+        key=identity.key,
+    )
+
+    assert status == "installed_and_verified"
+    write.assert_called_once_with(request)
+    store.install.assert_not_called()
+
+
+def test_the_published_staging_successor_installs_through_the_real_writer() -> None:
+    """The live v3 package, over its real v2 predecessor, with its real witness-key rotation."""
+
+    package = json.loads(PACKAGE.read_text(encoding="utf-8"))
+    identity, old, new, _ = _verified()
+    anchor_key = f"ENV#{identity.environment}#LEDGER#{identity.ledger_id}"
+    table = ConditionalTable()
+    table.items[anchor_key] = {
+        "anchor_key": {"S": anchor_key},
+        "transition_sha256": {"S": old.exact_sha256},
+        "transition_version": {"N": str(old.transition_version)},
+        "transition_jws": {"B": old.exact_jws},
+        "witness_jws": {"B": old.witness.exact_jws},
+    }
+    writer = AnchorWriter(
+        roots={
+            anchor_key: WriterRoot(
+                root_key_id=str(package["root_key_id"]),
+                root_public_key_b64=str(package["root_public_key_b64"]),
+                root_public_key_sha256=PIN,
+            )
+        },
+        client=table,
+        table_name="tiamat-recovery-anchor",
+        clock=lambda: NOW,
+    )
+
+    result = writer.write(
+        AnchorWriteRequest(
+            anchor_key=anchor_key,
+            transition_jws=new.exact_jws,
+            witness_jws=new.witness.exact_jws,
+            inventory_jws=base64.b64decode(str(package["inventory_jws_b64"])),
+            head_inventory_jws=base64.b64decode(str(package["predecessor_inventory_jws_b64"])),
+        )
+    )
+
+    assert (result.outcome, result.transition_sha256) == ("installed", new.exact_sha256)
+    assert table.puts == 1

@@ -1,0 +1,262 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Tiamat v1 M4 validating sole writer for the external recovery anchor. The writer function's
+  role is the only principal granted PutItem on the anchor table; the recovery coordinator may
+  only invoke it. A CloudTrail data-event trail on the table, and an EventBridge rule over it,
+  report any anchor-table write made by a different principal.
+
+Parameters:
+  ResourceNamespace:
+    Type: String
+    AllowedPattern: "[a-z0-9-]{3,32}"
+  EnvironmentName:
+    Type: String
+    AllowedPattern: "[a-z0-9-]{2,32}"
+  AnchorTableName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9_.-]{3,255}"
+    Description: RecoveryAnchorTableName output of the tiamat-recovery-anchor-v1 stack
+  CoordinatorRoleName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: Existing recovery-coordinator role; receives invoke permission only
+  WriterArtifactBucket:
+    Type: String
+    AllowedPattern: "[a-z0-9.-]{3,63}"
+  WriterArtifactKey:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9!_.*'()/-]{1,1024}"
+  WriterArtifactObjectVersion:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9._-]{1,1024}"
+  WriterArtifactCodeSha256:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+/=]{44}"
+    Description: Base64 SHA-256 of the artifact; recorded with every published version
+  WriterRootsJson:
+    Type: String
+    MinLength: 2
+    Description: >-
+      JSON object mapping each anchor key to the root the writer trusts for it. Changing it is a
+      reviewed change: it decides which signed transitions may ever be installed.
+  AlarmTopicArn:
+    Type: String
+    AllowedPattern: "arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}"
+    Description: Existing SNS topic that accepts events.amazonaws.com publications
+
+Resources:
+  WriterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1
+      RetentionInDays: 365
+
+  WriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+      Tags:
+        - {Key: stoin:system, Value: tiamat}
+        - {Key: stoin:purpose, Value: recovery-anchor-writer}
+        - {Key: stoin:environment, Value: !Ref EnvironmentName}
+
+  WriterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-writer-v1
+      Roles: [!Ref WriterRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: StrongReadAndConditionalWriteOnly
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+            Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}
+            Condition:
+              ForAllValues:StringLike:
+                dynamodb:LeadingKeys: [!Sub "ENV#${EnvironmentName}#LEDGER#*"]
+              "Null": {"dynamodb:LeadingKeys": "false"}
+          - Sid: WriteOwnLogsOnly
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub ${WriterLogGroup.Arn}:*
+
+  WriterFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: [WriterPolicy, WriterLogGroup]
+    Properties:
+      FunctionName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1
+      Description: Validating sole writer of the Tiamat recovery anchor (M4)
+      Runtime: python3.12
+      RuntimeManagementConfig: {UpdateRuntimeOn: Auto}
+      Architectures: [x86_64]
+      Handler: lucy.shared_execution.anchor_writer_lambda.handler
+      Role: !GetAtt WriterRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      # One install at a time. The conditional write already makes concurrent installs safe; this
+      # also keeps the writer's own reread and response unambiguous.
+      ReservedConcurrentExecutions: 1
+      Code:
+        S3Bucket: !Ref WriterArtifactBucket
+        S3Key: !Ref WriterArtifactKey
+        S3ObjectVersion: !Ref WriterArtifactObjectVersion
+      Environment:
+        Variables:
+          TIAMAT_RECOVERY_ANCHOR_TABLE: !Ref AnchorTableName
+          TIAMAT_ANCHOR_WRITER_ROOTS: !Ref WriterRootsJson
+
+  WriterVersion:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref WriterFunction
+      CodeSha256: !Ref WriterArtifactCodeSha256
+      Description: !Sub Tiamat anchor writer ${WriterArtifactCodeSha256}
+
+  WriterAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref WriterFunction
+      FunctionVersion: !GetAtt WriterVersion.Version
+      Name: live
+
+  CoordinatorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WriterAlias
+      Principal: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CoordinatorRoleName}
+
+  CoordinatorInvokePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-writer-invoke-v1
+      Roles: [!Ref CoordinatorRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: InvokeTheAnchorWriterOnly
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref WriterAlias
+
+  AnchorWriteTrailBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      VersioningConfiguration: {Status: Enabled}
+
+  AnchorWriteTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AnchorWriteTrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudTrailAclCheck
+            Effect: Allow
+            Principal: {Service: cloudtrail.amazonaws.com}
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt AnchorWriteTrailBucket.Arn
+            Condition:
+              StringEquals:
+                "aws:SourceArn": !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writes-v1
+          - Sid: CloudTrailWrite
+            Effect: Allow
+            Principal: {Service: cloudtrail.amazonaws.com}
+            Action: s3:PutObject
+            Resource: !Sub ${AnchorWriteTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                "aws:SourceArn": !Sub arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writes-v1
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt AnchorWriteTrailBucket.Arn
+              - !Sub ${AnchorWriteTrailBucket.Arn}/*
+            Condition:
+              Bool: {"aws:SecureTransport": "false"}
+
+  AnchorWriteTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: [AnchorWriteTrailBucketPolicy]
+    Properties:
+      TrailName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writes-v1
+      S3BucketName: !Ref AnchorWriteTrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: false
+      IncludeGlobalServiceEvents: false
+      EnableLogFileValidation: true
+      AdvancedEventSelectors:
+        - Name: Every write to the recovery anchor table
+          FieldSelectors:
+            - {Field: eventCategory, Equals: [Data]}
+            - {Field: resources.type, Equals: ["AWS::DynamoDB::Table"]}
+            - Field: resources.ARN
+              Equals:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}
+            - {Field: readOnly, Equals: ["false"]}
+
+  ForeignAnchorWriteRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-foreign-anchor-write-v1
+      Description: Any write to the recovery anchor table by a principal other than the M4 writer
+      State: ENABLED
+      EventPattern:
+        source: [aws.dynamodb]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          eventSource: [dynamodb.amazonaws.com]
+          eventName: [PutItem, UpdateItem, DeleteItem, BatchWriteItem, TransactWriteItems]
+          requestParameters:
+            tableName: [!Ref AnchorTableName]
+          # A role session other than the writer's, or any identity that is not a role session at
+          # all (an IAM user or root carries no session issuer to compare).
+          $or:
+            - userIdentity:
+                type: [{anything-but: [AssumedRole]}]
+            - userIdentity:
+                sessionContext:
+                  sessionIssuer:
+                    arn: [{anything-but: [!GetAtt WriterRole.Arn]}]
+      Targets:
+        - Id: foreign-anchor-write-alarm
+          Arn: !Ref AlarmTopicArn
+
+Outputs:
+  WriterFunctionAliasArn:
+    Value: !Ref WriterAlias
+  WriterRoleArn:
+    Value: !GetAtt WriterRole.Arn
+  WriterCodeSha256:
+    Value: !Ref WriterArtifactCodeSha256

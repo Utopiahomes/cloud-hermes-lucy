@@ -15,9 +15,6 @@ from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
-import psycopg
-from psycopg.rows import dict_row
-
 
 class RecoveryAnchorRejected(RuntimeError):
     """An anchor transition or attempted restart would weaken recovery authority."""
@@ -353,6 +350,16 @@ def validate_anchor_successor(
         raise RecoveryAnchorRejected("recovery_anchor_transition_chain_invalid")
     current_witness = previous.witness
     next_witness = candidate.witness
+    # G9: recovery leaves quarantine only through recovery_pending, and establishing continuity
+    # confirms that pending recovery exactly: the same witness, not a newly minted one.
+    if previous.continuity == "quarantined" and candidate.continuity == "continuity_established":
+        raise RecoveryAnchorRejected("recovery_continuity_requires_pending")
+    if (
+        previous.continuity == "recovery_pending"
+        and candidate.continuity == "continuity_established"
+        and next_witness.exact_jws != current_witness.exact_jws
+    ):
+        raise RecoveryAnchorRejected("recovery_continuity_witness_changed")
     if next_witness.identity.key != current_witness.identity.key:
         raise RecoveryAnchorRejected("recovery_anchor_identity_changed")
     if next_witness.identity.storage_epoch != current_witness.identity.storage_epoch:
@@ -385,6 +392,11 @@ class PostgresContinuityBeaconReader:
     def read(self, *, checkpoint_digest: str) -> PostgresContinuityBeacon:
         if not _hex_digest(checkpoint_digest):
             raise ValueError("checkpoint digest is invalid")
+        # Imported here, not at module level: the anchor writer shares this module and has no
+        # database, so it must not need a database driver to load.
+        import psycopg
+        from psycopg.rows import dict_row
+
         try:
             with psycopg.connect(self._connection_info(), row_factory=dict_row) as connection:
                 row = connection.execute(

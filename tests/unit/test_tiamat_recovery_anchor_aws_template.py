@@ -60,11 +60,8 @@ def test_reader_and_updater_credentials_are_separate_and_narrow() -> None:
     read_actions = {action for statement in read_statements for action in _actions(statement)}
     update_actions = {action for statement in update_statements for action in _actions(statement)}
     assert read_actions == {"dynamodb:GetItem", "dynamodb:DescribeTable"}
-    assert update_actions == {
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:DescribeTable",
-    }
+    # M4: the coordinator reads; only the anchor writer's own role may write.
+    assert update_actions == {"dynamodb:GetItem", "dynamodb:DescribeTable"}
     forbidden = {
         "dynamodb:DeleteItem",
         "dynamodb:UpdateItem",

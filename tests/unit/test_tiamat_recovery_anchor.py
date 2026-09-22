@@ -273,7 +273,7 @@ def test_postgres_beacon_reader_uses_control_identity_timeline_and_flushed_wal(
         captured["kwargs"] = kwargs
         return Connection()
 
-    monkeypatch.setattr("lucy.shared_execution.recovery_anchor.psycopg.connect", connect)
+    monkeypatch.setattr("psycopg.connect", connect)
     result = PostgresContinuityBeaconReader("postgresql+psycopg://example").read(
         checkpoint_digest=CHECKPOINT_A
     )
