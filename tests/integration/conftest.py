@@ -87,7 +87,7 @@ def disposable_roles() -> DisposableRoles:
             "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
         )
         owner.execute(
-            "GRANT SELECT, INSERT, UPDATE ON tiamat.recovery_checkpoints TO tiamat_recovery"
+            "GRANT SELECT, INSERT ON tiamat.recovery_checkpoints TO tiamat_recovery"
         )
         owner.execute("GRANT SELECT, INSERT, UPDATE ON tiamat.restore_gate TO tiamat_recovery")
         owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
@@ -119,7 +119,7 @@ def _own_share_locked_gate_reader(owner: psycopg.Connection[tuple[object, ...]])
         SELECT pg_catalog.pg_get_userbyid(p.proowner) = 'tiamat_recovery',
                pg_catalog.has_function_privilege('tiamat_runtime', p.oid, 'EXECUTE')
         FROM pg_catalog.pg_proc AS p
-        WHERE p.oid = pg_catalog.to_regprocedure('tiamat.share_locked_restore_gate(text)')
+        WHERE p.oid = pg_catalog.to_regprocedure('tiamat.share_locked_restore_gate()')
         """
     ).fetchone()
     assert state is not None
@@ -132,12 +132,16 @@ def _own_share_locked_gate_reader(owner: psycopg.Connection[tuple[object, ...]])
             )
         return
     owner.execute(
-        "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate(text) TO tiamat_runtime"
+        "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() TO tiamat_runtime"
+    )
+    owner.execute(
+        "GRANT EXECUTE ON FUNCTION tiamat.retire_coordinator(bigint) TO tiamat_runtime"
     )
     owner_name = sql.Identifier(str(current[0]))
     owner.execute(sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(owner_name))
     owner.execute("GRANT CREATE ON SCHEMA tiamat TO tiamat_recovery")
-    owner.execute("ALTER FUNCTION tiamat.share_locked_restore_gate(text) OWNER TO tiamat_recovery")
+    owner.execute("ALTER FUNCTION tiamat.share_locked_restore_gate() OWNER TO tiamat_recovery")
+    owner.execute("ALTER FUNCTION tiamat.retire_coordinator(bigint) OWNER TO tiamat_recovery")
     owner.execute("REVOKE CREATE ON SCHEMA tiamat FROM tiamat_recovery")
     owner.execute(sql.SQL("REVOKE tiamat_recovery FROM {}").format(owner_name))
 

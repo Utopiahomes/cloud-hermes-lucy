@@ -558,12 +558,14 @@ class PostgresSignedAuthorityStore:
     def _assert_recovery_gate_open(
         connection: psycopg.Connection[dict[str, Any]], environment: str
     ) -> int:
+        # The release manager holds SELECT only, so it takes the gate's shared lock through the
+        # same definer function the serving role uses. The scope comes from the session setting.
+        connection.execute("SELECT set_config('tiamat.environment', %s, true)", (environment,))
         row = connection.execute(
             """
-            SELECT dispatch_blocked, recovery_generation FROM tiamat.restore_gate
-            WHERE environment = %s FOR SHARE
-            """,
-            (environment,),
+            SELECT dispatch_blocked, recovery_generation
+            FROM tiamat.share_locked_restore_gate()
+            """
         ).fetchone()
         if row is None or row["dispatch_blocked"]:
             raise AuthorityTransitionRejected("recovery_gate_blocked")

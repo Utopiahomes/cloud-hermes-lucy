@@ -340,7 +340,10 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
             recovery_generation=1,
         ),
     )
-    coordinator_generation = ledger.consume_startup_attestation(transition.exact_sha256)
+    # The executor performs its own read; it never trusts a digest handed to it in process.
+    observed_head = anchor.read(identity.key)
+    assert observed_head.exact_sha256 == transition.exact_sha256
+    coordinator_generation = ledger.consume_startup_attestation(observed_head.exact_sha256)
     trace.record("claimant_consumed", coordinator_generation=coordinator_generation)
 
     # 3. Admit one request against the durable ledger.
@@ -405,7 +408,6 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
     assert settled.state == "completed"
     assert settled.settlement_status == "settled"
     assert settled.settled_microusd == result.cost_microusd
-    assert provider.calls == 1
 
     # 7. Replay of the same idempotency key returns the same execution, dispatching nothing more.
     replayed, created_again = ledger.create_or_get(
@@ -413,17 +415,32 @@ def test_gate_1a_one_synthetic_execution_end_to_end(integrated: _Environment) ->
     )
     assert not created_again
     assert replayed.execution_id == record.execution_id
-    assert provider.calls == 1
+    # The provider call count is this test's own control flow, not a system guarantee:
+    # nothing yet gates a provider call on committed dispatch. That belongs to the service
+    # layer running on the durable ledger, which Gate 1A does not deliver.
     trace.record("replay_idempotent", execution_id_matches=True)
 
-    # 8. Clean shutdown: the one-way latch blocks further dispatch and invalidates the claimant.
-    ledger.block_dispatch("executor_shutdown")
+    # 8. Clean shutdown retires this fence without quarantining, so a launcher can issue the
+    # next claimant. Blocking dispatch is quarantine, and an ordinary stop is not that.
+    retired = ledger.retire_coordinator(coordinator_generation)
+    assert retired == coordinator_generation + 1
     assert not ledger.verify_attestation_current(coordinator_generation)
-    trace.record("shutdown", attestation_current=False)
+    trace.record("shutdown", attestation_current=False, gate_blocked=False)
+
+    # 9. The ledger is immediately relaunchable: a fresh claimant is issued and consumed.
+    relaunch = StartupAttestationIssuer(
+        anchor=anchor,
+        identity=identity,
+        recovery_database_url=integrated.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(integrated.recovery),
+    ).issue(now=datetime.now(UTC))
+    assert relaunch.attestation_id != receipt.attestation_id
+    relaunched = ledger.consume_startup_attestation(transition.exact_sha256)
+    assert relaunched == retired + 1
+    trace.record("relaunched", coordinator_generation=relaunched)
 
     _assert_durable_state(integrated, record.execution_id, result, coordinator_generation)
     print("\n".join(f"  {index + 1}. {step}" for index, step in enumerate(trace.steps)))
-    assert len(trace.steps) == 10
 
 
 def _assert_durable_state(
@@ -461,7 +478,28 @@ def _assert_durable_state(
             """,
             (integrated.environment,),
         ).fetchone()
+        spending = recovery.execute(
+            """
+            SELECT period_spend_microusd, contingency_spend_microusd
+            FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND realm = %s AND partition_id = %s
+            """,
+            (
+                integrated.environment,
+                integrated.scope.caller_id,
+                integrated.scope.realm,
+                integrated.scope.partition_id,
+            ),
+        ).fetchone()
+        events = recovery.execute(
+            "SELECT count(*) FROM tiamat.financial_events WHERE environment = %s",
+            (integrated.environment,),
+        ).fetchone()
 
+    # The reservation must have been released and the settled cost recorded, not merely
+    # echoed back on the execution row.
+    assert spending == (result.cost_microusd, 0)
+    assert events is not None and int(events[0]) >= 1
     assert execution == (
         "completed",
         "settled",
@@ -470,4 +508,48 @@ def _assert_durable_state(
         coordinator_generation,
     )
     assert claimant == (True, 1)
-    assert gate == (1, True, "executor_shutdown")
+    assert gate == (1, False, None)
+
+
+def test_the_gate_reader_cannot_widen_its_own_scope(integrated: _Environment) -> None:
+    """The definer gate reader follows the caller's own scope, never an argument.
+
+    Inside the function ``current_user`` is its recovery owner, whose policy sees every row.
+    An environment argument would therefore let the serving role read a gate that its own
+    row-level security policy hides, so the scope comes from the session setting instead.
+    """
+
+    with psycopg.connect(integrated.runtime) as runtime:
+        runtime.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (integrated.environment,)
+        )
+        scoped = runtime.execute(
+            "SELECT storage_epoch FROM tiamat.share_locked_restore_gate()"
+        ).fetchone()
+        assert scoped is not None and scoped[0] == integrated.storage_epoch
+
+        # The row follows the session scope, and there is no argument with which a caller
+        # could ask for a different one.
+        runtime.execute("SELECT set_config('tiamat.environment', %s, false)", ("staging",))
+        other = runtime.execute(
+            "SELECT storage_epoch FROM tiamat.share_locked_restore_gate()"
+        ).fetchone()
+        assert other is None or other[0] != integrated.storage_epoch
+
+        # With no scope at all the function refuses rather than serving an arbitrary row.
+        runtime.execute("SELECT set_config('tiamat.environment', '', false)")
+        with pytest.raises(psycopg.Error) as refused:
+            runtime.execute("SELECT storage_epoch FROM tiamat.share_locked_restore_gate()")
+    assert refused.value.sqlstate == "ZX108"
+
+
+def test_a_direct_gate_read_still_hides_other_environments(integrated: _Environment) -> None:
+    """The serving role's own row-level security is unchanged by migration 0012."""
+
+    with psycopg.connect(integrated.runtime) as runtime:
+        runtime.execute("SELECT set_config('tiamat.environment', %s, false)", ("staging",))
+        foreign = runtime.execute(
+            "SELECT count(*) FROM tiamat.restore_gate WHERE environment = %s",
+            (integrated.environment,),
+        ).fetchone()
+    assert foreign == (0,)

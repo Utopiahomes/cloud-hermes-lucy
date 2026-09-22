@@ -300,6 +300,35 @@ class PostgresExecutionLedger:
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
+    def retire_coordinator(self, coordinator_generation: int) -> int:
+        """End this coordinator's fence on a clean stop without quarantining the environment.
+
+        Blocking dispatch is quarantine; an ordinary shutdown only retires the fence, so a
+        launcher can issue the next claimant without a recovery-role unblock.
+        """
+
+        if coordinator_generation < 1:
+            raise ValueError("coordinator generation is invalid")
+        try:
+            with (
+                psycopg.connect(_psycopg_conninfo(self._database_url)) as connection,
+                connection.transaction(),
+            ):
+                connection.execute(
+                    "SELECT set_config('tiamat.environment', %s, true)",
+                    (self._witness.environment,),
+                )
+                row = connection.execute(
+                    "SELECT tiamat.retire_coordinator(%s)", (coordinator_generation,)
+                ).fetchone()
+                if row is None:
+                    raise DispatchBlocked("coordinator retirement failed")
+                return int(row[0])
+        except psycopg.Error as exc:
+            if exc.sqlstate == "ZX109":
+                raise DispatchBlocked("coordinator retirement was stale") from exc
+            raise LedgerUnavailable from exc
+
     def block_dispatch(self, reason: str) -> None:
         """Persist a one-way runtime latch without direct restore-gate UPDATE."""
 
@@ -338,9 +367,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     digest_candidates = (
@@ -640,9 +668,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     partition = connection.execute(
@@ -870,9 +897,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     partition = connection.execute(
@@ -1032,9 +1058,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     candidates = connection.execute(
@@ -1116,9 +1141,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     row = connection.execute(
@@ -1188,9 +1212,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     current = connection.execute(
@@ -1269,9 +1292,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     connection.execute(
@@ -1373,9 +1395,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     rows = connection.execute(
@@ -1523,9 +1544,8 @@ class PostgresExecutionLedger:
                         """
                         SELECT storage_epoch, recovery_generation,
                                coordinator_generation, dispatch_blocked
-                        FROM tiamat.share_locked_restore_gate(%s)
-                        """,
-                        (scope.environment,),
+                        FROM tiamat.share_locked_restore_gate()
+                        """
                     ).fetchone()
                     self._validate_gate(gate, coordinator_generation)
                     if target_state == "dispatched":

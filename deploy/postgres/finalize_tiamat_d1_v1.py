@@ -21,7 +21,8 @@ class D1FinalizationRejected(RuntimeError):
 _FUNCTIONS = (
     # The serving role cannot take the restore gate's shared lock directly once its UPDATE is
     # revoked, so that lock is taken inside a definer function running in its transaction.
-    ("share_locked_restore_gate", "text"),
+    ("share_locked_restore_gate", ""),
+    ("retire_coordinator", "bigint"),
     ("consume_startup_attestation", "text"),
     ("consume_startup_attestation_v2", "text"),
     ("verify_attestation_current", "bigint"),
@@ -118,6 +119,16 @@ def finalize_d1(database_url: str, *, environment: str, expected_ledger_id: UUID
                 connection.execute(
                     sql.SQL("ALTER FUNCTION {} OWNER TO tiamat_recovery").format(signature)
                 )
+        # The release manager reads the gate the same way and also holds no UPDATE on it, so it
+        # needs the same locked reader. It is granted nothing else.
+        release_manager = connection.execute(
+            "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tiamat_release_manager'"
+        ).fetchone()
+        if release_manager is not None:
+            connection.execute(
+                "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() "
+                "TO tiamat_release_manager"
+            )
         connection.execute("REVOKE CREATE ON SCHEMA tiamat FROM tiamat_recovery")
         connection.execute(sql.SQL("REVOKE tiamat_recovery FROM {}").format(sql.Identifier(owner)))
         connection.execute(
