@@ -70,7 +70,13 @@ approved publication and the quarantined Raymond migration. The published source
 `d126f7064c58acdb644fbf14f4def78353f49996`; the cloud migration and separate six-check
 read-only verifier jobs both succeeded on it. The temporary runner was deleted, and a fresh
 GET confirmed policy and routine are still suspended. Prepare the bounded synthetic cloud
-demonstration. Coordinate the new migration number with shared-repository work.
+demonstration. A renewed, non-authorizing proposal for the same 11 conversations was then
+built locally with the same selected records, destination, route and $2/20-attempt limits;
+it expires 2026-09-29 23:25 UTC. Ray allowed the shared provider key for synthetic use only.
+The disabled pilot configuration was staged on the two suspended Raymond services, and
+independent GETs confirmed byte-equal environments and disabled capture/ingress/executor/intake.
+No personal records or provider requests were sent. Coordinate the new migration number with
+shared-repository work.
 
 Automatic approval review blocked the historical mixed-purpose commissioning helper because
 it supports persistent secret/configuration changes. It was not run. No cloud mutation was made.

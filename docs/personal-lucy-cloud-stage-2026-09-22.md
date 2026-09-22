@@ -101,6 +101,35 @@ Next prepare the bounded synthetic cloud execution. Preserve
 the additive correction ledger on rollback; suspend services and quarantine admission rather
 than downgrading it. Public intake, actual history and Telegram cutover remain later steps.
 
+## Disabled pilot configuration and renewed proposal
+
+On 2026-09-22, a fresh **non-authorizing** pilot proposal was built locally from the same
+11 selected conversations. The local ZIP commitment and every selected manifest record match
+the prior approved bundle; destination, route and limits are unchanged. It has a new campaign
+ID and exact bundle digest `15b2d1f70e50920d4605862d5c6772a8e28b24003681b5101671648813312b24`,
+expires 2026-09-29 23:25 UTC, and retains the $2 cumulative spend ceiling and 20-attempt
+limit. Files are in Ray's protected `chatgpt/2026-09-22-renewal` intake directory. The
+proposal grants **no authority** to upload or process real history. The model route is still
+listed by [OpenRouter](https://openrouter.ai/google/gemini-3.1-flash-lite); endpoint policy and
+price must be rechecked immediately before any real provider request.
+
+Ray approved use of the existing shared OpenRouter billing key for **synthetic demonstration
+only**. A local operator prepared the two exact Raymond service environments from that
+proposal, the prior scoped-credential stage and Raymond AWS bindings. The executor startup
+configuration parsed successfully with activation simulated locally. Three focused staging
+tests, Ruff and strict mypy passed. The disabled config was then applied to the two existing
+suspended services using `stage-raymond-disabled-pilot-suspended-v1`. Independent Render GETs
+confirmed exact environment equality and that both services remain suspended, with capture,
+product ingress, pilot executor and pilot intake all false. A gitignored rollback snapshot and
+stage receipt are saved under `secrets/generated/raymond-disabled-pilot-*20260922.json`.
+No service command, branch, deployment, provider request, personal-data import or Telegram
+route changed.
+
+Next prepare the bounded synthetic cloud runner and its exact rollback, then commission only
+the synthetic boundary. Real-history execution requires a fresh exact owner authorization
+for the new digest and a separate decision on the provider credential; this shared-key
+approval does not cover real history.
+
 ## Authorization and blockers
 
 Automatic approval review rejected execution of the historical mixed-purpose commissioning
