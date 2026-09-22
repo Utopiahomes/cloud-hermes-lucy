@@ -1,0 +1,94 @@
+{
+  "evidence_type": "tiamat_gate1b_failure_cases",
+  "date_utc": "2026-09-22",
+  "scope": "Gate 1B critical failure cases on disposable infrastructure; synthetic provider only",
+  "resource": {
+    "render_id": "dpg-danvd8uk1f9s73a3v2og-a",
+    "name": "tiamat-m2-floor-disposable-20260920",
+    "plan": "free",
+    "postgres_major": 16,
+    "migrated_to": "0014_attestation_expiry",
+    "disposition": "retained; deletion awaits Ray's explicit confirmation"
+  },
+  "cases": [
+    {
+      "case": "expiry while running",
+      "result": "passed",
+      "detail": "An expired claimant stops dispatch. Proved by real elapsed time against genuinely short-lived signed authority, not by rewriting a row: the database's trigger refuses to backdate an expiry, which is covered separately."
+    },
+    {
+      "case": "claimant renewal under continuing authority",
+      "result": "passed",
+      "detail": "With the claimant lifetime shorter than the witness lifetime, the claimant expires while its witness stays valid. The renewed claimant carries the same transition digest and the original witness is still valid at renewal: no new anchor, no new witness, no recovery step."
+    },
+    {
+      "case": "quarantine during dispatch",
+      "result": "passed",
+      "detail": "A quarantine landing after admission refuses the dispatch it would have authorized. The work stays admitted and unsent, and the provider is never reached."
+    },
+    {
+      "case": "old worker cannot dispatch",
+      "result": "passed",
+      "detail": "Once a newer coordinator holds the fence, the older executor is refused and reaches no provider."
+    },
+    {
+      "case": "old worker cannot settle",
+      "result": "passed",
+      "detail": "A stale worker cannot close out work it had already dispatched. The record stays dispatched as a liability for reconciliation, because its provider call may genuinely have been sent."
+    },
+    {
+      "case": "restart cannot reuse a spent claimant",
+      "result": "passed",
+      "detail": "A restarting process finds its claimant consumed and is refused, and the fence the previous process held is untouched, so nothing is silently taken over."
+    },
+    {
+      "case": "restart after a clean stop",
+      "result": "passed",
+      "detail": "After retirement no claimant exists at all, so the launcher must run again before anything serves."
+    },
+    {
+      "case": "AWS outage at startup",
+      "result": "passed",
+      "detail": "With the anchor unreadable the launcher refuses and writes no claimant, so no process can start."
+    },
+    {
+      "case": "AWS outage while running",
+      "result": "passed",
+      "detail": "Work already authorized completes, and dispatch then stops when the claimant's own bound lapses. No replacement claimant can be issued while the outage lasts. This is Draft 0.5 section 2's bounded authority interval, with the claimant as the bound."
+    },
+    {
+      "case": "concurrent launchers",
+      "result": "passed",
+      "detail": "Two launchers racing leave exactly one active claimant for the environment, and one consumer takes it."
+    },
+    {
+      "case": "concurrent shutdown and admission",
+      "result": "passed",
+      "detail": "Exactly one of the two wins and no work is stranded either way. Run repeatedly rather than once."
+    }
+  ],
+  "defects_found_and_fixed": [
+    "verify_attestation_current never checked the claimant's own expiry, so a running process kept dispatching after its authority lapsed. Migration 0014 adds the check inside the transaction the dispatch already makes.",
+    "Clean shutdown used block_dispatch, which quarantined the ledger and made an ordinary restart impossible. Migration 0013 separates retirement from quarantine.",
+    "The drain check and the generation move were separate transactions, so a request could be admitted between them and stranded. They now share one transaction."
+  ],
+  "deployment": {
+    "definer_migration_runner": "deploy/postgres/apply_tiamat_definer_migration_v1.py applies a revision which replaces an already-finalized definer function, taking a temporary ownership handoff and advancing Alembic in one transaction, then restoring and verifying ownership and grants.",
+    "proved_on_finalized_ledger": true,
+    "proved_on_fresh_ledger": false,
+    "fresh_ledger_note": "Render permits one free database per account and the existing one is retained, so applying 0014 by Alembic to a genuinely fresh database is outstanding. The branch that takes no handoff is unit-tested only."
+  },
+  "unchanged_live_state": {
+    "commissioned_staging_anchor_version": 2,
+    "commissioned_staging_ledger": "not connected; remains at 0006 and dispatch-blocked",
+    "staging_services": "all three suspended",
+    "provider_requests": 0,
+    "model_spending_microusd": 0
+  },
+  "remaining_matrix": [
+    "stale restore through a Render point-in-time restore, which needs its own disposable instance",
+    "attestation races under heavier concurrency than two threads",
+    "clock rollback and excessive clock uncertainty",
+    "the service layer and HTTP surface still run on the in-memory store rather than the durable ledger"
+  ]
+}
