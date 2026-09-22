@@ -78,6 +78,12 @@ independent GETs confirmed byte-equal environments and disabled capture/ingress/
 No personal records or provider requests were sent. Coordinate the new migration number with
 shared-repository work.
 
+An approved attempt to deploy the current branch while keeping both services suspended was
+rejected by Render (`cannot deploy suspended service`) before build. Both prior branches and
+commands were restored and verified; no new service code is deployed. A controlled resume
+with bounded synthetic execution and recovery is the next production boundary, requiring
+a separate exact authorization.
+
 Automatic approval review blocked the historical mixed-purpose commissioning helper because
 it supports persistent secret/configuration changes. It was not run. No cloud mutation was made.
 The actual saved real-history pilot authorization expired September 21, 2026; synthetic staging

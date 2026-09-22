@@ -130,6 +130,22 @@ the synthetic boundary. Real-history execution requires a fresh exact owner auth
 for the new digest and a separate decision on the provider credential; this shared-key
 approval does not cover real history.
 
+## Deployment boundary found during preparation
+
+The two existing Raymond services are still on `codex/r1-tenant-foundation`; a read-only GET
+found their latest deploys canceled. Ray approved an exact attempt to deploy commit
+`39d285924dd5caa91d85ebea05479cee446ad3b8` while both remained suspended. The
+operator saved the prior branch and commands and tried the policy deploy first. Render
+returned HTTP 400, `cannot deploy suspended service`, before any new build started. The
+operator restored both prior configurations, and an independent GET confirmed both services
+remain suspended on their original branch and commands, with no new deployment. The
+gitignored receipt is `secrets/generated/raymond-synthetic-deploy-state-v1.json`.
+
+The next rollout needs a controlled resume and readiness plan, including admission,
+one-off synthetic execution, and recovery. The suspended-deploy approval did not authorize
+resuming either service or opening the Raymond realm. Keep the current services suspended
+until that complete sequence is prepared and specifically authorized.
+
 ## Authorization and blockers
 
 Automatic approval review rejected execution of the historical mixed-purpose commissioning
