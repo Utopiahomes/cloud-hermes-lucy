@@ -14,8 +14,8 @@ from __future__ import annotations
 import threading
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol
+from datetime import datetime, timedelta
+from typing import Any, Protocol
 from uuid import UUID
 
 from lucy.shared_execution.postgres_ledger import (
@@ -26,6 +26,7 @@ from lucy.shared_execution.postgres_ledger import (
     LedgerScope,
     PostgresExecutionLedger,
 )
+from lucy.shared_execution.replay_cache import ReplayCache, require_matching_output
 from lucy.shared_execution.runtime_anchor_watch import (
     RuntimeAnchorWatch,
     RuntimeAuthorityClosed,
@@ -43,6 +44,8 @@ class ProviderOutcome:
     settled_microusd: int
     cost_reference_digest: str | None = None
     failure_code: str | None = None
+    # The replayable body. It goes to the cache, never to the ledger, which keeps only its digest.
+    output: Any | None = None
 
     @property
     def state(self) -> str:
@@ -62,6 +65,7 @@ class ExecutionOutcome:
     settlement_status: str
     settled_microusd: int | None
     replayed: bool
+    output: Any | None = None
 
 
 class DurableExecutor:
@@ -75,6 +79,8 @@ class DurableExecutor:
         coordinator_generation: int,
         provider: DispatchedProvider,
         watch: RuntimeAnchorWatch | None = None,
+        replay_cache: ReplayCache | None = None,
+        replay_window: timedelta = timedelta(hours=24),
     ) -> None:
         if coordinator_generation < 1:
             raise ValueError("coordinator generation is invalid")
@@ -84,6 +90,10 @@ class DurableExecutor:
         self._provider = provider
         # Optional for now: the served runtime supplies one, the ledger-only proofs do not.
         self._watch = watch
+        # Present when this executor serves a contract that replays response bodies. The cache is
+        # not authority: the ledger records the digest, and a replay is served only if they agree.
+        self._replay_cache = replay_cache
+        self._replay_window = replay_window
         self._intake_closed = False
         self._lock = threading.Lock()
 
@@ -137,6 +147,7 @@ class DurableExecutor:
                 settlement_status=record.settlement_status,
                 settled_microusd=record.settled_microusd,
                 replayed=True,
+                output=self._replayed_output(admission, record),
             )
         try:
             dispatched = self._ledger.dispatch(
@@ -171,6 +182,18 @@ class DurableExecutor:
                 )
             raise
         outcome = self._provider(dispatched)
+        # Cache the body before the ledger calls this complete. A failed cache write must not
+        # produce a clean completion whose replay cannot be honoured; an orphaned cache entry
+        # after a failed settlement is harmless and expires on its own.
+        response_digest: str | None = None
+        if self._replay_cache is not None and outcome.output is not None:
+            response_digest = self._replay_cache.put(
+                caller_id=self._scope.caller_id,
+                idempotency_key_digest=admission.idempotency_key_digest,
+                execution_id=record.execution_id,
+                output=outcome.output,
+                expires_at=now + self._replay_window,
+            )
         settled = self._ledger.settle_terminal(
             self._scope,
             record.execution_id,
@@ -181,6 +204,7 @@ class DurableExecutor:
             settled_microusd=outcome.settled_microusd,
             failure_code=outcome.failure_code,
             provider_cost_reference_digest=outcome.cost_reference_digest,
+            response_output_sha256=response_digest,
         )
         return ExecutionOutcome(
             execution_id=settled.execution_id,
@@ -188,4 +212,20 @@ class DurableExecutor:
             settlement_status=settled.settlement_status,
             settled_microusd=settled.settled_microusd,
             replayed=False,
+            output=outcome.output,
         )
+
+    def _replayed_output(self, admission: LedgerAdmission, record: LedgerRecord) -> Any | None:
+        """Serve a replayed body only when the ledger and the cache agree on what it was."""
+
+        if self._replay_cache is None or record.state != "completed":
+            return None
+        cached = self._replay_cache.get(
+            caller_id=self._scope.caller_id,
+            idempotency_key_digest=admission.idempotency_key_digest,
+        )
+        if cached is None:
+            # The replay window has passed, or the cache was lost. The execution and its
+            # accounting are unaffected; only the body is gone.
+            raise ExecutionRefused("replayable output is no longer retained")
+        return require_matching_output(cached, record.response_output_sha256)

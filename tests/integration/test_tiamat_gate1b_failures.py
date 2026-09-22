@@ -15,17 +15,33 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
-from lucy.shared_execution.durable_executor import DurableExecutor, ExecutionRefused
-from lucy.shared_execution.postgres_ledger import DispatchBlocked, DurableFenceRejected, LedgerScope
+from lucy.shared_execution.durable_executor import (
+    DurableExecutor,
+    ExecutionRefused,
+    ProviderOutcome,
+)
+from lucy.shared_execution.postgres_ledger import (
+    DispatchBlocked,
+    DurableFenceRejected,
+    LedgerRecord,
+    LedgerScope,
+)
 from lucy.shared_execution.recovery_anchor import (
     InMemoryExternalRecoveryAnchor,
     RecoveryAnchorRejected,
     VerifiedAnchorTransition,
+)
+from lucy.shared_execution.replay_cache import (
+    PostgresReplayCache,
+    ReplayOutputMismatch,
+    output_digest,
 )
 from lucy.shared_execution.runtime_anchor_watch import RuntimeAnchorWatch
 from lucy.shared_execution.served_startup import ServedStartupRefused, start_serving
@@ -791,3 +807,142 @@ def test_concurrent_restarts_leave_one_current_fence(gate1b: _Environment) -> No
     ]
     assert len(current) == 1
     assert current[0] == max(generations)
+
+
+def _cache(gate1b: _Environment) -> PostgresReplayCache:
+    return PostgresReplayCache(database_url=gate1b.runtime, environment=gate1b.environment)
+
+
+class _AnsweringProvider(_SyntheticProvider):
+    """A synthetic provider that returns a replayable body as well as a cost."""
+
+    def __call__(self, dispatched: LedgerRecord) -> ProviderOutcome:
+        outcome = super().__call__(dispatched)
+        return replace(
+            outcome, output={"mode": "text", "content": f"answer for {dispatched.execution_id}"}
+        )
+
+
+def _scoped(gate1b: _Environment, connection: Any) -> None:
+    connection.execute(
+        "SELECT set_config('tiamat.environment', %s, false)", (gate1b.environment,)
+    )
+    connection.execute(
+        "SELECT set_config('tiamat.caller_id', %s, false)", (gate1b.scope.caller_id,)
+    )
+
+
+def _serve(gate1b: _Environment, generation: int, admission: Any, cache: Any) -> Any:
+    return DurableExecutor(
+        ledger=_ledger(gate1b),
+        scope=gate1b.scope,
+        coordinator_generation=generation,
+        provider=_AnsweringProvider(),
+        replay_cache=cache,
+    ).execute(admission, now=datetime.now(UTC))
+
+
+def test_a_replay_after_restart_returns_the_same_body(gate1b: _Environment) -> None:
+    """The ledger keeps no content, so a replay is served from the cache it agrees with."""
+
+    generation, _, _ = _short_lived_fence(gate1b)
+    cache = _cache(gate1b)
+    admission = _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes)
+
+    first = _serve(gate1b, generation, admission, cache)
+    assert first.state == "completed" and not first.replayed
+
+    # A second executor, as a restarted process would be: no memory of the first.
+    replayed_provider = _AnsweringProvider()
+    replayed = DurableExecutor(
+        ledger=_ledger(gate1b),
+        scope=gate1b.scope,
+        coordinator_generation=generation,
+        provider=replayed_provider,
+        replay_cache=cache,
+    ).execute(admission, now=datetime.now(UTC))
+
+    assert replayed.replayed
+    assert replayed.execution_id == first.execution_id
+    assert replayed.output == first.output
+    assert replayed_provider.dispatched_states == []
+
+
+def test_the_ledger_keeps_the_digest_and_never_the_body(gate1b: _Environment) -> None:
+    """Content lives only in the cache; the ledger records what it was, not what it said."""
+
+    generation, _, _ = _short_lived_fence(gate1b)
+    admission = _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes)
+    outcome = _serve(gate1b, generation, admission, _cache(gate1b))
+
+    with psycopg.connect(gate1b.recovery) as recovery:
+        _scoped(gate1b, recovery)
+        row = recovery.execute(
+            "SELECT response_output_sha256 FROM tiamat.execution_records WHERE execution_id = %s",
+            (outcome.execution_id,),
+        ).fetchone()
+        columns = recovery.execute(
+            """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'tiamat' AND table_name = 'execution_records'
+              AND column_name IN ('output', 'response', 'content')
+            """
+        ).fetchone()
+    assert row is not None and row[0] == output_digest(outcome.output)
+    assert columns == (0,)
+
+
+def test_a_lost_cache_costs_the_body_and_nothing_else(gate1b: _Environment) -> None:
+    """Losing the cache degrades replay; the execution and its accounting are unaffected."""
+
+    generation, _, _ = _short_lived_fence(gate1b)
+    cache = _cache(gate1b)
+    admission = _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes)
+    outcome = _serve(gate1b, generation, admission, cache)
+
+    with psycopg.connect(gate1b.runtime, autocommit=True) as runtime:
+        _scoped(gate1b, runtime)
+        runtime.execute(
+            "DELETE FROM tiamat.replay_cache WHERE environment = %s", (gate1b.environment,)
+        )
+
+    with pytest.raises(ExecutionRefused, match="no longer retained"):
+        _serve(gate1b, generation, admission, cache)
+
+    with psycopg.connect(gate1b.recovery) as recovery:
+        _scoped(gate1b, recovery)
+        row = recovery.execute(
+            "SELECT state, settlement_status, settled_microusd FROM tiamat.execution_records "
+            "WHERE execution_id = %s",
+            (outcome.execution_id,),
+        ).fetchone()
+    # What Tiamat did, and what it spent, remain exactly as recorded.
+    assert row == ("completed", "settled", 137)
+
+
+def test_cached_output_that_disagrees_with_the_ledger_is_not_served(
+    gate1b: _Environment,
+) -> None:
+    """A cache entry is honoured only while it hashes to the digest the ledger recorded."""
+
+    generation, _, _ = _short_lived_fence(gate1b)
+    cache = _cache(gate1b)
+    admission = _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes)
+    _serve(gate1b, generation, admission, cache)
+
+    with psycopg.connect(gate1b.runtime, autocommit=True) as runtime:
+        _scoped(gate1b, runtime)
+        runtime.execute(
+            """
+            UPDATE tiamat.replay_cache SET output = %s
+            WHERE environment = %s AND idempotency_key_digest = %s
+            """,
+            (
+                Jsonb({"mode": "text", "content": "tampered"}),
+                gate1b.environment,
+                admission.idempotency_key_digest,
+            ),
+        )
+
+    with pytest.raises(ReplayOutputMismatch):
+        _serve(gate1b, generation, admission, cache)

@@ -25,7 +25,7 @@ TEST_DATABASE_PREFIX = "tiamat_test_d1"
 EXECUTION_TABLES = (
     "tiamat.spending_partitions, tiamat.grant_releases, tiamat.execution_records, "
     "tiamat.execution_idempotency_aliases, tiamat.jti_replay, "
-    "tiamat.financial_events, tiamat.route_rate_quarantines"
+    "tiamat.financial_events, tiamat.route_rate_quarantines, tiamat.replay_cache"
 )
 
 
