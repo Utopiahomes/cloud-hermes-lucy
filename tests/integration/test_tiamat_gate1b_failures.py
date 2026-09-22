@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedAnchorTransition,
 )
 from lucy.shared_execution.runtime_anchor_watch import RuntimeAnchorWatch
+from lucy.shared_execution.served_startup import ServedStartupRefused, start_serving
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
@@ -631,3 +633,161 @@ def test_a_refresh_outage_leaves_a_running_executor_serving(gate1b: _Environment
 
     assert outcome.state == "completed"
     assert provider.dispatched_states == ["dispatched"]
+
+
+def _issuer_for(gate1b: _Environment, anchor: object) -> StartupAttestationIssuer:
+    return StartupAttestationIssuer(
+        anchor=anchor,  # type: ignore[arg-type]
+        identity=_identity(gate1b),
+        recovery_database_url=gate1b.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(gate1b.recovery),
+    )
+
+
+def test_an_unattended_restart_obtains_and_consumes_a_claimant(gate1b: _Environment) -> None:
+    """An ordinary restart needs no operator: the launcher runs and serving resumes."""
+
+    ledger = _ledger(gate1b)
+    now = datetime.now(UTC)
+    digest = _bind_checkpoint(gate1b)
+    identity = _identity(gate1b)
+    anchor, transition = _established_anchor_with_validity(
+        gate1b, identity, digest, now, not_after=now + timedelta(hours=1)
+    )
+
+    started = start_serving(
+        anchor=anchor,
+        identity=identity,
+        issuer=_issuer_for(gate1b, anchor),
+        ledger=ledger,
+        clock=lambda: datetime.now(UTC),
+    )
+
+    assert started.launcher_invoked
+    assert started.anchor_transition_sha256 == transition.exact_sha256
+    assert ledger.verify_attestation_current(started.coordinator_generation)
+
+    provider = _SyntheticProvider()
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=gate1b.scope,
+        coordinator_generation=started.coordinator_generation,
+        provider=provider,
+        watch=started.watch,
+    )
+    outcome = executor.execute(
+        _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes),
+        now=datetime.now(UTC),
+    )
+    assert outcome.state == "completed"
+    assert provider.dispatched_states == ["dispatched"]
+
+
+def test_a_waiting_claimant_is_consumed_without_invoking_the_launcher(
+    gate1b: _Environment,
+) -> None:
+    """A claimant already issued is taken as it stands, not replaced."""
+
+    ledger = _ledger(gate1b)
+    now = datetime.now(UTC)
+    digest = _bind_checkpoint(gate1b)
+    identity = _identity(gate1b)
+    anchor, transition = _established_anchor_with_validity(
+        gate1b, identity, digest, now, not_after=now + timedelta(hours=1)
+    )
+    _issuer_for(gate1b, anchor).issue(now=now)
+
+    started = start_serving(
+        anchor=anchor,
+        identity=identity,
+        issuer=_issuer_for(gate1b, anchor),
+        ledger=ledger,
+        clock=lambda: datetime.now(UTC),
+    )
+
+    assert not started.launcher_invoked
+    assert ledger.verify_attestation_current(started.coordinator_generation)
+
+
+def test_startup_fails_closed_when_the_anchor_cannot_be_read(gate1b: _Environment) -> None:
+    """Startup is the one moment with no verified interval to fall back on."""
+
+    _bind_checkpoint(gate1b)
+    with pytest.raises(ServedStartupRefused, match="unavailable"):
+        start_serving(
+            anchor=_UnreachableAnchor(),
+            identity=_identity(gate1b),
+            issuer=_issuer_for(gate1b, _UnreachableAnchor()),
+            ledger=_ledger(gate1b),
+            clock=lambda: datetime.now(UTC),
+        )
+
+
+def test_startup_fails_closed_on_a_quarantined_anchor(gate1b: _Environment) -> None:
+    """A restart cannot serve over authority that does not authorize dispatch."""
+
+    ledger = _ledger(gate1b)
+    now = datetime.now(UTC)
+    digest = _bind_checkpoint(gate1b)
+    identity = _identity(gate1b)
+    established, transition = _established_anchor_with_validity(
+        gate1b, identity, digest, now, not_after=now + timedelta(hours=1)
+    )
+    quarantined = InMemoryExternalRecoveryAnchor()
+    quarantined.install(
+        replace(
+            transition,
+            continuity="quarantined",
+            beacon=None,
+            witness=replace(transition.witness, status="quarantined"),
+            exact_jws=b"gate-1b-quarantined-transition",
+        ),
+        expected_transition_sha256=None,
+        now=now,
+    )
+
+    with pytest.raises(ServedStartupRefused):
+        start_serving(
+            anchor=quarantined,
+            identity=identity,
+            issuer=_issuer_for(gate1b, quarantined),
+            ledger=ledger,
+            clock=lambda: datetime.now(UTC),
+        )
+    assert established is not None
+
+
+def test_concurrent_restarts_leave_one_current_fence(gate1b: _Environment) -> None:
+    """Two processes restarting at once must not both end up serving."""
+
+    ledger = _ledger(gate1b)
+    now = datetime.now(UTC)
+    digest = _bind_checkpoint(gate1b)
+    identity = _identity(gate1b)
+    anchor, _ = _established_anchor_with_validity(
+        gate1b, identity, digest, now, not_after=now + timedelta(hours=1)
+    )
+
+    def _start() -> object:
+        try:
+            return start_serving(
+                anchor=anchor,
+                identity=identity,
+                issuer=_issuer_for(gate1b, anchor),
+                ledger=ledger,
+                clock=lambda: datetime.now(UTC),
+            ).coordinator_generation
+        except ServedStartupRefused as exc:
+            return f"refused:{exc}"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [task.result() for task in [pool.submit(_start), pool.submit(_start)]]
+
+    generations = [result for result in results if isinstance(result, int)]
+    assert generations, results
+    # Whatever the interleaving, exactly one fence is current at the end and it is the newest.
+    current = [
+        generation for generation in generations if ledger.verify_attestation_current(generation)
+    ]
+    assert len(current) == 1
+    assert current[0] == max(generations)
