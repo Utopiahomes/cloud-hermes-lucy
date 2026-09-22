@@ -26,6 +26,7 @@ from lucy.shared_execution.recovery_anchor import (
     RecoveryAnchorRejected,
     VerifiedAnchorTransition,
 )
+from lucy.shared_execution.runtime_anchor_watch import RuntimeAnchorWatch
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
     StartupAttestationIssuer,
@@ -495,3 +496,138 @@ def test_two_launchers_racing_produce_one_claimant(gate1b: _Environment) -> None
     # Whichever claimant survived, exactly one consumer can take it.
     consumed = _ledger(gate1b).consume_startup_attestation(transition.exact_sha256)
     assert consumed > 1
+
+
+def test_a_quarantine_observed_at_the_dispatch_gate_stops_the_send(
+    gate1b: _Environment,
+) -> None:
+    """A quarantine seen after the ledger committed the dispatch must still stop the provider.
+
+    Nothing is sent and nothing is released. Closing the latch also blocks the gate, which
+    invalidates the very fence the executor would need to mark its own record, so the record
+    stays dispatched and unsettled: the liability reconciliation must resolve.
+    """
+
+    ledger = _ledger(gate1b)
+    generation, anchor, transition = _short_lived_fence(gate1b)
+    provider = _SyntheticProvider()
+
+    class _WatchClosingAtTheGate(RuntimeAnchorWatch):
+        """Open when the request is admitted, closed by the time it would be sent."""
+
+        def __init__(self) -> None:
+            super().__init__(
+                anchor=anchor,
+                identity=_identity(gate1b),
+                consumed_transition_sha256=transition.exact_sha256,
+                ledger=ledger,
+                clock=lambda: datetime.now(UTC),
+            )
+            self.checks = 0
+
+        def require_open(self) -> None:
+            self.checks += 1
+            if self.checks > 1:
+                self.close("recovery_anchor_superseded")
+            super().require_open()
+
+    watch = _WatchClosingAtTheGate()
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=gate1b.scope,
+        coordinator_generation=generation,
+        provider=provider,
+        watch=watch,
+    )
+
+    with pytest.raises(ExecutionRefused, match="superseded"):
+        executor.execute(
+            _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes),
+            now=datetime.now(UTC),
+        )
+
+    assert provider.dispatched_states == []
+    with psycopg.connect(gate1b.recovery) as recovery:
+        recovery.execute(
+            "SELECT set_config('tiamat.environment', %s, false)", (gate1b.environment,)
+        )
+        row = recovery.execute(
+            """
+            SELECT state, settlement_status FROM tiamat.execution_records
+            WHERE environment = %s AND coordinator_generation = %s
+            """,
+            (gate1b.environment, generation),
+        ).fetchone()
+    assert row is not None
+    # Either the executor retained the exposure explicitly, or the fence was already gone and the
+    # record remains in flight. Both are liabilities; neither is a settlement or a release.
+    assert row[0] in {"dispatched", "outcome_unknown"}
+    assert row[1] != "settled"
+    _unblock(gate1b)
+
+
+def test_a_closed_latch_refuses_before_anything_is_admitted(gate1b: _Environment) -> None:
+    """Once the latch is closed nothing is admitted, so no reservation is taken at all."""
+
+    ledger = _ledger(gate1b)
+    generation, anchor, transition = _short_lived_fence(gate1b)
+    watch = RuntimeAnchorWatch(
+        anchor=anchor,
+        identity=_identity(gate1b),
+        consumed_transition_sha256=transition.exact_sha256,
+        ledger=ledger,
+        clock=lambda: datetime.now(UTC),
+    )
+    watch.close("recovery_continuity_withdrawn")
+    provider = _SyntheticProvider()
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=gate1b.scope,
+        coordinator_generation=generation,
+        provider=provider,
+        watch=watch,
+    )
+
+    with pytest.raises(ExecutionRefused, match="continuity_withdrawn"):
+        executor.execute(
+            _admission(datetime.now(UTC), owner_id=uuid4(), key=uuid4().bytes),
+            now=datetime.now(UTC),
+        )
+
+    assert provider.dispatched_states == []
+    assert ledger.in_flight_under_fence(gate1b.scope, generation) == 0
+    _unblock(gate1b)
+
+
+def test_a_refresh_outage_leaves_a_running_executor_serving(gate1b: _Environment) -> None:
+    """A failed runtime refresh is not a withdrawal: the claimant's bound still governs.
+
+    This is the case the earlier outage test could not reach, because nothing refreshed at all.
+    """
+
+    ledger = _ledger(gate1b)
+    generation, _, transition = _short_lived_fence(gate1b)
+    watch = RuntimeAnchorWatch(
+        anchor=_UnreachableAnchor(),
+        identity=_identity(gate1b),
+        consumed_transition_sha256=transition.exact_sha256,
+        ledger=ledger,
+        clock=lambda: datetime.now(UTC),
+    )
+
+    assert watch.refresh() == "anchor_unavailable"
+    assert watch.closed_reason is None
+
+    provider = _SyntheticProvider()
+    executor = DurableExecutor(
+        ledger=ledger,
+        scope=gate1b.scope,
+        coordinator_generation=generation,
+        provider=provider,
+        watch=watch,
+    )
+    now = datetime.now(UTC)
+    outcome = executor.execute(_admission(now, owner_id=uuid4(), key=uuid4().bytes), now=now)
+
+    assert outcome.state == "completed"
+    assert provider.dispatched_states == ["dispatched"]

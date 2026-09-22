@@ -54,7 +54,7 @@
     {
       "case": "AWS outage while running",
       "result": "passed",
-      "detail": "Work already authorized completes, and dispatch then stops when the claimant's own bound lapses. No replacement claimant can be issued while the outage lasts. This is Draft 0.5 section 2's bounded authority interval, with the claimant as the bound."
+      "detail": "Proves that existing claimant authority expires and cannot be renewed while the launcher's anchor read is unavailable, and that work already authorized completes. It does NOT prove runtime refresh behaviour: DurableExecutor does not yet consult a runtime anchor gate or attempt a periodic refresh, so no failed runtime refresh is exercised here. The bound demonstrated is the claimant's expiry, enforced in the database, not a process noticing an unreachable anchor."
     },
     {
       "case": "concurrent launchers",
@@ -86,6 +86,7 @@
     "model_spending_microusd": 0
   },
   "remaining_matrix": [
+    "runtime anchor refresh and a local dispatch latch: a running executor does not yet poll the anchor, react to a newly observed quarantine, or invoke the launcher on restart",
     "stale restore through a Render point-in-time restore, which needs its own disposable instance",
     "attestation races under heavier concurrency than two threads",
     "clock rollback and excessive clock uncertainty",

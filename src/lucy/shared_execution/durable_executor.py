@@ -12,6 +12,7 @@ terminal settlement; profile authority, wire validation and the HTTP surface sta
 from __future__ import annotations
 
 import threading
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -24,6 +25,10 @@ from lucy.shared_execution.postgres_ledger import (
     LedgerRecord,
     LedgerScope,
     PostgresExecutionLedger,
+)
+from lucy.shared_execution.runtime_anchor_watch import (
+    RuntimeAnchorWatch,
+    RuntimeAuthorityClosed,
 )
 
 
@@ -69,6 +74,7 @@ class DurableExecutor:
         scope: LedgerScope,
         coordinator_generation: int,
         provider: DispatchedProvider,
+        watch: RuntimeAnchorWatch | None = None,
     ) -> None:
         if coordinator_generation < 1:
             raise ValueError("coordinator generation is invalid")
@@ -76,8 +82,18 @@ class DurableExecutor:
         self._scope = scope
         self._coordinator_generation = coordinator_generation
         self._provider = provider
+        # Optional for now: the served runtime supplies one, the ledger-only proofs do not.
+        self._watch = watch
         self._intake_closed = False
         self._lock = threading.Lock()
+
+    def _require_authority(self) -> None:
+        if self._watch is None:
+            return
+        try:
+            self._watch.require_open()
+        except RuntimeAuthorityClosed as exc:
+            raise ExecutionRefused(str(exc)) from exc
 
     def shutdown(self) -> int:
         """Close intake, then drain and retire. Retirement is generation-checked.
@@ -100,6 +116,7 @@ class DurableExecutor:
         with self._lock:
             if self._intake_closed:
                 raise ExecutionRefused("intake is closed for shutdown")
+        self._require_authority()
         try:
             record, created = self._ledger.create_or_get(
                 self._scope,
@@ -135,6 +152,24 @@ class DurableExecutor:
             raise ExecutionRefused(str(exc) or type(exc).__name__) from exc
         if dispatched.state != "dispatched":
             raise ExecutionRefused("dispatch was not committed")
+        # The final gate: a quarantine observed since admission must stop this send, even though
+        # the ledger has already committed the dispatch.
+        try:
+            self._require_authority()
+        except ExecutionRefused:
+            # Retain the exposure if this fence can still write. Closing the latch also blocks the
+            # gate, which invalidates the fence, so often it cannot: the record then stays
+            # dispatched and unsettled, which is itself the liability reconciliation must resolve.
+            # Either way nothing is sent and nothing is released.
+            with suppress(DispatchBlocked, DurableFenceRejected):
+                self._ledger.mark_outcome_unknown(
+                    self._scope,
+                    record.execution_id,
+                    coordinator_generation=self._coordinator_generation,
+                    record_generation=dispatched.record_generation,
+                    owner_id=admission.owner_id,
+                )
+            raise
         outcome = self._provider(dispatched)
         settled = self._ledger.settle_terminal(
             self._scope,
