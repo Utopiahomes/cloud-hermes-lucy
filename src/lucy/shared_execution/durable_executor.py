@@ -236,6 +236,10 @@ class DurableExecutor:
             # The fence moved, the gate closed or the claimant is no longer current. No provider
             # call may follow an uncommitted dispatch.
             raise ExecutionRefused(str(exc) or type(exc).__name__) from exc
+        if dispatched.state == "failed":
+            # The pre-dispatch recheck found the admitted authority revoked and aborted the
+            # record at zero cost. Nothing was sent; the terminal record is the answer.
+            return self._terminal(dispatched, response_body=None)
         if dispatched.state != "dispatched":
             raise ExecutionRefused("dispatch was not committed")
         # The final gate: a quarantine observed since admission must stop this send, even though
@@ -269,30 +273,46 @@ class DurableExecutor:
                 response_body=outcome.response_body,
                 admitted_at=now,
             )
-        settled = self._ledger.settle_terminal(
-            self._scope,
-            record.execution_id,
-            coordinator_generation=self._coordinator_generation,
-            record_generation=dispatched.record_generation,
-            owner_id=admission.owner_id,
-            state=outcome.state,
-            settled_microusd=outcome.settled_microusd,
-            failure_code=outcome.failure_code,
-            provider_cost_reference_digest=outcome.cost_reference_digest,
-            response_body_sha256=response_digest,
-        )
+        try:
+            settled = self._ledger.settle_terminal(
+                self._scope,
+                record.execution_id,
+                coordinator_generation=self._coordinator_generation,
+                record_generation=dispatched.record_generation,
+                owner_id=admission.owner_id,
+                state=outcome.state,
+                settled_microusd=outcome.settled_microusd,
+                failure_code=outcome.failure_code,
+                provider_cost_reference_digest=outcome.cost_reference_digest,
+                response_body_sha256=response_digest,
+            )
+        except BaseException:
+            self._discard(admission.idempotency_key_digest)
+            raise
+        if settled.state != "completed":
+            # The ledger can turn a reported success into a failure: an overrun, or a revocation
+            # that committed first. That candidate is suppressed, so it is not held for replay.
+            self._discard(admission.idempotency_key_digest)
+            return self._terminal(settled, response_body=None)
+        return self._terminal(settled, response_body=outcome.response_body)
+
+    def _terminal(self, record: LedgerRecord, *, response_body: Any | None) -> ExecutionOutcome:
         return ExecutionOutcome(
-            execution_id=settled.execution_id,
-            state=settled.state,
-            settlement_status=settled.settlement_status,
-            settled_microusd=settled.settled_microusd,
+            execution_id=record.execution_id,
+            state=record.state,
+            settlement_status=record.settlement_status,
+            settled_microusd=record.settled_microusd,
             replayed=False,
-            # The ledger can turn a reported success into a failure, as it does for an overrun.
-            # Only a durably completed execution returns its body.
-            response_body=outcome.response_body if settled.state == "completed" else None,
-            reserved_microusd=settled.reserved_microusd,
-            failure_code=settled.failure_code,
+            response_body=response_body,
+            reserved_microusd=record.reserved_microusd,
+            failure_code=record.failure_code,
         )
+
+    def _discard(self, idempotency_key_digest: str) -> None:
+        if self._replay_cache is not None:
+            self._replay_cache.discard(
+                caller_id=self._scope.caller_id, idempotency_key_digest=idempotency_key_digest
+            )
 
     def _replayed_body(
         self,
@@ -317,6 +337,9 @@ class DurableExecutor:
                 provider_route_id=record.provider_route_id,
                 rate_release_id=record.rate_release_id,
             )
+            # A revocation committed after the completed commit cannot recall the original
+            # response, but it does end replay.
+            or self._ledger.pinned_authority_revoked(self._scope, record)
         ):
             raise ReplayInvalidated(record)
         cached = (

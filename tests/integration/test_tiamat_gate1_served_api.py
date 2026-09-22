@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -39,7 +41,11 @@ from lucy.shared_execution.durable_service import (
     TransportProvider,
 )
 from lucy.shared_execution.idempotency import DigestKey, IdempotencyDigestRing
-from lucy.shared_execution.postgres_ledger import LedgerScope
+from lucy.shared_execution.postgres_ledger import (
+    LedgerScope,
+    PostgresExecutionLedger,
+    RecoveryWitness,
+)
 from lucy.shared_execution.recovery_anchor import InMemoryExternalRecoveryAnchor
 from lucy.shared_execution.replay_cache import MAXIMUM_REPLAY_WINDOW, InMemoryReplayCache
 from lucy.shared_execution.served_startup import ServedRuntime, start_serving
@@ -84,6 +90,8 @@ RELEASE = ServedProfile(
     rate_release_id="rates.gate-1",
     eligibility_generation=1,
     deadline_ms=15_000,
+    privacy_policy_id="utopia-public-zdr",
+    privacy_policy_release_id="privacy-gate1.1",
 )
 SETTLED_MICROUSD = 137
 
@@ -164,11 +172,12 @@ class _Served:
     private_key: Ed25519PrivateKey
     runtime: ServedRuntime
     anchor: InMemoryExternalRecoveryAnchor
+    cache: InMemoryReplayCache
 
-    def post(self, raw: bytes, key: UUID) -> httpx.Response:
-        response: httpx.Response = self.client.post(
-            PATH, content=raw, headers=headers(self.private_key, raw, key=key)
-        )
+    def post(self, raw: bytes, key: UUID, *, timeout_ms: int = 15_000) -> httpx.Response:
+        request_headers = headers(self.private_key, raw, key=key)
+        request_headers["X-Execution-Timeout-Ms"] = str(timeout_ms)
+        response: httpx.Response = self.client.post(PATH, content=raw, headers=request_headers)
         return response
 
 
@@ -184,6 +193,7 @@ def _serve(
     transport: _CountingTransport | None = None,
     cache: InMemoryReplayCache | None = None,
     profiles: ServedProfiles | None = None,
+    transaction_probe: Callable[[str, Any], None] | None = None,
 ) -> _Served:
     """One serving process, brought up the way a deployed one is.
 
@@ -192,7 +202,13 @@ def _serve(
     and its volatile cache; nothing carries over from a previous process except the ledger.
     """
 
-    ledger = _ledger(env)
+    ledger = PostgresExecutionLedger(
+        env.runtime,
+        RecoveryWitness(
+            environment=env.environment, storage_epoch=env.storage_epoch, recovery_generation=1
+        ),
+        transaction_probe=transaction_probe,
+    )
     anchor_identity = _identity(env)
     if anchor is None:
         now = datetime.now(UTC)
@@ -213,6 +229,9 @@ def _serve(
     )
     transport = transport or _CountingTransport()
     profiles = profiles or ServedProfiles((RELEASE,))
+    # Not ``cache or ...``: an empty cache has a length of zero and is falsy.
+    if cache is None:
+        cache = InMemoryReplayCache(clock=lambda: datetime.now(UTC))
     identity = WorkloadIdentity(
         issuer=ISSUER,
         subject=SUBJECT,
@@ -227,10 +246,7 @@ def _serve(
         coordinator_generation=runtime.coordinator_generation,
         provider=TransportProvider(transport),
         watch=runtime.watch,
-        # Not ``cache or ...``: an empty cache has a length of zero and is falsy.
-        replay_cache=(
-            cache if cache is not None else InMemoryReplayCache(clock=lambda: datetime.now(UTC))
-        ),
+        replay_cache=cache,
     )
     service = DurableExecutionService(
         executors={SUBJECT: executor},
@@ -243,7 +259,7 @@ def _serve(
         ApiRelease(execution="tiamat-gate1.1", policy=RELEASE.release_id),
         authentication_failure_delay=_no_delay,
     )
-    return _Served(TestClient(app), transport, profiles, private_key, runtime, anchor)
+    return _Served(TestClient(app), transport, profiles, private_key, runtime, anchor, cache)
 
 
 def _record_rows(env: _Environment) -> list[tuple[Any, ...]]:
@@ -441,7 +457,13 @@ def test_a_failed_execution_is_terminal_for_its_key(served_env: _Environment) ->
     assert served.transport.calls == 1
 
 
-def test_a_duplicate_while_running_is_in_progress(served_env: _Environment) -> None:
+def test_a_duplicate_waits_then_reports_in_progress(served_env: _Environment) -> None:
+    """RC1 section 11: the duplicate waits out its own ceiling, then reports the live record.
+
+    Everything runs on one event loop. The duplicate is answered while the original is still held
+    inside the provider, which it could not be if execution blocked the loop.
+    """
+
     transport = _CountingTransport(hold=True)
     served = _serve(
         served_env,
@@ -450,14 +472,20 @@ def test_a_duplicate_while_running_is_in_progress(served_env: _Environment) -> N
     )
     raw, key = body(), uuid4()
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with served.client, ThreadPoolExecutor(max_workers=1) as pool:
         first = pool.submit(served.post, raw, key)
         assert transport.started.wait(10)
-        duplicate = served.post(raw, key)
+        waited_from = time.monotonic()
+        duplicate = served.post(raw, key, timeout_ms=1_000)
+        waited = time.monotonic() - waited_from
+        still_running = not first.done()
         transport.release()
         original = first.result(timeout=20)
 
     document = _error(duplicate, 409, "request_in_progress")
+    # It waited for its own one-second ceiling rather than answering at once or holding on.
+    assert 0.9 <= waited < 5
+    assert still_running
     assert duplicate.headers["retry-after"] == "1"
     assert document["execution"]["state"] == "dispatched"
     assert document["cost"] == {
@@ -467,6 +495,39 @@ def test_a_duplicate_while_running_is_in_progress(served_env: _Environment) -> N
     }
     assert original.status_code == 200
     assert document["execution"]["execution_id"] == original.json()["execution_id"]
+    assert transport.calls == 1
+
+
+def test_a_waiting_duplicate_receives_the_outcome_it_waited_for(
+    served_env: _Environment,
+) -> None:
+    """When the original completes inside the wait, the duplicate is the eligible replay."""
+
+    transport = _CountingTransport(hold=True)
+    served = _serve(
+        served_env,
+        private_key=Ed25519PrivateKey.generate(),
+        transport=transport,
+    )
+    raw, key = body(), uuid4()
+
+    with served.client, ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(served.post, raw, key)
+        assert transport.started.wait(10)
+        waiting = pool.submit(served.post, raw, key)
+        # Let the duplicate find the record dispatched and begin waiting before the original ends.
+        time.sleep(0.5)
+        assert not waiting.done()
+        transport.release()
+        original = first.result(timeout=20)
+        duplicate = waiting.result(timeout=20)
+
+    assert original.status_code == 200 and duplicate.status_code == 200, duplicate.text
+    replayed = duplicate.json()
+    bundle_validator("response.schema.json").validate(replayed)
+    assert replayed["replayed"] is True
+    assert replayed["execution_id"] == original.json()["execution_id"]
+    assert replayed["output"] == original.json()["output"]
     assert transport.calls == 1
 
 

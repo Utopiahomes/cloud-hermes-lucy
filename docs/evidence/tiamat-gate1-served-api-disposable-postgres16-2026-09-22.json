@@ -7,15 +7,15 @@
     "name": "tiamat-m2-floor-disposable-20260920",
     "plan": "free",
     "postgres_major": 16,
-    "migrated_to": "0015_replay_cache",
+    "migrated_to": "0016_privacy_policy_pin",
     "disposition": "retained; deletion awaits Ray's explicit confirmation"
   },
   "path_exercised": [
-    "HTTP request through create_shared_execution_app: authentication, header, size, digest and schema checks unchanged",
-    "each serving process started by start_serving: anchor read, launcher when no claimant waits, one claimant consumed",
-    "DurableExecutionService: profile compatibility, RFC 8785 canonical identity, keyed idempotency digests, read-only step-10 lookup",
-    "DurableExecutor holding the process's fence, runtime watch and bounded in-memory replay cache",
-    "PostgresExecutionLedger on the disposable database; the ledger stores the response digest and no content"
+    "each serving process composed by build_served_app: start_serving (anchor read, launcher when no claimant waits, one claimant consumed), executor with fence, runtime watch and fresh volatile cache, durable jti replay, periodic watch refresh in the lifespan, drain and retire on shutdown",
+    "HTTP request through create_shared_execution_app; the jti consumption and the execution call run in the worker thread pool, off the event loop",
+    "DurableExecutionService: profile compatibility, RFC 8785 canonical identity, keyed idempotency digests, read-only step-10 lookup, bounded wait for an active duplicate",
+    "PostgresExecutionLedger on the disposable database: profile and privacy-policy releases pinned at admission, revocation rechecked before dispatch and atomically at the completed commit",
+    "signed authority transitions (activate_release, apply_revocation) run by the real PostgresSignedAuthorityStore as a login form of the deployed release-manager role"
   ],
   "cases": [
     {
@@ -59,9 +59,9 @@
       "detail": "An unusable candidate commits failed and returns 502 provider_response_invalid with the failed execution and settled receipt; the duplicate returns the same stored error and receipt. One provider request."
     },
     {
-      "case": "duplicate while running",
+      "case": "duplicate while running, bounded wait",
       "result": "passed",
-      "detail": "A duplicate arriving while the original is dispatched returns 409 request_in_progress with Retry-After 1, the dispatched execution and a pending_reconciliation receipt. The original then completes with the same execution ID. One provider request."
+      "detail": "A duplicate arriving while the original is dispatched waits its own one-second attempt ceiling (asserted between 0.9 and 5 seconds), then returns 409 request_in_progress with Retry-After 1, the dispatched execution and a pending_reconciliation receipt, while the original is still held in the provider. The whole case runs on one event loop, so an answer while the original is held shows execution no longer blocks the loop; with the calls moved back onto the loop the same test fails. One provider request."
     },
     {
       "case": "closed runtime latch",
@@ -72,25 +72,73 @@
       "case": "every serving configuration holds the cache",
       "result": "passed",
       "detail": "DurableExecutionService refuses an executor without a replay cache, and an executor without one answers a completed duplicate with IdempotencyRecoveryUnavailable, never an empty success."
+    },
+    {
+      "case": "waiting duplicate receives the outcome",
+      "result": "passed",
+      "detail": "A duplicate that begins waiting while the original is dispatched returns 200 replayed true with the original execution ID and output once the original completes inside its wait. One provider request."
+    },
+    {
+      "case": "revocation after dispatch, before the completed commit",
+      "result": "passed",
+      "detail": "Run for a profile revocation and for a privacy-policy revocation. The revocation commits while the provider holds the request; the completed commit's recheck sees it and commits failed with execution_invalidated, settled at the reported charge, with no response digest and no cached body. The original returns 409 execution_invalidated with the failed execution and settled receipt; the duplicate returns the same. One provider request."
+    },
+    {
+      "case": "revocation arriving during the completed commit",
+      "result": "passed",
+      "detail": "With the completion transaction past its recheck and still open, apply_revocation is started and observed still blocked on the subject lock 4 seconds later. The completed commit lands first, the original is delivered with 200, and the revocation then commits and ends replay: the duplicate returns 409 execution_invalidated. With the revocation's lock removed the same test fails, on two runs."
+    },
+    {
+      "case": "revocation committed inside settlement, before the recheck",
+      "result": "passed",
+      "detail": "A revocation committed inside the settlement transaction, after its record locks but before its recheck, is seen by the recheck, which reads after taking the lock. The candidate is suppressed with execution_invalidated."
+    },
+    {
+      "case": "routine successor during execution",
+      "result": "passed",
+      "detail": "Activating a successor profile release through activate_release while the provider holds the request lets the connected original finish with 200 under its pinned release; the duplicate then returns 409 execution_invalidated. One provider request."
+    },
+    {
+      "case": "revocation before dispatch",
+      "result": "passed",
+      "detail": "A revocation committed inside the dispatch transaction, before its recheck, aborts the admitted record: failed, execution_aborted, settled at zero, reservation released. The request returns 409 execution_aborted with that receipt and no provider request is made."
+    },
+    {
+      "case": "serving role and signed authority",
+      "result": "passed",
+      "detail": "tiamat_runtime reads only its own caller scope's signed releases under RLS and is refused FOR SHARE and UPDATE on the authority tables, which is why the fence is an advisory lock rather than a row lock."
+    },
+    {
+      "case": "composed process lifecycle",
+      "result": "passed",
+      "detail": "build_served_app starts through the launcher, serves 200, refreshes the watch from the anchor on its interval while serving, and on shutdown retires its fence without blocking the gate. A second process from the same configuration starts through the launcher at a higher fence and answers the earlier key with 409 idempotency_recovery_unavailable."
+    },
+    {
+      "case": "refresh withdraws authority",
+      "result": "passed",
+      "detail": "When the lifespan's refresh reads an unverifiable anchor, the watch closes with recovery_anchor_unverifiable and blocks the gate; the next request returns 503 state_store_unavailable, nothing is admitted and no provider request is made."
     }
   ],
   "provider_requests_by_replay_cases": 0,
   "suite": {
-    "full_suite": "1419 passed, 283 skipped; the skips are older vertical-slice tests that need a different integration database",
-    "served_api_cases": "11 passed",
+    "full_suite": "1429 passed, 283 skipped; the skips are older vertical-slice tests that need a different integration database",
+    "gate1_served_cases": "served API 12, served process 2, eligibility 7",
+    "mutation_checks": "Removing the completed-commit recheck fails 3 eligibility cases; removing the revocation's lock fails the arrival-during-commit case on two runs; moving execution back onto the event loop fails the bounded-wait case.",
     "ruff": "passed",
     "mypy_src": "passed"
   },
   "interpretations_for_review": [
-    "RC1 section 6.3 places capability authorization at step 8. That remains the static allowlist on the workload identity. A profile with no active release is treated as policy state: a duplicate gets step-10 execution_invalidated, as section 11 requires, and a new key gets step-11 privacy_route_unavailable. Please confirm or correct the new-key code.",
-    "A cached body that disagrees with the ledger's execution ID or digest is answered as idempotency_recovery_unavailable, since the durable result cannot be recovered from it."
+    "Accepted by Lyra: a profile with no active release answers a duplicate with 409 execution_invalidated and a new key with 503 privacy_route_unavailable, as a documented fail-closed interpretation for an otherwise authorized profile.",
+    "A cached body that disagrees with the ledger's execution ID or digest is answered as idempotency_recovery_unavailable.",
+    "A revoked head for a pinned subject suppresses even when the pinned release is a superseded predecessor, because apply_revocation can only target the current head. This is conservative in the direction RC1 requires.",
+    "Issuer is not filtered in the revocation check, so a mismatch between the ledger scope's issuer and the authority issuer can only over-suppress.",
+    "A duplicate whose record is still active when its wait ends, but whose lease has already elapsed, returns state_store_unavailable, since lease expiry belongs to the reaper."
   ],
   "known_gaps": [
-    "A duplicate while active returns request_in_progress immediately. RC1 section 11's bounded wait for a state change before answering is not implemented.",
-    "A provider result without an exact charge leaves the record dispatched for the lease reaper, which resolves it to outcome_unknown, and the request returns state_store_unavailable. settle_terminal has no failed-with-pending_reconciliation path for provider_response_invalid.",
-    "The HTTP endpoint is async and calls the blocking service inline, so a slow provider or database call blocks the event loop. It needs to run in a worker thread before real traffic.",
-    "The served proofs compose start_serving, the executor, the service and the app in the test. There is no deployable entrypoint that does this composition yet.",
-    "The completed commit does not recheck the eligibility generation (RC1 section 11); a revocation between dispatch and settlement is not yet mapped."
+    "Gate 3 prerequisite, before any real provider call: a provider result without an exact charge leaves the record dispatched for the lease reaper, which resolves it to outcome_unknown, and the request returns state_store_unavailable. settle_terminal has no failed-with-pending_reconciliation path for provider_response_invalid.",
+    "The served profile set is still configured in memory (ServedProfiles). The fence reads revocation from the signed-authority tables, so a profile that was never activated there is not refused at admission. Wiring admission to require an active signed release is the follow-up that closes that split.",
+    "build_served_app composes a process from a ServedConfiguration. There is no loader yet that builds that configuration from the deployment's trust package, secrets and signed authority, and no provider transport exists, so nothing is deployable to staging traffic until those are decided.",
+    "The bounded wait polls the ledger every 100 ms per waiting duplicate."
   ],
   "unchanged_live_state": {
     "commissioned_staging_anchor_version": 2,
@@ -102,7 +150,15 @@
   "remaining_matrix": [
     "stale restore through a Render point-in-time restore, which needs its own disposable instance",
     "attestation races under heavier concurrency than two threads",
+    "a sustained concurrent settle, revoke and activate loop for lock-ordering confidence",
     "clock rollback and excessive clock uncertainty",
-    "applying 0014 and 0015 by Alembic to a genuinely fresh database"
-  ]
+    "applying 0014, 0015 and 0016 by Alembic to a genuinely fresh database"
+  ],
+  "eligibility_design": {
+    "decision": "No new counter. The security/privacy eligibility named in RC1 section 11 is realised as the pinned profile and privacy-policy releases, evaluated at dispatch and at the completed commit against signed_releases.state and release_heads.head_state. A revoked pinned release, or a revoked head for its subject, suppresses; a superseded one does not, which is the RC1 split between revocation and routine replacement.",
+    "why_not_release_heads_eligibility_generation": "release_heads.eligibility_generation increments on routine successor activation as well as on revocation, so comparing against it would suppress connected originals that RC1 acceptance item 80 requires to be delivered.",
+    "ordering": "A transaction-scoped advisory lock per authority subject (environment, caller, realm, release type, subject). apply_revocation takes it exclusively before writing; dispatch and the completed commit take it shared before reading. The serving role cannot take FOR SHARE on the authority tables without UPDATE, which it must not hold.",
+    "execution_records_eligibility_generation": "unchanged and not used by this fence",
+    "advice": "An independent read-only design review (Fable) recommended this over a scope-level counter; its focused tests were adopted, with shared rather than exclusive locks on the serving side."
+  }
 }

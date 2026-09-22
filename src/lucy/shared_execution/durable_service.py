@@ -11,6 +11,7 @@ empty body.
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -53,6 +54,9 @@ from lucy.shared_execution.wire import (
 
 OPERATION = "inference.execute"
 CONTRACT_MAJOR = 1
+# RC1 section 11: a duplicate never waits past the original deadline plus this settlement margin.
+SETTLEMENT_MARGIN = timedelta(seconds=30)
+_ACTIVE_STATES = frozenset({"admitted", "dispatched"})
 
 # DispatchBlocked reasons that RC1 names specifically. Anything else - the restore gate, the
 # startup attestation, the fence, the runtime latch, shutdown - means current authoritative state
@@ -80,6 +84,10 @@ class ServedProfile:
     rate_release_id: str
     eligibility_generation: int
     deadline_ms: int
+    # The privacy policy this release is admitted under. It is pinned into each record, so a
+    # revocation of the policy is seen at dispatch, at the completed commit and on replay.
+    privacy_policy_id: str
+    privacy_policy_release_id: str
 
     def __post_init__(self) -> None:
         if (
@@ -92,6 +100,8 @@ class ServedProfile:
             or not 1 <= len(self.rate_release_id) <= 128
             or self.eligibility_generation < 1
             or not 1000 <= self.deadline_ms <= 18_000
+            or not 1 <= len(self.privacy_policy_id) <= 128
+            or not 1 <= len(self.privacy_policy_release_id) <= 128
         ):
             raise ValueError("served profile is invalid")
 
@@ -211,6 +221,8 @@ class DurableExecutionService:
         profiles: ProfileAuthority,
         digests: IdempotencyDigestRing,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        poll_interval: float = 0.1,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not executors:
             raise ValueError("a served runtime needs at least one executor")
@@ -221,6 +233,8 @@ class DurableExecutionService:
         self._profiles = profiles
         self._digests = digests
         self._clock = clock
+        self._poll_interval = poll_interval
+        self._sleep = sleep
 
     def execute(
         self,
@@ -231,6 +245,7 @@ class DurableExecutionService:
         request: ExecutionRequest,
         timeout_ms: int | None = None,
     ) -> ExecutionResponse:
+        received = self._clock()
         executor = self._executors.get(caller)
         if executor is None:
             raise PermissionError("caller is not mapped to an execution scope")
@@ -240,16 +255,21 @@ class DurableExecutionService:
         identity = canonical_identity(request)
         current, *previous = self._digests.candidates(idempotency_key)
 
+        digests = (current.digest, *(item.digest for item in previous))
+
         def eligible(record: LedgerRecord) -> bool:
             return self._replay_eligible(request.execution_profile_id, record)
 
-        try:
-            record = executor.lookup(
+        def lookup() -> LedgerRecord | None:
+            return executor.lookup(
                 operation=OPERATION,
                 contract_major=CONTRACT_MAJOR,
                 identity_digest=identity,
-                idempotency_key_digests=(current.digest, *(item.digest for item in previous)),
+                idempotency_key_digests=digests,
             )
+
+        try:
+            record = lookup()
             if record is not None:
                 outcome = executor.replay(
                     record, idempotency_key_digest=current.digest, replay_eligible=eligible
@@ -278,10 +298,20 @@ class DurableExecutionService:
                         lookup_idempotency_key_digests=tuple(
                             (item.version, item.digest) for item in previous
                         ),
+                        privacy_policy_id=profile.privacy_policy_id,
+                        privacy_policy_release_id=profile.privacy_policy_release_id,
                     ),
                     now=now,
                     work=ServedWork(request=request, profile=profile),
                     replay_eligible=eligible,
+                )
+            if outcome.state in _ACTIVE_STATES:
+                outcome = self._await_change(
+                    executor,
+                    lookup,
+                    idempotency_key_digest=current.digest,
+                    replay_eligible=eligible,
+                    attempt_limit=received + timedelta(milliseconds=timeout_ms or 0),
                 )
         except DurableIdempotencyConflict as exc:
             raise ExecutionRejected("idempotency_conflict") from exc
@@ -306,6 +336,47 @@ class DurableExecutionService:
             # No terminal state could be established or committed, so none is claimed.
             raise ExecutionRejected("state_store_unavailable") from exc
         return _answer(outcome, request_id)
+
+    def _await_change(
+        self,
+        executor: DurableExecutor,
+        lookup: Callable[[], LedgerRecord | None],
+        *,
+        idempotency_key_digest: str,
+        replay_eligible: Callable[[LedgerRecord], bool],
+        attempt_limit: datetime,
+    ) -> ExecutionOutcome:
+        """RC1 section 11: a duplicate of an active record waits, bounded, for its outcome.
+
+        The wait ends at the earlier of this attempt's own ceiling and the original deadline plus
+        the settlement margin. It only reads: it never renews the owner's lease and never
+        dispatches. Whatever state it then finds is answered as that state; request_in_progress
+        remains only for a record that is still genuinely active.
+        """
+
+        while True:
+            record = lookup()
+            if record is None:
+                raise LedgerUnavailable("the admitted record is no longer visible")
+            if record.state not in _ACTIVE_STATES:
+                return executor.replay(
+                    record,
+                    idempotency_key_digest=idempotency_key_digest,
+                    replay_eligible=replay_eligible,
+                )
+            now = self._clock()
+            limit = min(attempt_limit, record.execution_deadline + SETTLEMENT_MARGIN)
+            if now >= limit:
+                if record.lease_expires_at <= now:
+                    # Lease expiry belongs to the fenced reaper. An elapsed lease it has not yet
+                    # resolved is neither reported as active nor changed here.
+                    raise LedgerUnavailable("lease elapsed without an authoritative transition")
+                return executor.replay(
+                    record,
+                    idempotency_key_digest=idempotency_key_digest,
+                    replay_eligible=replay_eligible,
+                )
+            self._sleep(min(self._poll_interval, (limit - now).total_seconds()))
 
     def _replay_eligible(self, profile_id: str, record: LedgerRecord) -> bool:
         """RC1: replay only while the exact admitted release and route are still current."""

@@ -8,6 +8,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
+from lucy.shared_execution.authority_fence import authority_subject_lock
 from lucy.shared_execution.postgres_ledger import _psycopg_conninfo
 from lucy.shared_execution.signed_releases import (
     RevocationRelease,
@@ -479,6 +480,18 @@ class PostgresSignedAuthorityStore:
                 if len(targets) != 1:
                     raise AuthorityTransitionRejected("revocation_target_ambiguous")
                 target_row = targets[0]
+                # Ordered against every dispatch and completed commit pinned to this subject:
+                # those take this lock shared, so whichever commits first is the one that counts.
+                class_id, object_id = authority_subject_lock(
+                    scope.environment,
+                    scope.caller_id,
+                    scope.realm,
+                    target.target_release_type,
+                    str(target_row["subject_id"]),
+                )
+                connection.execute(
+                    "SELECT pg_advisory_xact_lock(%s, %s)", (class_id, object_id)
+                )
                 head = connection.execute(
                     """
                     SELECT active_release_id, head_state, revocation_release_id

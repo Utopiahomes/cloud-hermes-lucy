@@ -19,6 +19,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from lucy.shared_execution.auth import AuthenticationStateUnavailable
+from lucy.shared_execution.authority_fence import authority_subject_lock
 
 
 class LedgerUnavailable(RuntimeError):
@@ -77,6 +78,9 @@ class LedgerAdmission:
     eligibility_generation: int
     reserved_microusd: int
     lookup_idempotency_key_digests: tuple[tuple[str, str], ...] = ()
+    # The privacy policy admitted alongside the profile, so a revocation of either is seen.
+    privacy_policy_id: str | None = None
+    privacy_policy_release_id: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -100,6 +104,9 @@ class LedgerAdmission:
             or self.execution_deadline.tzinfo is None
             or self.eligibility_generation < 1
             or self.reserved_microusd < 1
+            or (self.privacy_policy_id is None) != (self.privacy_policy_release_id is None)
+            or self.privacy_policy_id == ""
+            or self.privacy_policy_release_id == ""
         ):
             raise ValueError("ledger admission is invalid")
 
@@ -124,6 +131,8 @@ class LedgerRecord:
     # What the record was admitted under, so a replay can be checked against current authority.
     execution_profile_id: str | None = None
     profile_release_id: str | None = None
+    privacy_policy_id: str | None = None
+    privacy_policy_release_id: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> LedgerRecord:
@@ -145,6 +154,8 @@ class LedgerRecord:
             response_body_sha256=row.get("response_body_sha256"),
             execution_profile_id=row.get("execution_profile_id"),
             profile_release_id=row.get("profile_release_id"),
+            privacy_policy_id=row.get("privacy_policy_id"),
+            privacy_policy_release_id=row.get("privacy_policy_release_id"),
         )
 
 
@@ -153,7 +164,7 @@ execution_id, identity_digest, state, coordinator_generation, record_generation,
 lease_owner_id, lease_expires_at, execution_deadline, reserved_microusd,
 settlement_status, settled_microusd, failure_code,
 provider_route_id, rate_release_id, response_body_sha256,
-execution_profile_id, profile_release_id
+execution_profile_id, profile_release_id, privacy_policy_id, privacy_policy_release_id
 """
 
 
@@ -552,11 +563,11 @@ class PostgresExecutionLedger:
                             coordinator_generation, record_generation, lease_owner_id,
                             lease_expires_at, execution_deadline, eligibility_generation,
                             reserved_microusd, settlement_status, reconciliation_deadline,
-                            tombstone_until
+                            tombstone_until, privacy_policy_id, privacy_policy_release_id
                         ) VALUES (
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             'admitted', %s, %s, %s, 1, %s, %s, %s, %s, %s,
-                            'pending_reconciliation', %s, %s
+                            'pending_reconciliation', %s, %s, %s, %s
                         )
                         RETURNING {_RECORD_COLUMNS}
                         """,
@@ -584,6 +595,8 @@ class PostgresExecutionLedger:
                             admission.reserved_microusd,
                             admission.execution_deadline + timedelta(hours=24),
                             now + timedelta(minutes=10),
+                            admission.privacy_policy_id,
+                            admission.privacy_policy_release_id,
                         ),
                     ).fetchone()
                     assert inserted is not None
@@ -850,9 +863,30 @@ class PostgresExecutionLedger:
                         raise DurableFenceRejected
                     reserved = int(current["reserved_microusd"])
                     overrun = settled_microusd > reserved
-                    target_state = "failed" if overrun else state
+                    # RC1 section 11: the completed commit rechecks security/privacy eligibility
+                    # in this transaction. A revocation that committed first suppresses the
+                    # candidate; one that commits later waits for this commit and affects replay.
+                    self._probe_transaction("settlement_before_authority_check", connection)
+                    suppressed = (
+                        state == "completed"
+                        and not overrun
+                        and _pinned_authority_revoked(
+                            connection, scope, LedgerRecord.from_row(current)
+                        )
+                    )
+                    self._probe_transaction("settlement_after_authority_check", connection)
+                    target_state = "failed" if overrun or suppressed else state
                     settlement_status = "settlement_overrun" if overrun else "settled"
-                    target_failure = "cost_settlement_violation" if overrun else failure_code
+                    target_failure = (
+                        "cost_settlement_violation"
+                        if overrun
+                        else "execution_invalidated"
+                        if suppressed
+                        else failure_code
+                    )
+                    if target_state != "completed":
+                        # A candidate that is not delivered is never replayable either.
+                        response_body_sha256 = None
                     row = connection.execute(
                         f"""
                         UPDATE tiamat.execution_records
@@ -1695,6 +1729,16 @@ class PostgresExecutionLedger:
                             ).fetchone()
                             if attestation is None or not bool(attestation["current"]):
                                 raise DispatchBlocked("startup attestation is no longer current")
+                        aborted = self._abort_if_revoked_before_dispatch(
+                            connection,
+                            scope,
+                            execution_id,
+                            coordinator_generation=coordinator_generation,
+                            record_generation=record_generation,
+                            owner_id=owner_id,
+                        )
+                        if aborted is not None:
+                            return aborted
                     row = connection.execute(
                         f"""
                         UPDATE tiamat.execution_records
@@ -1728,6 +1772,85 @@ class PostgresExecutionLedger:
                     return LedgerRecord.from_row(row)
         except (DispatchBlocked, DurableFenceRejected):
             raise
+        except psycopg.Error as exc:
+            raise LedgerUnavailable from exc
+
+    def _abort_if_revoked_before_dispatch(
+        self,
+        connection: psycopg.Connection[Any],
+        scope: LedgerScope,
+        execution_id: UUID,
+        *,
+        coordinator_generation: int,
+        record_generation: int,
+        owner_id: UUID,
+    ) -> LedgerRecord | None:
+        """RC1 section 13: an invalidation known before dispatch prevents it, at zero cost.
+
+        The record is still ``admitted`` and no provider byte can have been sent, so it becomes
+        ``failed`` with ``execution_aborted`` and its reservation is released at zero.
+        """
+
+        pending = connection.execute(
+            f"""
+            SELECT {_RECORD_COLUMNS}
+            FROM tiamat.execution_records
+            WHERE execution_id = %s AND issuer = %s AND caller_id = %s AND realm = %s
+              AND environment = %s AND state = 'admitted' AND coordinator_generation = %s
+              AND record_generation = %s AND lease_owner_id = %s
+            FOR UPDATE
+            """,
+            (
+                execution_id,
+                scope.issuer,
+                scope.caller_id,
+                scope.realm,
+                scope.environment,
+                coordinator_generation,
+                record_generation,
+                owner_id,
+            ),
+        ).fetchone()
+        if pending is None:
+            raise DurableFenceRejected
+        self._probe_transaction("dispatch_before_authority_check", connection)
+        if not _pinned_authority_revoked(connection, scope, LedgerRecord.from_row(pending)):
+            return None
+        aborted = connection.execute(
+            f"""
+            UPDATE tiamat.execution_records
+            SET state = 'failed',
+                record_generation = record_generation + 1,
+                settlement_status = 'settled',
+                settled_microusd = 0,
+                failure_code = 'execution_aborted',
+                terminal_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE execution_id = %s AND state = 'admitted'
+              AND coordinator_generation = %s AND record_generation = %s
+              AND lease_owner_id = %s
+            RETURNING {_RECORD_COLUMNS}
+            """,
+            (execution_id, coordinator_generation, record_generation, owner_id),
+        ).fetchone()
+        if aborted is None:
+            raise DurableFenceRejected
+        return LedgerRecord.from_row(aborted)
+
+    def pinned_authority_revoked(self, scope: LedgerScope, record: LedgerRecord) -> bool:
+        """Whether a release this record was admitted under has since been revoked.
+
+        Replay reads this, so a revocation committed after the completed commit still ends
+        replay even though it could not recall the original response.
+        """
+
+        try:
+            with psycopg.connect(  # noqa: SIM117 - transaction must begin after connection
+                _psycopg_conninfo(self._database_url), row_factory=dict_row
+            ) as connection:
+                with connection.transaction():
+                    _set_scope(connection, scope)
+                    return _pinned_authority_revoked(connection, scope, record)
         except psycopg.Error as exc:
             raise LedgerUnavailable from exc
 
@@ -1775,6 +1898,71 @@ def _set_scope(connection: psycopg.Connection[Any], scope: LedgerScope) -> None:
         ("tiamat.partition_id", scope.partition_id),
     ):
         connection.execute("SELECT set_config(%s, %s, true)", (setting, value))
+
+
+def _pinned_authority_revoked(
+    connection: psycopg.Connection[Any], scope: LedgerScope, record: LedgerRecord
+) -> bool:
+    """Take each pinned subject's authority lock shared, then read whether it was revoked.
+
+    A pinned release in state ``revoked`` suppresses, and so does its subject's head being
+    revoked, which also covers a predecessor the revocation could not target directly. A release
+    that was merely ``superseded`` does not: routine replacement lets an admitted execution finish.
+    Issuer is deliberately not filtered, so a mismatch between ledger and authority issuers can
+    only over-suppress, never let a revocation go unseen.
+    """
+
+    subjects = [("execution_profile", record.execution_profile_id, record.profile_release_id)]
+    if record.privacy_policy_id is not None:
+        subjects.append(
+            ("privacy_policy", record.privacy_policy_id, record.privacy_policy_release_id)
+        )
+    if any(subject_id is None or release_id is None for _, subject_id, release_id in subjects):
+        # A record without its profile pin cannot be shown eligible, so it is not.
+        return True
+    keys = sorted(
+        {
+            authority_subject_lock(
+                scope.environment, scope.caller_id, scope.realm, release_type, str(subject_id)
+            )
+            for release_type, subject_id, _ in subjects
+        }
+    )
+    for class_id, object_id in keys:
+        connection.execute("SELECT pg_advisory_xact_lock_shared(%s, %s)", (class_id, object_id))
+    for release_type, subject_id, release_id in subjects:
+        row = connection.execute(
+            """
+            SELECT
+              EXISTS (
+                SELECT 1 FROM tiamat.signed_releases
+                WHERE environment = %s AND caller_id = %s AND realm = %s
+                  AND release_type = %s AND subject_id = %s AND release_id = %s
+                  AND state = 'revoked'
+              )
+              OR EXISTS (
+                SELECT 1 FROM tiamat.release_heads
+                WHERE environment = %s AND caller_id = %s AND realm = %s
+                  AND release_type = %s AND subject_id = %s AND head_state = 'revoked'
+              ) AS revoked
+            """,
+            (
+                scope.environment,
+                scope.caller_id,
+                scope.realm,
+                release_type,
+                subject_id,
+                release_id,
+                scope.environment,
+                scope.caller_id,
+                scope.realm,
+                release_type,
+                subject_id,
+            ),
+        ).fetchone()
+        if row is None or bool(row["revoked"]):
+            return True
+    return False
 
 
 def _psycopg_conninfo(database_url: str) -> str:

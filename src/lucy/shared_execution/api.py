@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -15,6 +16,7 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import ClientDisconnect
 from starlette.responses import Response
@@ -147,8 +149,11 @@ def create_shared_execution_app(
     release: ApiRelease,
     *,
     authentication_failure_delay: Callable[[float], Awaitable[None]] | None = None,
+    lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Tiamat Shared Model Execution", docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="Tiamat Shared Model Execution", docs_url=None, redoc_url=None, lifespan=lifespan
+    )
     delay_authentication_failure = (
         authentication_failure_delay or _default_authentication_failure_delay
     )
@@ -194,7 +199,9 @@ def create_shared_execution_app(
             await delay_authentication_failure(authentication_started)
             return _error("authentication_failed", request_id=None)
         try:
-            verifier.verify(
+            # Consuming the jti writes durable replay state, so it runs off the event loop.
+            await run_in_threadpool(
+                verifier.verify,
                 authorization,
                 method="POST",
                 path=PATH,
@@ -232,7 +239,10 @@ def create_shared_execution_app(
             return _error("capability_forbidden", request_id=request_id_text, release=release)
 
         try:
-            response = service.execute(
+            # Execution blocks on the ledger and the provider for up to the whole deadline. On the
+            # event loop it would stall every other request, including the duplicates it answers.
+            response = await run_in_threadpool(
+                service.execute,
                 caller=verifier.identity.subject,
                 idempotency_key=idempotency_key,
                 request_id=request_id,

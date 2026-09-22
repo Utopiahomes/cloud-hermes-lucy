@@ -69,6 +69,8 @@ class ReplayCache(Protocol):
 
     def get(self, *, caller_id: str, idempotency_key_digest: str) -> CachedResponse | None: ...
 
+    def discard(self, *, caller_id: str, idempotency_key_digest: str) -> None: ...
+
 
 class InMemoryReplayCache:
     """A bounded, expiring map held only in this process's memory.
@@ -132,6 +134,12 @@ class InMemoryReplayCache:
         with self._lock:
             self._drop_expired()
             return self._entries.get((caller_id, idempotency_key_digest))
+
+    def discard(self, *, caller_id: str, idempotency_key_digest: str) -> None:
+        """Forget a body that will never be served, rather than holding it to its expiry."""
+
+        with self._lock:
+            self._entries.pop((caller_id, idempotency_key_digest), None)
 
     def __len__(self) -> int:
         with self._lock:

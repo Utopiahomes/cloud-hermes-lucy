@@ -34,6 +34,9 @@ class DisposableRoles:
     owner: str
     recovery: str
     runtime: str
+    # A login form of the deployed NOLOGIN release manager, with its deployed grants, so signed
+    # authority transitions run as the role that performs them in production.
+    release_manager: str
 
     def __repr__(self) -> str:
         return "DisposableRoles(credentials=redacted)"
@@ -59,10 +62,12 @@ def disposable_roles() -> DisposableRoles:
     if migrated.returncode != 0:
         pytest.fail("disposable database migration failed", pytrace=False)
     recovery_password, runtime_password = token_urlsafe(32), token_urlsafe(32)
+    release_manager_password = token_urlsafe(32)
     with psycopg.connect(owner_url, autocommit=True) as owner:
         for role, password in (
             ("tiamat_recovery", recovery_password),
             ("tiamat_runtime", runtime_password),
+            ("tiamat_release_manager", release_manager_password),
         ):
             existing = owner.execute(
                 "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
@@ -82,7 +87,20 @@ def disposable_roles() -> DisposableRoles:
                         "NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}"
                     ).format(sql.Identifier(role), sql.Literal(password))
                 )
-        owner.execute("GRANT USAGE ON SCHEMA tiamat TO tiamat_recovery, tiamat_runtime")
+        owner.execute(
+            "GRANT USAGE ON SCHEMA tiamat "
+            "TO tiamat_recovery, tiamat_runtime, tiamat_release_manager"
+        )
+        # As deployed: the serving role reads signed authority, the release manager writes it.
+        owner.execute(
+            "GRANT SELECT ON tiamat.trust_inventories, tiamat.signed_releases, "
+            "tiamat.release_heads TO tiamat_runtime"
+        )
+        owner.execute(
+            "GRANT SELECT, INSERT, UPDATE ON tiamat.trust_inventories, tiamat.signed_releases, "
+            "tiamat.release_heads TO tiamat_release_manager"
+        )
+        owner.execute("GRANT SELECT ON tiamat.restore_gate TO tiamat_release_manager")
         owner.execute(
             "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
         )
@@ -97,10 +115,19 @@ def disposable_roles() -> DisposableRoles:
             "TO tiamat_runtime, tiamat_recovery"
         )
         _own_share_locked_gate_reader(owner)
+    recovery_url = _url_for(owner_url, "tiamat_recovery", recovery_password)
+    # The gate reader is recovery-owned once transferred, so only its owner can extend it to the
+    # release manager, as the D1 finalizer does when that role exists.
+    with psycopg.connect(recovery_url, autocommit=True) as recovery:
+        recovery.execute(
+            "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() "
+            "TO tiamat_release_manager"
+        )
     return DisposableRoles(
         owner=owner_url,
-        recovery=_url_for(owner_url, "tiamat_recovery", recovery_password),
+        recovery=recovery_url,
         runtime=_url_for(owner_url, "tiamat_runtime", runtime_password),
+        release_manager=_url_for(owner_url, "tiamat_release_manager", release_manager_password),
     )
 
 
