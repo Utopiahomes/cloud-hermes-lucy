@@ -63,9 +63,12 @@ now pin 0073; 34 focused checks pass. A new local operator prepares credential s
 two existing suspended Raymond services without a provider key or pilot authorization; its three
 focused tests pass, including rollback after an uncertain second write. Ray approved the exact
 staging, and independent Render GETs confirmed both services remain suspended with matching
-credentials, disabled capture/ingress/executor/intake and saved rollback snapshots. Publish/pin
-the source and prepare the cloud migration and demonstration. Coordinate the new migration
-number with shared-repository work.
+credentials, disabled capture/ingress/executor/intake and saved rollback snapshots. Ray then
+approved publication and the quarantined Raymond migration. The published source is pinned at
+`d126f7064c58acdb644fbf14f4def78353f49996`; the cloud migration and separate six-check
+read-only verifier jobs both succeeded on it. The temporary runner was deleted, and a fresh
+GET confirmed policy and routine are still suspended. Prepare the bounded synthetic cloud
+demonstration. Coordinate the new migration number with shared-repository work.
 
 Automatic approval review blocked the historical mixed-purpose commissioning helper because
 it supports persistent secret/configuration changes. It was not run. No cloud mutation was made.

@@ -1,9 +1,9 @@
 # Raymond cloud stage: scoped credentials installed
 
 The correction release has been packaged and checked locally. Ray approved credential
-installation on the two named suspended Raymond services. The stage was applied on
-2026-09-22. No schema migration, service activation, personal import or Telegram change
-was performed.
+installation on the two named suspended Raymond services and the quarantined schema
+migration. Both completed on 2026-09-22. No service activation, personal import or Telegram
+change was performed.
 
 ## Applied stage and fresh verification
 
@@ -16,7 +16,7 @@ Secret values were compared in memory and were not printed. The gitignored state
 rollback files are `secrets/generated/raymond-synthetic-stage-v1.json` and
 `secrets/generated/raymond-synthetic-stage-rollback-v1.json`.
 
-## Exact next action
+## Staging boundary
 
 Run the prepared operator tool to install Raymond's own scoped credentials on these existing
 Render private services, keeping both suspended and auto-deploy disabled:
@@ -67,19 +67,39 @@ inspect remote state and the rollback snapshot before any retry. No credentials 
   `codex/personal-lucy-memory-20260922`. The image is locally built, not deployed. The
   staging tool is a local operator utility, not copied into the service image.
 
-The branch is **not published**. The existing origin is
-`https://github.com/Utopiahomes/cloud-hermes-lucy.git`, and its shared branch resolves to
-the exact base commit `a04eef6`. All 16 committed paths are code, tests or documentation;
-the credential stage and rollback files are ignored by Git. Automatic approval review still
-rejected the push because the remote was not independently verified as a trusted private
-organization repository and Ray has not explicitly authorized export of this branch's code
-and documentation. Do not try another route to publish without that authorization.
+Ray explicitly approved publishing the branch after the initial automatic approval rejection.
+`codex/personal-lucy-memory-20260922` is published at verified remote commit
+`d126f7064c58acdb644fbf14f4def78353f49996`. The credential stage and rollback files
+remain ignored by Git.
 
-After a specifically authorized branch push, pin the release, advance the quarantined Raymond database through 0073
-using the existing migration-only operator, and re-run the content-free head verifier. Preserve
+## Completed quarantined migration
+
+The local, gitignored operator `secrets/generated/_migrate_raymond_memory_0073.py` pins that
+commit and the Raymond database ID. Its read-only preflight passed on 2026-09-22: the two
+existing services are still suspended, their environments match the saved stage, no temporary
+migration service existed, and the private migration URL targeted `lucy_raymond` as
+`lucy_migration`. Ruff, strict mypy and compilation passed.
+
+The first authorized attempt created a temporary Render service, but Windows Application
+Control blocked the local Render CLI before deployment. The operator deleted that service;
+an independent GET found none and the saved state had no job ID. The retry used the Render
+API to deploy the pinned commit. Its migration job and separate read-only six-check head
+verifier job both reported `succeeded`. The migration command verifies revision `0073`,
+quarantined admission, a safe capture boundary and no residual schema CREATE authority before
+exiting successfully. The head verifier runs all six predicates in a read-only transaction.
+The saved job state is gitignored at `secrets/generated/raymond-memory-migration-0073-state.json`.
+Render's logs API returned 403 for this token, so the evidence is the two terminal job
+statuses and the independent post-run GET, not the job's printed JSON receipts. That GET
+confirmed no temporary service remains and both policy/routine services are suspended.
+The executed invocation was:
+
+```powershell
+.\.venv\Scripts\python.exe secrets/generated/_migrate_raymond_memory_0073.py --apply --authorization migrate-raymond-quarantined-memory-0073-v1
+```
+
+Next prepare the bounded synthetic cloud execution. Preserve
 the additive correction ledger on rollback; suspend services and quarantine admission rather
-than downgrading it. Prepare the bounded synthetic cloud execution before opening private
-runtime admission. Public intake, actual history and Telegram cutover remain later steps.
+than downgrading it. Public intake, actual history and Telegram cutover remain later steps.
 
 ## Authorization and blockers
 
