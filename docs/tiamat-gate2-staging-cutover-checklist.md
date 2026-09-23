@@ -257,8 +257,7 @@ issue time (the disposable test reproduces exactly this shape). Nothing touches 
 actual database state and current external anchor are read back and reviewed. The deployed role
 template predates migrations 0007 and 0011, so the recovery login's grants on
 `startup_attestations` and `recovery_checkpoints` are confirmed in that readback; `report` and
-`first-inventory` fail
-closed on a permission error. No anchor reset and no two-ceremony walk.
+`first-inventory` fail closed on a permission error. No anchor reset and no two-ceremony walk.
 
 ## Rollback — fail closed
 
