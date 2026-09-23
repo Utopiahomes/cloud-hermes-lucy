@@ -369,12 +369,11 @@ origin of the 85% recommendation, and assistant attribution for Lucy's exact May
 date. The remaining partial is temporal wording: a historical Philodelphio answer
 said Ray “has not settled,” implying today's state from a past exchange.
 
-The one-time v0.4 provider authorization is consumed. The 32 candidate versions
-remain pending, and the other ingested records have not been reinterpreted. No
-promotion, production database, Render service, or Telegram change was made. The
-next decision is Ray's review of the protected 32-item v0.3 document; a focused
-temporal-language refinement can be folded into subsequent answer work without
-another broad shadow rerun unless an actual deployment gate requires it.
+The one-time v0.4 provider authorization is consumed. At this checkpoint, the 32
+candidate versions were still pending, and the other ingested records had not been
+reinterpreted. That shadow run made no promotion, production database, Render
+service, or Telegram change. Ray's later batch-promotion decision and execution
+are recorded below.
 
 ## Reviewed batch promotion in progress (2026-09-23 local)
 
@@ -389,7 +388,7 @@ assessment dimensions and attribution/confirmation fields as bounded structured
 JSON, and is marked `historical` / `attributed_interpretation`. It has 52 source
 links, maximum object length 2,002 characters, and proposal SHA-256
 `fc2085b497de87d8da997159c2416cb1411e1f33b91007c0d4ea7558901fc36c`.
-This is a local proposal, **not yet staged, approved, or promoted**.
+At preparation time this was a local proposal; its cloud execution is recorded below.
 
 The Philodelphio temporal boundary is explicit in the answer-context contract.
 Seven focused interpretation/projection unit tests, Ruff, and strict mypy pass.
@@ -399,4 +398,35 @@ protected-recall verification phase. Its exact proposal decoder passed locally
 with no database or provider call. Fresh Render GET checks found both Raymond
 services still suspended, auto-deploy off, capture/product/pilot flags false, and
 the expected distinct `lucy_raymond` policy/routine logins. The operator has not
-run yet. No Telegram or service activation is planned for this batch.
+run at this checkpoint. No Telegram or service activation was planned for this batch.
+
+## Reviewed 32-item batch promoted and verified (2026-09-23 cloud)
+
+Ray's “go for it” authorized promotion of the reviewed batch. The exact protected
+proposal above was staged as candidate version 2 under the Raymond routine login
+using temporary Render job `job-daprtlegekts73f058m0` at commit `0bb2470`.
+All 32 stage calls succeeded in one transaction. The policy identity then approved
+and promoted all 32 in one transaction with built-in protected recall checks using
+job `job-daprv1u7bikc738jqm00` at commit `ddb30ce`. Before that transaction, a
+local check found that two broad subject queries could exceed the recall limit;
+the operator was changed to use each source candidate's unique digest and verified
+locally to find exactly one item per query.
+
+A separate post-commit policy job `job-daps0gm7bikc738juif0` at commit `bbc5fea`
+recalled all 32 through `lucy.search_protected_scoped_memory_v1` and confirmed the
+exact reviewed structured object, `protected` class, `historical` epistemic status,
+`attributed_interpretation` assertion status, and all 52 expected source-evidence
+links. The protected recall function wrote its normal access audit rows. No model
+provider or Telegram call was made by these jobs. Independent Render GET checks
+afterward confirmed both Raymond services still `suspended`, auto-deploy `no`,
+capture and product ingress false, and all three temporary utilities deleted.
+The original 32 version-1 extraction candidates were not promoted.
+
+This is database promotion and source-linked recall evidence, not evidence that a
+live Telegram answer path consumes the new structured JSON yet: both services are
+still suspended and their long-running builds were not changed by temporary jobs.
+The local synthetic correction tests at schema `0073` remain valid, but no new
+correction to Ray's real memories was invented merely to test that path. A later
+real correction should create a new version from new evidence while retaining the
+historical source and the earlier interpretation. Broader interpretation backfill
+remains separate from this 32-item pilot.
