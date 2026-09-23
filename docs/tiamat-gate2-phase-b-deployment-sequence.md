@@ -5,21 +5,28 @@ ledger. The commissioned ledger (`tiamat-staging-ledger`, anchor
 `ENV#staging#LEDGER#6177502f-…`) is not touched. No real provider. Every mutating command below
 previews by default and needs its exact digest or identity confirmed.
 
+Control-side design choices for D1, D4 and D6 are recorded in
+`docs/tiamat-gate2-proof2-control-decisions-2026-09-23.md`. That record does not authorize
+provisioning, shared-writer deployment, signing or activation. D6 is a prerequisite for the
+first-inventory step in section 4, not merely for section 6.
+
 Status of the tooling: every command in steps 7–9 was run through its real `main()`, in this
 order, on a disposable test ledger with only the AWS transport simulated
-(`tests/integration/test_tiamat_gate2_operator_cli.py`, commit `f24cef7`). What has **not** been
-exercised anywhere is provisioning a brand-new database end to end (section 2).
+(`tests/integration/test_tiamat_gate2_operator_cli.py`, commit `f24cef7`). A full fresh-database
+path through migration 0017 and the empty-ledger ceremony then passed twice on local PostgreSQL 16
+with TLS (`docs/evidence/tiamat-gate2-proof1-fresh-ledger-2026-09-23.json`, commit `788f388`).
+This does not establish the hosted Render path or real AWS writer behavior for the disposable key.
 
 ## 1. Decisions needed before this can be exact
 
-| # | Decision | Options | Recommendation |
+| # | Decision | Resolution or next action | State |
 |---|---|---|---|
-| D1 | Where the disposable ledger's credentials live on Render | (a) new services — a disposable recovery runner and a served service — with new IAM roles trusting only them, and the writer's invoke permission extended to the new runner's role (the writer template takes one `CoordinatorRoleName` today, so this needs a template change); (b) temporarily re-point the existing coordinator's `TIAMAT_RECOVERY_DATABASE_URL` at the disposable database | (a). (b) puts two ledgers' credentials through one slot; every tool checks the expected ledger ID, but a mistake would still be a live commissioned-ledger command. |
-| D2 | Environment name | must be `staging`: the writer's grant is scoped to `ENV#staging#LEDGER#*` | `staging`, with the new database's own ledger ID; the anchor key cannot collide. |
-| D3 | How the fresh database reaches the current schema | the existing Render bootstrap job migrates only to `0006`; 0007–0017 and the D1 finalizer have only been applied to the test database, incrementally | Prove the full fresh path locally first (a disposable Postgres 16 container: bootstrap → `alembic upgrade head` → finalizer → initialize → the whole Phase B command sequence), then run the same steps on Render. |
-| D4 | Control's release-manager boundary | the role template creates `tiamat_release_manager` as NOLOGIN ("its separately deployed boundary … when that boundary exists"); no Render path exists for Control to stage and activate releases | Needs a decision from Control/Lyra: a release-manager login held only by a Control-operated one-off runner, or another boundary. Blocks section 9. |
-| D5 | Runtime grant gap | the template grants the runtime no access to `execution_idempotency_aliases`, which admission writes (`postgres_ledger.py:617`); the test fixture grants it | Fix the template before provisioning; reviewed change. |
-| D6 | Release-root pin | `deploy/postgres/tiamat-staging-release-root-pin.json` | From Control's independently approved key ID and fingerprint; never derived from a candidate key. |
+| D1 | Where the disposable ledger's credentials live on Render | Separate disposable recovery runner and synthetic served service, each pinned to its own ledger and IAM role; never re-point the commissioned coordinator. Shared-writer policy extension requires its own reviewed change set and execution approval. | Control design chosen; provisioning pending. |
+| D2 | Environment name | Use `staging` with the disposable database's own ledger ID and a noncolliding anchor key, within the writer's `ENV#staging#LEDGER#*` scope. | Chosen. |
+| D3 | Fresh schema path | Reuse the Proof 1 sequence: bootstrap to `0006`, owner migration to `0017`, finalizer, initialize blocked, capability check, then empty-ledger ceremony. | Passed locally twice; Render execution pending. |
+| D4 | Control's release-manager boundary | Activate the narrowly granted login only on the disposable ledger and use a separate Control-operated one-off runner with exact signed artifacts, current verification and readback. No recovery or signing credentials in that runner. | Design chosen; runner implementation and review pending. |
+| D5 | Runtime grant gap | Grant the runtime only the access admission needs on `execution_idempotency_aliases` (`postgres_ledger.py:617`), then review and test it before provisioning. | Claude implementation pending. |
+| D6 | Release-root pin | `deploy/postgres/tiamat-staging-release-root-pin.json` | Offline RELEASE-root candidate, Control approval of its exact key ID and raw-public-key fingerprint, then a committed pin. No approved pin exists yet; blocks first-inventory. |
 
 ## 2. Provision the disposable ledger (Render)
 
