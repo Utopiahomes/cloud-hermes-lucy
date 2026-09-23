@@ -485,7 +485,21 @@
     "One Render deploy attempt used a full commit hash Claude typed instead of reading it from git; Render refused it because the service was suspended. Every later deploy used git rev-parse."
   ],
   "open": [
-    "Ray to re-suspend tiamat-staging-recovery-coordinator and tiamat-staging-executor (the Render CLI cannot suspend).",
     "Phase B stays blocked: pending/established transition builders for a disposable identity, an operator tool for authorize_reconciled_state, a committed trust file, a disposable Postgres ledger, and the launcher's placement on Render."
-  ]
+  ],
+  "post_cutover": {
+    "review": "Lyra and Astra accept Phase A as complete on this recorded evidence (a review of the committed evidence, not an independent live query of AWS or Render). No real provider call or guest traffic is authorized by this result.",
+    "render_services_suspended": {
+      "tiamat-staging-executor (srv-damkn2bm8hqs73dh1abg)": "suspended by user, 2026-09-23T11:37:55Z",
+      "tiamat-staging-recovery-coordinator (srv-damko3m7bikc73c1b510)": "suspended by user, 2026-09-23T11:38:29Z",
+      "checked": "Render API, 2026-09-23T11:45Z"
+    },
+    "alarm_email_delivery": {
+      "alarm_actions": "each ALARM transition recorded 'Successfully executed action' on the topic: boundary 11:18:53Z and 11:28:53Z, foreign write 11:27:11Z",
+      "sns_metrics": "NumberOfMessagesPublished 3, NumberOfNotificationsDelivered 3, NumberOfNotificationsFailed 0 for the alarms (plus the subscription confirmation delivered at 02:35-02:40Z)",
+      "meaning": "SNS reports handoff to the email endpoint's mail server, not arrival in the inbox",
+      "inbox_receipt": "to be confirmed by Ray at ray@utopiahomes.com: three 'ALARM:' emails around 11:18Z and 11:27-11:28Z (07:18 and 07:27-07:28 EDT)"
+    },
+    "gate_2_scope": "Per Lyra: Phase B (the disposable synthetic execution, under separate deployment approval) is part of Gate 2; commissioned-ledger reconciliation and re-quarantine remain the final Gate 2 proof. Neither is part of this Phase A increment."
+  }
 }
