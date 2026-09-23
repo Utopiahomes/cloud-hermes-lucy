@@ -214,5 +214,50 @@
     "noted": "Rebuilding the existing executor artifact now yields a different source_tree_sha256 in its manifest, because the build scripts are inputs to that digest; its zip contents are unchanged and preflight does not read that field."
   },
   "staging_proof_method": "IAM simulation cannot evaluate the table's resource policy for these roles. The checklist therefore proves the boundary by inspecting the deployed policy and by real denied writes of every kind from the administrator, the coordinator's Render service and the runtime's Render service (deploy/aws/probe_anchor_write_boundary.py), plus a writer-only positive test on a disposable key (deploy/aws/prepare_anchor_writer_probe.py).",
-  "g9_guidance": "Lyra: established -> pending is signed and fail-closed but is not a substitute for the approved recovery ceremony, which begins with quarantine and worker isolation; it is not to be used for commissioned-ledger recovery. No further transition-grammar work before staging."
+  "g9_guidance": "Lyra: established -> pending is signed and fail-closed but is not a substitute for the approved recovery ceremony, which begins with quarantine and worker isolation; it is not to be used for commissioned-ledger recovery. No further transition-grammar work before staging.",
+  "checklist_revision": {
+    "requested_by": "Lyra and Astra: do not approve steps 1-8 as one cutover; four focused corrections, no redesign",
+    "commits": [
+      "6ac43c6",
+      "78b577c"
+    ],
+    "supersedes": [
+      "m4_anchor_writer / infrastructure_as_code 'trust pinned to its own function' and independent_review's 'the role's trust is pinned to its function': the aws:SourceArn trust condition is removed (Lambda does not supply it when assuming an execution role, per AWS documentation; not observed live). The role now uses Lambda's plain trust and is bound to its function by lambda:SourceFunctionArn on its DynamoDB grant.",
+      "staging_proof_method's single writer-only positive test: now two disposable probes, one before the boundary moves (through the alias) and one after (through the alias, invoked by the coordinator from its Render service).",
+      "deployment_package's checklist verification by a malformed event (request_invalid): request validation precedes root loading, so it proves nothing about the roots. Replaced by verify_anchor_writer_version.py and a valid disposable-key install."
+    ],
+    "corrections": {
+      "activation_phase": "Signed-configuration activation moves to Phase B, the disposable ledger: activation refuses a blocked gate (postgres_authority._assert_recovery_gate_open, recovery_gate_blocked), and the commissioned ledger's gate stays blocked. Phase A (steps 1-6) touches no database. The commissioned database's release-manager grant fix is deferred to reconciliation.",
+      "rollback_fails_closed": "After step 4, containment is writer reserved concurrency 0: the anchor becomes writable by no one, which is safe because the commissioned ledger is already quarantined and blocked. The writer-only table policy stays. Restoring the coordinator's PutItem is break-glass: separate authorization from Ray and Lyra, restoring only the template saved at step 4.",
+      "writer_trust": "Plain lambda.amazonaws.com trust; DynamoDB grant conditioned on lambda:SourceFunctionArn equal to the unqualified function ARN (identity policy only, as AWS requires). Step 3 verifies the deployed inline policy and requires the alias to install the before-boundary probe before step 4 may run. cfn-lint passes both templates (it also passed the old trust; the defect was documentation-based).",
+      "configuration_proof": "verify_anchor_writer_version.py reads the live alias's get-function-configuration and checks: a published version of the writer function (derived name); code digest equals the manifest; zip package, no layers, no file systems, exactly three environment variables; roots byte-identical to the reviewed file and to its pinned digest; description names both digests; execution role is the writer role (derived name); the writer accepts the configuration and every root's key matches its pin. After the probes are removed, the removed probe key answers key_not_configured, which only loaded roots can produce."
+    },
+    "fable_third_review": {
+      "reviewer": "Fable, read-only, requested by Ray, of 6ac43c6",
+      "blocking_fixed": "Phase B ordering: consuming a claimant does not open the gate; only authorize_reconciled_state clears dispatch_blocked, and the launcher refuses a blocked gate. Step 7 now includes it; no operator tool runs it yet, which is recorded as Phase B's missing work.",
+      "should_fix_fixed": [
+        "Rollback wording: concurrency 0 persists as drift until a deploy that changes the function or an explicit put-function-concurrency lifts it; the change raises AnchorBoundaryChanges; a faulty-version redeploy lifts containment, so step 6's checks run at once.",
+        "The lambda:SourceFunctionArn binding is verified in the deployed inline policy (get-role-policy); refusal of other principals rests on AWS semantics and is recorded as untested.",
+        "Verifier: function and role pinned by derived name, not operator input; layers, file systems, image packages and extra environment variables refused; every failure branch tested.",
+        "This amendment, for the superseded evidence statements.",
+        "The coordinator's only remaining write path, invoking the alias, is exercised by the after-boundary probe from its Render service (invoke_anchor_writer_probe.py)."
+      ],
+      "nits_fixed": [
+        "SourceFunctionArn claim worded as credential-scoped.",
+        "Step 4 saves the current anchor template for break-glass and handles UPDATE_ROLLBACK_FAILED.",
+        "The probe preparer refuses final roots whose digest is not the reviewed one.",
+        "Test fixture role name matches the template."
+      ],
+      "confirmed_sound": [
+        "The binding is placed and shaped as AWS documents (identity policy, unqualified ARN, ArnEquals), ANDs with the LeadingKeys conditions, applies to consistent GetItem and conditional PutItem alike, and fails closed when the key is absent.",
+        "The table policy's aws:PrincipalArn equals the role ARN for the writer's assumed-role session.",
+        "A before-boundary install is reachable only after the roots load and the role's credentials read and write the table.",
+        "Concurrency-0 containment throttles every version and alias.",
+        "Activation cannot run on the commissioned ledger; the default rollback never widens the boundary."
+      ]
+    },
+    "artifact": "Rebuilt from clean commit 6ac43c6: byte-identical, sha256 ecb668c6d9726eadec8e98ddeaea29c171a6e993ae1b85f3dc868571917c2aca, and the packaged smoke test passed again in the Lambda Python 3.12 image. The revision changes no packaged code.",
+    "phase_b_blocked_on": "pending and established transition builders for a disposable identity, an operator tool for authorize_reconciled_state, a committed trust file, a disposable Postgres ledger and the launcher's placement on Render",
+    "full_suite": "At 78b577c, with the disposable Postgres ledger, the live staging-anchor reads and TIAMAT_AWS_FILTER_TEST=1: 1519 passed, 283 skipped, 0 failed. Strict mypy clean (155 files). Ruff clean on src, tests and deploy; repository-wide ruff also flags the pinned guest-answer contract bundle's tools/check_invariants_impl.py, unchanged since 984a22b and flagged identically at c4648ba, left as pinned."
+  }
 }
