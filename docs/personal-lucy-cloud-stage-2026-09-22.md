@@ -490,8 +490,8 @@ three temporary utilities were deleted. The succeeded job's gitignored receipt
 is `secrets/generated/utopia-telegram-history-count-state-v3.json`. Ray chose
 not to move this earlier archive to Raymond. On 2026-09-23 he explicitly
 authorized deleting the old Utopia Telegram archive. This does not include
-Raymond's imported ChatGPT evidence or 32 protected interpretations. Deletion
-has not yet been performed.
+Raymond's imported ChatGPT evidence or 32 protected interpretations. The exact
+non-synthetic scoped owner targets were deleted on 2026-09-23 as recorded below.
 
 A follow-up read-only exact-target inventory at `cfac540` succeeded in a
 temporary Render job (full job ID and exact UUIDs in the gitignored receipt
@@ -521,21 +521,44 @@ plugin archives its session ID, not the numeric chat ID. The scoped
 receipt. One of that pair has an existing deletion fence and operation state
 `FINALITY_PENDING`, so its remaining PostgreSQL payload/wrapper metadata does
 not prove its wrapped key still exists. The September 12 pair aligns with the
-documented live owner retained round trip; the September 14 pair still needs
-source/session classification. No message content was read.
+documented live owner retained round trip; the September 14 pair is also
+non-synthetic committed Telegram history. No message content was read.
 
 Do not treat the earlier total of six legacy encrypted payloads as six private
-owner messages. The immediate deletion target is the actual owner conversation
-inside the scoped archive, identified by the immutable scoped archive intent
-and Telegram event/session metadata; preserve the synthetic acceptance
-fence/recovery history. The production V1.3 deletion route requires a fresh
-broker-signed owner assertion, which the Telegram gateway does not yet issue.
-An exact manual owner-broker path must be commissioned before invoking the
-existing manifest-bound, key-destroying V1.3 deletion workflow. Stop Utopia
-capture at the bot handoff before the final inventory/sweep so new records do
-not replenish the archive. The legacy synthetic probes can be cleaned up
-separately only through a key-destroying legacy operator; they are not evidence
-of Ray's private Telegram messages.
+owner messages. The owner conversation targets were two non-synthetic committed
+turns, four scoped evidence records under two user roots. The reviewed,
+content-free packet is gitignored at
+`secrets/generated/utopia-telegram-owner-deletion-targets-v2.json`; SHA-256
+`62110370f84bf04581e07b67f3a9b0fbd0b151f4fbd206088b81aaf12ea06275`.
+The policy authority lookup for both roots passed as Render one-off job
+`job-dapvlnk9v7es73a36jig`: its exact command fails if owner identity, channel,
+action scope or record version differs, and Render reported `succeeded`.
+
+Ray's explicit archive deletion request was used as the owner-console approval
+for a one-use manual V1.3 operator. It created fresh broker assertions with the
+reviewed packet digest, asked Utopia policy to issue one exact permit per root,
+then ran the V1.3 manifest-bound Lambda deletion workflow on the suspended
+deletion identity. The policy service was resumed only for this workflow and
+resuspended afterward. Both policy and deletion jobs for both roots succeeded;
+job IDs and permit IDs are recorded in the gitignored
+`secrets/generated/utopia-telegram-owner-deletion-execution-v2.json`. No message
+content was read. This manual operator is not a Telegram owner-broker feature
+and should not be reused for ordinary "forget" commands.
+
+The first separate count-only inventory after execution returned the same
+unfenced rows as before; its Render log report is therefore not accepted as
+verification. A direct, read-only one-off job on the Utopia deletion service,
+`job-dapvs6egekts73fdas6g`, checked the four exact evidence IDs, found four
+scoped deletion fences belonging to the two expected operation IDs, and checked
+both operations in a finality state with nonempty receipt digests. It exited
+successfully. A prior direct job `job-dapvrp142hec73ec0vk0` checked both root
+fences and operation finality. These checks establish operational deletion for
+the four identified records; the count-only report discrepancy remains a
+diagnostic issue, so do not cite that report as current database state.
+
+Stop Utopia capture at the bot handoff and run a fresh final sweep so new
+records do not replenish the archive. The legacy cloud-acceptance probes are
+synthetic and remain outside this owner-history deletion scope.
 
 The new, default-disabled `/v1/memory/interpreted-lookup` route in Raymond's
 routine identity calls a separate policy-only protected-recall endpoint over
@@ -558,5 +581,4 @@ The existing Utopia Stage 1 commissioning operator hardcodes Utopia identities,
 so it cannot safely commission Raymond as-is. Raymond authority writer and
 recovery coordinator are still suspended configuration shells. Do not redirect
 the active bot to the current Raymond routine service: it would fail the
-Telegram lease/retention boundary and could interrupt replies. Retain the old
-archive only until the authorized, key-destroying deletion completes.
+Telegram lease/retention boundary and could interrupt replies.
