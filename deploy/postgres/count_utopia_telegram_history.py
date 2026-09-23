@@ -97,13 +97,17 @@ def main() -> int:
             SELECT e.id::text AS evidence_id, e.status,
                    p.evidence_id IS NOT NULL AS has_payload,
                    w.wrapped_key_ref::text AS wrapped_key_ref,
-                   f.evidence_id IS NOT NULL AS deletion_fenced
+                   f.evidence_id IS NOT NULL AS deletion_fenced,
+                   o.state AS deletion_operation_state,
+                   i.source_conversation_id LIKE 'cloud-acceptance-%%' AS acceptance_probe
               FROM lucy.scoped_evidence_records_v2 e
+              JOIN lucy.scoped_archive_intents_v1 i ON i.evidence_id = e.id
               LEFT JOIN lucy.scoped_evidence_payloads_v2 p ON p.evidence_id = e.id
               LEFT JOIN lucy.scoped_evidence_wrappers_v2 w
                 ON w.evidence_id = e.id AND w.current
               LEFT JOIN lucy.scoped_evidence_deletion_fences_v2 f
                 ON f.evidence_id = e.id
+              LEFT JOIN lucy.sensitive_operations_v2 o ON o.id = f.operation_id
              WHERE e.content_classification = 'owner_conversation'
              ORDER BY e.id
         """)).mappings().all()
@@ -168,6 +172,14 @@ def main() -> int:
                AND i.content_classification = 'owner_conversation'
              ORDER BY e.id
         """), {"chat_id": owner_chat_id}).mappings().all()
+        legacy_acceptance = connection.execute(text("""
+            SELECT count(*) AS evidence,
+                   count(*) FILTER (WHERE p.evidence_id IS NOT NULL) AS live_payloads
+              FROM lucy.evidence e
+              LEFT JOIN lucy.evidence_payloads p ON p.evidence_id = e.id
+             WHERE e.source = 'hermes'
+               AND e.source_conversation_id LIKE 'telegram:cloud-acceptance-%%'
+        """)).mappings().one()
     print(json.dumps({
         "status": "passed",
         "database": database,
@@ -182,6 +194,7 @@ def main() -> int:
         "owner_legacy_targets": [dict(row) for row in owner_legacy_targets],
         "owner_scoped": dict(owner_scoped),
         "owner_scoped_targets": [dict(row) for row in owner_scoped_targets],
+        "legacy_acceptance": dict(legacy_acceptance),
         "content_read": False,
     }, sort_keys=True))
     return 0
