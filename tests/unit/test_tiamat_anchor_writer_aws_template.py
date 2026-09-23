@@ -77,12 +77,18 @@ def test_the_writer_runs_one_install_at_a_time_from_a_pinned_artifact() -> None:
     assert function["Handler"] == "lucy.shared_execution.anchor_writer_lambda.handler"
     assert function["ReservedConcurrentExecutions"] == 1
     assert function["Code"]["S3ObjectVersion"] == {"Ref": "WriterArtifactObjectVersion"}
-    assert resources["WriterVersion"]["Properties"]["CodeSha256"] == {
-        "Ref": "WriterArtifactCodeSha256"
+    version = resources["WriterVersion"]["Properties"]
+    assert version["CodeSha256"] == {"Ref": "WriterArtifactCodeSha256"}
+    # Either digest changing replaces the version, so a root change reaches the live alias.
+    assert "${WriterArtifactCodeSha256}" in version["Description"]["Sub"]
+    assert "${WriterRootsSha256}" in version["Description"]["Sub"]
+    assert resources["WriterAlias"]["Properties"]["FunctionVersion"] == {
+        "GetAtt": "WriterVersion.Version"
     }
-    assert set(function["Environment"]["Variables"]) == {
-        "TIAMAT_RECOVERY_ANCHOR_TABLE",
-        "TIAMAT_ANCHOR_WRITER_ROOTS",
+    assert function["Environment"]["Variables"] == {
+        "TIAMAT_RECOVERY_ANCHOR_TABLE": {"Ref": "AnchorTableName"},
+        "TIAMAT_ANCHOR_WRITER_ROOTS": {"Ref": "WriterRootsJson"},
+        "TIAMAT_ANCHOR_WRITER_ROOTS_SHA256": {"Ref": "WriterRootsSha256"},
     }
 
 
@@ -147,6 +153,9 @@ def test_foreign_writes_and_boundary_changes_reach_an_alarm() -> None:
     assert '$.userIdentity.type != "AssumedRole"' in patterns["ForeignItemWriteByNonRoleFilter"]
     for name in ("ForeignItemWriteByRoleFilter", "ForeignItemWriteByNonRoleFilter"):
         assert "$.readOnly IS FALSE" in patterns[name]
+        # Every resource of a multi-item write, not only the first.
+        assert "$.resources[*].ARN = " in patterns[name]
+        assert "$.resources[0]" not in patterns[name]
     boundary = patterns["BoundaryChangeFilter"]
     for source in ("dynamodb.amazonaws.com", "lambda.amazonaws.com", "iam.amazonaws.com"):
         assert source in boundary

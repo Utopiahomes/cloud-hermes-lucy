@@ -538,11 +538,34 @@ def test_an_unknown_invocation_outcome_is_unavailable_not_success() -> None:
 )
 def test_the_writer_refuses_incomplete_configuration(roots: str) -> None:
     with pytest.raises(ValueError, match="configuration is invalid"):
-        writer_from_environment(
-            {
-                "TIAMAT_RECOVERY_ANCHOR_TABLE": "t",
-                "AWS_REGION": "us-east-1",
-                "TIAMAT_ANCHOR_WRITER_ROOTS": roots,
-            },
-            client=ConditionalTable(),
-        )
+        writer_from_environment(_environment(roots), client=ConditionalTable())
+
+
+def _environment(roots: str, *, digest: str | None = None) -> dict[str, str]:
+    return {
+        "TIAMAT_RECOVERY_ANCHOR_TABLE": "t",
+        "AWS_REGION": "us-east-1",
+        "TIAMAT_ANCHOR_WRITER_ROOTS": roots,
+        "TIAMAT_ANCHOR_WRITER_ROOTS_SHA256": (
+            digest if digest is not None else hashlib.sha256(roots.encode()).hexdigest()
+        ),
+    }
+
+
+def test_the_writer_starts_only_on_the_reviewed_roots(world: Any) -> None:
+    """The version names the roots digest; configuration that does not hash to it is refused."""
+
+    identity, root, _ = world
+    entry = _root(root)
+    roots = json.dumps(
+        {
+            _key(identity): {
+                "root_key_id": entry.root_key_id,
+                "root_public_key_b64": entry.root_public_key_b64,
+                "root_public_key_sha256": entry.root_public_key_sha256,
+            }
+        }
+    )
+    assert writer_from_environment(_environment(roots), client=ConditionalTable()) is not None
+    with pytest.raises(ValueError, match="configuration is invalid"):
+        writer_from_environment(_environment(roots, digest="0" * 64), client=ConditionalTable())

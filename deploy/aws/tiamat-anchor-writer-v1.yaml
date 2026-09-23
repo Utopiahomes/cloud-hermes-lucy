@@ -40,6 +40,13 @@ Parameters:
     Description: >-
       JSON object mapping each anchor key to the root the writer trusts for it. Changing it is a
       reviewed change: it decides which signed transitions may ever be installed.
+  WriterRootsSha256:
+    Type: String
+    AllowedPattern: "[0-9a-f]{64}"
+    Description: >-
+      Hex SHA-256 of the exact WriterRootsJson bytes. It is part of the published version, so a
+      root change always publishes a new version for the live alias, and the writer refuses to
+      start if its configuration does not hash to it.
   AlarmTopicArn:
     Type: String
     AllowedPattern: "arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}"
@@ -122,6 +129,7 @@ Resources:
         Variables:
           TIAMAT_RECOVERY_ANCHOR_TABLE: !Ref AnchorTableName
           TIAMAT_ANCHOR_WRITER_ROOTS: !Ref WriterRootsJson
+          TIAMAT_ANCHOR_WRITER_ROOTS_SHA256: !Ref WriterRootsSha256
 
   WriterVersion:
     Type: AWS::Lambda::Version
@@ -130,7 +138,9 @@ Resources:
     Properties:
       FunctionName: !Ref WriterFunction
       CodeSha256: !Ref WriterArtifactCodeSha256
-      Description: !Sub Tiamat anchor writer ${WriterArtifactCodeSha256}
+      # A version snapshots code and configuration. Naming both digests here makes either change
+      # replace this resource, so a new version is published and the live alias moves to it.
+      Description: !Sub Tiamat anchor writer code-${WriterArtifactCodeSha256} roots-${WriterRootsSha256}
 
   WriterAlias:
     Type: AWS::Lambda::Alias
@@ -270,7 +280,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref AnchorTrailLogGroup
-      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[0].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type = "AssumedRole") && ($.userIdentity.sessionContext.sessionIssuer.arn != "${WriterRole.Arn}") }'
+      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[*].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type = "AssumedRole") && ($.userIdentity.sessionContext.sessionIssuer.arn != "${WriterRole.Arn}") }'
       MetricTransformations:
         - {MetricNamespace: Stoin/TiamatAnchor, MetricName: ForeignAnchorWrites, MetricValue: "1"}
 
@@ -279,7 +289,7 @@ Resources:
     Properties:
       LogGroupName: !Ref AnchorTrailLogGroup
       # An IAM user or root carries no session issuer, so it is caught by identity type.
-      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[0].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type != "AssumedRole") }'
+      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[*].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type != "AssumedRole") }'
       MetricTransformations:
         - {MetricNamespace: Stoin/TiamatAnchor, MetricName: ForeignAnchorWrites, MetricValue: "1"}
 

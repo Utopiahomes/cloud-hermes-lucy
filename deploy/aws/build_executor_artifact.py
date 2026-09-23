@@ -38,7 +38,20 @@ def main() -> None:
     parser.add_argument(
         "--source-state", choices=("clean", "dirty-local-test"), default="clean"
     )
+    parser.add_argument(
+        "--package",
+        action="append",
+        choices=("contracts", "executors", "shared_execution"),
+        help="lucy subpackage to include; repeatable (default: contracts and executors)",
+    )
+    parser.add_argument(
+        "--requirements-lock",
+        type=Path,
+        default=Path("deploy") / "aws" / "lambda-requirements.lock",
+        help="the hash-locked lock the staging tree was installed from, relative to the root",
+    )
     arguments = parser.parse_args()
+    packages = tuple(arguments.package or SOURCE_PACKAGES)
 
     root = arguments.project_root.resolve(strict=True)
     staging = arguments.staging.resolve(strict=True)
@@ -51,7 +64,7 @@ def main() -> None:
     lucy_target.mkdir(exist_ok=True)
     shutil.copy2(root / "src" / "lucy" / "__init__.py", lucy_target / "__init__.py")
     shutil.copy2(root / "src" / "lucy" / "py.typed", lucy_target / "py.typed")
-    for package in SOURCE_PACKAGES:
+    for package in packages:
         shutil.copytree(
             root / "src" / "lucy" / package,
             lucy_target / package,
@@ -76,16 +89,19 @@ def main() -> None:
 
     artifact = output.read_bytes()
     digest = hashlib.sha256(artifact).digest()
-    lock = (root / "deploy" / "aws" / "lambda-requirements.lock").read_bytes()
+    lock_path = (root / arguments.requirements_lock).resolve(strict=True)
+    if root not in lock_path.parents:
+        raise ValueError("the requirements lock must be inside the project")
+    lock = lock_path.read_bytes()
     source_digest = hashlib.sha256()
     source_files = [
         root / "src" / "lucy" / "__init__.py",
         root / "src" / "lucy" / "py.typed",
-        root / "deploy" / "aws" / "lambda-requirements.lock",
+        lock_path,
         root / "deploy" / "aws" / "build_executor_artifact.py",
         root / "deploy" / "aws" / "build-executor-artifact.ps1",
     ]
-    for package in SOURCE_PACKAGES:
+    for package in packages:
         source_files.extend(
             path
             for path in (root / "src" / "lucy" / package).rglob("*")
@@ -106,7 +122,9 @@ def main() -> None:
         "artifact_sha256_hex": digest.hex(),
         "architecture": "linux-amd64",
         "python_runtime": "python3.12",
+        "requirements_lock": lock_path.relative_to(root).as_posix(),
         "requirements_lock_sha256": hashlib.sha256(lock).hexdigest(),
+        "source_packages": list(packages),
         "source_commit": arguments.source_commit,
         "source_state": arguments.source_state,
         "source_tree_sha256": source_digest.hexdigest(),

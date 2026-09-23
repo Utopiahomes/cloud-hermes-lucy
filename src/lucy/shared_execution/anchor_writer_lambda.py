@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import os
@@ -39,8 +40,15 @@ def writer_from_environment(
     environment = os.environ if values is None else values
     table_name = environment.get("TIAMAT_RECOVERY_ANCHOR_TABLE", "")
     region = environment.get("AWS_REGION", "")
+    raw_roots = environment.get("TIAMAT_ANCHOR_WRITER_ROOTS", "")
+    if hashlib.sha256(raw_roots.encode("utf-8")).hexdigest() != environment.get(
+        "TIAMAT_ANCHOR_WRITER_ROOTS_SHA256", ""
+    ):
+        # The published version names this digest; a configuration that does not match it is
+        # not the reviewed one.
+        raise ValueError("anchor writer configuration is invalid")
     try:
-        document = json.loads(environment.get("TIAMAT_ANCHOR_WRITER_ROOTS", ""))
+        document = json.loads(raw_roots)
         roots = {
             str(anchor_key): WriterRoot(**{field: str(entry[field]) for field in _ROOT_FIELDS})
             for anchor_key, entry in document.items()

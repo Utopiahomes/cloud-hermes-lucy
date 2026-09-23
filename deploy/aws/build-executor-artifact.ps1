@@ -2,6 +2,8 @@ param(
   [string]$PythonExecutable = ".\.venv\Scripts\python.exe",
   [string]$OutputDirectory = ".\dist\aws",
   [string]$ArtifactName = "lucy-security-executors-v1.2.zip",
+  [string]$RequirementsLock = "deploy\aws\lambda-requirements.lock",
+  [string[]]$Package = @(),
   [switch]$AllowDirtyForLocalTest
 )
 
@@ -45,7 +47,7 @@ try {
     --platform manylinux2014_x86_64 `
     --require-hashes `
     --target $staging `
-    --requirement (Join-Path $PSScriptRoot "lambda-requirements.lock")
+    --requirement (Join-Path $projectRoot $RequirementsLock)
   if ($LASTEXITCODE -ne 0) { throw "Locked Lambda dependency installation failed" }
 
   & $PythonExecutable (Join-Path $PSScriptRoot "build_executor_artifact.py") `
@@ -53,7 +55,9 @@ try {
     --staging $staging `
     --output $artifact `
     --source-commit $sourceCommit `
-    --source-state $sourceState
+    --source-state $sourceState `
+    --requirements-lock $RequirementsLock `
+    @($Package | ForEach-Object { "--package"; $_ })
   if ($LASTEXITCODE -ne 0) { throw "Deterministic Lambda packaging failed" }
 }
 finally {
