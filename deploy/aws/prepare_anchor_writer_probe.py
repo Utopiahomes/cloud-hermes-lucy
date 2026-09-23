@@ -42,7 +42,7 @@ def main() -> None:
     raw_root = root.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw
     )
-    artifacts, _ = build_quarantined_bootstrap(
+    artifacts, transition = build_quarantined_bootstrap(
         identity=identity,
         root_key_id=ROOT_KEY_ID,
         root_private_key=root,
@@ -90,7 +90,8 @@ def main() -> None:
             {
                 "anchor_key": anchor_key,
                 "expected_transition_sha256": artifacts.transition_sha256,
-                "valid_for": "the bootstrap witness's validity window from now",
+                # The positive test must run before this, or the writer refuses the witness.
+                "witness_not_after": transition.witness.not_after.astimezone(UTC).isoformat(),
             },
             sort_keys=True,
         )

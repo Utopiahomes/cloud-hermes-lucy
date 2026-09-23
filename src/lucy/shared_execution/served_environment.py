@@ -87,6 +87,8 @@ def served_configuration_from_environment(
         raise ServedEnvironmentRejected("anchor trust is unusable") from exc
     if str(trust.identity.ledger_id) != str(UUID(required("TIAMAT_EXPECTED_LEDGER_ID"))):
         raise ServedEnvironmentRejected("anchor trust names a different ledger")
+    if trust.identity.environment != required("TIAMAT_EXPECTED_ENVIRONMENT"):
+        raise ServedEnvironmentRejected("anchor trust names a different environment")
     try:
         anchor = verified_anchor_reader(
             trust, now=now or datetime.now(UTC), environment=environment
@@ -153,6 +155,7 @@ def served_configuration_from_environment(
                 policy=required("TIAMAT_POLICY_RELEASE"),
             ),
             refresh_interval=timedelta(seconds=refresh_seconds),
+            runtime_role=required("TIAMAT_RUNTIME_DATABASE_ROLE"),
         )
     except ValueError as exc:
         raise ServedEnvironmentRejected("serving configuration is invalid") from exc

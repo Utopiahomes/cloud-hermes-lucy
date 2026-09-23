@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import psycopg
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
@@ -51,7 +52,11 @@ from lucy.shared_execution.postgres_ledger import (
 )
 from lucy.shared_execution.recovery_anchor import ExternalRecoveryAnchor, RecoveryAnchorIdentity
 from lucy.shared_execution.replay_cache import InMemoryReplayCache
-from lucy.shared_execution.served_startup import ServedRuntime, start_serving
+from lucy.shared_execution.served_startup import (
+    ServedRuntime,
+    ServedStartupRefused,
+    start_serving,
+)
 from lucy.shared_execution.service import ExecutionRejected, ProviderTransport
 from lucy.shared_execution.startup_attestation import (
     LedgerRecoveryCheckpointSource,
@@ -83,6 +88,9 @@ class ServedConfiguration:
     transport: ProviderTransport
     release: ApiRelease
     refresh_interval: timedelta = timedelta(seconds=30)
+    # The database role the runtime URL must log in as. Consume-only is otherwise a naming
+    # convention: a recovery credential pasted into the runtime slot would pass every other check.
+    runtime_role: str = "tiamat_runtime"
 
     def __post_init__(self) -> None:
         if (
@@ -172,6 +180,7 @@ def build_served_app(
     interval = configuration.refresh_interval.total_seconds()
 
     def start() -> None:
+        _require_session_role(configuration.runtime_database_url, configuration.runtime_role)
         ledger = PostgresExecutionLedger(
             configuration.runtime_database_url,
             RecoveryWitness(
@@ -251,6 +260,20 @@ def build_served_app(
         lifespan=lifespan,
     )
     return ServedApplication(app=app, process=process)
+
+
+def _require_session_role(database_url: str, expected: str) -> None:
+    """Refuse to serve unless the runtime credential really is the runtime role."""
+
+    try:
+        with psycopg.connect(
+            database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        ) as c:
+            row = c.execute("SELECT current_user::text").fetchone()
+    except psycopg.Error as exc:
+        raise ServedStartupRefused("runtime_database_unavailable") from exc
+    if row is None or row[0] != expected:
+        raise ServedStartupRefused("runtime_credential_is_not_the_runtime_role")
 
 
 async def _refresh_forever(runtime: ServedRuntime, interval: float) -> None:

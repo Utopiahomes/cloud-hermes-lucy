@@ -69,7 +69,13 @@ def _role(arn: str) -> dict[str, Any]:
     }
 
 
-def _data(name: str, identity: dict[str, Any], *arns: str, read_only: bool = False) -> str:
+def _data(
+    name: str,
+    identity: dict[str, Any],
+    *arns: str,
+    read_only: bool = False,
+    parameters: dict[str, Any] | None = None,
+) -> str:
     return json.dumps(
         {
             "eventVersion": "1.09",
@@ -78,7 +84,8 @@ def _data(name: str, identity: dict[str, Any], *arns: str, read_only: bool = Fal
             "eventName": name,
             "readOnly": read_only,
             "userIdentity": identity,
-            "requestParameters": {"tableName": TABLE},
+            # Per-API shapes: a transaction, a batch and a PartiQL statement carry no tableName.
+            "requestParameters": parameters if parameters is not None else {"tableName": TABLE},
             "resources": [
                 {"accountId": ACCOUNT, "type": "AWS::DynamoDB::Table", "ARN": arn} for arn in arns
             ],
@@ -103,9 +110,26 @@ def _management(source: str, name: str, parameters: dict[str, Any]) -> str:
 FOREIGN = {
     "coordinator put": _data("PutItem", _role(COORDINATOR_ROLE_ARN), TABLE_ARN),
     "coordinator transaction, anchor table second": _data(
-        "TransactWriteItems", _role(COORDINATOR_ROLE_ARN), OTHER_TABLE_ARN, TABLE_ARN
+        "TransactWriteItems",
+        _role(COORDINATOR_ROLE_ARN),
+        OTHER_TABLE_ARN,
+        TABLE_ARN,
+        parameters={
+            "transactItems": [{"put": {"tableName": "unrelated"}}, {"put": {"tableName": TABLE}}]
+        },
     ),
-    "coordinator PartiQL insert": _data("ExecuteStatement", _role(COORDINATOR_ROLE_ARN), TABLE_ARN),
+    "coordinator PartiQL insert": _data(
+        "ExecuteStatement",
+        _role(COORDINATOR_ROLE_ARN),
+        TABLE_ARN,
+        parameters={"statement": f'INSERT INTO "{TABLE}" VALUE {{...}}'},
+    ),
+    "coordinator batch": _data(
+        "BatchWriteItem",
+        _role(COORDINATOR_ROLE_ARN),
+        TABLE_ARN,
+        parameters={"requestItems": {TABLE: [{"putRequest": {}}]}},
+    ),
     "IAM user put": _data(
         "PutItem", {"type": "IAMUser", "arn": f"arn:aws:iam::{ACCOUNT}:user/someone"}, TABLE_ARN
     ),
@@ -137,6 +161,20 @@ BOUNDARY = {
     ),
     "writer role policy changed": _management(
         "iam.amazonaws.com", "PutRolePolicy", {"roleName": WRITER_ROLE}
+    ),
+    "writer code changed": _management(
+        "lambda.amazonaws.com", "UpdateFunctionCode20150331v2", {"functionName": FUNCTION}
+    ),
+    "writer version published": _management(
+        "lambda.amazonaws.com", "PublishVersion20150331", {"functionName": FUNCTION}
+    ),
+    "managed policy attached to the writer role": _management(
+        "iam.amazonaws.com",
+        "AttachRolePolicy",
+        {"roleName": WRITER_ROLE, "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess"},
+    ),
+    "writer role trust changed": _management(
+        "iam.amazonaws.com", "UpdateAssumeRolePolicy", {"roleName": WRITER_ROLE}
     ),
 }
 NOT_BOUNDARY = {

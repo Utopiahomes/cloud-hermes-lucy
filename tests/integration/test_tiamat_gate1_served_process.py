@@ -253,6 +253,14 @@ def test_a_consume_only_process_serves_only_on_a_claimant_the_launcher_issued(
         _configuration(env, trust, anchor, private_key), recovery_database_url=None
     )
 
+    # The recovery credential in the runtime slot is refused before anything is read.
+    mislabelled = build_served_app(replace(configuration, runtime_database_url=env.recovery))
+    with (
+        pytest.raises(ServedStartupRefused, match="runtime_credential_is_not_the_runtime_role"),
+        TestClient(mislabelled.app),
+    ):
+        pass
+
     refused = build_served_app(configuration)
     with (
         pytest.raises(ServedStartupRefused, match="startup_claimant_required"),
