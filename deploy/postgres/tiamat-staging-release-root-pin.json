@@ -1,0 +1,6 @@
+{
+  "format_version": "1",
+  "environment": "staging",
+  "root_key_id": "tiamat-release-root.staging.1",
+  "root_public_key_sha256": "e56147d2ed53475f8ab315f469f745ce9ea7a7703a101341b9b2ac0a9e47ae05"
+}

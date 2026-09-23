@@ -21,6 +21,11 @@ Parameters:
     Type: String
     AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
     Description: Existing recovery-coordinator role; receives invoke permission only
+  DisposableCoordinatorRoleName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: Optional isolated Gate 2 disposable recovery role; receives invoke permission only
   WriterArtifactBucket:
     Type: String
     AllowedPattern: "[a-z0-9.-]{3,63}"
@@ -51,6 +56,9 @@ Parameters:
     Type: String
     AllowedPattern: "arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}"
     Description: Existing SNS topic that accepts CloudWatch alarm notifications
+
+Conditions:
+  HasDisposableCoordinator: !Not [!Equals [!Ref DisposableCoordinatorRoleName, ""]]
 
 Resources:
   WriterLogGroup:
@@ -164,6 +172,28 @@ Resources:
     Properties:
       PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-writer-invoke-v1
       Roles: [!Ref CoordinatorRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: InvokeTheAnchorWriterOnly
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref WriterAlias
+
+  DisposableCoordinatorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasDisposableCoordinator
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WriterAlias
+      Principal: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${DisposableCoordinatorRoleName}
+
+  DisposableCoordinatorInvokePolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasDisposableCoordinator
+    Properties:
+      PolicyName: !Sub ${ResourceNamespace}-${EnvironmentName}-anchor-writer-disposable-invoke-v1
+      Roles: [!Ref DisposableCoordinatorRoleName]
       PolicyDocument:
         Version: "2012-10-17"
         Statement:

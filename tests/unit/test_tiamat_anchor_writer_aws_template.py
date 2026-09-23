@@ -72,6 +72,33 @@ def test_the_coordinator_may_only_invoke_the_writer() -> None:
     ]
 
 
+def test_optional_disposable_coordinator_gets_only_writer_alias_invoke() -> None:
+    template = yaml.load(WRITER.read_text(encoding="utf-8"), Loader=CloudFormationLoader)
+    parameter = template["Parameters"]["DisposableCoordinatorRoleName"]
+    assert parameter["Default"] == ""
+    assert template["Conditions"]["HasDisposableCoordinator"] == {
+        "Not": [{"Equals": [{"Ref": "DisposableCoordinatorRoleName"}, ""]}]
+    }
+    resources = template["Resources"]
+    permission = resources["DisposableCoordinatorInvokePermission"]
+    policy = resources["DisposableCoordinatorInvokePolicy"]
+    assert permission["Condition"] == policy["Condition"] == "HasDisposableCoordinator"
+    assert permission["Properties"]["FunctionName"] == {"Ref": "WriterAlias"}
+    assert permission["Properties"]["Principal"] == {
+        "Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${DisposableCoordinatorRoleName}"
+    }
+    assert policy["Properties"]["Roles"] == [{"Ref": "DisposableCoordinatorRoleName"}]
+    assert policy["Properties"]["PolicyDocument"]["Statement"] == [
+        {
+            "Sid": "InvokeTheAnchorWriterOnly",
+            "Effect": "Allow",
+            "Action": "lambda:InvokeFunction",
+            "Resource": {"Ref": "WriterAlias"},
+        }
+    ]
+    assert _granted(resources, "dynamodb:PutItem") == {"WriterPolicy"}
+
+
 def test_the_writer_runs_one_install_at_a_time_from_a_pinned_artifact() -> None:
     resources = _resources(WRITER)
     function = resources["WriterFunction"]["Properties"]
