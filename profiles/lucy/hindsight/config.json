@@ -1,6 +1,8 @@
 {
   "mode": "local_external",
   "bank_id": "ray-personal",
+  "bank_mission": "Answer from source-linked memories. Distinguish Ray's explicit confirmations from assistant suggestions, preserve historical context, and say when present applicability is unverified.",
+  "bank_retain_mission": "Extract historically scoped facts without turning suggestions into Ray's beliefs. Keep correction and source attribution visible.",
   "memory_mode": "hybrid",
   "auto_recall": true,
   "recall_sync": true,
