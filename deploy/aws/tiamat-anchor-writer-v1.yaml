@@ -65,16 +65,15 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1
+      # Lambda's own trust pattern. Lambda does not supply aws:SourceArn when it assumes an
+      # execution role, so a trust condition on it would leave the function unable to run. The
+      # role is bound to its function in WriterPolicy instead, through lambda:SourceFunctionArn.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal: {Service: lambda.amazonaws.com}
             Action: sts:AssumeRole
-            Condition:
-              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
-              ArnLike:
-                "aws:SourceArn": !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1*
       Tags:
         - {Key: stoin:system, Value: tiamat}
         - {Key: stoin:purpose, Value: recovery-anchor-writer}
@@ -98,6 +97,10 @@ Resources:
               ForAllValues:StringLike:
                 dynamodb:LeadingKeys: [!Sub "ENV#${EnvironmentName}#LEDGER#*"]
               "Null": {"dynamodb:LeadingKeys": "false"}
+              # Only this function's code may use the grant, even if the role were passed to
+              # another function. The key carries the unqualified ARN, never a version or alias.
+              ArnEquals:
+                "lambda:SourceFunctionArn": !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1
           - Sid: WriteOwnLogsOnly
             Effect: Allow
             Action:

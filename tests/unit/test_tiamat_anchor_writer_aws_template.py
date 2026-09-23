@@ -55,6 +55,7 @@ def test_the_writer_writes_only_this_environments_keys() -> None:
     assert statement["Condition"]["ForAllValues:StringLike"]["dynamodb:LeadingKeys"] == [
         {"Sub": "ENV#${EnvironmentName}#LEDGER#*"}
     ]
+    assert statement["Condition"]["Null"] == {"dynamodb:LeadingKeys": "false"}
 
 
 def test_the_coordinator_may_only_invoke_the_writer() -> None:
@@ -114,13 +115,27 @@ def test_the_table_itself_denies_item_writes_to_everyone_but_the_writer() -> Non
     }
 
 
-def test_the_writer_role_is_assumable_only_by_its_own_function() -> None:
-    [statement] = _resources(WRITER)["WriterRole"]["Properties"]["AssumeRolePolicyDocument"][
-        "Statement"
+def test_the_writer_role_uses_lambdas_trust_and_is_bound_to_its_function() -> None:
+    """Lambda does not supply aws:SourceArn when assuming an execution role; a trust condition
+    on it would stop the function from running. The binding is lambda:SourceFunctionArn, which
+    only identity policies can use, on the unqualified function ARN."""
+
+    resources = _resources(WRITER)
+    [trust] = resources["WriterRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"]
+    assert trust == {
+        "Effect": "Allow",
+        "Principal": {"Service": "lambda.amazonaws.com"},
+        "Action": "sts:AssumeRole",
+    }
+    [table_grant] = [
+        statement
+        for statement in resources["WriterPolicy"]["Properties"]["PolicyDocument"]["Statement"]
+        if "dynamodb:PutItem" in _actions(statement)
     ]
-    assert statement["Principal"] == {"Service": "lambda.amazonaws.com"}
-    assert statement["Condition"]["ArnLike"]["aws:SourceArn"]["Sub"].endswith(
-        ":function:${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1*"
+    bound = table_grant["Condition"]["ArnEquals"]["lambda:SourceFunctionArn"]["Sub"]
+    function_name = resources["WriterFunction"]["Properties"]["FunctionName"]["Sub"]
+    assert bound == (
+        "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:" + function_name
     )
 
 
