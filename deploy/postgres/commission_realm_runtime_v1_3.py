@@ -1,4 +1,4 @@
-"""Open or quarantine one V1.3 realm for bounded synthetic commissioning.
+"""Open or quarantine one V1.3 realm for bounded commissioning.
 
 Run only as a temporary Render migration job. The command emits content-free
 state and never returns database URLs, customer content, or realm identifiers.
@@ -22,11 +22,12 @@ from sqlalchemy.engine import URL, make_url
 from lucy.readiness import ADMISSION_LOCK, MEMORY_CORRECTION_SCHEMA_REVISION
 from lucy.realm_provisioning import RealmSecurityStampV1
 
-Action = Literal["status", "open", "quarantine"]
+Action = Literal["status", "open", "pilot_open", "quarantine"]
 
 AUTHORIZATIONS: dict[Action, str] = {
     "status": "security-v1.3-commission-status",
     "open": "security-v1.3-synthetic-open-capture-disabled",
+    "pilot_open": "security-v1.3-raymond-approved-pilot-open-capture-disabled",
     "quarantine": "security-v1.3-commission-quarantine",
 }
 MAINTENANCE_LOCK = 0x4C5543594D53
@@ -46,6 +47,8 @@ class CommissionConfig:
     runtime_epoch: UUID | None
     declared_capture_enabled: bool | None
     approved_synthetic_receipts: frozenset[tuple[str, str]]
+    pilot_campaign_id: UUID | None = None
+    pilot_bundle_digest: str | None = None
 
     @classmethod
     def from_environment(
@@ -60,7 +63,7 @@ class CommissionConfig:
         if action != "quarantine" and capture_value not in {"true", "false"}:
             raise CommissionError("transcript capture declaration is missing or invalid")
         declared_capture_enabled = capture_value == "true"
-        if action == "open" and declared_capture_enabled:
+        if action in {"open", "pilot_open"} and declared_capture_enabled:
             raise CommissionError("transcript capture must remain disabled")
         migration_url = _database_url(_required(values, "LUCY_MIGRATION_DATABASE_URL"))
         if migration_url.username != "lucy_migration":
@@ -90,6 +93,22 @@ class CommissionConfig:
             approved_synthetic_receipts = _approved_synthetic_receipts(
                 values.get("LUCY_APPROVED_SYNTHETIC_CAPTURE_RECEIPTS_JSON", "[]")
             )
+        pilot_campaign_id = None
+        pilot_bundle_digest = None
+        if action == "pilot_open":
+            if (
+                migration_url.database != "lucy_raymond"
+                or stamp is None
+                or stamp.realm_slug != "raymond"
+            ):
+                raise CommissionError("pilot opening requires the Raymond realm")
+            try:
+                pilot_campaign_id = UUID(_required(values, "LUCY_APPROVED_PILOT_CAMPAIGN_ID"))
+            except ValueError as exc:
+                raise CommissionError("pilot campaign ID is invalid") from exc
+            pilot_bundle_digest = _required(values, "LUCY_APPROVED_PILOT_BUNDLE_DIGEST")
+            if _DIGEST.fullmatch(pilot_bundle_digest) is None:
+                raise CommissionError("pilot bundle digest is invalid")
         return cls(
             migration_url=migration_url,
             stamp=stamp,
@@ -98,6 +117,8 @@ class CommissionConfig:
                 declared_capture_enabled if capture_value in {"true", "false"} else None
             ),
             approved_synthetic_receipts=approved_synthetic_receipts,
+            pilot_campaign_id=pilot_campaign_id,
+            pilot_bundle_digest=pilot_bundle_digest,
         )
 
 
@@ -311,6 +332,30 @@ def _work_in_flight(connection: psycopg.Connection[Any], config: CommissionConfi
     )
 
 
+def _verify_pilot_boundary(connection: psycopg.Connection[Any], config: CommissionConfig) -> None:
+    stamp, _, _ = _full_config(config)
+    if config.pilot_campaign_id is None or config.pilot_bundle_digest is None:
+        raise CommissionError("pilot opening requires an exact campaign and bundle")
+    registered = _scalar(
+        connection,
+        "SELECT count(*) FROM lucy.memory_import_campaigns_v1 c "
+        "JOIN lucy.memory_import_pilot_authorizations_v1 a ON a.campaign_id=c.id "
+        "JOIN lucy.memory_pilot_transport_registrations_v1 t ON t.campaign_id=c.id "
+        "WHERE c.id=%s AND c.content_scope_id=%s AND a.content_scope_id=c.content_scope_id "
+        "AND t.content_scope_id=c.content_scope_id AND a.bundle_digest=%s "
+        "AND t.bundle_digest=a.bundle_digest AND a.owner_approval_ref=t.owner_approval_ref "
+        "AND c.expires_at>clock_timestamp() AND a.expires_at>clock_timestamp() "
+        "AND t.expires_at>clock_timestamp() "
+        "AND NOT EXISTS (SELECT 1 FROM lucy.memory_pilot_transport_revocations_v1 r "
+        "WHERE r.campaign_id=c.id) "
+        "AND (SELECT count(*) FROM lucy.memory_pilot_transport_batches_v1 b "
+        "WHERE b.campaign_id=c.id)=13",
+        (config.pilot_campaign_id, stamp.content_scope_id, config.pilot_bundle_digest),
+    )
+    if registered != 1:
+        raise CommissionError("exact Raymond pilot registration is unavailable")
+
+
 def _expired_unclaimed_permits(
     connection: psycopg.Connection[Any], config: CommissionConfig
 ) -> int:
@@ -393,9 +438,11 @@ def run(config: CommissionConfig, action: Action, authorization: str) -> dict[st
         expired_unclaimed = _expired_unclaimed_permits(connection, config)
         finality_pending = _finality_pending(connection, config)
         sessions = _runtime_sessions(connection, config)
-        if action == "open":
+        if action in {"open", "pilot_open"}:
             _, runtime_epoch, _ = _full_config(config)
             _verify_open_boundary(connection, config, capture_blockers)
+            if action == "pilot_open":
+                _verify_pilot_boundary(connection, config)
             if pending:
                 raise CommissionError("realm has unresolved sensitive authority")
             if sessions:

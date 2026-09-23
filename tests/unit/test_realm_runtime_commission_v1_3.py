@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -55,8 +56,26 @@ def test_config_fails_closed(key: str, value: str, message: str) -> None:
 
 
 def test_each_action_has_a_distinct_exact_authorization() -> None:
-    assert set(commission.AUTHORIZATIONS) == {"status", "open", "quarantine"}
-    assert len(set(commission.AUTHORIZATIONS.values())) == 3
+    assert set(commission.AUTHORIZATIONS) == {"status", "open", "pilot_open", "quarantine"}
+    assert len(set(commission.AUTHORIZATIONS.values())) == 4
+
+
+def test_pilot_open_requires_exact_raymond_registration(monkeypatch: pytest.MonkeyPatch) -> None:
+    environment = _environment()
+    environment["LUCY_APPROVED_PILOT_CAMPAIGN_ID"] = str(uuid4())
+    environment["LUCY_APPROVED_PILOT_BUNDLE_DIGEST"] = "a" * 64
+    with pytest.raises(commission.CommissionError, match="Raymond realm"):
+        commission.CommissionConfig.from_environment("pilot_open", environment)
+    config = replace(
+        commission.CommissionConfig.from_environment("open", environment),
+        pilot_campaign_id=uuid4(), pilot_bundle_digest="a" * 64,
+    )
+    monkeypatch.setattr(commission, "_scalar", lambda *_args: 0)
+    with pytest.raises(commission.CommissionError, match="registration is unavailable"):
+        commission._verify_pilot_boundary(object(), config)  # type: ignore[arg-type]
+    environment["LUCY_TRANSCRIPT_CAPTURE_ENABLED"] = "true"
+    with pytest.raises(commission.CommissionError, match="capture must remain disabled"):
+        commission.CommissionConfig.from_environment("pilot_open", environment)
 
 
 def test_synthetic_capture_receipt_exceptions_are_exact_and_named() -> None:
