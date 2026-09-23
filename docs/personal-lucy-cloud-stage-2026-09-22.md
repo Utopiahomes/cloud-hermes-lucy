@@ -638,3 +638,60 @@ job with a fresh corrected command and exact read-only database classification;
 then stage the Raymond channel, recovery dependencies and bot credential. Do
 not route real Telegram traffic through Raymond's shared OpenRouter key: Ray
 approved that key for synthetic testing only.
+
+## Raymond Telegram handoff staged (2026-09-23)
+
+The preceding next-action line is complete. A corrected read-only diagnostic
+found Raymond schema `0073_memory_candidate_correction`, admission `ready`,
+capture boundary safe, and no existing Telegram principal/channel/outbox. The
+old commissioning operator required `quarantined` because it was written before
+Raymond's memory pilot; it failed before writing a channel. Commit `f8dff25`
+accepts `ready` for the Raymond realm only and retains Utopia's quarantined
+gate. Nine focused tests, Ruff and strict mypy passed.
+
+Corrected one-off jobs verified the authority writer, cost writer and recovery
+coordinator database identities at schema 0073. The new commissioning utility
+waited for the private authority writer and recovery coordinator `/ready`
+endpoints before invoking the operator. Job `job-daq1cuh7lnhs739flds0`
+succeeded. Independent administrator job output from
+`raymond-telegram-stage1-diagnostic-v4.json` found exactly one Raymond owner
+principal, one active generation-2 Telegram channel binding, one matching bot
+binding, and one acknowledged authority activation outbox event. All temporary
+commissioning/diagnostic utilities were deleted; recovery services were
+resuspended. No Telegram message or provider call was made.
+
+Raymond policy and routine are deployed at `f8dff25` with ingress, capture,
+pilot executor and intake still false, and both are suspended. The routine has
+a new adapter credential distinct from Utopia's, plus the exact Raymond node,
+realm, channel and bot IDs. The replacement background worker
+`srv-daq1icm0tbcc73fg3af0` is in the Raymond environment and suspended. It
+holds the current bot token and owner allowlist but has `LUCY_TELEGRAM_STAGE=0`,
+capture false, no OpenRouter key, and an inert `sleep infinity` start command.
+Its Stage 2 image built at `f8dff25` and reached `live` before suspension. The
+Utopia bot remains the only poller and continues capturing; no bot handoff has
+occurred.
+
+To complete the cutover, resolve the real-reply provider credential. Ray's
+approval for the shared OpenRouter key was synthetic-only, so using it for real
+Telegram requires a new explicit choice; a Raymond-only key is preferred.
+Then configure the Raymond routine and worker for Stage 2 while suspended,
+stop the Utopia worker, run a content-free final archive sweep and delete any
+new owner turns, start the Raymond routine and then its worker, and verify one
+bounded Telegram exchange plus the expected Raymond evidence/ledger state.
+The Stage 1 Raymond channel budget account is $1/day. Do not run both bot
+workers at once.
+
+Subsequent preparation: the Raymond routine now has its own Telegram adapter
+token and a newly generated archive request commitment key, distinct from
+Utopia's. A read-only one-off Stage 2 preflight initially failed for the
+missing request key and then passed as job `job-daq1nmfavr4c73em0blg`: it
+checked readiness and archive construction with Stage 2 flags only inside the
+one-off process, without capture writes or provider calls. The replacement
+gateway holds the current bot token and Raymond adapter binding while
+suspended; its image was built with inert `sleep infinity`. The latest
+nonsecret Render snapshot confirms Utopia's worker is the only active poller,
+while Raymond policy, routine and gateway are all suspended. Raymond's gateway
+still has no provider key and remains Stage `0`/capture false. A focused choice
+about a Raymond-only key versus extending the shared key beyond the earlier
+synthetic-only approval is pending from Ray. The exact next action depends on
+that choice; no real Telegram traffic has been moved.
