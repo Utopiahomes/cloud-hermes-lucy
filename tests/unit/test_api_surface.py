@@ -41,6 +41,7 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ("POST", "/internal/v1/conversations/capture-mode-and-accept"),
         ("POST", "/internal/v1/conversations/forget-last"),
         ("POST", "/internal/v1/conversations/messages"),
+        ("POST", "/internal/v1/hindsight/openai/v1/chat/completions"),
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
         ("POST", "/internal/v1/memory/interpreted-context"),

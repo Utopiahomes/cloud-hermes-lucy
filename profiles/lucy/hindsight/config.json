@@ -1,0 +1,13 @@
+{
+  "mode": "local_external",
+  "bank_id": "ray-personal",
+  "memory_mode": "hybrid",
+  "auto_recall": true,
+  "recall_sync": true,
+  "recall_indicator": false,
+  "recall_types": "observation,world,experience",
+  "auto_retain": false,
+  "retain_indicator": false,
+  "recall_max_tokens": 1800,
+  "recall_max_input_chars": 800
+}

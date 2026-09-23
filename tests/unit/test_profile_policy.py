@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -9,10 +10,10 @@ PROFILE_ROOT = REPOSITORY_ROOT / "profiles" / "lucy"
 def test_profile_has_fail_closed_tool_surface() -> None:
     config = yaml.safe_load((PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8"))
     assert config["_config_version"] == 38
-    assert config["toolsets"] == ["lucy_memory"]
+    assert config["toolsets"] == ["memory"]
     assert config["platform_toolsets"] == {
-        "cli": ["lucy_memory"],
-        "telegram": ["lucy_memory"],
+        "cli": ["memory"],
+        "telegram": ["memory"],
     }
     assert config["known_plugin_toolsets"] == {
         "cli": ["a2a", "lucy_memory", "spotify"],
@@ -91,11 +92,18 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     assert auxiliary["background_review"]["enabled"] is False
     assert auxiliary["compression"]["enabled"] is False
     assert config["memory"] == {
+        "provider": "hindsight",
         "memory_enabled": False,
         "user_profile_enabled": False,
         "write_approval": True,
         "nudge_interval": 0,
     }
+    hindsight = json.loads((PROFILE_ROOT / "hindsight" / "config.json").read_text())
+    assert hindsight["mode"] == "local_external"
+    assert hindsight["bank_id"] == "ray-personal"
+    assert hindsight["auto_recall"] is True
+    assert hindsight["auto_retain"] is False
+    assert hindsight["memory_mode"] == "hybrid"
     assert config["curator"] == {"enabled": False, "backup": {"enabled": False}}
     assert config["sessions"]["write_json_snapshots"] is False
     assert config["gateway"] == {

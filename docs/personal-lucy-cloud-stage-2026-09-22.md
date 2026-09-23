@@ -856,3 +856,31 @@ substring and at most five confidence/recency-ordered claims; the explicit
 Telegram prefetch uses only the quoted topic. No further gateway code or cloud
 state was changed for the v2 proposal. The live recall pilot remains
 experimental until the multi-topic and temporal answer gate passes.
+
+## Hindsight integration in progress (2026-09-23)
+
+Ray explicitly chose the existing self-hosted Hindsight engine in place of
+further custom retrieval development. He authorized one new private Render
+`1c-2g` service at $25/month, billed prorata; it is needed for Hindsight's
+full local embedding/reranking image. The existing Raymond PostgreSQL host is
+the intended storage location, with a separate `lucy_hindsight` database and
+login. Utopia's gateway stays suspended. No Telegram capture or source archive
+is to be moved into Hindsight. Automatic Hindsight retention starts disabled.
+
+Local integration changes on this branch pin Hindsight API/client 0.10.1,
+configure Raymond Hermes for the bundled `local_external` provider and
+`ray-personal` bank, and add a private OpenAI-compatible proxy on the routine
+service. That proxy uses the existing `model.daily` action account and the
+approved `openai/gpt-oss-20b` OpenRouter route, with ZDR, denied data
+collection, no provider fallback, price caps, and per-call reservation.
+The new profile **must not be deployed** until the Hindsight server and proxy
+are live and their private authentication/recall boundaries pass.
+
+Verification ledger for this revision: focused Hindsight proxy/profile/API
+unit tests: 33 passed locally; Ruff and strict mypy: passed. This evidence is
+invalidated by changes to the proxy, profile, API, or pinned versions. Cloud
+database provisioning, image start, Hermes `memory status`, import, recall,
+reflection, restart, correction, deletion, and Telegram delivery are **not yet
+executed**. Next action: run the short-lived private Render prerequisite job,
+provision the dedicated database and role, deploy the proxy and Hindsight
+private service, and only then switch the gateway.

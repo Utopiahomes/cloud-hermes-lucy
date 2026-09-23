@@ -1,0 +1,4 @@
+FROM ghcr.io/vectorize-io/hindsight-api:0.10.1
+
+# Render supplies HINDSIGHT_API_DATABASE_URL and model/auth secrets. Keep the
+# upstream image's supervised API start command and independent migrations.

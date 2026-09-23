@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.concurrency import run_in_threadpool
 
 from lucy.archive import (
     CaptureModeAndTurnInput,
@@ -80,6 +81,8 @@ from lucy.evidence import (
     ForgetLastRequest,
 )
 from lucy.governed_memory import GovernedMemoryPolicy, GovernedMemoryUnavailable
+from lucy.hindsight_model_proxy import HindsightModelProxyError
+from lucy.hindsight_model_proxy import complete as complete_hindsight_model
 from lucy.interpreted_recall import recall_interpreted_answer_context
 from lucy.interpreted_recall_http import (
     HttpInterpretedRecallClient,
@@ -195,6 +198,16 @@ def _authorize(authorization: str | None) -> None:
         or not secrets.compare_digest(authorization, f"Bearer {token}")
     ):
         raise HTTPException(status_code=401, detail="invalid adapter credential")
+
+
+def _authorize_hindsight(authorization: str | None) -> None:
+    token = os.getenv("LUCY_HINDSIGHT_MODEL_PROXY_TOKEN")
+    if (
+        not token
+        or authorization is None
+        or not secrets.compare_digest(authorization, f"Bearer {token}")
+    ):
+        raise HTTPException(status_code=401, detail="invalid Hindsight credential")
 
 
 def _authorize_owner(authorization: str | None) -> None:
@@ -758,6 +771,24 @@ def propose_memory(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="idempotency conflict") from exc
     return result.model_dump(mode="json")
+
+
+@app.post("/internal/v1/hindsight/openai/v1/chat/completions", tags=["internal"])
+async def hindsight_model_completion(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """Give Hindsight the same bounded model account without exposing the provider key."""
+    _require_mode("routine")
+    _authorize_hindsight(authorization)
+    body = await request.body()
+    try:
+        result = await run_in_threadpool(complete_hindsight_model, body, _ready_sessions())
+    except HindsightModelProxyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Hindsight model route unavailable") from exc
+    return JSONResponse(content=result)
 
 
 @app.post(

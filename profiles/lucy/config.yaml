@@ -70,6 +70,7 @@ auxiliary:
     enabled: false
 
 memory:
+  provider: hindsight
   memory_enabled: false
   user_profile_enabled: false
   write_approval: true
@@ -107,13 +108,13 @@ telegram:
   gateway_restart_notification: false
 
 toolsets:
-  - lucy_memory
+  - memory
 
 platform_toolsets:
   cli:
-    - lucy_memory
+    - memory
   telegram:
-    - lucy_memory
+    - memory
 
 known_plugin_toolsets:
   cli:
