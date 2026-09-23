@@ -1,0 +1,271 @@
+{
+  "evidence_type": "tiamat_gate2_proof_1_fresh_ledger",
+  "date_utc": "2026-09-23",
+  "scope": "Gate 2 proof 1 (Lyra): a fresh disposable database migrated through 0017, roles finalized, and the empty-ledger ceremony run end to end. Local only; no AWS, Render or ledger outside the throwaway cluster was touched.",
+  "method": {
+    "cluster": "throwaway local PostgreSQL 16.15 container (postgres:16), TLS on, bound to 127.0.0.1; recreated fresh for the recorded run",
+    "owner": "tiamat_fresh_owner: LOGIN CREATEROLE NOSUPERUSER NOCREATEDB NOREPLICATION NOBYPASSRLS, owning database tiamat_fresh (the shape of Render's managed owner)",
+    "test": "tests/integration/test_tiamat_fresh_ledger_proof.py (opt-in: TIAMAT_FRESH_ADMIN_URL, local hosts only)",
+    "commands_in_order": [
+      "deploy/postgres/bootstrap_tiamat_staging_v1.py --confirm-bootstrap bootstrap:staging:tiamat_fresh (roles, role template, migration to 0006, verified logins)",
+      "alembic -c tiamat_alembic.ini upgrade head, as the owner",
+      "deploy/postgres/initialize_tiamat_ledger_v1.py (recovery login; day-zero checkpoint)",
+      "deploy/postgres/finalize_tiamat_d1_v1.py (owner)",
+      "deploy/postgres/verify_tiamat_render_capabilities_v1.py (recovery login)",
+      "deploy/postgres/tiamat_reconciliation_ledger_v1.py readback",
+      "then the Phase B ceremony through every command's real main(): recovery bootstrap preparation and install through the writer, first-inventory (with an approved release-root pin), report --checkpoint-generation 2, pending signing and install, authorize, beacon, established signing and install, the launcher's claimant, create-partition"
+    ],
+    "simulated": "Only the AWS transport: the Lambda client runs the real M4 writer handler in-process over an in-memory conditional table. Keys come from the generators' own builders (their command lines refuse to write private keys on Windows)."
+  },
+  "results": {
+    "bootstrap": {
+      "database_name": "tiamat_fresh",
+      "dispatch_enabled": false,
+      "environment": "staging",
+      "migration_head": "0006_render_recovery_rls",
+      "secrets_recorded": false,
+      "verified_logins": [
+        "tiamat_runtime",
+        "tiamat_recovery"
+      ]
+    },
+    "capabilities": {
+      "database_user": "tiamat_recovery",
+      "dispatch_blocked": true,
+      "environment": "staging",
+      "flushed_wal_lsn": "0/19EDF70",
+      "ledger_id": "739cffed-55b0-4a0b-b646-292c535ce352",
+      "recovery_generation": 1,
+      "server_version_num": 160015,
+      "storage_epoch": "6d2fb930-ad8e-4629-9b88-f200309e2b8b",
+      "system_identifier": "7688830124150280230",
+      "timeline_id": 1,
+      "transport_tls": true
+    },
+    "day_zero_checkpoint": {
+      "environment": "staging",
+      "ledger_id": "739cffed-55b0-4a0b-b646-292c535ce352",
+      "recovery_generation": 1,
+      "release_heads": [],
+      "release_inventory": {
+        "state": "not_installed"
+      },
+      "settlement_position": [],
+      "storage_epoch": "6d2fb930-ad8e-4629-9b88-f200309e2b8b"
+    },
+    "readback_after_provisioning": {
+      "beacon": {
+        "flushed_wal_lsn": "0/19EDF70",
+        "system_identifier": "7688830124150280230",
+        "timeline_id": 1
+      },
+      "beacon_callable": true,
+      "environment": "staging",
+      "gate": {
+        "anchor_floor_sha256": null,
+        "anchor_floor_version": 0,
+        "block_reason": "initial_reconciliation_required",
+        "coordinator_generation": 1,
+        "dispatch_blocked": true,
+        "recovery_generation": 1,
+        "storage_epoch": "6d2fb930-ad8e-4629-9b88-f200309e2b8b",
+        "verified_at": null
+      },
+      "gate_columns_missing": [],
+      "ledger_id": "739cffed-55b0-4a0b-b646-292c535ce352",
+      "login": "tiamat_recovery",
+      "schema_revision": "0017_revocation_generation",
+      "tables": {
+        "execution_idempotency_aliases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "execution_records": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "financial_events": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "grant_releases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "jti_replay": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "ledger_identity": {
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "recovery_checkpoints": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": false,
+            "insert": true,
+            "select": true,
+            "update": false
+          }
+        },
+        "release_heads": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "restore_gate": {
+          "environment_rows": 1,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "route_rate_quarantines": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "signed_releases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "spending_partitions": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "startup_attestations": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": false,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "trust_inventories": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        }
+      },
+      "trust_inventories": []
+    },
+    "report_after_ceremony": {
+      "anchor_floor": {
+        "transition_sha256": "4752ffe728ea3fe705df167372de6f9f370e1214700a84304b8ca91f73a505da",
+        "transition_version": 3
+      },
+      "beacon": {
+        "flushed_wal_lsn": "0/19EF570",
+        "system_identifier": "7688830124150280230",
+        "timeline_id": 1
+      },
+      "block_reason": null,
+      "coordinator_generation": 2,
+      "counts": {
+        "execution_idempotency_aliases": 0,
+        "execution_records": 0,
+        "financial_events": 0,
+        "grant_releases": 0,
+        "release_heads": 0,
+        "route_rate_quarantines": 0,
+        "signed_releases": 0,
+        "spending_partitions": 1
+      },
+      "dispatch_blocked": false,
+      "environment": "staging",
+      "ledger_id": "739cffed-55b0-4a0b-b646-292c535ce352",
+      "recovery_generation": 2,
+      "retained_checkpoints": [
+        {
+          "checkpoint_sha256": "9be57bb0bca8b4b149cb4ed0ac2871a4ad56656648de65fe522dcbc02e2ce8ec",
+          "recovery_generation": 2
+        }
+      ],
+      "storage_epoch": "6d2fb930-ad8e-4629-9b88-f200309e2b8b",
+      "trust_inventories": [
+        {
+          "inventory_generation": 1,
+          "jws_sha256": "95d98212ae6bfb26e13d20b783be93f97a63c5339cc21ce9d4510ee4d1319aba",
+          "state": "active"
+        }
+      ]
+    },
+    "server_version": "16.15 (Debian 16.15-1.pgdg13+2)"
+  },
+  "passed": true,
+  "reproduced": "twice, each on a newly created cluster",
+  "not_covered": [
+    "Render's managed owner may hold memberships a plain CREATEROLE login lacks; on this cluster the recovery login could call pg_control_system() and pg_current_wal_flush_lsn() by default, as the Render P1 probe also found.",
+    "No admission ran, so the runtime role's missing grant on execution_idempotency_aliases (deployment sequence D5) is not exercised; proof 2 will need it fixed.",
+    "Release activation, the served process and a synthetic request are proof 2."
+  ]
+}

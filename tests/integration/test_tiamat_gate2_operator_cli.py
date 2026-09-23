@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -60,6 +61,8 @@ def _script(relative: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(path.stem, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Registered first, as an import would: dataclasses resolve their module through sys.modules.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -107,6 +110,46 @@ def test_the_phase_b_commands_run_in_order_on_a_disposable_ledger(
             """,
             (environment, storage_epoch),
         )
+    checkpoint = _write(
+        tmp_path / "day-zero.json",
+        {
+            "environment": environment,
+            "ledger_id": str(ledger_id),
+            "storage_epoch": str(storage_epoch),
+            "recovery_generation": 1,
+            "release_inventory": {"state": "not_installed"},
+            "release_heads": [],
+            "settlement_position": [],
+        },
+    )
+    run_phase_b_ceremony(
+        run,
+        monkeypatch,
+        tmp_path,
+        environment=environment,
+        ledger_id=ledger_id,
+        storage_epoch=storage_epoch,
+        recovery_url=disposable_roles.recovery,
+        day_zero_checkpoint=checkpoint,
+    )
+
+
+def run_phase_b_ceremony(
+    run: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    environment: str,
+    ledger_id: UUID,
+    storage_epoch: UUID,
+    recovery_url: str,
+    day_zero_checkpoint: Path,
+) -> dict[str, Any]:
+    """Every Phase B command in order, on an initialized, blocked, empty ledger at generation 1.
+
+    Only the AWS transport is replaced. Returns the final ``report``.
+    """
+
     table, lambda_client = ConditionalTable(), _Lambda()
     monkeypatch.setattr(
         boto3,
@@ -114,7 +157,7 @@ def test_the_phase_b_commands_run_in_order_on_a_disposable_ledger(
         lambda service, **_kwargs: table if service == "dynamodb" else lambda_client,
     )
     monkeypatch.setattr(anchor_writer_lambda, "_writer", None)
-    monkeypatch.setenv("TIAMAT_RECOVERY_DATABASE_URL", disposable_roles.recovery)
+    monkeypatch.setenv("TIAMAT_RECOVERY_DATABASE_URL", recovery_url)
     monkeypatch.setenv("TIAMAT_RECOVERY_ANCHOR_TABLE", TABLE)
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     ledger_args = ["--environment", environment]
@@ -142,18 +185,7 @@ def test_the_phase_b_commands_run_in_order_on_a_disposable_ledger(
     )
 
     # Step 7.2: the quarantined bootstrap, through the writer.
-    checkpoint = _write(
-        tmp_path / "day-zero.json",
-        {
-            "environment": environment,
-            "ledger_id": str(ledger_id),
-            "storage_epoch": str(storage_epoch),
-            "recovery_generation": 1,
-            "release_inventory": {"state": "not_installed"},
-            "release_heads": [],
-            "settlement_position": [],
-        },
-    )
+    checkpoint = day_zero_checkpoint
     bootstrap = tmp_path / "bootstrap.json"
     run(
         "deploy/aws/prepare_tiamat_recovery_bootstrap_v1.py",
@@ -374,3 +406,4 @@ def test_the_phase_b_commands_run_in_order_on_a_disposable_ledger(
     assert final["counts"]["spending_partitions"] == 1
     assert final["anchor_floor"]["transition_version"] == 3
     assert lambda_client.invocations == 3
+    return final
