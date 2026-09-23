@@ -21,6 +21,7 @@ def test_adapter_surface_has_no_approval_or_apply_route() -> None:
     assert exposed == {
         ("POST", "/v1/evidence/retrieve"),
         ("POST", "/v1/memory/lookup"),
+        ("POST", "/v1/memory/interpreted-lookup"),
         ("POST", "/v1/memory/proposals"),
     }
 
@@ -42,6 +43,7 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ("POST", "/internal/v1/conversations/messages"),
         ("POST", "/internal/v1/model-executions/begin"),
         ("POST", "/internal/v1/model-executions/settle"),
+        ("POST", "/internal/v1/memory/interpreted-context"),
         ("POST", "/internal/v1/telegram-stage1/events/claim"),
         ("POST", "/internal/v1/telegram-stage1/events/transition"),
         ("POST", "/internal/v1/telegram-stage1/lease/acquire"),

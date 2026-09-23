@@ -468,3 +468,48 @@ This evidence is invalidated by changes to the 32 promoted claims, campaign
 source revisions, protected recall contract, interpreter, or policy database
 identity. The citation mapper assumes source revision 1 for this pilot; future
 mixed-revision imports need an explicit source-ID map.
+
+## Current-bot Raymond cutover preparation (2026-09-23)
+
+Ray chose to move the current Telegram bot from Utopia to Raymond. The fresh
+Render route inventory found gateway `srv-dai4k467bikc73bhs6r0` active in the
+Utopia environment with Stage 2 capture enabled, using `lucy-routine:10000` as
+its companion. That companion is active on Utopia's database. Raymond policy and
+routine remain suspended, capture/ingress disabled, and have no Telegram bot,
+allowlist, or adapter token staged. Both identities are on the Personal Lucy
+branch. Utopia's adapter credential differs from Raymond's policy credential.
+
+A temporary Utopia administrator-login job at `63bc413` completed a count-only
+inventory without reading message content. It found eight Telegram turn rows
+across eight conversation identifiers, three marked committed, eight capture
+receipts marked retained, 16 Telegram-labeled evidence rows, and six evidence
+payload rows. These are metadata counts, not a statement that all 16 rows are
+complete or portable. The first two count jobs failed before reading counts;
+the second exposed the bundled psycopg-driver mismatch, which was fixed. All
+three temporary utilities were deleted. The succeeded job's gitignored receipt
+is `secrets/generated/utopia-telegram-history-count-state-v3.json`. Ray chose
+to leave this earlier archive in Utopia for eventual deletion, not move it to
+Raymond. No deletion is authorized or performed by the cutover preparation.
+
+The new, default-disabled `/v1/memory/interpreted-lookup` route in Raymond's
+routine identity calls a separate policy-only protected-recall endpoint over
+the private Render network. It requires the Raymond adapter token at the routine
+boundary and the separate Raymond policy gateway token at the policy boundary;
+the feature flag and exact expected database login prevent the route from
+appearing on Utopia. The Hermes memory tool uses this route only for an active
+private turn when the flag is enabled. It returns dated interpretation contexts
+and mapped evidence labels, with a prompt instruction to avoid asserting
+unverified present truth. No raw evidence retrieval or automatic memory write
+is added. Seventy-six focused API, plugin and interpretation tests, Ruff and
+strict mypy passed locally. Neither long-running service has been deployed or
+resumed with this route, and the Utopia bot continues its existing behavior.
+
+Cutover still requires a Raymond Telegram channel binding and durable authority
+activation, owner allowlist and separate gateway adapter credential, a one-bot
+handoff, and a decision on whether Raymond archiving must be ready at cutover.
+The existing Utopia Stage 1 commissioning operator hardcodes Utopia identities,
+so it cannot safely commission Raymond as-is. Raymond authority writer and
+recovery coordinator are still suspended configuration shells. Do not redirect
+the active bot to the current Raymond routine service: it would fail the
+Telegram lease/retention boundary and could interrupt replies. Keep the former
+archive in Utopia until a separately authorized deletion workflow completes.

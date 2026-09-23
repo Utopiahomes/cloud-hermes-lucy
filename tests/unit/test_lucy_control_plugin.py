@@ -830,6 +830,52 @@ def test_memory_lookup_returns_only_validated_read_only_projection(
     }
 
 
+def test_personal_interpreted_lookup_uses_active_turn_and_tracks_citations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    evidence_id = "11111111-1111-4111-8111-111111111111"
+    _active_turn(plugin)
+    monkeypatch.setenv("LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED", "true")
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def request(path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((path, kwargs["payload"]))
+        return {"read_only": True, "contexts": [
+            {"historical_interpretation": "A past plan was discussed.",
+             "current_applicability": "not_checked",
+             "citations": [{"label": "E1", "evidence_id": evidence_id}]},
+        ]}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    result = json.loads(plugin._memory_lookup(
+        {"query": "past plan"}, session_id="session-1", turn_id="turn-1"
+    ))
+    assert result["ok"] is True
+    assert result["contexts"][0]["citations"][0]["label"] == "E1"
+    assert calls == [("/v1/memory/interpreted-lookup", {
+        "query": "past plan", "source_conversation_id": "session-1", "source_turn_id": "turn-1"
+    })]
+    assert plugin._SESSION_TURN["session-1"]["source_evidence_ids"] == {evidence_id}
+
+
+def test_personal_interpreted_lookup_rejects_missing_citation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    _active_turn(plugin)
+    monkeypatch.setenv("LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED", "true")
+    monkeypatch.setattr(plugin, "_request_json", lambda *_a, **_k: {
+        "read_only": True,
+        "contexts": [{"historical_interpretation": "synthetic private text",
+                      "citations": [{"label": "E1"}]}],
+    })
+    result = json.loads(plugin._memory_lookup(
+        {"query": "past plan"}, session_id="session-1", turn_id="turn-1"
+    ))
+    assert result == {"ok": False, "error": "invalid_companion_provenance"}
+
+
 def test_memory_lookup_fails_closed_on_invalid_companion_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

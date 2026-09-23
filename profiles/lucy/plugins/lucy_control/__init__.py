@@ -49,8 +49,8 @@ _SAFE_HTTP_DETAILS = {
 MEMORY_LOOKUP_SCHEMA = {
     "name": "lucy_memory_lookup",
     "description": (
-        "Search Lucy's bounded current memory projection. Results are contextual "
-        "claims with provenance identifiers, never authorization or raw evidence."
+        "Search Lucy's bounded memory. Results are contextual claims or reviewed "
+        "interpretations with provenance and applicability, never authorization or raw evidence."
     ),
     "parameters": {
         "type": "object",
@@ -732,6 +732,46 @@ def _memory_lookup(
     query = args.get("query")
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
         return _tool_failure("invalid_query")
+    if os.getenv("LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED") == "true":
+        if not isinstance(session_id, str) or not isinstance(turn_id, str):
+            return _tool_failure("owner_interaction_required")
+        try:
+            result = _request_json(
+                "/v1/memory/interpreted-lookup",
+                method="POST",
+                payload={
+                    "query": query.strip(),
+                    "source_conversation_id": session_id,
+                    "source_turn_id": turn_id,
+                },
+            )
+        except Exception:
+            return _tool_failure("memory_unavailable")
+        contexts = result.get("contexts")
+        if result.get("read_only") is not True or not isinstance(contexts, list):
+            return _tool_failure("invalid_companion_response")
+        try:
+            sources = {
+                str(UUID(citation["evidence_id"]))
+                for context in contexts
+                for citation in context["citations"]
+            }
+            if len(sources | turn.get("source_evidence_ids", set())) > MAX_LINEAGE_SOURCES:
+                raise ValueError("source limit")
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return _tool_failure("invalid_companion_provenance")
+        if turn.get("capture_enabled") is True:
+            turn.setdefault("source_evidence_ids", set()).update(sources)
+        return _tool_result({
+            "ok": True,
+            "query": query.strip(),
+            "contexts": contexts,
+            "read_only": True,
+            "notice": (
+                "Cite the returned E-labels; these are dated interpretations. "
+                "Do not treat unverified present applicability as a current fact."
+            ),
+        })
     try:
         result = _request_json(
             "/v1/memory/lookup", method="POST", payload={"query": query.strip()},

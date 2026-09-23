@@ -7,7 +7,7 @@ import re
 import secrets
 from datetime import UTC, datetime
 from functools import lru_cache
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import boto3  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -77,6 +77,14 @@ from lucy.evidence import (
     EvidenceRetrievalResult,
     EvidenceService,
     ForgetLastRequest,
+)
+from lucy.governed_memory import GovernedMemoryPolicy, GovernedMemoryUnavailable
+from lucy.interpreted_recall import recall_interpreted_answer_context
+from lucy.interpreted_recall_http import (
+    HttpInterpretedRecallClient,
+    InterpretedPolicyLookupV1,
+    InterpretedPolicyResultV1,
+    InterpretedRecallUnavailable,
 )
 from lucy.memory import MemoryService
 from lucy.memory_outcome import MemoryOutcomeUnavailable
@@ -591,6 +599,86 @@ def read_only_memory_lookup(
         raise HTTPException(status_code=400, detail="query must not be blank")
     context = MemoryService(sessions).build_context(request.query)
     return {"query": request.query, "claims": context.claims, "read_only": True}
+
+
+RAYMOND_INTERPRETED_CAMPAIGN_ID = UUID("c1800ec3-1158-42f0-bb0b-46a04df7a65c")
+
+
+def _require_raymond_interpreted_recall(login: str) -> None:
+    if (
+        os.getenv("LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED") != "true"
+        or os.getenv("LUCY_ENVIRONMENT") != "production"
+        or os.getenv("LUCY_EXPECTED_DATABASE_LOGIN") != login
+    ):
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+
+
+@app.post(
+    "/internal/v1/memory/interpreted-context",
+    tags=["internal"],
+    response_model=InterpretedPolicyResultV1,
+)
+def policy_interpreted_memory_context(
+    request: InterpretedPolicyLookupV1,
+    authorization: str | None = Header(default=None),
+) -> InterpretedPolicyResultV1:
+    """Policy-login protected recall; caller authentication remains a separate boundary."""
+    _require_mode("policy")
+    _require_raymond_interpreted_recall("lucy_raymond_policy")
+    _authorize_policy_gateway(authorization)
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be blank")
+    try:
+        contexts = recall_interpreted_answer_context(
+            GovernedMemoryPolicy(_ready_sessions()),
+            request.query,
+            owner_interaction_ref=request.owner_interaction_ref,
+            reason_code="raymond_telegram_owner_interpreted_recall",
+            campaign_id=RAYMOND_INTERPRETED_CAMPAIGN_ID,
+            question_is_current=True,
+            limit=request.limit,
+        )
+    except (GovernedMemoryUnavailable, ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=503, detail="interpreted memory unavailable") from exc
+    return InterpretedPolicyResultV1(contexts=contexts, read_only=True)
+
+
+class RaymondInterpretedLookupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    query: str = Field(min_length=1, max_length=200)
+    source_conversation_id: str = Field(min_length=1, max_length=200)
+    source_turn_id: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/v1/memory/interpreted-lookup", tags=["memory"])
+def raymond_interpreted_memory_lookup(
+    request: RaymondInterpretedLookupInput,
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Relay an authenticated private gateway turn to the Raymond policy login."""
+    _require_mode("routine")
+    _require_raymond_interpreted_recall("lucy_raymond_routine")
+    _authorize(authorization)
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be blank")
+    owner_ref = uuid5(
+        NAMESPACE_URL,
+        f"raymond-telegram:{request.source_conversation_id}:{request.source_turn_id}",
+    )
+    try:
+        result = HttpInterpretedRecallClient(
+            _required_environment("LUCY_POLICY_HOSTPORT"),
+            _required_environment("LUCY_POLICY_GATEWAY_TOKEN"),
+        ).lookup(InterpretedPolicyLookupV1(
+            query=request.query.strip(), owner_interaction_ref=owner_ref
+        ))
+    except (ValueError, InterpretedRecallUnavailable) as exc:
+        raise HTTPException(status_code=503, detail="interpreted memory unavailable") from exc
+    return {
+        "query": request.query.strip(),
+        "contexts": [context.model_dump(mode="json") for context in result.contexts],
+        "read_only": True,
+    }
 
 
 @app.post("/v1/memory/proposals", tags=["memory"], status_code=202)
