@@ -81,6 +81,14 @@ def main() -> None:
                     sql.Identifier(ROLE), sql.Literal(password)
                 ),
             )
+        # PostgreSQL 18 grants ADMIN but not SET on a newly created role.
+        # CREATE DATABASE OWNER requires the creator to be able to SET ROLE.
+        admin_role = _one(conn.execute("SELECT current_user"))[0]
+        conn.execute(
+            sql.SQL("GRANT {} TO {} WITH SET TRUE").format(
+                sql.Identifier(ROLE), sql.Identifier(str(admin_role))
+            )
+        )
         if existing is None:
             conn.execute(
                 sql.SQL("CREATE DATABASE {} OWNER {}").format(
