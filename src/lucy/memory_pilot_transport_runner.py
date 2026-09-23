@@ -91,8 +91,10 @@ class _TransportCompletion:
     def complete_success(
         self, *, reservation_id: UUID, outcome: MemoryExtractionProviderOutcomeV1
     ) -> None:
+        validation_phase = "parse"
         try:
             output = parse_memory_extraction_output(outcome.output)
+            validation_phase = "materialize"
             plaintext = {item.source_record_id: item.content for item in self._batch.records}
             candidates = materialize_verified_pending_candidates(
                 output,
@@ -102,10 +104,16 @@ class _TransportCompletion:
                 evidence_by_source_record_id=self._evidence,
                 extraction_job_id=self._batch.dispatch.extraction_job_id,
             )
+            validation_phase = "review"
             artifact = (
                 build_candidate_review_artifact(output, candidates) if candidates else None
             )
         except Exception as exc:
+            print(
+                "private pilot completion rejected: "
+                f"{validation_phase}/{type(exc).__name__}",
+                flush=True,
+            )
             raise MemoryExtractionCompletionRejected(
                 "provider output failed deterministic transport validation"
             ) from exc
