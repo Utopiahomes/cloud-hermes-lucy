@@ -129,7 +129,7 @@ def main() -> int:
                 recalled = session.execute(
                     text("SELECT lucy.search_protected_scoped_memory_v1("
                          ":query,20,:interaction,:reason)"),
-                    {"query": candidate.subject,
+                    {"query": json.loads(candidate.object)["source_candidate_digest"],
                      "interaction": uuid5(APPROVAL_NAMESPACE, f"recall:{candidate.candidate_id}"),
                      "reason": "owner_reviewed_pilot_verification"},
                 ).scalar_one()
