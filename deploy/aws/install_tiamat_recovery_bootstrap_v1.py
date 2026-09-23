@@ -1,4 +1,10 @@
-"""Verify, preview, and explicitly install one signed Tiamat recovery bootstrap package."""
+"""Verify, preview, and explicitly install one signed Tiamat recovery bootstrap package.
+
+Once the M4 anchor writer is deployed, no other principal may write the anchor table, so
+``--writer-function`` sends the one write through the writer (which refuses unless the key is
+empty, and treats an identical retry as installed); the tool then strong-reads it back. Without
+it, the tool writes directly, which only a principal still holding PutItem can do.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +24,7 @@ def main() -> None:
     parser.add_argument("--expected-root-public-sha256", required=True)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--confirm-empty-bootstrap")
+    parser.add_argument("--writer-function", help="the M4 writer's live alias ARN")
     args = parser.parse_args()
     package = json.loads(args.package.read_text(encoding="utf-8"))
     now = datetime.now(UTC).replace(microsecond=0)
@@ -65,6 +72,33 @@ def main() -> None:
     store = dynamodb_recovery_anchor_from_environment(
         RecoveryAnchorRecordDecoder(context, root_key_id, root_public_key)
     )
+    if args.writer_function:
+        import boto3  # type: ignore[import-untyped]
+
+        from lucy.shared_execution.anchor_writer import AnchorWriteRequest
+        from lucy.shared_execution.anchor_writer_lambda import LambdaAnchorWriterClient
+        from lucy.shared_execution.recovery_anchor import RecoveryAnchorRejected
+
+        writer = LambdaAnchorWriterClient(
+            function_name=args.writer_function, client=boto3.client("lambda")
+        )
+        request = AnchorWriteRequest(
+            anchor_key=f"ENV#{identity.environment}#LEDGER#{identity.ledger_id}",
+            transition_jws=transition.exact_jws,
+            witness_jws=transition.witness.exact_jws,
+            inventory_jws=inventory_jws,
+        )
+        try:
+            writer.write(request)
+        except RecoveryAnchorRejected:
+            # An unclear invocation might nevertheless have committed. Read once; do not retry.
+            if store.read(identity.key).exact_sha256 != transition.exact_sha256:
+                raise
+        reread = store.read(identity.key)
+        if reread.exact_sha256 != transition.exact_sha256:
+            raise RuntimeError("recovery bootstrap strong-read verification failed")
+        print(json.dumps({**preview, "status": "installed_and_verified"}, sort_keys=True))
+        return
     installed = store.install(transition, expected_transition_sha256=None, now=now)
     reread = store.read(identity.key)
     if reread.exact_sha256 != installed.exact_sha256:
