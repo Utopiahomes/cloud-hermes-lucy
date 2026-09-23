@@ -26,7 +26,7 @@ This does not establish the hosted Render path or real AWS writer behavior for t
 | D3 | Fresh schema path | Reuse the Proof 1 sequence: bootstrap to `0006`, owner migration to `0017`, finalizer, initialize blocked, capability check, then empty-ledger ceremony. | Passed locally twice; Render execution pending. |
 | D4 | Control's release-manager boundary | Activate the narrowly granted login only on the disposable ledger and use a separate Control-operated one-off runner with exact signed artifacts, current verification and readback. No recovery or signing credentials in that runner. | Runner and owner login step implemented and tested locally (`src/lucy/shared_execution/release_runner.py`, `deploy/postgres/tiamat_release_runner_v1.py`, `deploy/postgres/enable_tiamat_release_manager_login_v1.py`); review pending. |
 | D5 | Runtime grant gap | Grant the runtime only the access admission needs on `execution_idempotency_aliases` (`postgres_ledger.py:617`), then review and test it before provisioning. | Implemented: the role template grants the runtime `SELECT, INSERT` only; proven on a fresh bootstrap. Review pending. |
-| D6 | Release-root pin | `deploy/postgres/tiamat-staging-release-root-pin.json` | Offline RELEASE-root candidate, Control approval of its exact key ID and raw-public-key fingerprint, then a committed pin. No approved pin exists yet; blocks first-inventory. |
+| D6 | Release-root pin | `deploy/postgres/tiamat-staging-release-root-pin.json` | Root pin and offline custody recorded at `cbc51b3`; the generation-one signed inventory is not prepared or installed and still blocks first-inventory. |
 
 ## 2. Provision the disposable ledger (Render)
 

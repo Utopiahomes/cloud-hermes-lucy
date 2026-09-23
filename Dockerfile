@@ -12,6 +12,7 @@ COPY pyproject.toml ./
 COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
 COPY deploy/aws/install_tiamat_recovery_bootstrap_v1.py ./deploy/aws/install_tiamat_recovery_bootstrap_v1.py
 COPY deploy/aws/install_tiamat_continued_quarantine_successor_v1.py ./deploy/aws/install_tiamat_continued_quarantine_successor_v1.py
+COPY deploy/aws/install_tiamat_reconciliation_step_v1.py ./deploy/aws/install_tiamat_reconciliation_step_v1.py
 COPY deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json ./deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json
 COPY deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json ./deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json
 COPY deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json ./deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json
@@ -47,7 +48,10 @@ COPY deploy/postgres/initialize_tiamat_ledger_v1.py ./deploy/postgres/initialize
 COPY deploy/postgres/verify_tiamat_render_capabilities_v1.py ./deploy/postgres/verify_tiamat_render_capabilities_v1.py
 COPY deploy/postgres/probe_tiamat_p1_v1.py ./deploy/postgres/probe_tiamat_p1_v1.py
 COPY deploy/postgres/tiamat_reconciliation_ledger_v1.py ./deploy/postgres/tiamat_reconciliation_ledger_v1.py
+COPY deploy/postgres/issue_tiamat_startup_attestation_v1.py ./deploy/postgres/issue_tiamat_startup_attestation_v1.py
+COPY deploy/postgres/finalize_tiamat_d1_v1.py ./deploy/postgres/finalize_tiamat_d1_v1.py
 COPY deploy/postgres/tiamat_release_runner_v1.py ./deploy/postgres/tiamat_release_runner_v1.py
+COPY deploy/postgres/tiamat-staging-release-root-pin.json ./deploy/postgres/tiamat-staging-release-root-pin.json
 COPY deploy/postgres/enable_tiamat_release_manager_login_v1.py ./deploy/postgres/enable_tiamat_release_manager_login_v1.py
 COPY deploy/postgres/render_tiamat_role_template_v1.py ./deploy/postgres/render_tiamat_role_template_v1.py
 COPY deploy/postgres/bootstrap_tiamat_staging_v1.py ./deploy/postgres/bootstrap_tiamat_staging_v1.py

@@ -164,6 +164,16 @@ def test_render_image_excludes_secrets_and_copies_only_reviewed_database_files()
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY deploy/postgres ./deploy/postgres" not in dockerfile
     assert (
+        "COPY deploy/postgres/tiamat-staging-release-root-pin.json "
+        "./deploy/postgres/tiamat-staging-release-root-pin.json"
+    ) in dockerfile
+    for path in (
+        "deploy/aws/install_tiamat_reconciliation_step_v1.py",
+        "deploy/postgres/issue_tiamat_startup_attestation_v1.py",
+        "deploy/postgres/finalize_tiamat_d1_v1.py",
+    ):
+        assert f"COPY {path} ./{path}" in dockerfile
+    assert (
         "COPY deploy/aws/install_tiamat_recovery_bootstrap_v1.py "
         "./deploy/aws/install_tiamat_recovery_bootstrap_v1.py"
     ) in dockerfile
