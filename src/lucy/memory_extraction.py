@@ -204,9 +204,29 @@ class MemoryExtractionCoordinator:
                 )
             except Exception as exc:
                 cause_name = type(exc.__cause__).__name__ if exc.__cause__ else "none"
+                safe_recovery_reasons = {
+                    "outcome policy admission unavailable",
+                    "outcome recovery grant lookup unavailable",
+                    "outcome recovery grant storage unavailable",
+                    "outcome policy service is unavailable",
+                    "outcome policy rejected recovery",
+                    "outcome policy response is invalid",
+                    "stored provider outcome does not match the exact job",
+                    "recovery release was already consumed; a fresh grant is required",
+                    "outcome recovery executor failed",
+                    "outcome recovery request was rejected",
+                    "outcome recovery response is invalid",
+                    "memory outcome is not currently recoverable",
+                }
+                safe_reason = (
+                    str(exc)
+                    if type(exc).__name__ == "MemoryOutcomeUnavailable"
+                    and str(exc) in safe_recovery_reasons
+                    else "other"
+                )
                 print(
                     "private memory outcome recovery unavailable: "
-                    f"{type(exc).__name__}/{cause_name}",
+                    f"{type(exc).__name__}/{cause_name}/{safe_reason}",
                     flush=True,
                 )
                 outcome = None
