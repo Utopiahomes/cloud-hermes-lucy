@@ -392,6 +392,11 @@ class GovernedMemoryArchive:
                     },
                 ).scalar_one()
         except DBAPIError as exc:
+            print(
+                "private memory archive database rejection: "
+                f"{type(exc.orig).__name__}/{getattr(exc.orig, 'sqlstate', 'unknown')}",
+                flush=True,
+            )
             raise GovernedMemoryUnavailable("memory import archive unavailable") from exc
         return ImportArchiveResultV1.model_validate(value)
 
