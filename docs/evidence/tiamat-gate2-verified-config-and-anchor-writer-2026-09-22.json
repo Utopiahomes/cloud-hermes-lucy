@@ -185,7 +185,7 @@
       "foreign_writes": "match: coordinator PutItem, a coordinator TransactWriteItems whose second resource is the anchor table, a coordinator PartiQL statement, a coordinator BatchWriteItem, an IAM user put, a root delete. No match: the writer's own put, a read, a write to another table.",
       "boundary_changes": "match: table resource policy removed, table updated, writer configuration, code, alias and published version changed, writer role inline policy, attached managed policy and trust policy changed. No match: the writer's own put, another function, another role.",
       "array_selector": "The same AWS evaluation with the previous resources[0] pattern misses the transaction whose anchor-table resource is second; resources[*] catches it.",
-      "test": "tests/integration/test_tiamat_anchor_writer_filters_aws.py, run with TIAMAT_AWS_FILTER_TEST=1: 2 passed (13 foreign-or-not and 12 boundary-or-not events)"
+      "test": "tests/integration/test_tiamat_anchor_writer_filters_aws.py, run with TIAMAT_AWS_FILTER_TEST=1: 2 passed (9 foreign-or-not and 12 boundary-or-not events)"
     },
     "serving_process": {
       "consume_only": "A deployed serving process never holds the recovery credential, as the role template requires. start_serving without a launcher consumes a waiting claimant or refuses with startup_claimant_required; proven on the disposable ledger, then served 200 after the separate launcher issued one. A recovery credential placed in the runtime slot is refused at startup (runtime_credential_is_not_the_runtime_role), also proven on the disposable ledger.",
