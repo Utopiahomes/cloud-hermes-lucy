@@ -742,7 +742,21 @@ def _lock_blocked_gate(
     ).fetchone()
     if identity is None or UUID(str(identity[0])) != expected_ledger_id:
         raise RecoveryRejected("ledger_identity_differs")
+    # The checks that follow read the ledger's authority and history and act on what they saw.
+    # Staging an inventory or release takes no gate lock, and a count cannot lock rows that do
+    # not exist yet, so the gate lock alone would let a concurrent write commit between the check
+    # and this transaction's commit. SHARE ROW EXCLUSIVE conflicts with every row write and with
+    # itself: it waits for any uncommitted writer to finish, then keeps every other writer out
+    # until this transaction ends. Taken after the gate, in one fixed order.
+    connection.execute(
+        "LOCK TABLE "
+        + ", ".join(f"tiamat.{table}" for table in _SNAPSHOT_TABLES)
+        + " IN SHARE ROW EXCLUSIVE MODE"
+    )
     return _LockedGate(recovery_generation=int(gate[1]))
+
+
+_SNAPSHOT_TABLES = tuple(sorted({"trust_inventories", *_FINANCIAL_HISTORY_TABLES}))
 
 
 def _require_empty_financial_history(connection: psycopg.Connection[Any], environment: str) -> None:
@@ -753,3 +767,69 @@ def _require_empty_financial_history(connection: psycopg.Connection[Any], enviro
         ).fetchone()
         if row is None or int(row[0]) != 0:
             raise RecoveryRejected("recovery_ledger_financial_state_unsupported")
+
+
+def create_spending_partition(
+    database_url: str,
+    *,
+    environment: str,
+    expected_ledger_id: UUID,
+    expected_storage_epoch: UUID,
+    expected_recovery_generation: int,
+    caller_id: str,
+    realm: str,
+    partition_id: str,
+) -> None:
+    """Create one empty, blocked spending partition for a signed grant to be activated onto.
+
+    Grant activation (the release manager's path) projects a verified signed grant onto an
+    existing partition row and cannot create one. This is the reviewed step that creates it, after
+    reconciliation: the gate must be open at the generation the reviewer read back, of this epoch
+    and ledger, with a checkpoint retained for it. The row carries no allowance, no spend and no
+    concurrency, and is blocked with ``no_active_grant``, the one block a grant activation clears.
+    Until a signed grant for exactly this caller, realm and partition is activated, nothing can
+    be admitted against it. An existing partition is never changed.
+    """
+
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        gate = connection.execute(
+            """
+            SELECT storage_epoch, recovery_generation, dispatch_blocked
+            FROM tiamat.restore_gate
+            WHERE environment = %s
+            FOR UPDATE
+            """,
+            (environment,),
+        ).fetchone()
+        if gate is None:
+            raise RecoveryRejected("restore_gate_not_initialized")
+        if UUID(str(gate[0])) != expected_storage_epoch:
+            raise RecoveryRejected("restore_gate_epoch_differs")
+        if bool(gate[2]) or int(gate[1]) != expected_recovery_generation:
+            raise RecoveryRejected("spending_partition_requires_the_reconciled_generation")
+        identity = connection.execute(
+            "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
+        ).fetchone()
+        if identity is None or UUID(str(identity[0])) != expected_ledger_id:
+            raise RecoveryRejected("ledger_identity_differs")
+        bound = connection.execute(
+            """
+            SELECT 1 FROM tiamat.recovery_checkpoints
+            WHERE environment = %s AND recovery_generation = %s
+            """,
+            (environment, expected_recovery_generation),
+        ).fetchone()
+        if bound is None:
+            raise RecoveryRejected("spending_partition_requires_the_reconciled_generation")
+        created = connection.execute(
+            """
+            INSERT INTO tiamat.spending_partitions (
+                environment, caller_id, realm, partition_id, blocked, block_reason
+            ) VALUES (%s, %s, %s, %s, true, 'no_active_grant')
+            ON CONFLICT DO NOTHING
+            RETURNING partition_id
+            """,
+            (environment, caller_id, realm, partition_id),
+        ).fetchone()
+        if created is None:
+            raise RecoveryRejected("spending_partition_exists")

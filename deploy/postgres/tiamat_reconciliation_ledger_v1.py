@@ -8,10 +8,15 @@ Reads ``TIAMAT_RECOVERY_DATABASE_URL``; it must never be given to a serving proc
 - ``beacon``: read-only; the continuity beacon bound to the checkpoint retained for the gate's
   current, open generation, for signing ``continuity_established``.
 - ``first-inventory``: the one-time install of the first RELEASE trust inventory while dispatch
-  stays blocked. Previews by default; ``--execute`` needs ``--confirm-jws-sha256``.
+  stays blocked. The release root is authenticated by ``--release-root-pin``, a committed,
+  separately reviewed record of the fingerprint Control approved; a digest computed from the
+  supplied key is never the authority. Previews by default; ``--execute`` needs
+  ``--confirm-jws-sha256``.
 - ``authorize``: Draft 0.5 section 7 step 6. Strong-reads the external anchor and requires its
   head to be exactly the verified pending step, then authorizes the generation jump. Previews by
   default; ``--execute`` needs the target generation and checkpoint digest confirmed.
+- ``create-partition``: after authorization, one empty, blocked spending partition for a signed
+  grant to be activated onto. Previews by default; ``--execute`` needs the partition confirmed.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from lucy.shared_execution.recovery import (
     authorize_recovery_generation,
+    create_spending_partition,
     install_first_release_inventory,
 )
 from lucy.shared_execution.recovery_anchor import PostgresContinuityBeaconReader
@@ -80,10 +86,26 @@ def bound_checkpoint_beacon(database_url: str, *, environment: str) -> dict[str,
     }
 
 
-def _release_root(args: argparse.Namespace) -> Ed25519PublicKey:
-    raw = base64.b64decode(args.release_root_public_key_b64, validate=True)
-    if hashlib.sha256(raw).hexdigest() != args.release_root_public_key_sha256:
-        raise ValueError("release root public key does not match its pin")
+def release_root_from_pin(
+    pin: dict[str, object], *, environment: str, root_key_id: str, public_key_b64: str
+) -> Ed25519PublicKey:
+    """Authenticate the supplied release root key against the approved, committed pin.
+
+    The pin names the environment, the root key ID and the SHA-256 fingerprint Control approved.
+    The key's own digest is computed only to compare with that independent fingerprint.
+    """
+
+    if set(pin) != {"format_version", "environment", "root_key_id", "root_public_key_sha256"}:
+        raise ValueError("release root pin shape is invalid")
+    if (
+        pin["format_version"] != "1"
+        or pin["environment"] != environment
+        or pin["root_key_id"] != root_key_id
+    ):
+        raise ValueError("release root pin does not name this environment and root key")
+    raw = base64.b64decode(public_key_b64, validate=True)
+    if hashlib.sha256(raw).hexdigest() != pin["root_public_key_sha256"]:
+        raise ValueError("release root public key does not match the approved pin")
     return Ed25519PublicKey.from_public_bytes(raw)
 
 
@@ -100,7 +122,12 @@ def main() -> None:
     first.add_argument("--inventory-jws-file", type=Path, required=True)
     first.add_argument("--release-root-key-id", required=True)
     first.add_argument("--release-root-public-key-b64", required=True)
-    first.add_argument("--release-root-public-key-sha256", required=True)
+    first.add_argument(
+        "--release-root-pin",
+        type=Path,
+        required=True,
+        help="committed, reviewed JSON naming the approved release root fingerprint",
+    )
     first.add_argument("--execute", action="store_true")
     first.add_argument("--confirm-jws-sha256")
     authorize = commands.add_parser("authorize")
@@ -110,7 +137,16 @@ def main() -> None:
     authorize.add_argument("--execute", action="store_true")
     authorize.add_argument("--confirm-target-generation", type=int)
     authorize.add_argument("--confirm-checkpoint-sha256")
-    for command in (report, commands.choices["beacon"], first, authorize):
+    partition = commands.add_parser("create-partition")
+    partition.add_argument("--expected-ledger-id", type=UUID, required=True)
+    partition.add_argument("--expected-storage-epoch", type=UUID, required=True)
+    partition.add_argument("--expected-recovery-generation", type=int, required=True)
+    partition.add_argument("--caller-id", required=True)
+    partition.add_argument("--realm", required=True)
+    partition.add_argument("--partition-id", required=True)
+    partition.add_argument("--execute", action="store_true")
+    partition.add_argument("--confirm-partition-id")
+    for command in (report, commands.choices["beacon"], first, authorize, partition):
         command.add_argument("--environment", required=True)
     args = parser.parse_args()
     url = _database_url()
@@ -129,7 +165,12 @@ def main() -> None:
         output = bound_checkpoint_beacon(url, environment=args.environment)
     elif args.command == "first-inventory":
         exact = args.inventory_jws_file.read_bytes()
-        root = _release_root(args)
+        root = release_root_from_pin(
+            json.loads(args.release_root_pin.read_text(encoding="utf-8")),
+            environment=args.environment,
+            root_key_id=args.release_root_key_id,
+            public_key_b64=args.release_root_public_key_b64,
+        )
         inventory = verify_trust_inventory(
             exact,
             root_key_id=args.release_root_key_id,
@@ -158,6 +199,29 @@ def main() -> None:
             )
             output["status"] = "installed_dispatch_still_blocked"
             output["activation_recovery_generation"] = installed.activation_recovery_generation
+    elif args.command == "create-partition":
+        output = {
+            "environment": args.environment,
+            "caller_id": args.caller_id,
+            "realm": args.realm,
+            "partition_id": args.partition_id,
+            "state": "blocked_no_active_grant",
+            "status": "not_written",
+        }
+        if args.execute:
+            if args.confirm_partition_id != args.partition_id:
+                raise ValueError("--confirm-partition-id must repeat --partition-id")
+            create_spending_partition(
+                url,
+                environment=args.environment,
+                expected_ledger_id=args.expected_ledger_id,
+                expected_storage_epoch=args.expected_storage_epoch,
+                expected_recovery_generation=args.expected_recovery_generation,
+                caller_id=args.caller_id,
+                realm=args.realm,
+                partition_id=args.partition_id,
+            )
+            output["status"] = "created"
     else:
         verified = verify_reconciliation_package(
             json.loads(args.pending_package.read_text(encoding="utf-8")),

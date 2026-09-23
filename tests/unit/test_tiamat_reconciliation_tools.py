@@ -130,3 +130,67 @@ def test_the_signer_refuses_a_malformed_beacon(world: dict[str, Any]) -> None:
             expected_root_public_sha256=world["pin"],
             now=ESTABLISHED_AT,
         )
+
+
+def _ledger_tool() -> ModuleType:
+    path = ROOT / "deploy/postgres/tiamat_reconciliation_ledger_v1.py"
+    spec = importlib.util.spec_from_file_location("reconciliation_ledger_tool", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _pin(key: Ed25519PrivateKey, **changes: object) -> dict[str, object]:
+    pin: dict[str, object] = {
+        "format_version": "1",
+        "environment": "staging",
+        "root_key_id": "tiamat-release-root.staging.1",
+        "root_public_key_sha256": hashlib.sha256(key.public_key().public_bytes_raw()).hexdigest(),
+    }
+    pin.update(changes)
+    return pin
+
+
+def test_the_release_root_is_authenticated_by_the_approved_pin() -> None:
+    key = Ed25519PrivateKey.generate()
+    supplied = base64.b64encode(key.public_key().public_bytes_raw()).decode()
+    root = _ledger_tool().release_root_from_pin(
+        _pin(key),
+        environment="staging",
+        root_key_id="tiamat-release-root.staging.1",
+        public_key_b64=supplied,
+    )
+    assert root.public_bytes_raw() == key.public_key().public_bytes_raw()
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("other_key", "does not match the approved pin"),
+        ("other_environment", "does not name this environment"),
+        ("other_key_id", "does not name this environment"),
+        ("extra_member", "shape is invalid"),
+    ],
+)
+def test_a_key_the_pin_does_not_approve_is_refused(case: str, reason: str) -> None:
+    approved = Ed25519PrivateKey.generate()
+    supplied = approved
+    pin = _pin(approved)
+    environment, key_id = "staging", "tiamat-release-root.staging.1"
+    if case == "other_key":
+        # The supplied key's own digest is never the authority: a different key fails the pin.
+        supplied = Ed25519PrivateKey.generate()
+    elif case == "other_environment":
+        environment = "production"
+    elif case == "other_key_id":
+        key_id = "tiamat-release-root.staging.2"
+    else:
+        pin = {**pin, "approved_by": "anyone"}
+    with pytest.raises(ValueError, match=reason):
+        _ledger_tool().release_root_from_pin(
+            pin,
+            environment=environment,
+            root_key_id=key_id,
+            public_key_b64=base64.b64encode(supplied.public_key().public_bytes_raw()).decode(),
+        )

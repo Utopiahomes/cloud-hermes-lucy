@@ -196,6 +196,12 @@ class _Ledger:
 
 @pytest.fixture
 def ledger(disposable_roles: DisposableRoles) -> _Ledger:
+    return make_ledger(disposable_roles)
+
+
+def make_ledger(disposable_roles: DisposableRoles) -> _Ledger:
+    """A fresh environment, blocked at generation one, with its quarantined bootstrap installed."""
+
     environment = f"g2r-{uuid4().hex[:10]}"
     storage_epoch = uuid4()
     with psycopg.connect(disposable_roles.owner) as owner:

@@ -171,10 +171,19 @@ for its own ledger. The commissioned ledger stays quarantined and blocked, so Ph
 entirely on a disposable ledger, through the single truthful ceremony of Draft 0.5 section 7 with
 the empty-ledger checkpoint projection. The library operations, the offline signer and the
 beacon read are exercised end to end on the disposable test database
-(`tests/integration/test_tiamat_gate2_reconciliation.py`), including the commissioned ledger's
-shape; the `first-inventory` and `authorize` subcommands and the installer script are thin
-wrappers over those tested functions and are not themselves run by a test. Phase B still needs its
-own deployment approval. No two-ceremony walk, and no placeholder checkpoint, is used.
+(`tests/integration/test_tiamat_gate2_reconciliation.py`,
+`tests/integration/test_tiamat_gate2_reconciliation_races.py`), including a disposable
+reproduction of the commissioned ledger's anchor shape, which is not evidence about the live
+commissioned ledger. The `first-inventory`, `authorize` and `create-partition` subcommands and the
+installer script are thin wrappers over those tested functions and are not themselves run by a
+test. Phase B still needs its own deployment approval. No two-ceremony walk, and no placeholder
+checkpoint, is used.
+
+The ledger snapshot each recovery step checks is exclusive: after locking the gate, the step
+takes `SHARE ROW EXCLUSIVE` on every table it inspects, so a concurrent stage or ledger write
+either finishes first and is seen (the step then refuses), or waits until the step has committed.
+Two-connection tests prove both orders, and fail with the lock removed. Waiting writers include
+the release manager's staging, which takes no gate lock of its own.
 
 Tools: `deploy/postgres/tiamat_reconciliation_ledger_v1.py` (recovery login: `report`, `beacon`,
 `first-inventory`, `authorize`), `deploy/aws/prepare_tiamat_reconciliation_step_v1.py` (offline:
@@ -191,11 +200,18 @@ previews by default and needs its exact digest confirmed.
    `WriterRootsJson` as a further reviewed version (verified as in step 6); its version-one
    quarantined bootstrap installed through the writer.
 3. **First release inventory, dispatch still blocked.** Control signs the generation-1 RELEASE
-   trust inventory. `first-inventory` verifies it against the pinned release root and, in one
+   trust inventory, and separately approves its root: the approved environment, root key ID and
+   SHA-256 fingerprint are committed as `deploy/postgres/tiamat-staging-release-root-pin.json`
+   (format version 1) and reviewed before this step; until Control supplies it, this step cannot
+   run. `first-inventory --release-root-pin` compares the supplied key with that approved
+   fingerprint; a digest computed from the supplied key is never the authority. The operation
+   verifies the inventory against that root and, in one
    transaction, requires the gate blocked, of this epoch and of the generation `report` read back,
    on this ledger and never reconciled (no retained checkpoint, no claimant ever issued), no prior
    activated inventory (a staged copy of the same bytes is allowed), and an empty financial and
-   release history; it activates the inventory and leaves dispatch blocked. One time only.
+   release history; it activates the inventory and leaves dispatch blocked. One time only. The
+   block reason need not be the day-zero `initial_reconciliation_required`: a ledger quarantined
+   again before its first reconciliation is still never reconciled, and is tested to proceed.
 4. **Checkpoint.** `report --checkpoint-generation 2`: the empty-ledger checkpoint — the installed
    inventory, no release heads, no settlement positions. It refuses a ledger with any history.
 5. **Pending.** Offline `pending` signs a reconciled witness for generation 2 under a successor
@@ -212,6 +228,11 @@ previews by default and needs its exact digest confirmed.
 7. **Established.** `beacon` reads the continuity beacon for the checkpoint now bound; offline
    `established` signs `continuity_established` with the identical witness bytes and that beacon,
    and writes the launcher's trust file (commit it); install through the writer.
+8. **Spending partition.** `create-partition` creates the one partition the signed grant names,
+   for its exact caller, realm and partition ID: blocked with `no_active_grant`, with no
+   allowance, spend or concurrency. It requires the gate open at the reconciled generation with
+   its checkpoint retained, and never changes an existing partition. Only the release manager's
+   activation of the signed grant (step 9) funds and unblocks it.
 
 ## 8. Render: the served process, synthetic only
 
@@ -237,9 +258,9 @@ this checklist.
 
 With the gate open and the service started, Control stages and activates, through the release
 manager, the signed profile, privacy policy and spending grant for the served profile; Draft 0.5
-section 4 allows release activation to advance from the checkpoint. Open: activating the grant
-projects it onto a spending partition and grant row that only test helpers create today; that
-seeding needs its own reviewed operator step before Phase B. Then one synthetic request
+section 4 allows release activation to advance from the checkpoint. Staging the signed grant
+records its grant row; activating it projects the grant onto the partition step 7.8 created.
+Then one synthetic request
 through the signed configuration returns 200 with the signed profile release, makes one synthetic
 provider call, and leaves the settled receipt in the disposable ledger.
 
@@ -256,8 +277,9 @@ needs no further quarantine successor: the signer and the writer verify a head a
 issue time (the disposable test reproduces exactly this shape). Nothing touches it until its
 actual database state and current external anchor are read back and reviewed. The deployed role
 template predates migrations 0007 and 0011, so the recovery login's grants on
-`startup_attestations` and `recovery_checkpoints` are confirmed in that readback; `report` and
-`first-inventory` fail closed on a permission error. No anchor reset and no two-ceremony walk.
+`startup_attestations` and `recovery_checkpoints` are confirmed in that readback, as is UPDATE
+on every table the recovery steps lock (the lock mode requires it); `report` and `first-inventory`
+fail closed on a permission error. No anchor reset and no two-ceremony walk.
 
 ## Rollback — fail closed
 
