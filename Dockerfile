@@ -15,6 +15,9 @@ COPY deploy/aws/install_tiamat_continued_quarantine_successor_v1.py ./deploy/aws
 COPY deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json ./deploy/aws/tiamat-staging-recovery-bootstrap-public-2026-09-18.json
 COPY deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json ./deploy/aws/tiamat-staging-quarantine-successor-v2-public-2026-09-20.json
 COPY deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json ./deploy/aws/tiamat-staging-quarantine-successor-v3-public-2026-09-22.json
+COPY deploy/aws/probe_anchor_write_boundary.py ./deploy/aws/probe_anchor_write_boundary.py
+COPY deploy/aws/invoke_anchor_writer_probe.py ./deploy/aws/invoke_anchor_writer_probe.py
+COPY deploy/aws/tiamat-staging-anchor-writer-probe-after-boundary-2026-09-23.json ./deploy/aws/tiamat-staging-anchor-writer-probe-after-boundary-2026-09-23.json
 COPY deploy/postgres/bootstrap_cloud_v1_2.py ./deploy/postgres/bootstrap_cloud_v1_2.py
 COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_realm_cloud_v1_3.py
 COPY deploy/postgres/migrate_realm_cloud_v1_3.py ./deploy/postgres/migrate_realm_cloud_v1_3.py
