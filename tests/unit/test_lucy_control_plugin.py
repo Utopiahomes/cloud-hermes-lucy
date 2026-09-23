@@ -876,6 +876,68 @@ def test_personal_interpreted_lookup_rejects_missing_citation_id(
     assert result == {"ok": False, "error": "invalid_companion_provenance"}
 
 
+def test_explicit_telegram_lookup_prefetches_reviewed_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED", "true")
+    monkeypatch.setattr(plugin, "_accept_turn", lambda *_args: True)
+    monkeypatch.setattr(plugin, "_archive_conversation_message", lambda **_kwargs: {
+        "archived": True, "evidence_id": "11111111-1111-4111-8111-111111111111"
+    })
+    calls: list[tuple[dict[str, Any], str, str]] = []
+
+    def lookup(args: dict[str, Any], *, session_id: str, turn_id: str) -> str:
+        calls.append((args, session_id, turn_id))
+        return json.dumps({"ok": True, "contexts": [{
+            "historical_interpretation": "Synthetic dated interpretation.",
+            "citations": [{"label": "E1", "evidence_id": "22222222-2222-4222-8222-222222222222"}],
+        }]})
+
+    monkeypatch.setattr(plugin, "_memory_lookup", lookup)
+    result = plugin._pre_llm_call(
+        user_message='Look up “Gate” in your memory. What changed?',
+        session_id="session-prefetch", turn_id="turn-prefetch", platform="telegram",
+    )
+    assert calls == [({"query": "Gate"}, "session-prefetch", "turn-prefetch")]
+    assert result is not None
+    assert "already complete" in result["context"]
+    assert "Synthetic dated interpretation." in result["context"]
+    assert '"label":"E1"' in result["context"]
+    bounded = plugin._request_middleware({
+        "messages": [], "tools": [{"type": "function"}],
+        "tool_choice": "auto", "parallel_tool_calls": True,
+    })["request"]
+    assert "tools" not in bounded
+    assert "tool_choice" not in bounded
+    assert "parallel_tool_calls" not in bounded
+
+
+def test_raw_tool_markup_is_replaced_before_archive_and_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    archived: list[str] = []
+
+    def archive(**kwargs: Any) -> dict[str, Any]:
+        archived.append(kwargs["content"])
+        return {"archived": True, "turn_committed": True}
+
+    monkeypatch.setattr(plugin, "_archive_conversation_message", archive)
+    plugin._SESSION_TURN["session-markup"] = {
+        "turn_id": "turn-markup", "capture_enabled": True,
+        "active": True, "proposal_keys": {},
+    }
+    delivered = plugin._transform_llm_output(
+        response_text='<|channel|>commentary to=functions.tool_call {"name":"lucy_memory_lookup"}',
+        session_id="session-markup", turn_id="turn-markup", platform="telegram",
+    )
+    assert delivered is not None and "could not complete" in delivered
+    assert archived == [delivered]
+    assert "tool_call" not in delivered
+
+
 def test_memory_lookup_fails_closed_on_invalid_companion_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
