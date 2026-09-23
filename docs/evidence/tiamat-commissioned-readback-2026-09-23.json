@@ -1,0 +1,197 @@
+{
+  "evidence_type": "tiamat_commissioned_ledger_readback",
+  "date_utc": "2026-09-23",
+  "scope": "Read-only readback of the commissioned staging ledger and its external anchor, authorized by Lyra; no ceremony, no write to either.",
+  "authorization": "Lyra: read-only commissioned ledger and anchor readback may proceed; it does not authorize a ceremony. Ray: 'Approved: deploy 8d55c27 to the coordinator and run the readback job'; Ray resumed the coordinator service and refreshed AWS SSO.",
+  "anchor": {
+    "method": "strong GetItem from the workstation (security-administrator SSO), verified against the pinned root at the witness's signed issued_at",
+    "anchor_key": "ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f",
+    "transition_version": 2,
+    "transition_sha256": "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459",
+    "previous_transition_sha256": "ce352339af357ef868376ca3b4e9a1b2db666d9ad127f10dbe6ae19fc54d7f7b",
+    "continuity": "quarantined",
+    "witness": {
+      "status": "quarantined",
+      "recovery_generation": 2,
+      "witness_revision": 1,
+      "not_before": "2026-09-22T14:53:24Z",
+      "not_after": "2026-09-23T14:53:24Z",
+      "checkpoint_digest": "1c403669137333ec2c9b146af7849d7c5787b1e52b97f2de1c29bc228f5aae52"
+    },
+    "stored_bytes_equal_successor_v3_package": true,
+    "root_public_key_sha256": "54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996"
+  },
+  "database": {
+    "render_database": "tiamat-staging-ledger (dpg-damo6cp42hec73bp5nug-a), database tiamat_staging",
+    "method": "one-off job on tiamat-staging-recovery-coordinator (srv-damko3m7bikc73c1b510) as the recovery login, one READ ONLY transaction: python deploy/postgres/tiamat_reconciliation_ledger_v1.py readback --environment staging",
+    "deploy": {
+      "commit": "8d55c27a692f48306356c37d6c0fa5f66b9433dd",
+      "deploy_id": "dep-daq2v9rtqb8s73e4qjag"
+    },
+    "job": "job-daq2vl942hec73akp1d0 (succeeded, 2026-09-23T20:00:46Z)",
+    "readback": {
+      "beacon": {
+        "flushed_wal_lsn": "5/BB006000",
+        "system_identifier": "7686944526360399911",
+        "timeline_id": 1
+      },
+      "beacon_callable": true,
+      "environment": "staging",
+      "gate": {
+        "block_reason": "initial_reconciliation_required",
+        "coordinator_generation": 1,
+        "dispatch_blocked": true,
+        "recovery_generation": 1,
+        "storage_epoch": "63d24f64-e2c4-4bed-8e39-4d0674b4e6b2",
+        "verified_at": null
+      },
+      "gate_columns_missing": [
+        "anchor_floor_version",
+        "anchor_floor_sha256"
+      ],
+      "ledger_id": "6177502f-3a93-429c-b68b-0ed726d1447f",
+      "login": "tiamat_recovery",
+      "schema_revision": "0006_render_recovery_rls",
+      "tables": {
+        "execution_idempotency_aliases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "execution_records": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "financial_events": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "grant_releases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "jti_replay": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "ledger_identity": {
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "recovery_checkpoints": {
+          "present": false
+        },
+        "release_heads": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "restore_gate": {
+          "environment_rows": 1,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "route_rate_quarantines": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "signed_releases": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "spending_partitions": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        },
+        "startup_attestations": {
+          "present": false
+        },
+        "trust_inventories": {
+          "environment_rows": 0,
+          "present": true,
+          "privileges": {
+            "delete": true,
+            "insert": true,
+            "select": true,
+            "update": true
+          }
+        }
+      },
+      "trust_inventories": []
+    }
+  },
+  "findings": [
+    "Schema revision 0006_render_recovery_rls: migrations 0007-0017 are not applied. restore_gate lacks the anchor floor columns; recovery_checkpoints and startup_attestations do not exist.",
+    "Ledger identity 6177502f-3a93-429c-b68b-0ed726d1447f and storage epoch 63d24f64-e2c4-4bed-8e39-4d0674b4e6b2 match the day-zero record and the anchor.",
+    "Gate: blocked, recovery generation 1, coordinator generation 1, reason initial_reconciliation_required, never verified.",
+    "Empty history: no trust inventories, no signed releases or heads, no partitions, grants, executions, aliases, financial events, quarantines or replay rows. The empty-ledger projection applies.",
+    "The recovery login holds SELECT/INSERT/UPDATE/DELETE on every existing table; the continuity beacon is callable.",
+    "The anchor head's witness is generation 2 and the gate is at 1: reconciliation needs a pending witness at generation 3 or higher and a 1->3 jump, after the schema reaches head.",
+    "Before any ceremony here: migrations 0007-0017 and the D1 finalizer must be applied to this ledger, a schema change needing its own approval; the fresh-path proof (deployment sequence D3) covers the same steps."
+  ],
+  "open": [
+    "Ray to suspend tiamat-staging-recovery-coordinator again."
+  ]
+}
