@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::429870640638:oidc-provider/oidc.render.com/tea-da8et5bbc2fs73a2dtng"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.render.com/tea-da8et5bbc2fs73a2dtng:aud": "sts.amazonaws.com",
+          "oidc.render.com/tea-da8et5bbc2fs73a2dtng:sub": "workspace:tea-da8et5bbc2fs73a2dtng:environment:evm-dal82elg1s2s73ei84qg:service:srv-daq5p1jncjis73apipfg"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyThisDisposableAnchor",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:us-east-1:429870640638:table/stoin-staging-tiamat-recovery-anchor-v1",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "ENV#staging#LEDGER#4ad24649-8467-42be-bc12-8155b101b590"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeOnlyTheAnchorTable",
+      "Effect": "Allow",
+      "Action": "dynamodb:DescribeTable",
+      "Resource": "arn:aws:dynamodb:us-east-1:429870640638:table/stoin-staging-tiamat-recovery-anchor-v1"
+    }
+  ]
+}
