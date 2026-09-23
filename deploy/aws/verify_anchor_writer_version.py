@@ -7,11 +7,13 @@ alias, and compares it with the reviewed artifact manifest and the reviewed root
     aws lambda get-function-configuration --function-name <writer> --qualifier live \
         > live-configuration.json
 
-It checks that the alias resolves to a published version, not ``$LATEST``; that the version's code
-digest is the manifest's; that its roots are byte-for-byte the reviewed file and hash to its pinned
-digest; that its description names both digests; that it runs as the writer role; and that the
-writer accepts that configuration, with every root's public key matching its pin. Output is
-content-free JSON. Exit status is 0 only if every check passes.
+It checks that the alias resolves to a published version, not ``$LATEST``, of the writer function
+itself; that the version's code digest is the manifest's and nothing else can add code (a zip
+package, no layers, no file systems, exactly the writer's three environment variables); that its
+roots are byte-for-byte the reviewed file and hash to its pinned digest; that its description names
+both digests; that it runs as the writer role, whose name the stack fixes; and that the writer
+accepts that configuration, with every root's public key matching its pin. Output is content-free
+JSON. Exit status is 0 only if every check passes.
 
 A valid request is still needed to show the version executes and assumes its role; the checklist
 pairs this with an install on a disposable key.
@@ -31,6 +33,17 @@ from lucy.shared_execution.anchor_writer_lambda import writer_from_environment
 
 HANDLER = "lucy.shared_execution.anchor_writer_lambda.handler"
 RUNTIME = "python3.12"
+VARIABLES = {
+    "TIAMAT_RECOVERY_ANCHOR_TABLE",
+    "TIAMAT_ANCHOR_WRITER_ROOTS",
+    "TIAMAT_ANCHOR_WRITER_ROOTS_SHA256",
+}
+
+
+def writer_name(namespace: str, environment: str) -> str:
+    """The function and its role share this name in tiamat-anchor-writer-v1.yaml."""
+
+    return f"{namespace}-{environment}-tiamat-anchor-writer-v1"
 
 
 def verify(
@@ -39,6 +52,7 @@ def verify(
     manifest: dict[str, Any],
     reviewed_roots: bytes,
     table_name: str,
+    function_name: str,
     role_arn: str,
 ) -> dict[str, Any]:
     failures: list[str] = []
@@ -50,6 +64,18 @@ def verify(
 
     if not version.isdigit():
         failures.append("alias_does_not_resolve_to_a_published_version")
+    if configuration.get("FunctionName") != function_name:
+        failures.append("function_differs")
+    if (
+        configuration.get("PackageType", "Zip") != "Zip"
+        or configuration.get("Layers")
+        or configuration.get("FileSystemConfigs")
+    ):
+        # The code digest covers the zip only; a layer or a file system could add code.
+        failures.append("code_outside_the_artifact")
+    if set(variables) != VARIABLES:
+        # An extra variable such as AWS_LAMBDA_EXEC_WRAPPER or PYTHONPATH changes what runs.
+        failures.append("environment_variables_differ")
     if not code_sha256 or configuration.get("CodeSha256") != code_sha256:
         failures.append("code_digest_differs_from_manifest")
     if configuration.get("Handler") != HANDLER or configuration.get("Runtime") != RUNTIME:
@@ -100,15 +126,20 @@ def main() -> int:
         help="the exact WriterRootsJson bytes the parameters file passed",
     )
     parser.add_argument("--table", required=True)
-    parser.add_argument("--role-arn", required=True, help="the writer stack's WriterRole ARN")
+    parser.add_argument("--namespace", required=True)
+    parser.add_argument("--environment", required=True)
+    parser.add_argument("--account-id", required=True)
+    parser.add_argument("--partition", default="aws")
     args = parser.parse_args()
+    name = writer_name(args.namespace, args.environment)
 
     report = verify(
         json.loads(args.function_configuration.read_text(encoding="utf-8")),
         manifest=json.loads(args.manifest.read_text(encoding="utf-8")),
         reviewed_roots=args.roots_file.read_bytes(),
         table_name=args.table,
-        role_arn=args.role_arn,
+        function_name=name,
+        role_arn=f"arn:{args.partition}:iam::{args.account_id}:role/{name}",
     )
     print(json.dumps(report, sort_keys=True))
     return 0 if report["verified"] else 1

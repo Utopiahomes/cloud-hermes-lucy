@@ -23,7 +23,8 @@ FINAL_ROOTS = ROOT / "deploy/aws/tiamat-staging-anchor-writer-roots.json"
 FINAL_ROOTS_SHA256 = "d641fe3b70eeca4f3973749880e99d7d18d8cccab7bb9b199665ddd38398a948"
 STAGING_KEY = "ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f"
 TABLE = "stoin-staging-tiamat-recovery-anchor-v1"
-ROLE = "arn:aws:iam::429870640638:role/stoin-staging-anchor-writer-v1"
+FUNCTION = "stoin-staging-tiamat-anchor-writer-v1"
+ROLE = f"arn:aws:iam::429870640638:role/{FUNCTION}"
 CODE = base64.b64encode(hashlib.sha256(b"artifact").digest()).decode()
 NOW = datetime(2026, 9, 22, 18, tzinfo=UTC)
 
@@ -56,9 +57,25 @@ def _invoke(
 @pytest.fixture
 def prepared(tmp_path: Path) -> tuple[dict[str, Any], Path]:
     report = _script("prepare_anchor_writer_probe").prepare(
-        "staging", FINAL_ROOTS.read_bytes(), tmp_path, now=NOW
+        "staging",
+        FINAL_ROOTS.read_bytes(),
+        tmp_path,
+        final_roots_sha256=FINAL_ROOTS_SHA256,
+        now=NOW,
     )
     return report, tmp_path
+
+
+def test_the_probes_are_prepared_only_over_the_reviewed_roots(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="reviewed bytes"):
+        _script("prepare_anchor_writer_probe").prepare(
+            "staging",
+            FINAL_ROOTS.read_bytes() + b" ",
+            tmp_path,
+            final_roots_sha256=FINAL_ROOTS_SHA256,
+            now=NOW,
+        )
+    assert not list(tmp_path.iterdir())
 
 
 def test_the_committed_final_roots_are_the_reviewed_bytes() -> None:
@@ -122,7 +139,9 @@ def test_after_the_probes_are_removed_the_writer_loads_and_refuses_their_keys(
 def _configuration(roots: bytes, **changes: Any) -> dict[str, Any]:
     digest = hashlib.sha256(roots).hexdigest()
     configuration: dict[str, Any] = {
+        "FunctionName": FUNCTION,
         "Version": "7",
+        "PackageType": "Zip",
         "CodeSha256": CODE,
         "Handler": "lucy.shared_execution.anchor_writer_lambda.handler",
         "Runtime": "python3.12",
@@ -146,9 +165,17 @@ def _verify(configuration: dict[str, Any], roots: bytes) -> dict[str, Any]:
         manifest={"artifact_sha256_base64": CODE},
         reviewed_roots=roots,
         table_name=TABLE,
+        function_name=FUNCTION,
         role_arn=ROLE,
     )
     return result
+
+
+def test_the_function_and_role_names_are_the_templates() -> None:
+    assert _script("verify_anchor_writer_version").writer_name("stoin", "staging") == FUNCTION
+    template = (ROOT / "deploy/aws/tiamat-anchor-writer-v1.yaml").read_text(encoding="utf-8")
+    name = "!Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1"
+    assert f"RoleName: {name}" in template and f"FunctionName: {name}" in template
 
 
 def test_the_reviewed_version_verifies() -> None:
@@ -190,6 +217,15 @@ def _bad_pin() -> bytes:
         ("description", "description_does_not_name_both_digests"),
         ("digest", "pinned_roots_digest_differs"),
         ("bad_pin", "writer_refuses_this_configuration"),
+        ("handler", "handler_or_runtime_differs"),
+        ("runtime", "handler_or_runtime_differs"),
+        ("table", "table_differs"),
+        ("function", "function_differs"),
+        ("layer", "code_outside_the_artifact"),
+        ("file_system", "code_outside_the_artifact"),
+        ("image", "code_outside_the_artifact"),
+        ("extra_variable", "environment_variables_differ"),
+        ("no_environment", "environment_variables_differ"),
     ],
 )
 def test_a_version_that_is_not_the_reviewed_one_fails(case: str, failure: str) -> None:
@@ -211,6 +247,27 @@ def test_a_version_that_is_not_the_reviewed_one_fails(case: str, failure: str) -
     elif case == "digest":
         configuration = _configuration(reviewed)
         configuration["Environment"]["Variables"]["TIAMAT_ANCHOR_WRITER_ROOTS_SHA256"] = "0" * 64
+    elif case == "handler":
+        configuration = _configuration(reviewed, Handler="lucy.other.handler")
+    elif case == "runtime":
+        configuration = _configuration(reviewed, Runtime="python3.13")
+    elif case == "table":
+        configuration = _configuration(reviewed)
+        configuration["Environment"]["Variables"]["TIAMAT_RECOVERY_ANCHOR_TABLE"] = "other"
+    elif case == "function":
+        configuration = _configuration(reviewed, FunctionName="stoin-staging-other")
+    elif case == "layer":
+        configuration = _configuration(reviewed, Layers=[{"Arn": "arn:aws:lambda:x:1:layer:y:1"}])
+    elif case == "file_system":
+        configuration = _configuration(reviewed, FileSystemConfigs=[{"Arn": "x"}])
+    elif case == "image":
+        configuration = _configuration(reviewed, PackageType="Image")
+    elif case == "extra_variable":
+        configuration = _configuration(reviewed)
+        configuration["Environment"]["Variables"]["AWS_LAMBDA_EXEC_WRAPPER"] = "/opt/wrap"
+    elif case == "no_environment":
+        configuration = _configuration(reviewed)
+        del configuration["Environment"]
     else:
         reviewed_for_check = _bad_pin()
         configuration = _configuration(reviewed_for_check)

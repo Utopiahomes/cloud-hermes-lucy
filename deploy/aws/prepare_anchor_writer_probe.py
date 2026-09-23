@@ -38,8 +38,15 @@ PROBES = ("before-boundary", "after-boundary")
 
 
 def prepare(
-    environment: str, final_roots: bytes, output_directory: Path, *, now: datetime
+    environment: str,
+    final_roots: bytes,
+    output_directory: Path,
+    *,
+    final_roots_sha256: str,
+    now: datetime,
 ) -> dict[str, Any]:
+    if hashlib.sha256(final_roots).hexdigest() != final_roots_sha256:
+        raise ValueError("the final roots are not the reviewed bytes")
     roots = json.loads(final_roots)
     if not isinstance(roots, dict) or not roots:
         raise ValueError("the final roots must be a non-empty JSON object")
@@ -107,12 +114,14 @@ def main() -> None:
         required=True,
         help="the reviewed final WriterRootsJson (tiamat-staging-anchor-writer-roots.json)",
     )
+    parser.add_argument("--final-roots-sha256", required=True, help="the reviewed digest")
     parser.add_argument("--output-directory", type=Path, required=True)
     args = parser.parse_args()
     report = prepare(
         args.environment,
         args.final_roots_file.read_bytes(),
         args.output_directory,
+        final_roots_sha256=args.final_roots_sha256,
         now=datetime.now(UTC),
     )
     print(json.dumps(report, sort_keys=True))

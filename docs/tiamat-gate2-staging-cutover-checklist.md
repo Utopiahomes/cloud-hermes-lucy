@@ -47,7 +47,8 @@ Upload the zip to the versioned executor artifact bucket. Record the S3 object v
 ## 3. Deploy `tiamat-anchor-writer-v1`, with two probe keys, and prove it runs
 
 Run `deploy/aws/prepare_anchor_writer_probe.py --environment staging --final-roots-file
-deploy/aws/tiamat-staging-anchor-writer-roots.json --output-directory <dir>`. It writes
+deploy/aws/tiamat-staging-anchor-writer-roots.json --final-roots-sha256 <digest above>
+--output-directory <dir>`; it refuses roots that are not the reviewed bytes. It writes
 `writer-roots-with-probes.json` — the final roots plus two disposable probe keys, each with its own
 throwaway root, as exact bytes — and one signed event per probe (`before-boundary`,
 `after-boundary`). It prints the merged digest, each probe's expected transition digest and its
@@ -67,8 +68,10 @@ version, `WriterArtifactCodeSha256`, `WriterRootsJson` (the content of
 The writer role trusts `lambda.amazonaws.com` with no condition — Lambda does not supply
 `aws:SourceArn` when it assumes an execution role, so a trust condition on it would stop the
 function from running. The role is bound to its function instead: its DynamoDB grant requires
-`lambda:SourceFunctionArn` to equal the function's unqualified ARN, so the role's table access
-works only from this function's code.
+`lambda:SourceFunctionArn` to equal the function's unqualified ARN, a key Lambda places in the
+credentials it issues to this function, so the grant works only with those credentials. That
+another principal's use of the role is refused rests on AWS's documented semantics; this
+checklist does not test it.
 
 Verify, all before step 4:
 
@@ -76,25 +79,33 @@ Verify, all before step 4:
    stoin-staging-tiamat-anchor-writer-v1 --qualifier live > live.json`, then
    `deploy/aws/verify_anchor_writer_version.py --function-configuration live.json --manifest
    dist/aws/tiamat-anchor-writer-v1.zip.manifest.json --roots-file <dir>/writer-roots-with-probes.json
-   --table stoin-staging-tiamat-recovery-anchor-v1 --role-arn <WriterRole ARN>` reports
-   `verified: true`: the alias resolves to a published version; its code digest is the manifest's;
-   its roots are byte-for-byte the reviewed file and hash to its pinned digest; its description
-   names both digests; it runs as the writer role; the writer accepts that configuration, and
-   every root's key matches its pin.
+   --table stoin-staging-tiamat-recovery-anchor-v1 --namespace stoin --environment staging
+   --account-id 429870640638` reports `verified: true`: the alias resolves to a published version
+   of the writer function; its code digest is the manifest's and nothing adds code outside it (zip
+   package, no layers, no file systems, exactly the writer's three environment variables); its
+   roots are byte-for-byte the reviewed file and hash to its pinned digest; its description names
+   both digests; it runs as the writer role, whose name is derived, not supplied; the writer
+   accepts that configuration, and every root's key matches its pin.
 2. **The alias executes, assumes its role and loaded those roots.** Invoke the `live` alias with
    `probe-event-before-boundary.json`: `installed`, with the digest the preparer printed. Invoke it
    again: `already_installed`, with no second write. A valid install is reachable only after the
    roots have loaded and the role's credentials have read and written the table, so it proves what
    a malformed request cannot (the handler validates a request before it loads its roots).
-3. `aws iam get-role --role-name <writer role>` shows the trust above, and `aws cloudtrail
-   get-trail-status` shows logging.
+3. **The deployed role.** `aws iam get-role --role-name stoin-staging-tiamat-anchor-writer-v1`
+   shows the trust above. `aws iam get-role-policy --role-name
+   stoin-staging-tiamat-anchor-writer-v1 --policy-name stoin-staging-anchor-writer-v1` shows the
+   `StrongReadAndConditionalWriteOnly` statement exactly as in the template, including its
+   `lambda:SourceFunctionArn` condition: the install in 2 shows the binding admits the function,
+   only this shows the binding is there. `aws cloudtrail get-trail-status` shows logging.
 
 If 1 or 2 fails, stop: do not run step 4. Rollback before step 4 is deleting this stack.
 
 ## 4. Update `tiamat-recovery-anchor-v1` — the boundary moves
 
-Only after step 3 passed. Update with the revised template and `AnchorWriterRoleName` set to the
-writer stack's role. This removes the coordinator's PutItem and adds the table's writer-only
+Only after step 3 passed. First save the stack's current template and parameters
+(`aws cloudformation get-template` and `describe-stacks`) into the evidence: that is the only
+template break-glass may restore. Then update with the revised template and `AnchorWriterRoleName`
+set to the writer stack's role. This removes the coordinator's PutItem and adds the table's writer-only
 resource policy.
 
 Verify:
@@ -102,7 +113,10 @@ Verify:
 - the coordinator's policy grants only `GetItem` and `DescribeTable` on the table.
 
 If this update fails, CloudFormation returns the stack to its pre-step-4 template — the state in
-force before this checklist, not a relaxation of a boundary already in place.
+force before this checklist, not a relaxation of a boundary already in place. The table policy
+and the coordinator's policy are separate resources, so check both afterwards. If the stack ends
+in `UPDATE_ROLLBACK_FAILED`, stop, run `continue-update-rollback`, and re-check
+`get-resource-policy` before anything else.
 
 ## 5. Prove the boundary with real credentials
 
@@ -119,9 +133,13 @@ Every one must be denied (`all_denied: true`, exit 0). Run it:
 Each run's `caller` field must name the expected role, which also proves each Render service
 assumes its intended machine role.
 
-Then the writer, through the new boundary, before the `after-boundary` probe's
-`witness_not_after`: invoke the `live` alias with `probe-event-after-boundary.json`: `installed`,
-with its printed digest; again: `already_installed`, with no second write.
+Then the writer, through the new boundary and on the coordinator's own path, before the
+`after-boundary` probe's `witness_not_after`. From the coordinator's Render service, run
+`deploy/aws/invoke_anchor_writer_probe.py --function-name stoin-staging-tiamat-anchor-writer-v1
+--event-file probe-event-after-boundary.json`: `caller` names the coordinator role and the answer
+is `installed`, with the printed digest. Run it again: `already_installed`, with no second write.
+After step 4, invoking the alias is the coordinator's only way to write the anchor; this exercises
+it end to end on a disposable key.
 
 Then alarms, recorded as observations rather than as the boundary's pass condition, which is the
 denied writes above. Step 4's changes to the table policy should raise `AnchorBoundaryChanges`;
@@ -152,10 +170,11 @@ The probe items stay in the table, inert: no ledger reads their keys and nothing
 **Open, and blocking staging sign-off.** The served process dispatches only under an anchor whose
 continuity is `continuity_established` for its own ledger, and signed configuration can be
 activated only while that ledger's gate is open. The commissioned ledger stays quarantined and
-blocked, so Phase B runs entirely on a disposable ledger. The offline builders today sign only
-quarantined transitions; the `recovery_pending` and `continuity_established` transitions for the
-disposable identity are the remaining local work, and the same ceremony Gate 2 then runs for real
-reconciliation. Phase B comes back for its own approval once that exists.
+blocked, so Phase B runs entirely on a disposable ledger. The remaining local work is the
+ceremony that gets there: the offline builders today sign only quarantined transitions, and no
+operator tool yet runs `authorize_reconciled_state`, the only operation that opens a ledger's
+gate. It is the same ceremony Gate 2 then runs for real reconciliation. Phase B comes back for its
+own approval once that exists.
 
 ## 7. The disposable ledger reaches established continuity
 
@@ -167,6 +186,10 @@ reconciliation. Phase B comes back for its own approval once that exists.
   further reviewed version, verified as in step 6, and a committed trust file for it.
 - Through the writer: quarantined bootstrap, then `recovery_pending`, then
   `continuity_established`.
+- With the disposable ledger's recovery credential, `authorize_reconciled_state`
+  (`src/lucy/shared_execution/recovery.py`), bound to the established anchor as its floor and to
+  the retained checkpoint. It is the only operation that clears `dispatch_blocked`; until it runs,
+  the launcher refuses (`startup_restore_gate_not_authorized`), and so does consumption.
 
 ## 8. Render: the served process, synthetic only
 
@@ -180,12 +203,13 @@ A serving process that never holds the recovery credential:
   presence refuses startup, and the process also checks the runtime URL's `current_user`, so a
   recovery credential in the runtime slot refuses too;
 - the launcher (`deploy/postgres/issue_tiamat_startup_attestation_v1.py`) runs separately, with
-  the disposable ledger's recovery credential, immediately before the service starts. Startup
-  consumes its claimant, which opens the disposable ledger's gate.
+  the disposable ledger's recovery credential, immediately before the service starts, against the
+  gate step 7 opened. Startup consumes its claimant; consumption requires the gate open and does
+  not open it.
 
 ## 9. Signed configuration (Control), then one synthetic request
 
-With the disposable ledger's gate open, Control stages and activates, through the release
+With the disposable ledger's gate open (step 7) and the service started, Control stages and activates, through the release
 manager, the staging trust inventory and the signed profile, privacy policy and spending grant for
 the served profile. Then one synthetic request through the signed configuration returns 200 with
 the signed profile release, makes one synthetic provider call, and leaves the settled receipt in
@@ -206,12 +230,17 @@ Rollback never widens who can write the anchor.
   --reserved-concurrent-executions 0`. The anchor is then writable by no one. That is safe:
   the commissioned ledger is quarantined and dispatch-blocked, and stays so without any anchor
   write. The table's writer-only policy stays in place. Do not delete the writer stack or its
-  role while the policy names it. The template sets reserved concurrency 1, so any later deploy
-  of the writer stack restores it: that is the point at which the writer runs again.
+  role while the policy names it. The change is a Lambda configuration change, so
+  `AnchorBoundaryChanges` alarms: expected, and recorded. The 0 is drift from the template's 1 and
+  stays until an operator deliberately lifts it, by `put-function-concurrency` back to 1 or by a
+  writer-stack deploy that changes the function, which re-applies the template's 1. A deploy that
+  leaves the function unchanged does not. Verify as in step 6 immediately after lifting it.
 - **From step 4 on, a faulty writer version:** redeploy the writer stack with a previously reviewed
-  artifact and roots, and verify it as in step 3 before restoring concurrency.
-- **Break-glass, not a rollback step:** redeploying the previous `tiamat-recovery-anchor-v1`
-  template removes the writer-only policy and restores the coordinator's direct `PutItem`. It
+  artifact and roots. That deploy changes the function and so lifts containment: at once run step
+  6's checks (the pinned configuration and the `key_not_configured` answer) and step 3's item 3,
+  and contain again if any fails.
+- **Break-glass, not a rollback step:** redeploying the `tiamat-recovery-anchor-v1` template
+  saved at step 4 removes the writer-only policy and restores the coordinator's direct `PutItem`. It
   needs its own explicit authorization from Ray and Lyra, recorded with its reason, and is
   followed by re-running step 5 once the boundary is restored.
 - **Phase B:** the Render service can be suspended at any time; suspension is local containment
