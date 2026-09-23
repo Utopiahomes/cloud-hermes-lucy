@@ -29,8 +29,7 @@ def test_bounded_request_enforces_provider_route_and_output_cap() -> None:
     assert body["provider"]["allow_fallbacks"] is False
     with pytest.raises(HindsightModelProxyError):
         _bounded_request(_request(model="other/model"))
-    with pytest.raises(HindsightModelProxyError):
-        _bounded_request(_request(max_tokens=4097))
+    assert _bounded_request(_request(max_tokens=16384))["max_tokens"] == 4096
     with pytest.raises(HindsightModelProxyError):
         _bounded_request(_request(stream=True))
     with pytest.raises(HindsightModelProxyError):

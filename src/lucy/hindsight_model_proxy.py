@@ -57,9 +57,13 @@ def _bounded_request(body: bytes) -> dict[str, Any]:
             raise HindsightModelProxyError("messages")
     output_cap = parsed.get("max_completion_tokens", parsed.get("max_tokens", _MAX_OUTPUT_TOKENS))
     if (not isinstance(output_cap, int) or isinstance(output_cap, bool)
-            or not 1 <= output_cap <= _MAX_OUTPUT_TOKENS):
+            or output_cap < 1):
         raise HindsightModelProxyError("output_cap")
-    if "max_completion_tokens" not in parsed and "max_tokens" not in parsed:
+    if "max_completion_tokens" in parsed:
+        parsed["max_completion_tokens"] = min(output_cap, _MAX_OUTPUT_TOKENS)
+    elif "max_tokens" in parsed:
+        parsed["max_tokens"] = min(output_cap, _MAX_OUTPUT_TOKENS)
+    else:
         parsed["max_tokens"] = _MAX_OUTPUT_TOKENS
     if parsed.get("stream") is False:
         parsed.pop("stream")
