@@ -12,6 +12,7 @@ from uuid import UUID, uuid5
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 from lucy.contracts.canonical import canonical_json_bytes
 from lucy.db import create_session_factory
@@ -64,9 +65,35 @@ def load_proposal() -> tuple[MemoryCandidatePayloadV1, ...]:
     return tuple(candidates)
 
 
+def verify_protected_recall(
+    session: Session, candidates: tuple[MemoryCandidatePayloadV1, ...]
+) -> None:
+    for candidate in candidates:
+        recalled = session.execute(
+            text("SELECT lucy.search_protected_scoped_memory_v1("
+                 ":query,20,:interaction,:reason)"),
+            {"query": json.loads(candidate.object)["source_candidate_digest"],
+             "interaction": uuid5(APPROVAL_NAMESPACE, f"recall:{candidate.candidate_id}"),
+             "reason": "owner_reviewed_pilot_verification"},
+        ).scalar_one()
+        matches = [item for item in recalled
+                   if item["candidate_id"] == str(candidate.candidate_id)
+                   and item["candidate_version"] == 2]
+        if len(matches) != 1 or matches[0]["object"] != candidate.object:
+            raise RuntimeError("protected recall differs from reviewed interpretation")
+        if (matches[0]["protection_class"] != "protected"
+                or matches[0]["assertion_status"] != "attributed_interpretation"
+                or matches[0]["epistemic_status"] != "historical"):
+            raise RuntimeError("protected recall interpretation classification differs")
+        if set(matches[0]["source_evidence_ids"]) != {
+            str(source.evidence_id) for source in candidate.sources
+        }:
+            raise RuntimeError("protected recall source links differ")
+
+
 def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in {"stage", "promote"}:
-        raise RuntimeError("expected stage or promote phase")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"stage", "promote", "verify"}:
+        raise RuntimeError("expected stage, promote, or verify phase")
     phase = sys.argv[1]
     if (os.getenv("RENDER") != "true"
             or os.getenv("LUCY_ENVIRONMENT") != "production"
@@ -101,7 +128,7 @@ def main() -> int:
                     raise RuntimeError("candidate staging acknowledgement changed")
                 replayed += int(result["replayed"])
             status = {"phase": phase, "staged": 32, "replayed": replayed}
-        else:
+        elif phase == "promote":
             approval_ids = []
             for candidate in candidates:
                 owner_ref = uuid5(
@@ -125,25 +152,12 @@ def main() -> int:
                 claim_ids.add(promoted["claim_id"])
             if len(claim_ids) != 32:
                 raise RuntimeError("promotion claims are not distinct")
-            for candidate in candidates:
-                recalled = session.execute(
-                    text("SELECT lucy.search_protected_scoped_memory_v1("
-                         ":query,20,:interaction,:reason)"),
-                    {"query": json.loads(candidate.object)["source_candidate_digest"],
-                     "interaction": uuid5(APPROVAL_NAMESPACE, f"recall:{candidate.candidate_id}"),
-                     "reason": "owner_reviewed_pilot_verification"},
-                ).scalar_one()
-                matches = [item for item in recalled
-                           if item["candidate_id"] == str(candidate.candidate_id)
-                           and item["candidate_version"] == 2]
-                if len(matches) != 1 or matches[0]["object"] != candidate.object:
-                    raise RuntimeError("protected recall differs from reviewed interpretation")
-                if set(matches[0]["source_evidence_ids"]) != {
-                    str(source.evidence_id) for source in candidate.sources
-                }:
-                    raise RuntimeError("protected recall source links differ")
+            verify_protected_recall(session, candidates)
             status = {"phase": phase, "promoted": 32,
                       "protected_recall_verified": 32}
+        else:
+            verify_protected_recall(session, candidates)
+            status = {"phase": phase, "protected_recall_verified": 32}
     print(json.dumps({"status": "passed", "proposal_sha256": PROPOSAL_SHA256,
                       **status, "provider_calls": 0, "telegram_messages": 0}, sort_keys=True))
     return 0
