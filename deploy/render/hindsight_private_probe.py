@@ -45,6 +45,15 @@ def _recall(query: str) -> object:
     return result
 
 
+def _recall_text(result: object) -> str:
+    if not isinstance(result, dict) or not isinstance(result.get("results"), list):
+        raise RuntimeError("Hindsight recall response shape differs")
+    return " ".join(
+        entry.get("text", "") for entry in result["results"]
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+    ).lower()
+
+
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {"health", "synthetic", "after_restart"}:
         raise SystemExit("usage: hindsight_private_probe.py health|synthetic|after_restart")
@@ -74,13 +83,18 @@ def main() -> None:
                                     {"items": [item], "async": False})
             if code != 200 or not isinstance(result, dict) or not result.get("success"):
                 raise RuntimeError(f"synthetic retain failed: HTTP {code}")
-        recalled = _recall("Where did Iris keep the synthetic copper notebook?")
+        recalled = _recall_text(_recall("Where did Iris keep the synthetic copper notebook?"))
+        if not all(part in recalled for part in ("iris", "copper", "notebook")):
+            raise RuntimeError("synthetic fact was not recalled")
         reflected_code, reflected = _request(
             "POST", _memory_path("/reflect"),
             {"query": "Where is Iris's synthetic copper notebook after the cabinet moved?"},
         )
         if reflected_code != 200 or not isinstance(reflected, dict):
             raise RuntimeError(f"synthetic reflection failed: HTTP {reflected_code}")
+        reflection_text = str(reflected.get("text", "")).lower()
+        if not all(part in reflection_text for part in ("iris", "notebook")):
+            raise RuntimeError("synthetic reflection omitted the related memories")
         correction = {
             "content": "Synthetic correction: Iris filed the copper notebook in the east cabinet, "
                        "not the west cabinet.",
@@ -92,7 +106,11 @@ def main() -> None:
                                 {"items": [correction], "async": False})
         if code != 200 or not isinstance(result, dict) or not result.get("success"):
             raise RuntimeError(f"synthetic correction failed: HTTP {code}")
-        corrected = _recall("Which cabinet contains Iris's synthetic copper notebook?")
+        corrected = _recall_text(_recall(
+            "Which cabinet contains Iris's synthetic copper notebook?"
+        ))
+        if "east" not in corrected:
+            raise RuntimeError("synthetic correction was not recalled")
         code, _ = _request("DELETE", f"/v1/default/banks/{BANK}/documents/{DOC_B}")
         if code not in {200, 204}:
             raise RuntimeError(f"synthetic deletion failed: HTTP {code}")
@@ -101,12 +119,12 @@ def main() -> None:
             raise RuntimeError("deleted synthetic document remains readable")
         print("HINDSIGHT_PROBE:" + json.dumps({
             "phase": phase, "health": True, "unauthorized_denied": True,
-            "recalled": bool(recalled), "reflected": bool(reflected.get("text")),
-            "corrected_recalled": bool(corrected), "deleted_document_absent": True,
+            "recalled": True, "reflected": True,
+            "corrected_recalled": True, "deleted_document_absent": True,
         }, sort_keys=True))
         return
-    recovered = _recall("Which cabinet contains Iris's synthetic copper notebook?")
-    if not recovered:
+    recovered = _recall_text(_recall("Which cabinet contains Iris's synthetic copper notebook?"))
+    if "east" not in recovered:
         raise RuntimeError("synthetic memory not recalled after restart")
     print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase,
                                            "recalled_after_restart": True}))
