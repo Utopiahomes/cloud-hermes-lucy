@@ -52,18 +52,38 @@ def main() -> int:
         """)).mappings().one()
         evidence = connection.execute(text("""
             SELECT count(*) AS telegram_evidence,
-                   count(*) FILTER (WHERE p.evidence_id IS NOT NULL) AS encrypted_payloads
+                   count(*) FILTER (WHERE p.evidence_id IS NOT NULL) AS encrypted_payloads,
+                   count(*) FILTER (WHERE t.evidence_id IS NOT NULL) AS tombstones
               FROM lucy.evidence e
               LEFT JOIN lucy.evidence_payloads p ON p.evidence_id = e.id
+              LEFT JOIN lucy.evidence_tombstones t ON t.evidence_id = e.id
              WHERE e.source = 'hermes'
                AND e.source_conversation_id LIKE 'telegram:%'
         """)).mappings().one()
+        targets = connection.execute(text("""
+            SELECT e.id::text AS evidence_id,
+                   p.evidence_id IS NOT NULL AS has_payload,
+                   t.evidence_id IS NOT NULL AS tombstoned,
+                   EXISTS (
+                       SELECT 1 FROM lucy.conversation_turns ct
+                        WHERE ct.platform = 'telegram'
+                          AND (ct.user_evidence_id = e.id
+                               OR ct.assistant_evidence_id = e.id)
+                   ) AS linked_turn
+              FROM lucy.evidence e
+              LEFT JOIN lucy.evidence_payloads p ON p.evidence_id = e.id
+              LEFT JOIN lucy.evidence_tombstones t ON t.evidence_id = e.id
+             WHERE e.source = 'hermes'
+               AND e.source_conversation_id LIKE 'telegram:%'
+             ORDER BY e.id
+        """)).mappings().all()
     print(json.dumps({
         "status": "passed",
         "database": database,
         "turns": dict(rows),
         "captures": dict(captures),
         "evidence": dict(evidence),
+        "targets": [dict(row) for row in targets],
         "content_read": False,
     }, sort_keys=True))
     return 0
