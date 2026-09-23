@@ -41,16 +41,24 @@
         "case": "the composed process serves under genuinely signed authority",
         "result": "passed",
         "detail": "build_served_app with a synthetic release root: launcher start, 200, refresh, retire, restart; and the refresh-withdrawal case."
+      },
+      {
+        "case": "activating a grant does not clear an unfunded settlement block",
+        "result": "passed"
+      },
+      {
+        "case": "activating a grant clears the no-grant block",
+        "result": "passed"
       }
     ],
     "method": "Each case mints its own release root and release key, signs a real inventory and real profile, policy and grant releases, and installs them through the authority store's ordinary verify, stage and activate path as the release manager.",
-    "defect_found": "The release manager, holding exactly its deployed grants, could not activate a spending grant: the role template granted nothing on grant_releases or spending_partitions, and the authority store never set tiamat.partition_id, which both tables' row-level security requires. The only earlier grant-activation test ran as the database owner. Fixed: the store scopes the partition for grant writes, and the template and the disposable fixture grant the narrowest rights grant staging and projection need."
+    "defect_found": "The release manager, holding exactly its deployed grants, could not activate a spending grant: the role template granted nothing on grant_releases or spending_partitions, and the authority store never set tiamat.partition_id, which both tables' row-level security requires. The only earlier grant-activation test ran as the database owner. Fixed: the store scopes the partition for grant writes, and the template and the disposable fixture grant the narrowest rights grant staging and projection need. The first fix let grant activation clear any partition block; it now clears only no_active_grant, so an unfunded settlement liability outlives a new grant."
   },
   "m4_anchor_writer": {
     "contract_points": [
       "strong-reads the head itself; the caller never supplies it",
       "verifies the candidate's exact transition, witness and inventory bytes against a root held in its own configuration per anchor key, at its own clock",
-      "verifies the head it read against the same pinned root, as of the head's own signed validity window, using a head-era inventory that must itself verify against that root",
+      "verifies the head it read against the same pinned root, as of the signed instant its witness was issued, using a head-era inventory that must itself verify against that root",
       "applies the shared successor rules, now including G9, then writes conditionally on the exact prior version and digest",
       "strong-rereads and returns the digest it read back",
       "treats a request for the bytes already at the head as success"
@@ -67,7 +75,7 @@
       "candidate for another ledger under this key refused",
       "raw malformed head refused and not overwritten (C4 v)",
       "a second version-one transition refused (C4 iii)",
-      "a write racing another loses the compare (C4 i)",
+      "a write racing another at put time loses the compare (C4 i)",
       "G9: quarantine cannot skip recovery_pending (C4 x)",
       "G9: establishing continuity confirms the pending witness exactly",
       "Lambda client installs through the real handler, including the idempotent retry",
@@ -75,25 +83,29 @@
       "the handler refuses a malformed request and leaks no internal detail",
       "an unknown invocation outcome is unavailable, never success",
       "incomplete writer configuration is refused",
-      "the published staging v3 successor package installs through the real writer over its real v2 predecessor, with its real witness-key rotation",
-      "the successor installer keeps its exact-digest discipline when writing through the writer"
+      "the published staging v3 successor package installs through the real writer logic over its real v2 predecessor, with its real witness-key rotation (real signed bytes; fake table and fixed clock; no Lambda packaging, IAM or DynamoDB condition evaluation exercised)",
+      "the successor installer keeps its exact-digest discipline when writing through the writer",
+      "a head that moves between the writer's read and the install's read loses the compare, reported as compare_failed",
+      "an omitted head inventory is reported as recovery_anchor_head_inventory_required; a wrong one, and a head that is not even well formed, as recovery_anchor_record_invalid"
     ],
     "infrastructure_as_code": {
-      "tiamat-recovery-anchor-v1.yaml": "the coordinator's PutItem is removed; it keeps GetItem",
-      "tiamat-anchor-writer-v1.yaml": "new: writer role (the only PutItem principal, LeadingKeys-scoped), function with reserved concurrency 1 from a pinned artifact version and code digest, invoke permission for the coordinator role only, a CloudTrail trail recording every write data event on the anchor table, and an EventBridge rule alarming on any table write by a principal other than the writer role, including non-role identities",
-      "template_tests": "structural tests assert the PutItem boundary, the invoke boundary, the pinned artifact and the alarm pattern; the templates are not deployed and have not been run through cfn-lint"
+      "tiamat-recovery-anchor-v1.yaml": "the coordinator's PutItem is removed (it keeps GetItem), and the table's own resource policy denies PutItem, UpdateItem, DeleteItem, BatchWriteItem and PartiQL writes to every principal but the writer role",
+      "tiamat-anchor-writer-v1.yaml": "writer role (identity grant LeadingKeys-scoped; trust pinned to its own function), function with reserved concurrency 1 from a pinned artifact version and code digest, invoke permission granted to the coordinator role, and a CloudTrail trail delivered to CloudWatch Logs recording item writes on the table and all management writes. Metric filters raise ForeignAnchorWrites (item write by any other role session or any non-role identity) and AnchorBoundaryChanges (the table's policy, protection or existence; the writer function's code, configuration, alias or permissions; the writer role's policies), each alarming to the SNS topic",
+      "invoke_boundary": "The coordinator's invoke grant is additive, not exclusive: other same-account principals holding lambda:InvokeFunction can also invoke. That is safe because the writer believes nothing unsigned; the privileged surface is changing the function or its role, which the boundary alarm reports.",
+      "template_tests": "structural only: they assert the policies, filters and alarms are present and shaped as intended. Nothing is deployed, cfn-lint has not run, and whether each filter matches real CloudTrail records can only be shown on staging."
     },
     "lambda_packaging": "The writer's import chain no longer loads psycopg (the continuity beacon reader imports it lazily). It still needs rfc8785, which is not in the hash-locked Lambda dependency list, and the artifact builder packages only lucy.contracts and lucy.executors today."
   },
   "suite": {
-    "full_suite": "1475 passed, 1 failed, 283 skipped. The failure is the live staging-anchor read, test_c1_the_installed_head_refuses_under_current_trust, whose AWS SSO session had expired; it is unrelated and awaits a fresh login. The skips are older tests that need a different integration database.",
+    "full_suite": "1480 passed, 1 failed, 283 skipped. The failure is the live staging-anchor read, test_c1_the_installed_head_refuses_under_current_trust, blocked by an expired AWS SSO session; it awaits a fresh login. The skips are older tests that need a different integration database.",
     "ruff": "passed",
     "mypy_src": "passed"
   },
   "for_review": [
     "The writer verifies an existing head as of its own signed validity window, with the head-era inventory supplied by the caller but trusted only if it verifies against the writer's pinned root. This is the same historical verification the continued-quarantine ceremony uses. Lyra: please confirm or correct.",
     "G9 as implemented: quarantined -> established refused; pending -> established must keep the pending witness. Other continuity transitions are unchanged.",
-    "The foreign-writer alarm goes to an existing SNS topic supplied as a parameter."
+    "The foreign-writer alarm goes to an existing SNS topic supplied as a parameter.",
+    "G9 leaves continuity_established -> recovery_pending with a new generation allowed without an intervening quarantine. Lyra: is that intended?"
   ],
   "needs_approval_before_deployment": [
     "Staging release-signing root and signed releases: serving now requires a signed inventory and a signed profile, privacy policy and spending grant for staging. Who signs them, under which root, is a Control decision.",
@@ -107,5 +119,35 @@
     "M3 DynamoDB Streams alarm (detection only)",
     "C4 xi on staging: coordinator raw PutItem gets AccessDenied and the alarm fires; needs the deployed stacks",
     "the commissioned-ledger continuity path through M4 (plan step 6)"
+  ],
+  "independent_review": {
+    "reviewer": "Fable, read-only, requested by Ray",
+    "found_and_fixed": [
+      "HIGH: the EventBridge foreign-writer rule could never fire, because DynamoDB item-level data events are not delivered to EventBridge. Replaced by a table resource policy that denies item writes to all but the writer, plus CloudWatch Logs metric filters and alarms, including management events.",
+      "MEDIUM: verifying the head at its witness not_before could permanently refuse a genuine head issued late in its key's window. Now verified at the signed issued_at.",
+      "MEDIUM: 'invoke only from the coordinator' was overstated. Reworded; writer function and role changes now alarm, and the role's trust is pinned to its function.",
+      "MEDIUM: the new release-manager grant made grant activation able to clear an unfunded settlement block. Activation now clears only no_active_grant.",
+      "LOW: a read/read race reported record_invalid; it now reports compare_failed.",
+      "The missing-head-inventory case is distinguished from a junk head."
+    ],
+    "confirmed_sound": [
+      "Historical head verification and reading key id and identity from unverified bytes: closed by the root-signed transition binding the witness digest and the witness binding its inventory digest.",
+      "G9 as implemented; pending renewal, quarantined -> pending and established -> pending with a new generation remain allowed.",
+      "Principal set to a role ARN is valid for AWS::Lambda::Permission.",
+      "Verified configuration: route, rates, bounds, deadline and policy come only from verified content."
+    ],
+    "not_changed": [
+      "VerifiedProfileAuthority opens four connections per call, at admission and on every replay-eligibility check. Correct; a connection-count risk to watch on Render rather than a change made now.",
+      "The ApiRelease policy header is still local configuration; it is not compared with ledger state."
+    ]
+  },
+  "deployment_verification": [
+    "iam simulate-principal-policy for the coordinator, runtime, Render machine role and deploy role: no PutItem, UpdateItem, DeleteItem, BatchWriteItem, TransactWriteItems or PartiQL write on the table; then C4 xi live: a coordinator PutItem is denied",
+    "list who holds lambda:UpdateAlias, UpdateFunctionConfiguration or PublishVersion on the writer and iam:PutRolePolicy on its role",
+    "the live alias points at a version whose CodeSha256 equals the recorded digest; the artifact contains lucy.shared_execution, rfc8785, cryptography and pydantic for py3.12 x86_64; TIAMAT_ANCHOR_WRITER_ROOTS pins the staging root and lists only the staging key",
+    "the trail is logging; a writer PutItem appears in CloudWatch Logs; a foreign write attempt and a boundary change each reach the SNS topic",
+    "Render: sts get-caller-identity from the service shows the intended role, and that role's trust admits only Render's credential path",
+    "the writer verifies the live staging head historically",
+    "database: release-manager grants applied; connection counts watched during the synthetic request"
   ]
 }

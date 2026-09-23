@@ -56,10 +56,17 @@ class ConditionalTable:
         self.items: dict[str, dict[str, Any]] = {}
         self.puts = 0
         self.interfere: dict[str, Any] | None = None
+        self.interfere_on_read: dict[str, Any] | None = None
+        self.reads = 0
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         assert kwargs["ConsistentRead"] is True
-        item = self.items.get(kwargs["Key"]["anchor_key"]["S"])
+        key = kwargs["Key"]["anchor_key"]["S"]
+        self.reads += 1
+        if self.interfere_on_read is not None and self.reads >= 2:
+            # Another write lands after the writer's own first read of this request.
+            self.items[key], self.interfere_on_read = self.interfere_on_read, None
+        item = self.items.get(key)
         return {} if item is None else {"Item": item}
 
     def put_item(self, **kwargs: Any) -> dict[str, Any]:
@@ -235,8 +242,45 @@ def test_a_head_is_not_verified_under_an_inventory_that_never_signed_it(world: A
         now=later,
     )
 
-    with pytest.raises(AnchorWriteRefused, match="recovery_anchor_record_invalid"):
+    # Omitted: the writer says what is missing rather than calling the head junk.
+    with pytest.raises(AnchorWriteRefused, match="recovery_anchor_head_inventory_required"):
         _writer(table, identity, root, now=later).write(_request(identity, successor))
+    # Supplied, but not the inventory that signed the head: refused as unverifiable.
+    with pytest.raises(AnchorWriteRefused, match="recovery_anchor_record_invalid"):
+        _writer(table, identity, root, now=later).write(
+            _request(identity, successor, head_inventory=successor.inventory_jws)
+        )
+    assert table.puts == 1
+
+
+def test_a_head_that_moves_after_the_writer_read_it_loses_the_compare(world: Any) -> None:
+    """The read/read race: the head changes between the writer's read and the install's."""
+
+    identity, root, table = world
+    bootstrap = _bootstrap(identity, root)
+    _writer(table, identity, root).write(_request(identity, bootstrap))
+    later = NOW + timedelta(hours=13)
+    successor, _ = build_continued_quarantine_successor(
+        predecessor=bootstrap,
+        identity=identity,
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.test.2",
+        witness_private_key=Ed25519PrivateKey.generate(),
+        predecessor_verified_at=NOW,
+        now=later,
+    )
+    table.reads = 0
+    table.interfere_on_read = {
+        **table.items[_key(identity)],
+        "transition_jws": {"B": b"someone-else"},
+        "witness_jws": {"B": b"someone-else"},
+        "transition_sha256": {"S": "2" * 64},
+    }
+
+    with pytest.raises(AnchorWriteRefused, match="recovery_anchor_compare_failed"):
+        _writer(table, identity, root, now=later).write(
+            _request(identity, successor, head_inventory=bootstrap.inventory_jws)
+        )
     assert table.puts == 1
 
 

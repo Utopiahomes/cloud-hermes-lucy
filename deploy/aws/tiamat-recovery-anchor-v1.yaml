@@ -18,6 +18,12 @@ Parameters:
     Description: >-
       Existing recovery-coordinator role; receives strong-read access only. Writes go through the
       M4 anchor writer (tiamat-anchor-writer-v1), whose role is the only PutItem principal.
+  AnchorWriterRoleName:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+    Description: >-
+      WriterRoleArn role name from the tiamat-anchor-writer-v1 stack. The table's own resource
+      policy denies every item write to every other principal. Deploy the writer stack first.
 
 Resources:
   RecoveryAnchorTable:
@@ -40,6 +46,27 @@ Resources:
       KeySchema:
         - AttributeName: anchor_key
           KeyType: HASH
+      # M4 enforced at the table, not only reported: no principal but the writer's role may
+      # write an item, by any API. Removing this is a management event the writer stack alarms on.
+      ResourcePolicy:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: OnlyTheAnchorWriterWritesItems
+              Effect: Deny
+              Principal: "*"
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:PartiQLInsert
+                - dynamodb:PartiQLUpdate
+                - dynamodb:PartiQLDelete
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourceNamespace}-${EnvironmentName}-tiamat-recovery-anchor-v1
+              Condition:
+                ArnNotEquals:
+                  "aws:PrincipalArn": !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AnchorWriterRoleName}
       Tags:
         - {Key: stoin:system, Value: tiamat}
         - {Key: stoin:purpose, Value: recovery-authority}

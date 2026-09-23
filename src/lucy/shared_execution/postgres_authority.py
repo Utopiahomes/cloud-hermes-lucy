@@ -403,7 +403,13 @@ class PostgresSignedAuthorityStore:
                     contingency_reserve_microusd = g.contingency_reserve_microusd,
                     maximum_concurrency = g.maximum_concurrency,
                     largest_per_call_microusd = g.largest_per_call_microusd,
-                    blocked = false, block_reason = NULL,
+                    -- A grant answers only the absence of a grant. Any other block,
+                    -- such as an unfunded settlement liability, outlives the activation.
+                    blocked = p.blocked AND p.block_reason IS DISTINCT FROM 'no_active_grant',
+                    block_reason = CASE
+                        WHEN p.blocked AND p.block_reason IS DISTINCT FROM 'no_active_grant'
+                        THEN p.block_reason
+                    END,
                     generation = p.generation + 1,
                     updated_at = clock_timestamp()
                 FROM tiamat.grant_releases g

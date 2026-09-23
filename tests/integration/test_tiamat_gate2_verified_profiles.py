@@ -153,3 +153,61 @@ def test_a_verified_profile_the_contract_cannot_serve_is_not_current(
 
     env, trust = _signed_environment(disposable_roles, replace(SIGNED, timeout_ceiling_ms=500))
     assert _verified(env, trust).current(PROFILE) is None
+
+
+def _block(env: _Environment, reason: str) -> None:
+    with psycopg.connect(env.recovery, autocommit=True) as recovery:
+        for setting, value in (
+            ("tiamat.environment", env.environment),
+            ("tiamat.caller_id", env.scope.caller_id),
+            ("tiamat.realm", env.scope.realm),
+            ("tiamat.partition_id", env.scope.partition_id),
+        ):
+            recovery.execute("SELECT set_config(%s, %s, false)", (setting, value))
+        recovery.execute(
+            """
+            UPDATE tiamat.spending_partitions SET blocked = true, block_reason = %s
+            WHERE environment = %s AND caller_id = %s AND partition_id = %s
+            """,
+            (reason, env.environment, env.scope.caller_id, env.scope.partition_id),
+        )
+
+
+def _partition_block(env: _Environment) -> tuple[bool, str | None]:
+    with psycopg.connect(env.recovery) as recovery:
+        for setting, value in (
+            ("tiamat.environment", env.environment),
+            ("tiamat.caller_id", env.scope.caller_id),
+            ("tiamat.realm", env.scope.realm),
+            ("tiamat.partition_id", env.scope.partition_id),
+        ):
+            recovery.execute("SELECT set_config(%s, %s, false)", (setting, value))
+        row = recovery.execute(
+            """
+            SELECT blocked, block_reason FROM tiamat.spending_partitions
+            WHERE environment = %s AND caller_id = %s AND partition_id = %s
+            """,
+            (env.environment, env.scope.caller_id, env.scope.partition_id),
+        ).fetchone()
+    assert row is not None
+    return bool(row[0]), row[1]
+
+
+def test_activating_a_grant_does_not_clear_an_unfunded_settlement_block(
+    disposable_roles: DisposableRoles,
+) -> None:
+    """Only the absence of a grant is answered by a grant; an unfunded liability is not."""
+
+    env = _bare_environment(disposable_roles)
+    _block(env, "settlement_liability_unfunded")
+    trust = SyntheticReleaseTrust(env.environment, env.scope.caller_id, env.scope.realm)
+    install_signed_authority(trust, env.release_manager, env.recovery, SIGNED)
+    assert _partition_block(env) == (True, "settlement_liability_unfunded")
+
+
+def test_activating_a_grant_clears_the_no_grant_block(disposable_roles: DisposableRoles) -> None:
+    env = _bare_environment(disposable_roles)
+    _block(env, "no_active_grant")
+    trust = SyntheticReleaseTrust(env.environment, env.scope.caller_id, env.scope.realm)
+    install_signed_authority(trust, env.release_manager, env.recovery, SIGNED)
+    assert _partition_block(env) == (False, None)

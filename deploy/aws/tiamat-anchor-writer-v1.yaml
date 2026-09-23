@@ -1,9 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Tiamat v1 M4 validating sole writer for the external recovery anchor. The writer function's
-  role is the only principal granted PutItem on the anchor table; the recovery coordinator may
-  only invoke it. A CloudTrail data-event trail on the table, and an EventBridge rule over it,
-  report any anchor-table write made by a different principal.
+  role is the only principal granted PutItem on the anchor table, and the table's own resource
+  policy (tiamat-recovery-anchor-v1) denies item writes to everyone else. A CloudTrail trail
+  delivered to CloudWatch Logs alarms on any item write by another principal and on any change
+  to the table's boundary, the writer function or the writer role.
 
 Parameters:
   ResourceNamespace:
@@ -42,7 +43,7 @@ Parameters:
   AlarmTopicArn:
     Type: String
     AllowedPattern: "arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}"
-    Description: Existing SNS topic that accepts events.amazonaws.com publications
+    Description: Existing SNS topic that accepts CloudWatch alarm notifications
 
 Resources:
   WriterLogGroup:
@@ -65,6 +66,8 @@ Resources:
             Action: sts:AssumeRole
             Condition:
               StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+              ArnLike:
+                "aws:SourceArn": !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1*
       Tags:
         - {Key: stoin:system, Value: tiamat}
         - {Key: stoin:purpose, Value: recovery-anchor-writer}
@@ -206,18 +209,51 @@ Resources:
             Condition:
               Bool: {"aws:SecureTransport": "false"}
 
+  AnchorTrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /stoin/${ResourceNamespace}-${EnvironmentName}/tiamat-anchor-writes-v1
+      RetentionInDays: 365
+
+  AnchorTrailLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudtrail.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+      Policies:
+        - PolicyName: deliver-anchor-trail-to-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub ${AnchorTrailLogGroup.Arn}:*
+
   AnchorWriteTrail:
     Type: AWS::CloudTrail::Trail
     DependsOn: [AnchorWriteTrailBucketPolicy]
     Properties:
       TrailName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writes-v1
       S3BucketName: !Ref AnchorWriteTrailBucket
+      CloudWatchLogsLogGroupArn: !GetAtt AnchorTrailLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt AnchorTrailLogsRole.Arn
       IsLogging: true
       IsMultiRegionTrail: false
-      IncludeGlobalServiceEvents: false
+      # IAM is a global service; its events reach a trail only with this set.
+      IncludeGlobalServiceEvents: true
       EnableLogFileValidation: true
       AdvancedEventSelectors:
-        - Name: Every write to the recovery anchor table
+        - Name: Every item write to the recovery anchor table
           FieldSelectors:
             - {Field: eventCategory, Equals: [Data]}
             - {Field: resources.type, Equals: ["AWS::DynamoDB::Table"]}
@@ -225,33 +261,67 @@ Resources:
               Equals:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}
             - {Field: readOnly, Equals: ["false"]}
+        - Name: Every management write, for boundary changes
+          FieldSelectors:
+            - {Field: eventCategory, Equals: [Management]}
+            - {Field: readOnly, Equals: ["false"]}
 
-  ForeignAnchorWriteRule:
-    Type: AWS::Events::Rule
+  ForeignItemWriteByRoleFilter:
+    Type: AWS::Logs::MetricFilter
     Properties:
-      Name: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-foreign-anchor-write-v1
-      Description: Any write to the recovery anchor table by a principal other than the M4 writer
-      State: ENABLED
-      EventPattern:
-        source: [aws.dynamodb]
-        detail-type: [AWS API Call via CloudTrail]
-        detail:
-          eventSource: [dynamodb.amazonaws.com]
-          eventName: [PutItem, UpdateItem, DeleteItem, BatchWriteItem, TransactWriteItems]
-          requestParameters:
-            tableName: [!Ref AnchorTableName]
-          # A role session other than the writer's, or any identity that is not a role session at
-          # all (an IAM user or root carries no session issuer to compare).
-          $or:
-            - userIdentity:
-                type: [{anything-but: [AssumedRole]}]
-            - userIdentity:
-                sessionContext:
-                  sessionIssuer:
-                    arn: [{anything-but: [!GetAtt WriterRole.Arn]}]
-      Targets:
-        - Id: foreign-anchor-write-alarm
-          Arn: !Ref AlarmTopicArn
+      LogGroupName: !Ref AnchorTrailLogGroup
+      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[0].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type = "AssumedRole") && ($.userIdentity.sessionContext.sessionIssuer.arn != "${WriterRole.Arn}") }'
+      MetricTransformations:
+        - {MetricNamespace: Stoin/TiamatAnchor, MetricName: ForeignAnchorWrites, MetricValue: "1"}
+
+  ForeignItemWriteByNonRoleFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AnchorTrailLogGroup
+      # An IAM user or root carries no session issuer, so it is caught by identity type.
+      FilterPattern: !Sub '{ ($.eventCategory = "Data") && ($.eventSource = "dynamodb.amazonaws.com") && ($.readOnly IS FALSE) && ($.resources[0].ARN = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}") && ($.userIdentity.type != "AssumedRole") }'
+      MetricTransformations:
+        - {MetricNamespace: Stoin/TiamatAnchor, MetricName: ForeignAnchorWrites, MetricValue: "1"}
+
+  BoundaryChangeFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AnchorTrailLogGroup
+      # The table's policy, protection or existence; the writer function's code, configuration,
+      # alias or permissions (which hold its pinned roots); and the writer role's policies.
+      FilterPattern: !Sub '{ ($.eventCategory = "Management") && ($.readOnly IS FALSE) && ((($.eventSource = "dynamodb.amazonaws.com") && (($.requestParameters.tableName = "${AnchorTableName}") || ($.requestParameters.resourceArn = "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AnchorTableName}"))) || (($.eventSource = "lambda.amazonaws.com") && ($.requestParameters.functionName = "*${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1*")) || (($.eventSource = "iam.amazonaws.com") && ($.requestParameters.roleName = "${WriterRole}"))) }'
+      MetricTransformations:
+        - {MetricNamespace: Stoin/TiamatAnchor, MetricName: AnchorBoundaryChanges, MetricValue: "1"}
+
+  ForeignAnchorWriteAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-foreign-anchor-write-v1
+      AlarmDescription: An anchor-table item write by a principal other than the M4 writer role
+      Namespace: Stoin/TiamatAnchor
+      MetricName: ForeignAnchorWrites
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
+
+  AnchorBoundaryChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-boundary-change-v1
+      AlarmDescription: A change to the anchor table's boundary, the writer function or its role
+      Namespace: Stoin/TiamatAnchor
+      MetricName: AnchorBoundaryChanges
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
 
 Outputs:
   WriterFunctionAliasArn:

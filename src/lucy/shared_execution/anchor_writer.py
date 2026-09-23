@@ -8,8 +8,9 @@ and its tools - may only ask it to install a transition. For every request it:
    carried in the request - against a root public key held in its own configuration for that
    anchor key, at its own clock;
 3. verifies the head it read against the same pinned root. A head whose witness has since
-   expired, or was signed under an earlier inventory, is verified as of its own signed validity:
-   signatures do not expire, and a forged head cannot be made to verify at any instant;
+   expired, or was signed under an earlier inventory, is verified as of the instant its witness
+   was issued: signatures do not expire, and a forged head cannot be made to verify at any
+   instant;
 4. applies the shared successor rules, including the continuity-state rules, then writes
    conditionally on the exact prior version and digest;
 5. strong-rereads and reports the digest it read back; and
@@ -131,7 +132,10 @@ class AnchorWriter:
         head: VerifiedAnchorTransition | None = None
         if stored is not None:
             head = self._verify_historical(
-                root, *stored, request.head_inventory_jws or request.inventory_jws
+                root,
+                *stored,
+                request.head_inventory_jws or request.inventory_jws,
+                head_inventory_supplied=request.head_inventory_jws is not None,
             )
 
         anchor = DynamoDbExternalRecoveryAnchor(
@@ -146,6 +150,9 @@ class AnchorWriter:
                 now=now,
             )
         except RecoveryAnchorRejected as exc:
+            if self._strong_read(request.anchor_key) != stored:
+                # The head moved after this request read it: another write won the race.
+                raise AnchorWriteRefused("recovery_anchor_compare_failed") from exc
             raise AnchorWriteRefused(str(exc)) from exc
         return self._confirm(request.anchor_key, candidate, "installed")
 
@@ -189,17 +196,32 @@ class AnchorWriter:
         transition_jws: bytes,
         witness_jws: bytes,
         inventory_jws: bytes,
+        *,
+        head_inventory_supplied: bool,
     ) -> VerifiedAnchorTransition:
-        """Verify the stored head as of its own signed validity window."""
+        """Verify the stored head as of the instant its witness was issued.
+
+        ``issued_at`` is signed and, by the witness rules, always falls inside its key's issuance
+        window, so a genuine head always verifies there. ``not_before`` need not: a witness issued
+        late in the window may start after it closes, and would otherwise wedge the anchor.
+        """
 
         try:
             claims, _ = _claims(witness_jws)
-            instant = datetime.strptime(str(claims["not_before"]), "%Y-%m-%dT%H:%M:%SZ")
+            instant = datetime.strptime(str(claims["issued_at"]), "%Y-%m-%dT%H:%M:%SZ")
         except (KeyError, TypeError, ValueError) as exc:
+            # Not even a well-formed witness: the head is junk, whatever inventory is offered.
             raise AnchorWriteRefused("recovery_anchor_record_invalid") from exc
-        return self._verify(
-            root, transition_jws, witness_jws, inventory_jws, at=instant.replace(tzinfo=UTC)
-        )
+        try:
+            return self._verify(
+                root, transition_jws, witness_jws, inventory_jws, at=instant.replace(tzinfo=UTC)
+            )
+        except AnchorWriteRefused as exc:
+            if not head_inventory_supplied and str(exc) == "recovery_anchor_record_invalid":
+                # A well-formed head that did not verify under the candidate's inventory, and
+                # the caller did not send the one it was signed under: say what is missing.
+                raise AnchorWriteRefused("recovery_anchor_head_inventory_required") from exc
+            raise
 
     def _strong_read(self, anchor_key: str) -> tuple[bytes, bytes] | None:
         try:

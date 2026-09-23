@@ -86,29 +86,81 @@ def test_the_writer_runs_one_install_at_a_time_from_a_pinned_artifact() -> None:
     }
 
 
-def test_every_anchor_table_write_is_trailed_and_a_foreign_writer_alarms() -> None:
-    resources = _resources(WRITER)
-    selectors = resources["AnchorWriteTrail"]["Properties"]["AdvancedEventSelectors"][0][
-        "FieldSelectors"
-    ]
-    fields = {item["Field"]: item["Equals"] for item in selectors}
-    assert fields["eventCategory"] == ["Data"]
-    assert fields["resources.type"] == ["AWS::DynamoDB::Table"]
-    assert fields["readOnly"] == ["false"]
-
-    rule = resources["ForeignAnchorWriteRule"]["Properties"]
-    detail = rule["EventPattern"]["detail"]
-    assert "PutItem" in detail["eventName"]
-    assert detail["$or"] == [
-        {"userIdentity": {"type": [{"anything-but": ["AssumedRole"]}]}},
-        {
-            "userIdentity": {
-                "sessionContext": {
-                    "sessionIssuer": {"arn": [{"anything-but": [{"GetAtt": "WriterRole.Arn"}]}]}
-                }
+def test_the_table_itself_denies_item_writes_to_everyone_but_the_writer() -> None:
+    table = _resources(ANCHOR)["RecoveryAnchorTable"]["Properties"]
+    [statement] = table["ResourcePolicy"]["PolicyDocument"]["Statement"]
+    assert statement["Effect"] == "Deny" and statement["Principal"] == "*"
+    assert set(statement["Action"]) == {
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PartiQLInsert",
+        "dynamodb:PartiQLUpdate",
+        "dynamodb:PartiQLDelete",
+    }
+    assert statement["Condition"] == {
+        "ArnNotEquals": {
+            "aws:PrincipalArn": {
+                "Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AnchorWriterRoleName}"
             }
-        },
+        }
+    }
+
+
+def test_the_writer_role_is_assumable_only_by_its_own_function() -> None:
+    [statement] = _resources(WRITER)["WriterRole"]["Properties"]["AssumeRolePolicyDocument"][
+        "Statement"
     ]
-    assert rule["Targets"] == [
-        {"Id": "foreign-anchor-write-alarm", "Arn": {"Ref": "AlarmTopicArn"}}
+    assert statement["Principal"] == {"Service": "lambda.amazonaws.com"}
+    assert statement["Condition"]["ArnLike"]["aws:SourceArn"]["Sub"].endswith(
+        ":function:${ResourceNamespace}-${EnvironmentName}-tiamat-anchor-writer-v1*"
+    )
+
+
+def test_foreign_writes_and_boundary_changes_reach_an_alarm() -> None:
+    """Through CloudWatch Logs: EventBridge does not carry DynamoDB item-level data events."""
+
+    resources = _resources(WRITER)
+    assert not [name for name, item in resources.items() if item["Type"] == "AWS::Events::Rule"]
+
+    trail = resources["AnchorWriteTrail"]["Properties"]
+    assert trail["CloudWatchLogsLogGroupArn"] == {"GetAtt": "AnchorTrailLogGroup.Arn"}
+    assert trail["IncludeGlobalServiceEvents"] is True
+    categories = [
+        {item["Field"]: item["Equals"] for item in selector["FieldSelectors"]}["eventCategory"]
+        for selector in trail["AdvancedEventSelectors"]
     ]
+    assert categories == [["Data"], ["Management"]]
+
+    patterns = {
+        name: resources[name]["Properties"]["FilterPattern"]["Sub"]
+        for name in (
+            "ForeignItemWriteByRoleFilter",
+            "ForeignItemWriteByNonRoleFilter",
+            "BoundaryChangeFilter",
+        )
+    }
+    assert '$.userIdentity.sessionContext.sessionIssuer.arn != "${WriterRole.Arn}"' in patterns[
+        "ForeignItemWriteByRoleFilter"
+    ]
+    assert '$.userIdentity.type != "AssumedRole"' in patterns["ForeignItemWriteByNonRoleFilter"]
+    for name in ("ForeignItemWriteByRoleFilter", "ForeignItemWriteByNonRoleFilter"):
+        assert "$.readOnly IS FALSE" in patterns[name]
+    boundary = patterns["BoundaryChangeFilter"]
+    for source in ("dynamodb.amazonaws.com", "lambda.amazonaws.com", "iam.amazonaws.com"):
+        assert source in boundary
+
+    metrics = {
+        resources[name]["Properties"]["MetricTransformations"][0]["MetricName"]
+        for name in patterns
+    }
+    alarms = {
+        resources[name]["Properties"]["MetricName"]: resources[name]["Properties"]
+        for name in ("ForeignAnchorWriteAlarm", "AnchorBoundaryChangeAlarm")
+    }
+    assert metrics == set(alarms) == {"ForeignAnchorWrites", "AnchorBoundaryChanges"}
+    for alarm in alarms.values():
+        assert alarm["Threshold"] == 1
+        assert alarm["ComparisonOperator"] == "GreaterThanOrEqualToThreshold"
+        assert alarm["AlarmActions"] == [{"Ref": "AlarmTopicArn"}]
