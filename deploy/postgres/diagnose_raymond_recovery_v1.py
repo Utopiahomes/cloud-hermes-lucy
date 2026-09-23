@@ -50,6 +50,11 @@ def main() -> None:
             "JOIN lucy.memory_import_extraction_jobs_v1 j ON j.reservation_id=s.reservation_id "
             "WHERE j.id=%s)", (JOB_ID,)
         ).fetchone()[0], flush=True)
+        print("attempt settlement state:", db.execute(
+            "SELECT s.result,s.billed_microusd FROM lucy.memory_import_attempt_settlements_v1 s "
+            "JOIN lucy.memory_import_extraction_jobs_v1 j ON j.reservation_id=s.reservation_id "
+            "WHERE j.id=%s", (JOB_ID,)
+        ).fetchone(), flush=True)
         print("source count:", db.execute(
             "SELECT jsonb_array_length(source_record_ids) FROM lucy.memory_import_extraction_jobs_v1 "
             "WHERE id=%s", (JOB_ID,)
