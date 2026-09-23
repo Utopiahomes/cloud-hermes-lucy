@@ -101,6 +101,7 @@ def main() -> int:
                    f.evidence_id IS NOT NULL AS deletion_fenced,
                    o.state AS deletion_operation_state,
                    i.source_conversation_id LIKE 'cloud-acceptance-%%' AS acceptance_probe,
+                   i.source_conversation_id LIKE 'synthetic-%%' AS synthetic_session,
                    EXISTS (
                        SELECT 1 FROM lucy.scoped_archive_intents_v1 live
                        JOIN lucy.scoped_evidence_records_v2 live_e
