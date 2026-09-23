@@ -59,7 +59,7 @@ def main() -> None:
                 existing is not None and existing[1] == ROLE,
         }
         if sys.argv[1] == "inspect":
-            print(json.dumps(inspection, sort_keys=True))
+            print("HINDSIGHT_DB:" + json.dumps(inspection, sort_keys=True))
             return
         if version < 140000 or not all((privileges[0], privileges[1], vector)):
             raise RuntimeError("PostgreSQL prerequisites unavailable")
@@ -103,7 +103,7 @@ def main() -> None:
         ))[0]
         if not installed:
             raise RuntimeError("pgvector installation unavailable")
-    print(json.dumps({"database": DATABASE, "role": ROLE,
+    print("HINDSIGHT_DB:" + json.dumps({"database": DATABASE, "role": ROLE,
                       "pgvector_installed": True}, sort_keys=True))
 
 
