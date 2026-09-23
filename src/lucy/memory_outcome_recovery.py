@@ -270,6 +270,7 @@ class HttpMemoryOutcomeGrantIssuer:
         finally:
             connection.close()
         if response.status != 200 or len(raw) > 262_144:
+            print(f"private memory outcome policy HTTP rejection: {response.status}", flush=True)
             raise MemoryOutcomeUnavailable("outcome policy rejected recovery")
         try:
             grant = MemoryOutcomeRecoveryGrantV1.model_validate_json(raw)

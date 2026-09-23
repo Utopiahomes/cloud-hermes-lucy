@@ -1379,6 +1379,23 @@ def grant_memory_outcome_recovery_v1(
             now=datetime.now(UTC),
         )
     except (MemoryOutcomeUnavailable, PermissionError, ValueError, SQLAlchemyError) as exc:
+        safe_reasons = {
+            "pilot authorization does not cover this outcome",
+            "memory outcome authorization is no longer current",
+            "memory outcome is not currently recoverable",
+            "outcome policy admission unavailable",
+            "outcome policy eligibility phase is invalid",
+            "outcome recovery requires an executable V2 manifest",
+        }
+        safe_reason = (
+            str(exc)
+            if type(exc) is MemoryOutcomeUnavailable and str(exc) in safe_reasons
+            else "other"
+        )
+        print(
+            f"private memory outcome policy rejection: {type(exc).__name__}/{safe_reason}",
+            flush=True,
+        )
         raise HTTPException(
             status_code=403, detail="memory outcome is not eligible for recovery"
         ) from exc
