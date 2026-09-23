@@ -95,6 +95,7 @@ def main() -> int:
         """)).mappings().one()
         scoped_targets = connection.execute(text("""
             SELECT e.id::text AS evidence_id, e.status,
+                   e.created_at::date::text AS created_date,
                    p.evidence_id IS NOT NULL AS has_payload,
                    w.wrapped_key_ref::text AS wrapped_key_ref,
                    f.evidence_id IS NOT NULL AS deletion_fenced,
