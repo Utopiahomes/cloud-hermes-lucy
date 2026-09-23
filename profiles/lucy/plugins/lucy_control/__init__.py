@@ -1008,6 +1008,10 @@ def _tool_execution_middleware(
     args: dict[str, Any], next_call: Callable[[dict[str, Any]], Any], *,
     tool_name: str = "", session_id: Any = None, turn_id: Any = None, **_: Any,
 ) -> Any:
+    if os.getenv("LUCY_HINDSIGHT_ENABLED") == "true" and tool_name == "hindsight_retain":
+        # The reviewed importer, not model-authored Telegram text, is the
+        # initial source of Hindsight writes. Capture still uses Lucy's archive.
+        return _tool_failure("hindsight_import_only")
     if tool_name not in {"lucy_memory_lookup", "lucy_memory_propose", "lucy_evidence_retrieve"}:
         return next_call(args)
     if not isinstance(session_id, str) or not session_id or not isinstance(turn_id, str) \

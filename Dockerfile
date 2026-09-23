@@ -10,6 +10,7 @@ RUN groupadd --system --gid 10001 lucy \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY deploy/render/requirements.lock ./deploy/render/requirements.lock
+COPY deploy/render/hindsight_private_probe.py ./deploy/render/hindsight_private_probe.py
 COPY deploy/postgres/bootstrap_cloud_v1_2.py ./deploy/postgres/bootstrap_cloud_v1_2.py
 COPY deploy/postgres/hindsight_database.py ./deploy/postgres/hindsight_database.py
 COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_realm_cloud_v1_3.py

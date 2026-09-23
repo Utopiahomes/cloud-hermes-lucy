@@ -1233,3 +1233,13 @@ def test_middleware_blocks_request_without_price_policy(
         request, lambda _request: pytest.fail("provider call must not run"), **_middleware_kwargs()
     )
     assert "unapproved model route" in response.choices[0].message.content
+def test_hindsight_retain_is_import_only(monkeypatch: Any) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_HINDSIGHT_ENABLED", "true")
+    calls: list[dict[str, Any]] = []
+    result = plugin._tool_execution_middleware(
+        {"content": "synthetic"}, lambda args: calls.append(args),
+        tool_name="hindsight_retain", session_id="session-1", turn_id="turn-1",
+    )
+    assert json.loads(result) == {"ok": False, "error": "hindsight_import_only"}
+    assert calls == []
