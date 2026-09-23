@@ -769,3 +769,38 @@ verified by `getMe` under the same bot ID. Its username remains
 `@UtopiaLucy_bot`; changing that handle requires a separate Telegram
 identity-management step. Routing, provider reply, retention and display name
 are now verified.
+
+## Read-only interpreted recall enabled for Telegram (2026-09-23)
+
+The reviewed 32-item protected batch is now connected to the live Raymond
+Telegram memory tool. Before activation, the Raymond policy service was
+suspended and `LUCY_PERSONAL_INTERPRETED_RECALL_ENABLED` was absent on policy,
+routine and gateway. Distinct policy and adapter credentials, the Raymond
+database logins, and Utopia gateway suspension were checked without printing
+secrets. A gitignored exact environment snapshot and phased activation state
+are in `secrets/generated/raymond-interpreted-recall-activation-v1.json`.
+
+The flag was staged on policy while suspended; the policy service was resumed
+and deployed at `5775c25`. An active-service private-network probe verified
+`/ready` and HTTP 401 for a request without the policy credential. The routine
+flag was staged and explicitly deployed at `5775c25`; saving the Render flag
+alone did not replace the older live container. A private-network routine
+probe verified HTTP 401 without the adapter credential, and successful
+read-only lookup with mapped citations for short topic queries. The observed
+context/citation counts were: `Gate` 2/4, `equity` 2/3, `LLC` 3/5,
+`Philodelphio` 1/2 and `Lucy` 5/8. The longer phrase `85% equity proposal`
+returned zero, so query matching remains a known limitation. These probes
+made no model-provider or Telegram call; policy recall wrote normal access
+audit rows. The initial routine probe failed a nonempty-result assertion on
+the long phrase, then the bounded multi-query probe passed.
+
+The gateway flag was staged and explicitly deployed at `5775c25` as
+`dep-daq3ejg473hc73cfq11g`. During the rolling replacement, three launcher
+attempts emitted `startup_failed` before the prior instance stopped. The new
+instance subsequently emitted `preflight_passed`, `lease_acquired` and
+`gateway_started`. Utopia's gateway remained suspended, and the final Render
+readback found the recall flag `true` on policy, routine and gateway. The
+live Telegram memory answer has **not yet been assessed**. Ray was given an
+exact first question using the verified `Gate` search term, asking Lucy to
+distinguish explicit confirmation, suggestions, historical context, current
+uncertainty and citations. Review that reply before backfilling older memory.
