@@ -695,3 +695,49 @@ still has no provider key and remains Stage `0`/capture false. A focused choice
 about a Raymond-only key versus extending the shared key beyond the earlier
 synthetic-only approval is pending from Ray. The exact next action depends on
 that choice; no real Telegram traffic has been moved.
+
+## Raymond Telegram cutover (2026-09-23)
+
+This section supersedes the pending-provider and pending-handoff statements above.
+Ray explicitly authorized the existing shared OpenRouter key for Raymond's real
+Telegram replies. The $1/day Raymond channel budget remains in force. The shared
+provider billing credential is the only intended credential overlap; Raymond's
+database and gateway adapter credentials remain separate. Ray had already chosen
+to move the current bot to Raymond and delete, rather than migrate, the old
+Utopia owner archive.
+
+While both Raymond services were suspended, the shared provider key was staged
+on the new gateway and verified equal to the key already on Raymond's routine
+and Utopia's old gateway. Stage 2 and capture were set on Raymond routine and
+gateway. A corrected read-only Stage 2 preflight succeeded as job
+`job-daq1rhojo6nc73d8mq8g`; it made no provider call or capture write.
+
+Utopia's gateway `srv-dai4k467bikc73bhs6r0` was then suspended before any
+Raymond gateway activation. A final content-free count, job
+`job-daq20u4a9krc73atat9g`, found exactly four nonsynthetic owner scoped
+records, all four deletion-fenced, and zero legacy owner records or live legacy
+payloads. It read no message content. The temporary count service
+`crn-daq1tge0tbcc73d9vlv0` was deleted. The four deletion operations remain
+`FINALITY_PENDING` as recorded above; their metadata rows remain.
+
+Raymond routine `srv-dak5bc2d0e5s73b2c8vg` was resumed and reached a live
+deployment at `d001300`. The first gateway resume also reached `live`, but a
+startup event check exposed a Render configuration error: it had built from
+`./Dockerfile` despite the Telegram Dockerfile supplied at creation. No
+Telegram launcher or lease ran in that image. The gateway was suspended,
+patched to `./Dockerfile.hermes-telegram-stage2`, and resumed. The corrected
+gateway deployment `dep-daq24rjncjis7398fgf0` reached `live` at `d001300`.
+Content-free runtime events then confirmed `configuration_validated`,
+`preflight_passed`, `lease_acquired`, and `gateway_started` for the corrected
+launcher. Utopia's gateway remained suspended. The checkpoint artifacts are
+gitignored `secrets/generated/raymond-telegram-cutover-v1.json` and
+`secrets/generated/utopia-telegram-cutover-sweep-v1.json`; neither is an
+authorization source.
+
+Current state: Raymond routine and Telegram gateway are live, and Utopia's
+gateway is suspended. This verifies the exclusive active gateway and startup
+lease. A real owner-sent Telegram exchange and its expected Raymond
+evidence/ledger entries have **not yet been verified**. The next action is for
+Ray to send a short message to the existing bot, then check the reply and
+content-free Raymond capture/budget metadata. Do not claim the provider reply
+path is proven before that exchange. Keep Utopia's gateway suspended.
