@@ -100,7 +100,15 @@ def main() -> int:
                    w.wrapped_key_ref::text AS wrapped_key_ref,
                    f.evidence_id IS NOT NULL AS deletion_fenced,
                    o.state AS deletion_operation_state,
-                   i.source_conversation_id LIKE 'cloud-acceptance-%%' AS acceptance_probe
+                   i.source_conversation_id LIKE 'cloud-acceptance-%%' AS acceptance_probe,
+                   EXISTS (
+                       SELECT 1 FROM lucy.scoped_archive_intents_v1 live
+                       JOIN lucy.scoped_evidence_records_v2 live_e
+                         ON live_e.id = live.evidence_id
+                        WHERE live.source_conversation_id = i.source_conversation_id
+                          AND live_e.created_at::date = DATE '2026-09-12'
+                          AND live.content_classification = 'owner_conversation'
+                   ) AS matches_september_12_session
               FROM lucy.scoped_evidence_records_v2 e
               JOIN lucy.scoped_archive_intents_v1 i ON i.evidence_id = e.id
               LEFT JOIN lucy.scoped_evidence_payloads_v2 p ON p.evidence_id = e.id

@@ -508,11 +508,34 @@ single-evidence deletion endpoint is deliberately unavailable in production
 for scoped evidence, whereas these six records are in the older
 `lucy.evidence`/`lucy.evidence_payloads` archive. Direct SQL deletion would
 leave wrapped encryption keys and recovery copies and is not a valid completion.
-The next deletion step is a narrowly scoped production operator for these six
-legacy records that destroys each wrapped key and applies the existing
-deletion/tombstone/derived-state rules, followed by an exact zero-live-payload
-check. Finish the one-bot Raymond cutover or otherwise stop Utopia capture
-before the final sweep so new records do not replenish the old archive.
+Subsequent read-only jobs at `c03a6a7`, `13aab59`, `08a452c`, and `d39f322`
+expanded the inventory; their exact receipts are gitignored under
+`secrets/generated/utopia-telegram-*-state-v*.json`, and each temporary
+utility was deleted. They establish that **all 16 legacy records are labeled
+cloud-acceptance probes**, including the six encrypted payloads. A direct
+comparison with the numeric Telegram home-chat ID found no legacy or scoped
+matches, but that comparison is not a reliable owner selector: the Hermes
+plugin archives its session ID, not the numeric chat ID. The scoped
+`owner_conversation` archive has six records, two each dated September 10,
+12, and 14. The September 10 pair matches the V1.3 synthetic acceptance
+receipt. One of that pair has an existing deletion fence and operation state
+`FINALITY_PENDING`, so its remaining PostgreSQL payload/wrapper metadata does
+not prove its wrapped key still exists. The September 12 pair aligns with the
+documented live owner retained round trip; the September 14 pair still needs
+source/session classification. No message content was read.
+
+Do not treat the earlier total of six legacy encrypted payloads as six private
+owner messages. The immediate deletion target is the actual owner conversation
+inside the scoped archive, identified by the immutable scoped archive intent
+and Telegram event/session metadata; preserve the synthetic acceptance
+fence/recovery history. The production V1.3 deletion route requires a fresh
+broker-signed owner assertion, which the Telegram gateway does not yet issue.
+An exact manual owner-broker path must be commissioned before invoking the
+existing manifest-bound, key-destroying V1.3 deletion workflow. Stop Utopia
+capture at the bot handoff before the final inventory/sweep so new records do
+not replenish the archive. The legacy synthetic probes can be cleaned up
+separately only through a key-destroying legacy operator; they are not evidence
+of Ray's private Telegram messages.
 
 The new, default-disabled `/v1/memory/interpreted-lookup` route in Raymond's
 routine identity calls a separate policy-only protected-recall endpoint over
