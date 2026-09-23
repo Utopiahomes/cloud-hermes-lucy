@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from starlette.middleware.base import RequestResponseEndpoint
 
 from lucy.contracts.canonical import canonical_json_bytes
+from lucy.governed_memory import GovernedMemoryUnavailable
 from lucy.memory_candidate_review import CandidateReviewBundleArtifactV1
 from lucy.memory_pilot_transport import (
     MemoryPilotTransportAdmissionReceiptV1,
@@ -156,9 +157,23 @@ def create_memory_pilot_execution_app(
             )
             raise HTTPException(status_code=403, detail="pilot batch unavailable") from exc
         except (PermissionError, RuntimeError) as exc:
+            safe_label = (
+                str(exc)
+                if type(exc) is GovernedMemoryUnavailable
+                and str(exc) in {
+                    "memory import archive unavailable",
+                    "memory import source eligibility unavailable",
+                    "memory import attempt reservation unavailable",
+                    "memory import job registration unavailable",
+                    "memory import attempt settlement unavailable",
+                    "memory import completion is unavailable",
+                }
+                else "other"
+            )
             print(
                 "private pilot execution unavailable: "
-                f"{type(exc).__name__}/{type(exc.__cause__).__name__ if exc.__cause__ else 'none'}",
+                f"{type(exc).__name__}/{type(exc.__cause__).__name__ if exc.__cause__ else 'none'}"
+                f"/{safe_label}",
                 flush=True,
             )
             raise HTTPException(status_code=503, detail="pilot execution unavailable") from exc
