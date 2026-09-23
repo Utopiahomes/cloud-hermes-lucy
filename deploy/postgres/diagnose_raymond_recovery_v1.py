@@ -78,6 +78,24 @@ def main() -> None:
             "WHERE f.evidence_id=e.id AND f.content_scope_id=e.content_scope_id)",
             (JOB_ID,)
         ).fetchone()[0], flush=True)
+        print("campaign archive count:", db.execute(
+            "SELECT count(*) FROM lucy.scoped_evidence_records_v2 e "
+            "JOIN lucy.memory_import_campaigns_v1 c ON c.id=%s "
+            "WHERE e.content_scope_id=%s AND e.status='active' "
+            "AND e.idempotency_key LIKE 'memory-import:'||c.manifest_digest||':%%'",
+            (CAMPAIGN_ID, SCOPE_ID),
+        ).fetchone()[0], flush=True)
+        print("campaign pending candidates:", db.execute(
+            "SELECT count(*) FROM lucy.scoped_memory_candidate_versions_v1 "
+            "WHERE content_scope_id=%s AND serialized_candidate->>'campaign_id'=%s",
+            (SCOPE_ID, str(CAMPAIGN_ID)),
+        ).fetchone()[0], flush=True)
+        print("campaign settlements:", db.execute(
+            "SELECT result,count(*),sum(billed_microusd) "
+            "FROM lucy.memory_import_attempt_settlements_v1 "
+            "WHERE campaign_id=%s GROUP BY result ORDER BY result",
+            (CAMPAIGN_ID,),
+        ).fetchall(), flush=True)
 
 
 if __name__ == "__main__":
