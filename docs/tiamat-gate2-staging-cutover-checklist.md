@@ -26,7 +26,7 @@ The two phases are approved separately:
 | Final writer roots | `deploy/aws/tiamat-staging-anchor-writer-roots.json`, exact bytes, SHA-256 `d641fe3b70eeca4f3973749880e99d7d18d8cccab7bb9b199665ddd38398a948` |
 | Staging anchor key | `ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f` |
 | Pinned anchor root | `tiamat-recovery-root.staging.1`, public key SHA-256 `54865ab6738e51177c2880f1fc31baf86afb4f0f4b58bc415c943d0def39d996` |
-| Current anchor head | v3, `39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459`, quarantined |
+| Current anchor head | `transition_version` 2, `39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459`, quarantined (installed from the "successor v3" package; the package name is not the transition version) |
 | Coordinator role | `tiamat-staging-recovery-coordinator` (Render OIDC, one service) |
 | Runtime role | `tiamat-staging-executor` (Render OIDC, one service) |
 | Alarm destination | an operator address Ray chooses for the SNS topic |

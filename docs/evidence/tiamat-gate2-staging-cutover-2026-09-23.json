@@ -1,0 +1,491 @@
+{
+  "evidence_type": "tiamat_gate2_phase_a_staging_cutover",
+  "date_utc": "2026-09-23",
+  "scope": "Phase A (steps 1-6) of docs/tiamat-gate2-staging-cutover-checklist.md: the M4 anchor writer and the table's write boundary. No database touched; the commissioned ledger stays quarantined and dispatch-blocked; no provider configured or called. Phase B remains blocked.",
+  "authorization": {
+    "checklist_review": "Lyra and Astra: no remaining blocker in Phase A; Phase A needs separate deployment authorization; alarm subscription ray@utopiahomes.com.",
+    "deployment": "Ray: 'authorized deployment'; then, after the permission classifier blocked stack creation, 'Approved: a-e as listed' (a writer stack, b probe invocations, c Render commit/deploy/jobs/suspend, d anchor stack update, e writer stack redeploy) and 'Approved 5.1'.",
+    "operator_notes": "The anchor-stack change set (step 4) was reviewed by Claude and executed by Ray, whose SSO session is the same security-administrator role, after Claude's session classifier refused it. Ray resumed both Render services in the dashboard for the jobs."
+  },
+  "account": "429870640638",
+  "region": "us-east-1",
+  "commissioned_anchor_head": {
+    "anchor_key": "ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f",
+    "transition_version": 2,
+    "transition_sha256": "39a929956738360d7d9f5bcdd77f9c00473a3b57c481af195c0b55f2938bb459",
+    "note": "Read with strong consistency before step 4, after step 4 and after step 6: unchanged. The checklist's earlier 'v3' was the successor package's name, not the transition version; corrected."
+  },
+  "step_1_alarm_topic": {
+    "topic_arn": "arn:aws:sns:us-east-1:429870640638:stoin-staging-tiamat-anchor-alarms",
+    "policy": "account owner management, plus sns:Publish for cloudwatch.amazonaws.com with aws:SourceAccount 429870640638 and alarm SourceArn",
+    "subscription": "email ray@utopiahomes.com, confirmed by Ray before step 2"
+  },
+  "step_2_artifact": {
+    "s3": "s3://lucy-prod-v12-artifacts-429870640638-us-east-1/tiamat/anchor-writer/6ac43c6166424a0358cee49f357ddf7301bfbfe2/tiamat-anchor-writer-v1.zip",
+    "object_version": "97eAa.UKczi7CAWkJheCLPPaf6Ko7hkh",
+    "sha256_base64": "7LZoxtlybq3sjpjd6uopwXGm6ZOuG4Xz3IaFcZF8Kso=",
+    "sha256_hex": "ecb668c6d9726eadec8e98ddeaea29c171a6e993ae1b85f3dc868571917c2aca",
+    "bytes": 23940726,
+    "integrity": "uploaded with x-amz-checksum-sha256; S3 reported the same full-object SHA-256"
+  },
+  "step_3_writer_stack": {
+    "stack": "stoin-staging-tiamat-anchor-writer-v1",
+    "method": "create-stack with a parameters file (not cloudformation deploy); CREATE_COMPLETE 2026-09-23T03:0xZ",
+    "probes": {
+      "probes": {
+        "after-boundary": {
+          "anchor_key": "ENV#staging#LEDGER#bef832a5-8c1b-4afa-b407-24076cf9ab2c",
+          "expected_transition_sha256": "313d78d1f9cc2b2543c588212b9ea7dfc6123ab906bdbce545f1684c51e4c0f6",
+          "witness_not_after": "2026-09-23T14:43:11+00:00"
+        },
+        "before-boundary": {
+          "anchor_key": "ENV#staging#LEDGER#1c6adab1-ea42-441b-a8d6-f4aeeeb875de",
+          "expected_transition_sha256": "ad704c5bd936b856e3c35c40dd7994a94014ade117701fb5f123daf31031d896",
+          "witness_not_after": "2026-09-23T14:43:11+00:00"
+        }
+      },
+      "writer_roots_sha256": "d54fc569ddeaa2b839fbea9aec74dbdbd852fe0e6540be4d5df885a822e65f6b"
+    },
+    "writer_roots_with_probes_sha256": "d54fc569ddeaa2b839fbea9aec74dbdbd852fe0e6540be4d5df885a822e65f6b",
+    "outputs": [
+      {
+        "OutputKey": "WriterRoleArn",
+        "OutputValue": "arn:aws:iam::429870640638:role/stoin-staging-tiamat-anchor-writer-v1"
+      },
+      {
+        "OutputKey": "WriterCodeSha256",
+        "OutputValue": "7LZoxtlybq3sjpjd6uopwXGm6ZOuG4Xz3IaFcZF8Kso="
+      },
+      {
+        "OutputKey": "WriterFunctionAliasArn",
+        "OutputValue": "arn:aws:lambda:us-east-1:429870640638:function:stoin-staging-tiamat-anchor-writer-v1:live"
+      }
+    ],
+    "verify_live_version": {
+      "anchor_keys": [
+        "ENV#staging#LEDGER#1c6adab1-ea42-441b-a8d6-f4aeeeb875de",
+        "ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f",
+        "ENV#staging#LEDGER#bef832a5-8c1b-4afa-b407-24076cf9ab2c"
+      ],
+      "code_sha256": "7LZoxtlybq3sjpjd6uopwXGm6ZOuG4Xz3IaFcZF8Kso=",
+      "failures": [],
+      "roots_sha256": "d54fc569ddeaa2b839fbea9aec74dbdbd852fe0e6540be4d5df885a822e65f6b",
+      "verified": true,
+      "version": "1"
+    },
+    "role_trust": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "lambda.amazonaws.com"
+          },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+    },
+    "role_policy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Condition": {
+            "Null": {
+              "dynamodb:LeadingKeys": "false"
+            },
+            "ForAllValues:StringLike": {
+              "dynamodb:LeadingKeys": [
+                "ENV#staging#LEDGER#*"
+              ]
+            },
+            "ArnEquals": {
+              "lambda:SourceFunctionArn": "arn:aws:lambda:us-east-1:429870640638:function:stoin-staging-tiamat-anchor-writer-v1"
+            }
+          },
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:429870640638:table/stoin-staging-tiamat-recovery-anchor-v1",
+          "Effect": "Allow",
+          "Sid": "StrongReadAndConditionalWriteOnly"
+        },
+        {
+          "Action": [
+            "logs:CreateLogStream",
+            "logs:PutLogEvents"
+          ],
+          "Resource": "arn:aws:logs:us-east-1:429870640638:log-group:/aws/lambda/stoin-staging-tiamat-anchor-writer-v1:*:*",
+          "Effect": "Allow",
+          "Sid": "WriteOwnLogsOnly"
+        }
+      ]
+    },
+    "trail_logging": true,
+    "before_boundary_probe": {
+      "first": {
+        "at": "2026-09-23T03:04:36Z",
+        "executed_version": "1",
+        "answer": {
+          "status": "installed",
+          "transition_sha256": "ad704c5bd936b856e3c35c40dd7994a94014ade117701fb5f123daf31031d896",
+          "transition_version": 1
+        }
+      },
+      "retry": {
+        "at": "2026-09-23T03:04:40Z",
+        "executed_version": "1",
+        "answer": {
+          "status": "already_installed",
+          "transition_sha256": "ad704c5bd936b856e3c35c40dd7994a94014ade117701fb5f123daf31031d896",
+          "transition_version": 1
+        }
+      },
+      "writes_in_trail": "exactly one PutItem by the writer role, 03:04:39Z; none for the retry"
+    }
+  },
+  "step_4_boundary": {
+    "stack": "tiamat-staging-recovery-anchor-v1",
+    "saved_before": {
+      "template_sha256": "66c00ec4d9c50044849a2e02128dd92bbb760d708a5aa1000a81c5e010bb310f",
+      "template_is": "commit 80745cb's template (plus a trailing blank line); this is the only template break-glass may restore",
+      "resource_policy_before": "none (PolicyNotFoundException)"
+    },
+    "change_set": "gate2-step4-writer-boundary: Modify RecoveryAnchorTable (ResourcePolicy), Modify RecoveryAnchorUpdatePolicy (PolicyDocument), Modify RecoveryAnchorReadPolicy (dynamic re-evaluation of the unchanged table ARN); no replacement",
+    "executed": "by Ray; UPDATE_COMPLETE 2026-09-23T11:17:10Z",
+    "resource_policy_after": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "OnlyTheAnchorWriterWritesItems",
+          "Effect": "Deny",
+          "Principal": "*",
+          "Action": [
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:PartiQLInsert",
+            "dynamodb:PartiQLUpdate",
+            "dynamodb:PartiQLDelete"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:429870640638:table/stoin-staging-tiamat-recovery-anchor-v1",
+          "Condition": {
+            "ArnNotEquals": {
+              "aws:PrincipalArn": "arn:aws:iam::429870640638:role/stoin-staging-tiamat-anchor-writer-v1"
+            }
+          }
+        }
+      ]
+    },
+    "coordinator_after": "inline stoin-staging-anchor-update-v1: GetItem (LeadingKeys-scoped) and DescribeTable only; inline stoin-staging-anchor-writer-invoke-v1: lambda:InvokeFunction on the live alias only; no attached managed policies"
+  },
+  "step_5_boundary_proof": {
+    "denied_writes": {
+      "administrator_workstation": {
+        "all_denied": true,
+        "caller": "arn:aws:sts::429870640638:assumed-role/AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc/fortisanima",
+        "probe_key": "ENV#staging#LEDGER#boundary-probe-1abf8905-7bb0-44dc-9bd2-1834f41d3768",
+        "results": {
+          "BatchWriteItem": "denied",
+          "DeleteItem": "denied",
+          "PartiQLInsert": "denied",
+          "PutItem": "denied",
+          "TransactWriteItems": "denied",
+          "UpdateItem": "denied"
+        }
+      },
+      "coordinator_render_job": {
+        "job": "job-daprdc0u01pc73dmrkng",
+        "caller": "arn:aws:sts::429870640638:assumed-role/tiamat-staging-recovery-coordinator/...",
+        "all_denied": true,
+        "results": "PutItem, UpdateItem, DeleteItem, BatchWriteItem, TransactWriteItems, PartiQLInsert: denied"
+      },
+      "runtime_render_job": {
+        "job": "job-daprdcad0e5s73a5no20",
+        "caller": "arn:aws:sts::429870640638:assumed-role/tiamat-staging-executor/...",
+        "all_denied": true,
+        "results": "PutItem, UpdateItem, DeleteItem, BatchWriteItem, TransactWriteItems, PartiQLInsert: denied"
+      },
+      "render_roles": "each Render job's STS caller is its service's intended role, so each service assumes its intended machine role"
+    },
+    "render_deploys": {
+      "commit": "4d80f77bd465920298f1214587deb367f9aa7256 (adds the two probe scripts and the after-boundary event to the image; the services' inert identity command and dependency lock are unchanged)",
+      "coordinator": "srv-damko3m7bikc73c1b510 dep-daprcgbtqb8s73dhj22g live",
+      "runtime": "srv-damkn2bm8hqs73dh1abg dep-daprcqrtqb8s73dhjvt0 live"
+    },
+    "after_boundary_probe_by_coordinator": {
+      "first": {
+        "job": "job-daprdq3ncjis73ffd8hg",
+        "answer": {
+          "status": "installed",
+          "transition_sha256": "313d78d1f9cc2b2543c588212b9ea7dfc6123ab906bdbce545f1684c51e4c0f6",
+          "transition_version": 1
+        }
+      },
+      "retry": {
+        "job": "job-dapre0o473hc73c0rt90",
+        "answer": {
+          "status": "already_installed",
+          "transition_sha256": "313d78d1f9cc2b2543c588212b9ea7dfc6123ab906bdbce545f1684c51e4c0f6",
+          "transition_version": 1
+        }
+      },
+      "caller": "assumed-role/tiamat-staging-recovery-coordinator for both",
+      "writes_in_trail": "exactly one PutItem by the writer role, 11:24:32Z; none for the retry",
+      "before_witness_expiry": "2026-09-23T14:43:11Z"
+    },
+    "alarm_observations": {
+      "foreign_anchor_writes": "All 18 denied writes (6 per principal, including TransactWriteItems and PartiQL as ExecuteStatement) carry resources[].ARN for the table; the metric counted 6+3+9 = 18 and the alarm went to ALARM at 11:27:11Z. The open question from the synthetic filter test is answered: denied data events carry the ARN for every write API probed.",
+      "anchor_boundary_changes": "Step 4 counted 2 (PutResourcePolicy and TagResource) and the alarm went to ALARM 11:18:52Z, OK 11:24:52Z (missing data not breaching); step 6 counted 3 (UpdateFunctionConfiguration, PublishVersion, UpdateAlias) and the alarm went to ALARM 11:28:52Z.",
+      "gap_for_review": "The coordinator role's PutRolePolicy (step 4) did not count: the boundary filter watches the table, the writer function and the writer role, not the coordinator role. This change narrowed access, and a widened coordinator grant is still refused by the table policy; recorded for review, not changed.",
+      "step_3_events": "The writer stack's own creation events precede its trail and were not expected to alarm."
+    },
+    "trail_events": [
+      {
+        "time": "2026-09-23T03:04:39Z",
+        "name": "PutItem",
+        "error": null,
+        "who": "stoin-staging-tiamat-anchor-writer-v1",
+        "key": "ENV#staging#LEDGER#1c6adab1-ea42-441b-a8d6-f4aeeeb875de",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:17:14Z",
+        "name": "TagResource",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:17:14Z",
+        "name": "PutResourcePolicy",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:17:27Z",
+        "name": "PutRolePolicy",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": false
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "BatchWriteItem",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "TransactWriteItems",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "ExecuteStatement",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "PutItem",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": "ENV#staging#LEDGER#boundary-probe-1abf8905-7bb0-44dc-9bd2-1834f41d3768",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "UpdateItem",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": "ENV#staging#LEDGER#boundary-probe-1abf8905-7bb0-44dc-9bd2-1834f41d3768",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:21:28Z",
+        "name": "DeleteItem",
+        "error": "AccessDenied",
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": "ENV#staging#LEDGER#boundary-probe-1abf8905-7bb0-44dc-9bd2-1834f41d3768",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "BatchWriteItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "TransactWriteItems",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "ExecuteStatement",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "PutItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": "ENV#staging#LEDGER#boundary-probe-5a10b519-616f-4b7f-a48b-72a3c361752f",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "UpdateItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": "ENV#staging#LEDGER#boundary-probe-5a10b519-616f-4b7f-a48b-72a3c361752f",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:39Z",
+        "name": "DeleteItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-recovery-coordinator",
+        "key": "ENV#staging#LEDGER#boundary-probe-5a10b519-616f-4b7f-a48b-72a3c361752f",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "BatchWriteItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "TransactWriteItems",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "ExecuteStatement",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": null,
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "PutItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": "ENV#staging#LEDGER#boundary-probe-25688d30-e3a9-4684-985f-ca716dbe436a",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "UpdateItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": "ENV#staging#LEDGER#boundary-probe-25688d30-e3a9-4684-985f-ca716dbe436a",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:23:40Z",
+        "name": "DeleteItem",
+        "error": "AccessDenied",
+        "who": "tiamat-staging-executor",
+        "key": "ENV#staging#LEDGER#boundary-probe-25688d30-e3a9-4684-985f-ca716dbe436a",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:24:32Z",
+        "name": "PutItem",
+        "error": null,
+        "who": "stoin-staging-tiamat-anchor-writer-v1",
+        "key": "ENV#staging#LEDGER#bef832a5-8c1b-4afa-b407-24076cf9ab2c",
+        "has_table_resource": true
+      },
+      {
+        "time": "2026-09-23T11:26:25Z",
+        "name": "UpdateFunctionConfiguration20150331v2",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": false
+      },
+      {
+        "time": "2026-09-23T11:26:33Z",
+        "name": "PublishVersion20150331",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": false
+      },
+      {
+        "time": "2026-09-23T11:26:36Z",
+        "name": "UpdateAlias20150331",
+        "error": null,
+        "who": "AWSReservedSSO_LucySecurityAdministrator_2f6b8b2d65470bdc",
+        "key": null,
+        "has_table_resource": false
+      }
+    ]
+  },
+  "step_6_probe_roots_removed": {
+    "change_set": "gate2-step6-remove-probe-roots: Modify WriterFunction (Environment), Replace WriterVersion (Description), Modify WriterAlias (FunctionVersion)",
+    "executed": "UPDATE_COMPLETE 2026-09-23T11:26Z",
+    "versions": {
+      "1": "code-7LZo... roots-d54fc569... (retained)",
+      "2": "code-7LZo... roots-d641fe3b..."
+    },
+    "live_alias": "2",
+    "verify_live_version": {
+      "anchor_keys": [
+        "ENV#staging#LEDGER#6177502f-3a93-429c-b68b-0ed726d1447f"
+      ],
+      "code_sha256": "7LZoxtlybq3sjpjd6uopwXGm6ZOuG4Xz3IaFcZF8Kso=",
+      "failures": [],
+      "roots_sha256": "d641fe3b70eeca4f3973749880e99d7d18d8cccab7bb9b199665ddd38398a948",
+      "verified": true,
+      "version": "2"
+    },
+    "removed_probe_key_answer": {
+      "executed_version": "2",
+      "answer": {
+        "status": "refused",
+        "reason": "recovery_anchor_writer_key_not_configured"
+      }
+    },
+    "probe_items": "the two probe items and no others remain in the table under disposable keys; inert"
+  },
+  "deviations": [
+    "create-stack and change sets instead of cloudformation deploy, so every stack change was reviewed before it applied.",
+    "Claude's session classifier refused the stack creation until Ray approved a-e, and refused the step 4 execution outright; Ray ran that one command.",
+    "One Render deploy attempt used a full commit hash Claude typed instead of reading it from git; Render refused it because the service was suspended. Every later deploy used git rev-parse."
+  ],
+  "open": [
+    "Ray to re-suspend tiamat-staging-recovery-coordinator and tiamat-staging-executor (the Render CLI cannot suspend).",
+    "Phase B stays blocked: pending/established transition builders for a disposable identity, an operator tool for authorize_reconciled_state, a committed trust file, a disposable Postgres ledger, and the launcher's placement on Render."
+  ]
+}
