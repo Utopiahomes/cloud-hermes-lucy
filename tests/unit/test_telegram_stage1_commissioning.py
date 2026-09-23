@@ -37,6 +37,18 @@ def test_configuration_derives_stable_content_free_binding() -> None:
     assert len(first.binding_digest) == 64
 
 
+def test_raymond_binding_is_distinct_from_utopia_for_same_bot_and_owner() -> None:
+    utopia = configuration_from_environment(_environment())
+    raymond = configuration_from_environment(
+        _environment() | {"LUCY_TELEGRAM_REALM_SLUG": "raymond"}
+    )
+    assert raymond.realm_slug == "raymond"
+    assert raymond.principal_id != utopia.principal_id
+    assert raymond.membership_id != utopia.membership_id
+    assert raymond.channel_binding_id != utopia.channel_binding_id
+    assert raymond.binding_digest != utopia.binding_digest
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -46,6 +58,7 @@ def test_configuration_derives_stable_content_free_binding() -> None:
         ("LUCY_AUTHORITY_EPOCH", "0"),
         ("LUCY_AUTHORITY_WRITER_URL", "https://example.com"),
         ("LUCY_TELEGRAM_ACTIVATION_DECISION_ID", "contains whitespace"),
+        ("LUCY_TELEGRAM_REALM_SLUG", "homes"),
     ],
 )
 def test_configuration_rejects_changed_boundary(key: str, value: str) -> None:

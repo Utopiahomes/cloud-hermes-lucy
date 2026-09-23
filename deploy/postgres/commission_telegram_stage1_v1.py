@@ -52,18 +52,21 @@ class Configuration:
     authority_ack_url: str
     authority_ack_token: str
     decision_id: str
+    realm_slug: str = "utopia"
 
     @property
     def principal_id(self) -> UUID:
-        return uuid5(NAMESPACE_URL, f"lucy:utopia:telegram-owner:{self.owner_user_id}")
+        return uuid5(NAMESPACE_URL, f"lucy:{self.realm_slug}:telegram-owner:{self.owner_user_id}")
 
     @property
     def membership_id(self) -> UUID:
-        return uuid5(NAMESPACE_URL, f"lucy:utopia:telegram-membership:{self.owner_user_id}")
+        return uuid5(
+            NAMESPACE_URL, f"lucy:{self.realm_slug}:telegram-membership:{self.owner_user_id}"
+        )
 
     @property
     def channel_binding_id(self) -> UUID:
-        return uuid5(NAMESPACE_URL, f"lucy:utopia:telegram-private:{self.bot_id}")
+        return uuid5(NAMESPACE_URL, f"lucy:{self.realm_slug}:telegram-private:{self.bot_id}")
 
     @property
     def binding_digest(self) -> str:
@@ -113,6 +116,9 @@ def configuration_from_environment(
     decision_id = _required(values, "LUCY_TELEGRAM_ACTIVATION_DECISION_ID")
     if _SAFE.fullmatch(decision_id) is None:
         raise BootstrapError("activation decision identifier is invalid")
+    realm_slug = values.get("LUCY_TELEGRAM_REALM_SLUG", "utopia")
+    if realm_slug not in {"utopia", "raymond"}:
+        raise BootstrapError("Telegram realm slug is invalid")
     try:
         config = Configuration(
             migration_url=migration_url,
@@ -129,6 +135,7 @@ def configuration_from_environment(
             authority_ack_url=ack_url,
             authority_ack_token=_required(values, "LUCY_AUTHORITY_ACK_TOKEN"),
             decision_id=decision_id,
+            realm_slug=realm_slug,
         )
     except (TypeError, ValueError) as exc:
         raise BootstrapError("Telegram commissioning identifiers are invalid") from exc
@@ -185,8 +192,8 @@ def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
             raise BootstrapError("Telegram commissioning scope or quarantine boundary differs")
         connection.execute(
             "INSERT INTO lucy.principals(id,issuer,subject,principal_kind,display_name,created_at) "
-            "VALUES(%s,'telegram',%s,'human','Utopia owner',%s) ON CONFLICT DO NOTHING",
-            (config.principal_id, str(config.owner_user_id), now),
+            "VALUES(%s,'telegram',%s,'human',%s,%s) ON CONFLICT DO NOTHING",
+            (config.principal_id, str(config.owner_user_id), f"{config.realm_slug} owner", now),
         )
         connection.execute(
             "INSERT INTO lucy.node_memberships("
@@ -196,9 +203,16 @@ def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
         )
         connection.execute(
             "INSERT INTO lucy.channel_bindings(id,hostname,node_id,tenure_id,workspace_id,"
-            "channel_kind,active,created_at) VALUES(%s,'telegram.private.utopia.internal',"
+            "channel_kind,active,created_at) VALUES(%s,%s,"
             "%s,%s,%s,'internal',false,%s) ON CONFLICT DO NOTHING",
-            (config.channel_binding_id, config.node_id, config.tenure_id, config.workspace_id, now),
+            (
+                config.channel_binding_id,
+                f"telegram.private.{config.realm_slug}.internal",
+                config.node_id,
+                config.tenure_id,
+                config.workspace_id,
+                now,
+            ),
         )
         connection.execute(
             "INSERT INTO lucy.telegram_channel_bindings_v1(channel_binding_id,bot_id,"
