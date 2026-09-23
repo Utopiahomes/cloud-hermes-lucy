@@ -24,8 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEST_DATABASE_PREFIX = "tiamat_test_d1"
 EXECUTION_TABLES = (
     "tiamat.spending_partitions, tiamat.grant_releases, tiamat.execution_records, "
-    "tiamat.execution_idempotency_aliases, tiamat.jti_replay, "
-    "tiamat.financial_events, tiamat.route_rate_quarantines"
+    "tiamat.jti_replay, tiamat.financial_events, tiamat.route_rate_quarantines"
 )
 
 
@@ -135,6 +134,18 @@ def disposable_roles() -> DisposableRoles:
             f"GRANT SELECT, INSERT, UPDATE, DELETE ON {EXECUTION_TABLES} "
             "TO tiamat_runtime, tiamat_recovery"
         )
+        # As deployed (D5): admission reads and inserts aliases and never changes one; recovery
+        # holds every table.
+        owner.execute("REVOKE ALL ON tiamat.execution_idempotency_aliases FROM tiamat_runtime")
+        owner.execute(
+            "GRANT SELECT, INSERT ON tiamat.execution_idempotency_aliases TO tiamat_runtime"
+        )
+        owner.execute(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON tiamat.execution_idempotency_aliases "
+            "TO tiamat_recovery"
+        )
+        # As deployed (D4): the release runner confirms the ledger identity.
+        owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_release_manager")
         _own_share_locked_gate_reader(owner)
     recovery_url = _url_for(owner_url, "tiamat_recovery", recovery_password)
     # The gate reader is recovery-owned once transferred, so only its owner can extend it to the

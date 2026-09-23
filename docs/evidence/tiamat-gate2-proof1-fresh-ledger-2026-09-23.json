@@ -267,5 +267,59 @@
     "Render's managed owner may hold memberships a plain CREATEROLE login lacks; on this cluster the recovery login could call pg_control_system() and pg_current_wal_flush_lsn() by default, as the Render P1 probe also found.",
     "No admission ran, so the runtime role's missing grant on execution_idempotency_aliases (deployment sequence D5) is not exercised; proof 2 will need it fixed.",
     "Release activation, the served process and a synthetic request are proof 2."
-  ]
+  ],
+  "proof2_local_preparation": {
+    "requested_by": "Lyra: fix D5 and prepare the one-off release runner locally against the Control decisions; no provisioning, deployment or inventory install",
+    "d5": "deploy/postgres/tiamat_roles.sql.example grants tiamat_runtime SELECT, INSERT on tiamat.execution_idempotency_aliases (admission reads and inserts; never updates or deletes). On a fresh bootstrap the runtime holds exactly SELECT and INSERT there.",
+    "d4": {
+      "owner_step": "deploy/postgres/enable_tiamat_release_manager_login_v1.py: disposable ledger only, exact confirmation, least-privilege attributes checked, login verified over TLS, password never printed",
+      "runner": "src/lucy/shared_execution/release_runner.py and deploy/postgres/tiamat_release_runner_v1.py: release-manager login over TLS on the named ledger only; the active inventory re-verified against the approved RELEASE-root pin and the release under it immediately before each write; staged bytes, succession, an open gate and (for a grant) active policy and profile heads required before activation; previews by default; exact digest confirmation; readback after each write",
+      "template": "the release manager gains SELECT on tiamat.ledger_identity so the runner can confirm the ledger it acts on",
+      "operational_rule_found": "grant_releases is keyed by release ID across every environment of a database: a reused grant release ID conflicts silently at staging and the activation then finds no partition to project onto"
+    },
+    "fresh_cluster_run": "Rerun on a newly created PostgreSQL 16.15 cluster after these changes: the full proof-1 path, then the D5 privilege check, the owner's login step and the runner's command line staging and activating policy, profile and grant after continuity was established; the partition was funded and unblocked by the grant.",
+    "fresh_cluster_final_report": {
+      "anchor_floor": {
+        "transition_sha256": "6dfc9aecd975adc9258ca0a94ff97a068c4f08862abb1e3275dfaef515d845f9",
+        "transition_version": 3
+      },
+      "beacon": {
+        "flushed_wal_lsn": "0/19EFD10",
+        "system_identifier": "7688842339134095398",
+        "timeline_id": 1
+      },
+      "block_reason": null,
+      "coordinator_generation": 2,
+      "counts": {
+        "execution_idempotency_aliases": 0,
+        "execution_records": 0,
+        "financial_events": 0,
+        "grant_releases": 0,
+        "release_heads": 0,
+        "route_rate_quarantines": 0,
+        "signed_releases": 0,
+        "spending_partitions": 1
+      },
+      "dispatch_blocked": false,
+      "environment": "staging",
+      "ledger_id": "ea90bfa4-2192-4696-a24e-62786cc6a9e8",
+      "recovery_generation": 2,
+      "retained_checkpoints": [
+        {
+          "checkpoint_sha256": "39302b2ebedf29eaa819e21b29746dfe655f658fa84fe12dd546e9fabd001990",
+          "recovery_generation": 2
+        }
+      ],
+      "storage_epoch": "5281aa28-d916-4c9e-8aec-ba1f56862241",
+      "trust_inventories": [
+        {
+          "inventory_generation": 1,
+          "jws_sha256": "f7309d44804c90183cc5223339c19c6621617548d335dbb0eda877a47352103c",
+          "state": "active"
+        }
+      ]
+    },
+    "tests": "tests/integration/test_tiamat_release_runner.py (11 cases on the disposable test ledger, passed twice), tests/integration/test_tiamat_fresh_ledger_proof.py (extended)",
+    "not_done": "No provisioning, deployment, signing, pin or inventory install. D6 (the approved RELEASE-root pin) is Control's."
+  }
 }

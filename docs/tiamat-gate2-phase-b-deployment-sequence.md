@@ -24,8 +24,8 @@ This does not establish the hosted Render path or real AWS writer behavior for t
 | D1 | Where the disposable ledger's credentials live on Render | Separate disposable recovery runner and synthetic served service, each pinned to its own ledger and IAM role; never re-point the commissioned coordinator. Shared-writer policy extension requires its own reviewed change set and execution approval. | Control design chosen; provisioning pending. |
 | D2 | Environment name | Use `staging` with the disposable database's own ledger ID and a noncolliding anchor key, within the writer's `ENV#staging#LEDGER#*` scope. | Chosen. |
 | D3 | Fresh schema path | Reuse the Proof 1 sequence: bootstrap to `0006`, owner migration to `0017`, finalizer, initialize blocked, capability check, then empty-ledger ceremony. | Passed locally twice; Render execution pending. |
-| D4 | Control's release-manager boundary | Activate the narrowly granted login only on the disposable ledger and use a separate Control-operated one-off runner with exact signed artifacts, current verification and readback. No recovery or signing credentials in that runner. | Design chosen; runner implementation and review pending. |
-| D5 | Runtime grant gap | Grant the runtime only the access admission needs on `execution_idempotency_aliases` (`postgres_ledger.py:617`), then review and test it before provisioning. | Claude implementation pending. |
+| D4 | Control's release-manager boundary | Activate the narrowly granted login only on the disposable ledger and use a separate Control-operated one-off runner with exact signed artifacts, current verification and readback. No recovery or signing credentials in that runner. | Runner and owner login step implemented and tested locally (`src/lucy/shared_execution/release_runner.py`, `deploy/postgres/tiamat_release_runner_v1.py`, `deploy/postgres/enable_tiamat_release_manager_login_v1.py`); review pending. |
+| D5 | Runtime grant gap | Grant the runtime only the access admission needs on `execution_idempotency_aliases` (`postgres_ledger.py:617`), then review and test it before provisioning. | Implemented: the role template grants the runtime `SELECT, INSERT` only; proven on a fresh bootstrap. Review pending. |
 | D6 | Release-root pin | `deploy/postgres/tiamat-staging-release-root-pin.json` | Offline RELEASE-root candidate, Control approval of its exact key ID and raw-public-key fingerprint, then a committed pin. No approved pin exists yet; blocks first-inventory. |
 
 ## 2. Provision the disposable ledger (Render)
@@ -95,13 +95,32 @@ starts, the recovery runner runs the launcher:
 
     python deploy/postgres/issue_tiamat_startup_attestation_v1.py --trust-package trust.json --expected-ledger-id <id>
 
-## 6. Section 9 — signed configuration and one synthetic request (blocked on D4)
+## 6. Section 9 — signed configuration and one synthetic request
 
-Control stages and activates the signed profile, privacy policy and spending grant through the
-release manager; then one synthetic request, and one restart recorded.
+6.1 Owner boundary, disposable ledger only (D4): give the release manager a login, verified
+over TLS; its password goes only to the release runner's secret.
+
+    TIAMAT_MIGRATION_DATABASE_URL=<owner url> TIAMAT_RELEASE_MANAGER_PASSWORD=<secret> python deploy/postgres/enable_tiamat_release_manager_login_v1.py --expected-ledger-id <id> --confirm-disposable-login release-manager-login:<database>:<id>
+
+6.2 Control's one-off release runner (`TIAMAT_RELEASE_MANAGER_DATABASE_URL` only), after checklist step 7.7 has
+installed `continuity_established`: stage then activate, in this order, the privacy policy, the
+execution profile, then the spending grant. Each command previews first; `--execute` needs the
+release's exact digest. Before activation the runner re-reads the active inventory, verifies it
+against the approved RELEASE-root pin (D6) and the release under it now, requires the exact staged
+bytes, succession, an open gate and, for the grant, active policy and profile heads, then reads
+the head back.
+
+    python deploy/postgres/tiamat_release_runner_v1.py stage|activate --environment staging --expected-ledger-id <id> --issuer <issuer> --caller-id <c> --realm <r> --release-root-pin deploy/postgres/tiamat-staging-release-root-pin.json --release-root-key-id <id> --release-root-public-key-b64 <key> --release-jws-file <file>   # then --execute --confirm-jws-sha256 <digest>
+
+A grant's release ID must be unique across every environment of the database (`grant_releases`
+is keyed by release ID alone), and a grant stages only once its partition exists (checklist step 7.8).
+
+6.3 One synthetic request through the signed configuration; one restart and re-attestation
+recorded. The runner's credential is then removed and the runner suspended.
 
 ## 7. Image changes needed
 
 The Render image must also copy `finalize_tiamat_d1_v1.py`, `issue_tiamat_startup_attestation_v1.py`,
 `prepare/install_tiamat_reconciliation_step_v1.py` (install only; prepare stays offline) and the
-committed trust and pin files. `tiamat_reconciliation_ledger_v1.py` is added in `0794e61`.
+committed trust and pin files. `tiamat_reconciliation_ledger_v1.py` is added in `0794e61`; the
+release runner and the owner's login step are added with D4.

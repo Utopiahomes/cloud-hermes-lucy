@@ -25,6 +25,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   tiamat.financial_events
 TO tiamat_runtime;
 GRANT SELECT, UPDATE ON tiamat.restore_gate TO tiamat_runtime;
+-- Admission records and resolves an execution's idempotency aliases; it never changes one.
+GRANT SELECT, INSERT ON tiamat.execution_idempotency_aliases TO tiamat_runtime;
 -- Only the migration/recovery boundary reads the database-global ledger identity. Serving
 -- processes receive neither this grant nor any ability to select another environment's state.
 GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery;
@@ -37,6 +39,9 @@ GRANT SELECT, INSERT, UPDATE ON
   tiamat.release_heads
 TO tiamat_release_manager;
 GRANT SELECT ON tiamat.restore_gate TO tiamat_release_manager;
+-- Control's release runner confirms it is acting on the ledger the operator named. Read only;
+-- the release manager is Control's boundary, not a serving process.
+GRANT SELECT ON tiamat.ledger_identity TO tiamat_release_manager;
 -- Staging a signed spending grant records it; activating one projects it onto its partition.
 GRANT SELECT, INSERT ON tiamat.grant_releases TO tiamat_release_manager;
 GRANT UPDATE (activated_at) ON tiamat.grant_releases TO tiamat_release_manager;

@@ -14,6 +14,8 @@ localhost or 127.0.0.1 only) that has never held the Tiamat roles; they are clus
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -29,6 +31,9 @@ from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from tests.integration.test_tiamat_gate2_operator_cli import _run, _script, run_phase_b_ceremony
+from tests.integration.test_tiamat_release_runner import _grant, _policy_bytes, _profile_bytes
+from tests.integration.tiamat_signed_trust import AUTHORITY_ISSUER, SyntheticReleaseTrust
+from tests.integration.tiamat_signed_trust import ROOT_KEY_ID as RELEASE_ROOT_KEY_ID
 
 ROOT = Path(__file__).resolve().parents[2]
 DATABASE = "tiamat_fresh"
@@ -169,6 +174,7 @@ def test_a_fresh_ledger_provisions_to_head_and_completes_the_ceremony(
     )
 
     # Sections 3-4 and 7.3-7.8: the whole ceremony on this ledger, then the claimant.
+    release = SyntheticReleaseTrust("staging", f"caller-{uuid4().hex[:8]}", "g2c-realm")
     final = run_phase_b_ceremony(
         run,
         monkeypatch,
@@ -178,9 +184,103 @@ def test_a_fresh_ledger_provisions_to_head_and_completes_the_ceremony(
         storage_epoch=storage_epoch,
         recovery_url=recovery_url,
         day_zero_checkpoint=checkpoint,
+        release=release,
     )
     assert (final["dispatch_blocked"], final["recovery_generation"]) == (False, 2)
     assert final["anchor_floor"]["transition_version"] == 3
+
+    # D5: the freshly bootstrapped runtime role holds exactly what admission needs on aliases.
+    runtime_url = (
+        make_url(owner_url)
+        .set(username="tiamat_runtime", password=runtime_password)
+        .render_as_string(hide_password=False)
+    )
+    with psycopg.connect(runtime_url) as runtime:
+        privileges = runtime.execute(
+            """
+            SELECT pg_catalog.has_table_privilege('tiamat.execution_idempotency_aliases', p)
+            FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS p
+            """
+        ).fetchall()
+    assert [bool(row[0]) for row in privileges] == [True, True, False, False]
+
+    # D4: the owner gives this disposable ledger's release manager a login, verified over TLS.
+    manager_password = token_urlsafe(32)
+    monkeypatch.setenv("TIAMAT_MIGRATION_DATABASE_URL", owner_url)
+    monkeypatch.setenv("TIAMAT_RELEASE_MANAGER_PASSWORD", manager_password)
+    enabled = run(
+        "deploy/postgres/enable_tiamat_release_manager_login_v1.py",
+        "--expected-ledger-id", str(ledger_id),
+        "--confirm-disposable-login", f"release-manager-login:{DATABASE}:{ledger_id}",
+    )  # fmt: skip
+    assert enabled["tls"] is True and enabled["password_recorded"] is False
+    monkeypatch.delenv("TIAMAT_MIGRATION_DATABASE_URL")
+    monkeypatch.delenv("TIAMAT_RELEASE_MANAGER_PASSWORD")
+    monkeypatch.setenv(
+        "TIAMAT_RELEASE_MANAGER_DATABASE_URL",
+        make_url(owner_url)
+        .set(username="tiamat_release_manager", password=manager_password)
+        .render_as_string(hide_password=False),
+    )
+
+    # Section 9, Control's side: the runner stages and activates policy, profile, then grant,
+    # after continuity is established, each verified now against the approved root pin.
+    release_public = base64.b64encode(release.root_public_key.public_bytes_raw()).decode()
+    pin = tmp_path / "runner-release-root-pin.json"
+    pin.write_text(
+        json.dumps(
+            {
+                "format_version": "1",
+                "environment": "staging",
+                "root_key_id": RELEASE_ROOT_KEY_ID,
+                "root_public_key_sha256": hashlib.sha256(
+                    release.root_public_key.public_bytes_raw()
+                ).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = [
+        "deploy/postgres/tiamat_release_runner_v1.py",
+        "--environment", "staging",
+        "--expected-ledger-id", str(ledger_id),
+        "--issuer", AUTHORITY_ISSUER,
+        "--caller-id", release.caller_id,
+        "--realm", "g2c-realm",
+        "--release-root-pin", str(pin),
+        "--release-root-key-id", RELEASE_ROOT_KEY_ID,
+        "--release-root-public-key-b64", release_public,
+    ]  # fmt: skip
+    grant_id = f"grant-cli-{uuid4().hex[:8]}"
+    for name, exact in (
+        ("policy", _policy_bytes(release, "policy-cli")),
+        ("profile", _profile_bytes(release, "profile-cli", "policy-cli")),
+        ("grant", _grant(release, grant_id, partition="partition-cli")),
+    ):
+        path = tmp_path / f"{name}.jws"
+        path.write_bytes(exact)
+        staged = run(runner[0], "stage", *runner[1:], "--release-jws-file", str(path))
+        assert staged["status"] == "verified_not_written"
+        digest = str(staged["jws_sha256"])
+        for command, done in (
+            ("stage", "staged_and_read_back"),
+            ("activate", "activated_and_read_back"),
+        ):
+            result = run(
+                runner[0], command, *runner[1:],
+                "--release-jws-file", str(path),
+                "--execute", "--confirm-jws-sha256", digest,
+            )  # fmt: skip
+            assert result["status"] == done
+    with psycopg.connect(recovery_url) as recovery:
+        partition = recovery.execute(
+            """
+            SELECT blocked, allowance_microusd, active_grant_release_id
+            FROM tiamat.spending_partitions
+            WHERE environment = 'staging' AND partition_id = 'partition-cli'
+            """
+        ).fetchone()
+    assert partition is not None and tuple(partition) == (False, 20_000, grant_id)
 
     evidence_path = os.environ.get("TIAMAT_FRESH_EVIDENCE_PATH")
     if evidence_path:

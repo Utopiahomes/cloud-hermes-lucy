@@ -144,6 +144,7 @@ def run_phase_b_ceremony(
     storage_epoch: UUID,
     recovery_url: str,
     day_zero_checkpoint: Path,
+    release: SyntheticReleaseTrust | None = None,
 ) -> dict[str, Any]:
     """Every Phase B command in order, on an initialized, blocked, empty ledger at generation 1.
 
@@ -218,12 +219,15 @@ def run_phase_b_ceremony(
     assert installed["status"] == "installed_and_verified" and lambda_client.invocations == 1
 
     # Step 7.3: the first release inventory, authenticated by the approved pin, gate blocked.
-    release = SyntheticReleaseTrust(environment, f"caller-{uuid4().hex[:8]}", "g2c-realm")
+    release = release or SyntheticReleaseTrust(
+        environment, f"caller-{uuid4().hex[:8]}", "g2c-realm"
+    )
     inventory = tmp_path / "release-inventory.jws"
     inventory.write_bytes(
         release.inventory_jws(
             [
                 ("execution_profile", "profile-cli"),
+                ("privacy_policy", "policy-cli"),
                 ("spending_grant", "partition-cli"),
             ]
         )

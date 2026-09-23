@@ -26,7 +26,6 @@ Reads ``TIAMAT_RECOVERY_DATABASE_URL``; it must never be given to a serving proc
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -35,7 +34,6 @@ from pathlib import Path
 from uuid import UUID
 
 import psycopg
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from lucy.shared_execution.recovery import (
     authorize_recovery_generation,
@@ -52,6 +50,7 @@ from lucy.shared_execution.recovery_ledger_report import (
     read_ledger_recovery_state,
     read_ledger_schema_readback,
 )
+from lucy.shared_execution.release_runner import release_root_from_pin
 from lucy.shared_execution.signed_releases import verify_trust_inventory
 
 
@@ -89,34 +88,6 @@ def bound_checkpoint_beacon(database_url: str, *, environment: str) -> dict[str,
         "flushed_wal_lsn": beacon.flushed_wal_lsn,
         "checkpoint_digest": beacon.checkpoint_digest,
     }
-
-
-def release_root_from_pin(
-    pin: dict[str, object], *, environment: str, root_key_id: str, public_key_b64: str
-) -> Ed25519PublicKey:
-    """Authenticate the supplied release root key against the approved, committed pin.
-
-    The pin names the environment, the root key ID and the SHA-256 fingerprint Control approved.
-    The key's own digest is computed only to compare with that independent fingerprint.
-    """
-
-    if not isinstance(pin, dict) or set(pin) != {
-        "format_version",
-        "environment",
-        "root_key_id",
-        "root_public_key_sha256",
-    }:
-        raise ValueError("release root pin shape is invalid")
-    if (
-        pin["format_version"] != "1"
-        or pin["environment"] != environment
-        or pin["root_key_id"] != root_key_id
-    ):
-        raise ValueError("release root pin does not name this environment and root key")
-    raw = base64.b64decode(public_key_b64, validate=True)
-    if hashlib.sha256(raw).hexdigest() != pin["root_public_key_sha256"]:
-        raise ValueError("release root public key does not match the approved pin")
-    return Ed25519PublicKey.from_public_bytes(raw)
 
 
 def main() -> None:
