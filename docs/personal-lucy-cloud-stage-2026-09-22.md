@@ -834,3 +834,25 @@ logs also contained `startup_failed` during rolling replacement, followed by
 the successful startup events. The live Telegram answer after this fix is
 **not yet verified**. Ask Ray to repeat the same `Gate` question and inspect
 the actual reply before treating recall as commissioned.
+
+## Live answer reviewed; memory v2 design proposed (2026-09-23)
+
+Ray repeated the `Gate`/`Magician` Telegram question. The reply was delivered
+as normal prose with citation labels, confirming that the raw tool-call markup
+failure did not recur on this turn. Semantic review found a partial result:
+`Trial Gate` was distinguished from the ambiguous `Guardian Locked` second
+tag, but Lucy falsely said no Magician label existed and described a past
+minimum tag as “re-confirmed” today. The protected reviewed interpretations
+contain Ray's explicit historical confirmation of `Universal Aid` as The
+Magician's tag, and mark present applicability `not_checked`.
+
+Ray identified this as a scale/architecture concern and shifted the next step
+from a narrow Telegram wording fix to designing advanced memory before broader
+import. `docs/personal-lucy-memory-v2-proposal.md` records the read-only v2
+proposal: multi-topic planning, hybrid candidate retrieval, version/relationship
+coverage, one citation map per answer, temporal and absence checks, and a
+32-item evaluation gate before backfill. The current SQL uses one literal
+substring and at most five confidence/recency-ordered claims; the explicit
+Telegram prefetch uses only the quoted topic. No further gateway code or cloud
+state was changed for the v2 proposal. The live recall pilot remains
+experimental until the multi-topic and temporal answer gate passes.
