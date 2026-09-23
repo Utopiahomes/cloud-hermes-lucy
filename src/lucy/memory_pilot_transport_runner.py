@@ -109,9 +109,15 @@ class _TransportCompletion:
                 build_candidate_review_artifact(output, candidates) if candidates else None
             )
         except Exception as exc:
+            reason = str(exc)
+            if reason not in {
+                "candidate source is outside the exact archived manifest",
+                "candidate quote must occur exactly once in its source",
+            }:
+                reason = "other"
             print(
                 "private pilot completion rejected: "
-                f"{validation_phase}/{type(exc).__name__}",
+                f"{validation_phase}/{type(exc).__name__}/{reason}",
                 flush=True,
             )
             raise MemoryExtractionCompletionRejected(
