@@ -195,6 +195,7 @@ def test_established_reuses_the_pending_witness_and_binds_the_beacon(chain: Any)
         ("not_installed", "checkpoint"),
         ("pending_head", "reconciliation_requires_quarantined_head"),
         ("other_root", "recovery_witness_inventory_invalid"),
+        ("settlement", "reconciliation_checkpoint_projection_unsupported"),
     ],
 )
 def test_pending_is_signed_only_from_quarantine_to_a_higher_installed_checkpoint(
@@ -215,6 +216,9 @@ def test_pending_is_signed_only_from_quarantine_to_a_higher_installed_checkpoint
         )
     elif change == "other_root":
         signing_root = Ed25519PrivateKey.generate()
+    elif change == "settlement":
+        # Only the empty-ledger projection may be signed until populated ones are specified.
+        checkpoint = _checkpoint(identity, positions=[_position()])
     if change == "not_installed":
         with pytest.raises(ValueError, match=reason):
             _pending(
@@ -471,3 +475,51 @@ def test_an_unclear_invocation_is_resolved_by_one_readback() -> None:
     verified2 = _verify(_pending(identity2, root, head2), now=PENDING_AT)
     with pytest.raises(RecoveryAnchorRejected, match="writer_unavailable"):
         install_through_writer(_store(table2, verified2), failed, verified2)
+
+
+class _NeverRead:
+    def read(self, key: Any) -> Any:
+        raise AssertionError("the anchor must not be read for an unsupported projection")
+
+
+def test_authorization_refuses_an_unsupported_projection_on_its_own() -> None:
+    """Defense in depth: the signer refuses these checkpoints, and so does authorization, before
+    reading the anchor or connecting to any database."""
+
+    from lucy.shared_execution.recovery import RecoveryRejected, authorize_recovery_generation
+    from lucy.shared_execution.recovery_anchor import (
+        VerifiedAnchorTransition,
+        VerifiedRecoveryWitness,
+    )
+
+    identity = _identity()
+    checkpoint = _checkpoint(identity, positions=[_position()])
+    witness = VerifiedRecoveryWitness(
+        identity=identity,
+        recovery_generation=2,
+        witness_revision=1,
+        status="reconciled",
+        checkpoint_digest=checkpoint.checkpoint_sha256,
+        release_heads_sha256=checkpoint.release_heads_sha256,
+        checkpoint_settlement_position_sha256=checkpoint.settlement_position_sha256,
+        witness_inventory_digest="e" * 64,
+        exact_jws=b"witness",
+        not_before=NOW,
+        not_after=NOW + timedelta(hours=1),
+    )
+    pending = VerifiedAnchorTransition(
+        witness=witness,
+        transition_version=2,
+        previous_transition_sha256="a" * 64,
+        continuity="recovery_pending",
+        beacon=None,
+        exact_jws=b"transition",
+    )
+    with pytest.raises(RecoveryRejected, match="settlement_projection_unsupported"):
+        authorize_recovery_generation(
+            "postgresql://unused.invalid/never",
+            anchor=_NeverRead(),
+            authorized=pending,
+            checkpoint=checkpoint,
+            source_recovery_generation=1,
+        )

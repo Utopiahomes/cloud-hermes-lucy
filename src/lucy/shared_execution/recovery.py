@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 import psycopg
@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from psycopg.types.json import Jsonb
 
 from lucy.shared_execution.recovery_anchor import (
+    RecoveryAnchorKey,
     RecoveryAnchorRejected,
     VerifiedAnchorTransition,
     require_monotonic_anchor_floor,
@@ -469,6 +470,7 @@ def install_first_release_inventory(
     environment: str,
     expected_ledger_id: UUID,
     expected_storage_epoch: UUID,
+    expected_recovery_generation: int,
     exact_jws: bytes,
     release_root_key_id: str,
     release_root_public_key: Ed25519PublicKey,
@@ -480,8 +482,9 @@ def install_first_release_inventory(
     an open gate. This is that one-time step, not a general exception to the blocked-gate rule:
 
     - the exact bytes verify against the pinned release root as generation 1 with no predecessor;
-    - in one transaction, the gate is locked and must be blocked, of this epoch, on this ledger,
-      and never reconciled (no retained checkpoint);
+    - in one transaction, the gate is locked and must be blocked, of this epoch and of the
+      recovery generation the reviewer read back, on this ledger, and never reconciled: no
+      retained checkpoint and no startup claimant was ever issued for the environment;
     - no inventory has ever been active, and the only staged one, if any, is these exact bytes;
     - the ledger's financial and release history is empty;
     - the inventory is activated, stamped with the gate's current generation, and dispatch stays
@@ -507,25 +510,34 @@ def install_first_release_inventory(
             expected_ledger_id=expected_ledger_id,
             expected_storage_epoch=expected_storage_epoch,
         )
-        retained = connection.execute(
-            "SELECT count(*) FROM tiamat.recovery_checkpoints WHERE environment = %s",
-            (environment,),
-        ).fetchone()
-        if retained is None or int(retained[0]) != 0:
-            raise RecoveryRejected("first_inventory_ledger_already_reconciled")
+        if gate.recovery_generation != expected_recovery_generation:
+            raise RecoveryRejected("first_inventory_generation_differs")
+        for evidence in ("recovery_checkpoints", "startup_attestations"):
+            # A retained checkpoint or any claimant proves the gate was once authorized.
+            row = connection.execute(
+                f"SELECT count(*) FROM tiamat.{evidence} WHERE environment = %s",  # noqa: S608
+                (environment,),
+            ).fetchone()
+            if row is None or int(row[0]) != 0:
+                raise RecoveryRejected("first_inventory_ledger_already_reconciled")
         rows = connection.execute(
             """
-            SELECT inventory_generation, state, jws_sha256, exact_jws
+            SELECT inventory_generation, state, jws_sha256, exact_jws, root_key_id
             FROM tiamat.trust_inventories
             WHERE environment = %s
             FOR UPDATE
             """,
             (environment,),
         ).fetchall()
-        for generation, state, digest, stored in rows:
+        for generation, state, digest, stored, root_key_id in rows:
             if state != "staged":
                 raise RecoveryRejected("first_inventory_prior_inventory_activated")
-            if int(generation) != 1 or str(digest) != jws_sha256 or bytes(stored) != exact_jws:
+            if (
+                int(generation) != 1
+                or str(digest) != jws_sha256
+                or bytes(stored) != exact_jws
+                or str(root_key_id) != inventory.root_key_id
+            ):
                 raise RecoveryRejected("first_inventory_staged_candidate_differs")
         _require_empty_financial_history(connection, environment)
         if not rows:
@@ -564,18 +576,27 @@ class AuthorizedRecovery:
     anchor_floor: AnchorFloorRecord
 
 
+class InstalledAnchorReader(Protocol):
+    def read(self, key: RecoveryAnchorKey) -> VerifiedAnchorTransition: ...
+
+
 def authorize_recovery_generation(
     database_url: str,
     *,
+    anchor: InstalledAnchorReader,
     authorized: VerifiedAnchorTransition,
     checkpoint: RecoveryCheckpoint,
     source_recovery_generation: int,
 ) -> AuthorizedRecovery:
     """Draft 0.5 section 7 step 6: authorize an externally authorized generation jump.
 
-    ``authorized`` is the exact-byte verified ``recovery_pending`` head now installed on the
-    external anchor. Its reconciled witness names the target generation and all three checkpoint
-    digests; ``source_recovery_generation`` is the database generation the reviewer observed.
+    ``authorized`` is the exact-byte verified ``recovery_pending`` step, and ``anchor`` must
+    strong-read it back as the external anchor's current head immediately before the
+    transaction: a verified step never installed must not open a gate or pin a floor. A newer
+    concurrent quarantine after that read still defeats the next compare-and-swap and keeps
+    serving blocked (section 7 step 7). Its reconciled witness names the target generation and
+    all three checkpoint digests; ``source_recovery_generation`` is the database generation the
+    reviewer observed.
     The target must equal the witness's generation and exceed the source; there is no ``+ 1``
     rule. In one transaction the gate is locked and checked, the checkpoint is verified against the
     actual ledger and bound immutably, authority is restamped, the anchor floor advances to the
@@ -618,6 +639,12 @@ def authorize_recovery_generation(
     inventory = recomputed.object["release_inventory"]
     assert isinstance(inventory, dict)
     floor = AnchorFloorRecord(authorized.transition_version, authorized.exact_sha256)
+    try:
+        head = anchor.read(identity.key)
+    except (RecoveryAnchorRejected, ValueError) as exc:
+        raise RecoveryRejected("recovery_anchor_head_unavailable") from exc
+    if head.exact_sha256 != authorized.exact_sha256:
+        raise RecoveryRejected("recovery_anchor_head_is_not_the_pending_step")
     with psycopg.connect(database_url) as connection, connection.transaction():
         gate = _lock_blocked_gate(
             connection,

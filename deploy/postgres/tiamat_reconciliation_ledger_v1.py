@@ -96,6 +96,7 @@ def main() -> None:
     first = commands.add_parser("first-inventory")
     first.add_argument("--expected-ledger-id", type=UUID, required=True)
     first.add_argument("--expected-storage-epoch", type=UUID, required=True)
+    first.add_argument("--expected-recovery-generation", type=int, required=True)
     first.add_argument("--inventory-jws-file", type=Path, required=True)
     first.add_argument("--release-root-key-id", required=True)
     first.add_argument("--release-root-public-key-b64", required=True)
@@ -150,6 +151,7 @@ def main() -> None:
                 environment=args.environment,
                 expected_ledger_id=args.expected_ledger_id,
                 expected_storage_epoch=args.expected_storage_epoch,
+                expected_recovery_generation=args.expected_recovery_generation,
                 exact_jws=exact,
                 release_root_key_id=args.release_root_key_id,
                 release_root_public_key=root,
@@ -180,13 +182,10 @@ def main() -> None:
                 or args.confirm_checkpoint_sha256 != verified.step.checkpoint.checkpoint_sha256
             ):
                 raise ValueError("confirm the verified target generation and checkpoint digest")
-            head = dynamodb_recovery_anchor_from_environment(verified.decoder()).read(
-                verified.step.identity.key
-            )
-            if head.exact_sha256 != verified.candidate.exact_sha256:
-                raise ValueError("the external anchor head is not the verified pending step")
+            # The strong read of the anchor's head happens inside the authorization itself.
             authorized = authorize_recovery_generation(
                 url,
+                anchor=dynamodb_recovery_anchor_from_environment(verified.decoder()),
                 authorized=verified.candidate,
                 checkpoint=verified.step.checkpoint,
                 source_recovery_generation=args.source_recovery_generation,

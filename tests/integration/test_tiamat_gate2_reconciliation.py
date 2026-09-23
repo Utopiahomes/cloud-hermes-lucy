@@ -33,7 +33,10 @@ from lucy.shared_execution.recovery_anchor import (
     PostgresContinuityBeaconReader,
     RecoveryAnchorIdentity,
 )
-from lucy.shared_execution.recovery_anchor_commissioning import build_quarantined_bootstrap
+from lucy.shared_execution.recovery_anchor_commissioning import (
+    build_continued_quarantine_successor,
+    build_quarantined_bootstrap,
+)
 from lucy.shared_execution.recovery_anchor_dynamodb import DynamoDbExternalRecoveryAnchor
 from lucy.shared_execution.recovery_anchor_reconciliation import (
     AnchorHead,
@@ -101,6 +104,7 @@ class _Ledger:
             environment=self.environment,
             expected_ledger_id=self.identity.ledger_id,
             expected_storage_epoch=self.identity.storage_epoch,
+            expected_recovery_generation=1,
             exact_jws=exact_jws or self.first_inventory_jws(),
             release_root_key_id=RELEASE_ROOT_KEY_ID,
             release_root_public_key=self.release.root_public_key,
@@ -130,17 +134,20 @@ class _Ledger:
             expected_ceremony=step.ceremony,
         )
 
-    def install(self, verified: VerifiedReconciliationStep) -> str:
-        store = DynamoDbExternalRecoveryAnchor(
+    def store(self, verified: VerifiedReconciliationStep) -> DynamoDbExternalRecoveryAnchor:
+        return DynamoDbExternalRecoveryAnchor(
             client=self.table, table_name=TABLE, decode_transition=verified.decoder()
         )
-        return install_through_writer(store, self.writer.write, verified)
+
+    def install(self, verified: VerifiedReconciliationStep) -> str:
+        return install_through_writer(self.store(verified), self.writer.write, verified)
 
     def authorize(
         self, verified: VerifiedReconciliationStep, *, source: int = 1, checkpoint: Any = None
     ) -> Any:
         return authorize_recovery_generation(
             self.roles.recovery,
+            anchor=self.store(verified),
             authorized=verified.candidate,
             checkpoint=checkpoint or verified.step.checkpoint,
             source_recovery_generation=source,
@@ -370,6 +377,7 @@ def _generation_two(ledger: _Ledger) -> bytes:
         ("staged_other_bytes", "first_inventory_staged_candidate_differs"),
         ("financial_history", "recovery_ledger_financial_state_unsupported"),
         ("already_reconciled", "first_inventory_ledger_already_reconciled"),
+        ("other_generation", "first_inventory_generation_differs"),
     ],
 )
 def test_the_first_inventory_refuses_invalid_preconditions(
@@ -378,7 +386,10 @@ def test_the_first_inventory_refuses_invalid_preconditions(
     exact = ledger.first_inventory_jws()
     epoch, ledger_id = ledger.identity.storage_epoch, ledger.identity.ledger_id
     public_key = ledger.release.root_public_key
-    if case == "foreign_root":
+    generation = 1
+    if case == "other_generation":
+        generation = 2
+    elif case == "foreign_root":
         public_key = Ed25519PrivateKey.generate().public_key()
     elif case == "generation_two":
         exact = _generation_two(ledger)
@@ -430,6 +441,7 @@ def test_the_first_inventory_refuses_invalid_preconditions(
             environment=ledger.environment,
             expected_ledger_id=ledger_id,
             expected_storage_epoch=epoch,
+            expected_recovery_generation=generation,
             exact_jws=exact,
             release_root_key_id=RELEASE_ROOT_KEY_ID,
             release_root_public_key=public_key,
@@ -439,7 +451,7 @@ def test_the_first_inventory_refuses_invalid_preconditions(
 
 
 def _fail_on(
-    ledger: _Ledger, table: str, event: str
+    ledger: _Ledger, table: str, event: str, condition: str = "true"
 ) -> Any:  # a context manager that installs a failing trigger scoped to this environment
     import contextlib
 
@@ -452,7 +464,7 @@ def _fail_on(
                 f"""
                 CREATE FUNCTION tiamat.{name}() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN
-                    IF NEW.environment = '{ledger.environment}' THEN
+                    IF NEW.environment = '{ledger.environment}' AND ({condition}) THEN
                         RAISE EXCEPTION 'injected failure';
                     END IF;
                     RETURN NEW;
@@ -550,7 +562,6 @@ def test_a_legitimate_generation_jump_opens_the_gate_and_the_launcher_issues(
     [
         ("wrong_checkpoint", "recovery_checkpoint_differs_from_witness"),
         ("wrong_settlement", "recovery_checkpoint_differs_from_witness"),
-        ("signed_settlement", "recovery_checkpoint_settlement_projection_unsupported"),
         ("inventory_not_on_ledger", "recovery_checkpoint_inventory_differs_from_ledger"),
         ("populated_ledger", "recovery_ledger_financial_state_unsupported"),
         ("source_differs", "recovery_source_generation_differs"),
@@ -567,8 +578,10 @@ def test_authorization_refuses_what_the_ledger_or_witness_does_not_support(
     checkpoint = _checkpoint(ledger, target=2, inventory=installed)
     presented: RecoveryCheckpoint | None = None
     source = 1
-    if case == "signed_settlement":
-        checkpoint = _checkpoint(ledger, target=2, inventory=installed, positions=[_position()])
+    if case == "source_differs":
+        # A signed, installed target above the stated source: only the ledger can refuse it.
+        source = 2
+        checkpoint = _checkpoint(ledger, target=3, inventory=installed)
     elif case == "inventory_not_on_ledger":
         checkpoint = _checkpoint(
             ledger, target=2, inventory={"generation": 1, "jws_sha256": "e" * 64}
@@ -584,11 +597,6 @@ def test_authorization_refuses_what_the_ledger_or_witness_does_not_support(
         presented = _checkpoint(ledger, target=2, inventory=installed, positions=[_position()])
     elif case == "populated_ledger":
         _seed_partition(ledger)
-    elif case == "source_differs":
-        # A signed target above the stated source, so only the ledger's generation can refuse it.
-        source = 2
-        presented = _checkpoint(ledger, target=3, inventory=installed)
-        authorized = ledger.pending(presented).candidate
     elif case == "target_not_higher":
         source = 2
     elif case == "gate_open":
@@ -605,6 +613,7 @@ def test_authorization_refuses_what_the_ledger_or_witness_does_not_support(
     with pytest.raises(RecoveryRejected, match=reason):
         authorize_recovery_generation(
             ledger.roles.recovery,
+            anchor=ledger.store(pending),
             authorized=authorized,
             checkpoint=presented or checkpoint,
             source_recovery_generation=source,
@@ -613,15 +622,27 @@ def test_authorization_refuses_what_the_ledger_or_witness_does_not_support(
     assert ledger.retained() == retained_before
 
 
+def test_a_verified_pending_step_never_installed_opens_nothing(ledger: _Ledger) -> None:
+    ledger.install_first_inventory()
+    pending = ledger.pending(_report_checkpoint(ledger, target=2))
+    gate_before = ledger.gate()
+    with pytest.raises(RecoveryRejected, match="recovery_anchor_head_is_not_the_pending_step"):
+        ledger.authorize(pending)
+    assert ledger.gate() == gate_before
+    assert ledger.retained() == []
+
+
 def test_a_failed_authorization_opens_nothing_and_binds_nothing(ledger: _Ledger) -> None:
     ledger.install_first_inventory()
     pending = ledger.pending(_report_checkpoint(ledger, target=2))
     ledger.install(pending)
     gate_before = ledger.gate()
-    # The checkpoint insert and floor update precede the gate update the trigger refuses.
-    with _fail_on(ledger, "restore_gate", "UPDATE"), pytest.raises(psycopg.Error):
+    # Only the final update, which opens the gate, fails: the floor advance, the checkpoint
+    # insert and the inventory restamp have already been written in the same transaction.
+    opening = "OLD.dispatch_blocked AND NOT NEW.dispatch_blocked"
+    with _fail_on(ledger, "restore_gate", "UPDATE", opening), pytest.raises(psycopg.Error):
         ledger.authorize(pending)
-    assert ledger.gate() == gate_before
+    assert ledger.gate() == gate_before  # floor version and digest included
     assert ledger.retained() == []
     assert ledger.inventories() == [(1, "active", 1)]
     # Readback resolves it; nothing opened, so the same authorization can be retried whole.
@@ -670,3 +691,191 @@ def test_the_beacon_tool_refuses_a_blocked_or_unbound_gate(ledger: _Ledger) -> N
         )
     with pytest.raises(ValueError, match="gate is blocked"):
         tool.bound_checkpoint_beacon(ledger.roles.recovery, environment=ledger.environment)
+
+
+def _prepare_tool() -> ModuleType:
+    path = ROOT / "deploy/aws/prepare_tiamat_reconciliation_step_v1.py"
+    spec = importlib.util.spec_from_file_location("prepare_reconciliation_step", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _private(kind: str, key_id: str, key: Ed25519PrivateKey) -> dict[str, object]:
+    return {
+        "format_version": "1",
+        f"{kind}_key_id": key_id,
+        f"{kind}_private_key_b64": base64.b64encode(key.private_bytes_raw()).decode(),
+    }
+
+
+def test_the_commissioned_shape_reconciles_from_an_expired_successor_head(
+    disposable_roles: DisposableRoles,
+) -> None:
+    """The commissioned ledger's shape: a v2 continued-quarantine head at witness generation 2,
+    its witness long expired, over a gate at generation 1. Pending is signed through the
+    operator tool from the successor's published package, at generation 3; the gate jumps 1->3."""
+
+    environment = f"g2r-{uuid4().hex[:10]}"
+    storage_epoch = uuid4()
+    with psycopg.connect(disposable_roles.owner) as owner:
+        row = owner.execute(
+            "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
+        ).fetchone()
+    assert row is not None
+    identity = RecoveryAnchorIdentity(environment, UUID(str(row[0])), storage_epoch)
+    with psycopg.connect(disposable_roles.recovery) as recovery:
+        recovery.execute(
+            """
+            INSERT INTO tiamat.restore_gate (
+                environment, storage_epoch, recovery_generation,
+                coordinator_generation, dispatch_blocked, block_reason
+            ) VALUES (%s, %s, 1, 1, true, 'initial_reconciliation_required')
+            """,
+            (environment, storage_epoch),
+        )
+    root = Ed25519PrivateKey.generate()
+    clock = _Clock()
+    now = clock.now
+    bootstrap_at, successor_at = now - timedelta(hours=40), now - timedelta(hours=30)
+    bootstrap, _ = build_quarantined_bootstrap(
+        identity=identity,
+        root_key_id=ANCHOR_ROOT_KEY_ID,
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.bootstrap.1",
+        witness_private_key=Ed25519PrivateKey.generate(),
+        checkpoint={
+            "environment": environment,
+            "ledger_id": str(identity.ledger_id),
+            "storage_epoch": str(storage_epoch),
+            "recovery_generation": 1,
+            "release_inventory": {"state": "not_installed"},
+            "release_heads": [],
+            "settlement_position": [],
+        },
+        now=bootstrap_at,
+    )
+    successor, _ = build_continued_quarantine_successor(
+        predecessor=bootstrap,
+        identity=identity,
+        root_private_key=root,
+        witness_key_id="tiamat-recovery-witness.successor.2",
+        witness_private_key=Ed25519PrivateKey.generate(),
+        predecessor_verified_at=bootstrap_at,
+        now=successor_at,
+        validity=timedelta(hours=24),
+    )
+    table = ConditionalTable()
+    anchor_key = f"ENV#{environment}#LEDGER#{identity.ledger_id}"
+    writer = AnchorWriter(
+        roots={anchor_key: _root_for(root)}, client=table, table_name=TABLE, clock=clock
+    )
+    clock.now = bootstrap_at
+    writer.write(
+        AnchorWriteRequest(
+            anchor_key=anchor_key,
+            transition_jws=bootstrap.transition_jws,
+            witness_jws=bootstrap.witness_jws,
+            inventory_jws=bootstrap.inventory_jws,
+        )
+    )
+    clock.now = successor_at
+    writer.write(
+        AnchorWriteRequest(
+            anchor_key=anchor_key,
+            transition_jws=successor.transition_jws,
+            witness_jws=successor.witness_jws,
+            inventory_jws=successor.inventory_jws,
+            head_inventory_jws=bootstrap.inventory_jws,
+        )
+    )
+    clock.now = now
+    release = SyntheticReleaseTrust(environment, f"caller-{uuid4().hex[:8]}", "g2r-realm")
+    install_first_release_inventory(
+        disposable_roles.recovery,
+        environment=environment,
+        expected_ledger_id=identity.ledger_id,
+        expected_storage_epoch=storage_epoch,
+        expected_recovery_generation=1,
+        exact_jws=release.inventory_jws([("execution_profile", "profile-reconciliation")]),
+        release_root_key_id=RELEASE_ROOT_KEY_ID,
+        release_root_public_key=release.root_public_key,
+    )
+    report = read_ledger_recovery_state(disposable_roles.recovery, environment=environment)
+    checkpoint = empty_ledger_checkpoint(report, target_recovery_generation=3)
+    pin = hashlib.sha256(root.public_key().public_bytes_raw()).hexdigest()
+
+    pending_package = _prepare_tool().build_pending_package(
+        head_package=successor.public_package(identity),
+        checkpoint=checkpoint.object,
+        root_private_identity=_private("root", ANCHOR_ROOT_KEY_ID, root),
+        witness_private_identity=_private(
+            "witness", "tiamat-recovery-witness.reconciled.3", Ed25519PrivateKey.generate()
+        ),
+        expected_root_public_sha256=pin,
+        now=now,
+    )
+    pending = verify_reconciliation_package(
+        pending_package,
+        now=now,
+        expected_root_public_sha256=pin,
+        expected_ceremony="recovery_pending",
+    )
+    assert pending.head.transition_version == 2
+    assert pending.head.witness.recovery_generation == 2
+    assert not pending.head.witness.valid_at(now)
+    assert pending.candidate.witness.recovery_generation == 3
+    store = DynamoDbExternalRecoveryAnchor(
+        client=table, table_name=TABLE, decode_transition=pending.decoder()
+    )
+    assert install_through_writer(store, writer.write, pending) == "installed_and_verified"
+
+    authorized = authorize_recovery_generation(
+        disposable_roles.recovery,
+        anchor=store,
+        authorized=pending.candidate,
+        checkpoint=pending.step.checkpoint,
+        source_recovery_generation=1,
+    )
+    assert (authorized.source_recovery_generation, authorized.target_recovery_generation) == (
+        1,
+        3,
+    )
+    assert authorized.anchor_floor.transition_version == 3
+
+    beacon = _ledger_tool().bound_checkpoint_beacon(
+        disposable_roles.recovery, environment=environment
+    )
+    clock.now = now + timedelta(minutes=1)
+    established_package, trust = _prepare_tool().build_established_package(
+        pending_package=pending_package,
+        beacon=beacon,
+        root_private_identity=_private("root", ANCHOR_ROOT_KEY_ID, root),
+        expected_root_public_sha256=pin,
+        now=clock.now,
+    )
+    established = verify_reconciliation_package(
+        established_package,
+        now=clock.now,
+        expected_root_public_sha256=pin,
+        expected_ceremony="continuity_established",
+    )
+    store = DynamoDbExternalRecoveryAnchor(
+        client=table, table_name=TABLE, decode_transition=established.decoder()
+    )
+    assert install_through_writer(store, writer.write, established) == "installed_and_verified"
+    reader = verified_anchor_reader(
+        load_anchor_trust(trust),
+        now=clock.now,
+        environment={"TIAMAT_RECOVERY_ANCHOR_TABLE": TABLE, "AWS_REGION": "us-east-1"},
+        client_factory=lambda *_args, **_kwargs: table,
+    )
+    receipt = StartupAttestationIssuer(
+        anchor=reader,
+        identity=identity,
+        recovery_database_url=disposable_roles.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(disposable_roles.recovery),
+    ).issue(now=datetime.now(UTC))
+    assert receipt.anchor_transition_version == 4
+    assert receipt.anchor_transition_sha256 == established.candidate.exact_sha256

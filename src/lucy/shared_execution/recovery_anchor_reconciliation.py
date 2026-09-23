@@ -158,13 +158,20 @@ class ReconciliationStep:
 def require_reconcilable_checkpoint(
     checkpoint: RecoveryCheckpoint, *, identity: RecoveryAnchorIdentity
 ) -> None:
-    """A reconciled checkpoint must name an installed RELEASE inventory (Draft 0.5 section 4)."""
+    """A reconciled checkpoint names an installed RELEASE inventory (Draft 0.5 section 4).
+
+    Only the empty-ledger projection is specified today, so a checkpoint with release heads or
+    settlement positions is refused here too, before anything is signed or installed: signing one
+    would strand the anchor at a pending step no authorization can accept.
+    """
 
     rebuilt = construct_recovery_checkpoint(dict(checkpoint.object), identity=identity)
     if rebuilt != checkpoint:
         raise ReconciliationStepRejected("reconciliation_checkpoint_not_canonical")
     if not checkpoint.release_inventory_installed:
         raise ReconciliationStepRejected("reconciliation_checkpoint_inventory_not_installed")
+    if checkpoint.object["release_heads"] != [] or checkpoint.object["settlement_position"] != []:
+        raise ReconciliationStepRejected("reconciliation_checkpoint_projection_unsupported")
 
 
 def build_recovery_pending(

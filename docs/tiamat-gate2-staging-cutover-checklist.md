@@ -169,9 +169,12 @@ The probe items stay in the table, inert: no ledger reads their keys and nothing
 The served process dispatches only under an anchor whose continuity is `continuity_established`
 for its own ledger. The commissioned ledger stays quarantined and blocked, so Phase B runs
 entirely on a disposable ledger, through the single truthful ceremony of Draft 0.5 section 7 with
-the empty-ledger checkpoint projection. The tooling exists and is proven on the disposable test
-database (`tests/integration/test_tiamat_gate2_reconciliation.py`); Phase B still needs its own
-deployment approval. No two-ceremony walk, and no placeholder checkpoint, is used.
+the empty-ledger checkpoint projection. The library operations, the offline signer and the
+beacon read are exercised end to end on the disposable test database
+(`tests/integration/test_tiamat_gate2_reconciliation.py`), including the commissioned ledger's
+shape; the `first-inventory` and `authorize` subcommands and the installer script are thin
+wrappers over those tested functions and are not themselves run by a test. Phase B still needs its
+own deployment approval. No two-ceremony walk, and no placeholder checkpoint, is used.
 
 Tools: `deploy/postgres/tiamat_reconciliation_ledger_v1.py` (recovery login: `report`, `beacon`,
 `first-inventory`, `authorize`), `deploy/aws/prepare_tiamat_reconciliation_step_v1.py` (offline:
@@ -189,18 +192,23 @@ previews by default and needs its exact digest confirmed.
    quarantined bootstrap installed through the writer.
 3. **First release inventory, dispatch still blocked.** Control signs the generation-1 RELEASE
    trust inventory. `first-inventory` verifies it against the pinned release root and, in one
-   transaction, requires the gate blocked, of this epoch, on this ledger and never reconciled, no
-   prior activated inventory (a staged copy of the same bytes is allowed), and an empty financial
-   and release history; it activates the inventory and leaves dispatch blocked. One time only.
+   transaction, requires the gate blocked, of this epoch and of the generation `report` read back,
+   on this ledger and never reconciled (no retained checkpoint, no claimant ever issued), no prior
+   activated inventory (a staged copy of the same bytes is allowed), and an empty financial and
+   release history; it activates the inventory and leaves dispatch blocked. One time only.
 4. **Checkpoint.** `report --checkpoint-generation 2`: the empty-ledger checkpoint — the installed
    inventory, no release heads, no settlement positions. It refuses a ledger with any history.
 5. **Pending.** Offline `pending` signs a reconciled witness for generation 2 under a successor
    witness inventory, and the `recovery_pending` transition; install through the writer.
-6. **Authorize (the gate opens, no serving authority yet).** `authorize` strong-reads the anchor
-   (its head must be exactly the pending step) and, in one transaction: target generation equal to
+6. **Authorize (the gate opens, no serving authority yet).** The authorization itself
+   strong-reads the anchor (its head must be exactly the pending step) and, in one transaction:
+   target generation equal to
    the witness's and above the ledger's; all three checkpoint digests equal the witness's; the
    installed inventory equal to the ledger's single active one; no history; checkpoint bound
    immutably; anchor floor advanced to the pending transition; gate open at generation 2.
+   Between this and 7.7 the database gate is open while the anchor is only pending: nothing can
+   serve, but release activation would be accepted, so Control activates nothing until 7.7 is
+   installed.
 7. **Established.** `beacon` reads the continuity beacon for the checkpoint now bound; offline
    `established` signs `continuity_established` with the identical witness bytes and that beacon,
    and writes the launcher's trust file (commit it); install through the writer.
@@ -220,8 +228,10 @@ A serving process that never holds the recovery credential:
   the disposable ledger's recovery credential and the step 7 trust file, immediately before the
   service starts. Startup consumes its claimant.
 
-The step 7 witness and its inventory are valid for at most 24 hours; steps 7.5 to 9 run inside
-that window. Renewal is not part of this checklist.
+The step 7 witness and its inventory are valid for at most 24 hours from the pending signing
+(12 by default); steps 7.5 to 9 run inside that window, and the launcher's trust file expires
+with them. Renewal, which needs a new witness inventory and so a new trust file, is not part of
+this checklist.
 
 ## 9. Signed configuration (Control), then one synthetic request
 
@@ -240,9 +250,15 @@ validity. That is not yet tested; record one restart as evidence.
 ## Commissioned ledger (not part of this checklist)
 
 Reconciling the commissioned ledger is the final Gate 2 proof. It uses the same tools with a
-generation jump (its anchor is quarantined at generation 2, so its witness must be at least 3),
-but nothing touches it until its actual database state and current external anchor are read back
-and reviewed. No anchor reset and no two-ceremony walk.
+generation jump: its anchor head is the v2 continued-quarantine successor at witness generation 2,
+so the pending witness must be at least generation 3. That head's witness has expired, which
+needs no further quarantine successor: the signer and the writer verify a head at its own signed
+issue time (the disposable test reproduces exactly this shape). Nothing touches it until its
+actual database state and current external anchor are read back and reviewed. The deployed role
+template predates migrations 0007 and 0011, so the recovery login's grants on
+`startup_attestations` and `recovery_checkpoints` are confirmed in that readback; `report` and
+`first-inventory` fail
+closed on a permission error. No anchor reset and no two-ceremony walk.
 
 ## Rollback — fail closed
 
