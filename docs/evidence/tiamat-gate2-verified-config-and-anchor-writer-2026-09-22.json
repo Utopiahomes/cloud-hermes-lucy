@@ -97,15 +97,14 @@
     "lambda_packaging": "The writer's import chain no longer loads psycopg (the continuity beacon reader imports it lazily). It still needs rfc8785, which is not in the hash-locked Lambda dependency list, and the artifact builder packages only lucy.contracts and lucy.executors today."
   },
   "suite": {
-    "full_suite": "1480 passed, 1 failed, 283 skipped. The failure is the live staging-anchor read, test_c1_the_installed_head_refuses_under_current_trust, blocked by an expired AWS SSO session; it awaits a fresh login. The skips are older tests that need a different integration database.",
+    "full_suite": "1495 passed, 283 skipped, no failures, at 5ca6f8a, with the live staging-anchor tests and the AWS TestMetricFilter tests included (fresh SSO). The skips are older tests that need a different integration database.",
     "ruff": "passed",
     "mypy_src": "passed"
   },
   "for_review": [
     "The writer verifies an existing head as of its own signed validity window, with the head-era inventory supplied by the caller but trusted only if it verifies against the writer's pinned root. This is the same historical verification the continued-quarantine ceremony uses. Lyra: please confirm or correct.",
     "G9 as implemented: quarantined -> established refused; pending -> established must keep the pending witness. Other continuity transitions are unchanged.",
-    "The foreign-writer alarm goes to an existing SNS topic supplied as a parameter.",
-    "G9 leaves continuity_established -> recovery_pending with a new generation allowed without an intervening quarantine. Lyra: is that intended?"
+    "The foreign-writer alarm goes to an existing SNS topic supplied as a parameter."
   ],
   "needs_approval_before_deployment": [
     "Staging release-signing root and signed releases: serving now requires a signed inventory and a signed profile, privacy policy and spending grant for staging. Who signs them, under which root, is a Control decision.",
@@ -149,5 +148,71 @@
     "Render: sts get-caller-identity from the service shows the intended role, and that role's trust admits only Render's credential path",
     "the writer verifies the live staging head historically",
     "database: release-manager grants applied; connection counts watched during the synthetic request"
-  ]
+  ],
+  "deployment_package": {
+    "requested_by": "Lyra, after Astra's review: build and test the real Lambda ZIP; publish a new version on any root change; match every resource ARN; test the filters against representative events",
+    "artifact": {
+      "file": "dist/aws/tiamat-anchor-writer-v1.zip (not committed; rebuilt from the commit below)",
+      "source_commit": "5ca6f8a534a08ccfcafa03f04d865cb737481da3",
+      "source_state": "clean",
+      "sha256_hex": "ecb668c6d9726eadec8e98ddeaea29c171a6e993ae1b85f3dc868571917c2aca",
+      "sha256_base64_for_lambda": "7LZoxtlybq3sjpjd6uopwXGm6ZOuG4Xz3IaFcZF8Kso=",
+      "bytes": 23940726,
+      "unzipped_megabytes": 46.0,
+      "requirements_lock": "deploy/aws/tiamat-anchor-writer-requirements.lock",
+      "requirements_lock_sha256": "4457ef19581360e21bb682e2cad4735b25609554082cf66c2fe171412affa903",
+      "source_tree_sha256": "e2f47a944a4cf6e0c638ff0d1d1c7e4d958c38af3f26d88ae729a53e3fd2ac26",
+      "reproducible": "a second build from freshly installed locked wheels produced the identical digest (checked at c83ca73; the build inputs are unchanged since)",
+      "contents": "lucy.shared_execution and the hash-locked wheels for CPython 3.12 manylinux2014 x86_64, including rfc8785 0.1.4 (wheel digest matched PyPI's published sha256); no psycopg",
+      "build_note": "Built with build-executor-artifact.ps1's exact pip install and builder commands, run directly: Windows PowerShell 5.1 treats git's warning about two unreadable pytest temporary directories as fatal. The tree was verified clean first."
+    },
+    "packaged_handler_tests": {
+      "runtime_image": "public.ecr.aws/lambda/python:3.12, Python 3.12.14, isolated interpreter, no network, only the unzipped artifact on the path",
+      "smoke": "deploy/aws/smoke_anchor_writer_artifact.py: a mismatched roots digest refused; a signed bootstrap installed; the identical retry already_installed with one write; a malformed request and a forged transition refused with their codes; no database driver loaded",
+      "runtime_bootstrap": "through the image's Lambda runtime emulator, the template's handler string resolves and a deliberately wrong configuration answers recovery_anchor_writer_misconfigured",
+      "commands": {
+        "smoke": "docker run --rm --network none --entrypoint /var/lang/bin/python3 -v <unzipped>:/var/task:ro -v deploy/aws/smoke_anchor_writer_artifact.py:/smoke.py:ro public.ecr.aws/lambda/python:3.12 -I -c \"import sys; sys.path[:0]=['/var/task']; import runpy; runpy.run_path('/smoke.py', run_name='__main__')\"",
+        "runtime_emulator": "docker run -d --rm -p 127.0.0.1:9125:8080 -v <unzipped>:/var/task:ro -e TIAMAT_RECOVERY_ANCHOR_TABLE=smoke -e AWS_REGION=us-east-1 -e TIAMAT_ANCHOR_WRITER_ROOTS={} -e TIAMAT_ANCHOR_WRITER_ROOTS_SHA256=0 public.ecr.aws/lambda/python:3.12 lucy.shared_execution.anchor_writer_lambda.handler; then POST {anchor_key, transition_jws_b64, witness_jws_b64, inventory_jws_b64} (empty values) to /2015-03-31/functions/function/invocations",
+        "runtime_emulator_output": {
+          "status": "refused",
+          "reason": "recovery_anchor_writer_misconfigured"
+        }
+      }
+    },
+    "roots_pinned_into_the_version": "WriterRootsSha256 is a stack parameter, an environment variable and part of the Lambda version's description beside the code digest. Either changing replaces the version resource, so a new version is published and the live alias moves to it; the writer refuses to start when its roots do not hash to the published digest.",
+    "metric_filters_tested_by_aws": {
+      "method": "CloudWatch Logs TestMetricFilter, which evaluates patterns and changes nothing in the account, run against the template's own patterns rendered as the stack renders them. The events are synthetic records in CloudTrail's shape, with each API's own request fields; whether real denied events carry resources[].ARN for every write API is established only at staging step 5.",
+      "foreign_writes": "match: coordinator PutItem, a coordinator TransactWriteItems whose second resource is the anchor table, a coordinator PartiQL statement, a coordinator BatchWriteItem, an IAM user put, a root delete. No match: the writer's own put, a read, a write to another table.",
+      "boundary_changes": "match: table resource policy removed, table updated, writer configuration, code, alias and published version changed, writer role inline policy, attached managed policy and trust policy changed. No match: the writer's own put, another function, another role.",
+      "array_selector": "The same AWS evaluation with the previous resources[0] pattern misses the transaction whose anchor-table resource is second; resources[*] catches it.",
+      "test": "tests/integration/test_tiamat_anchor_writer_filters_aws.py, run with TIAMAT_AWS_FILTER_TEST=1: 2 passed (13 foreign-or-not and 12 boundary-or-not events)"
+    },
+    "serving_process": {
+      "consume_only": "A deployed serving process never holds the recovery credential, as the role template requires. start_serving without a launcher consumes a waiting claimant or refuses with startup_claimant_required; proven on the disposable ledger, then served 200 after the separate launcher issued one. A recovery credential placed in the runtime slot is refused at startup (runtime_credential_is_not_the_runtime_role), also proven on the disposable ledger.",
+      "environment_loader": "served_environment.create_app_from_environment (uvicorn factory) builds the process from its environment and committed trust, and refuses a recovery credential, any transport but synthetic, a ledger ID or environment that differs from its independent pin, a release root that differs from its pin, and any missing value; at startup it also refuses unless the runtime URL logs in as the runtime role. 9 unit cases."
+    },
+    "live_anchor_rerun": "After a fresh AWS SSO sign-in, tests/integration/test_tiamat_startup_gate_postgres.py: 9 passed, including the live staging-anchor read that expired SSO had been blocking.",
+    "cutover_checklist": "docs/tiamat-gate2-staging-cutover-checklist.md",
+    "open_before_the_deployed_synthetic_request": "The served process dispatches only under an established anchor for its own ledger. The commissioned ledger stays quarantined, and no other ledger has an anchor record. A disposable staging identity needs its own throwaway writer root and signed quarantined -> recovery_pending -> continuity_established transitions; the offline builders today sign only quarantined ones. That tooling is the next local piece."
+  },
+  "second_independent_review": {
+    "reviewer": "Fable, read-only, requested by Ray, of 3a561e6 and c83ca73",
+    "found_and_fixed": [
+      "Consume-only was enforced by variable name only: a recovery credential in the runtime slot passed. The served process now checks the runtime URL's current_user against TIAMAT_RUNTIME_DATABASE_ROLE and refuses otherwise (proven on the disposable ledger), and TIAMAT_EXPECTED_ENVIRONMENT pins the environment independently of the trust file.",
+      "Roots bytes passed through shell quoting could change; the checklist now uses a parameters file and invokes the deployed alias to show it is the reviewed version.",
+      "Filter test events now use each API's real request shape; four more boundary events are tested; alarm behaviour for denied writes is an observation at staging, not a pass condition.",
+      "Checklist: only step 4 is expected to alarm; step 9 is blocking staging sign-off and lists what it still needs; step 7's wording corrected.",
+      "The probe preparer prints the witness expiry the positive test must beat."
+    ],
+    "confirmed_sound": [
+      "A root change publishes a new version the live alias follows (Description is a replacement property; the version depends on the function, so it snapshots the updated configuration); a mismatch between roots and digest fails closed either way.",
+      "The digest check and the misconfigured path never assign a writer; request validation still precedes them.",
+      "start_serving without an issuer refuses on the first DispatchBlocked and never issues.",
+      "Probe scripts cannot write to a real ledger's key; the probe key is not a UUID; the preparer discards its private keys.",
+      "The executor artifact's default build is unchanged; the lock differs from the baseline lock by exactly the rfc8785 entry."
+    ],
+    "noted": "Rebuilding the existing executor artifact now yields a different source_tree_sha256 in its manifest, because the build scripts are inputs to that digest; its zip contents are unchanged and preflight does not read that field."
+  },
+  "staging_proof_method": "IAM simulation cannot evaluate the table's resource policy for these roles. The checklist therefore proves the boundary by inspecting the deployed policy and by real denied writes of every kind from the administrator, the coordinator's Render service and the runtime's Render service (deploy/aws/probe_anchor_write_boundary.py), plus a writer-only positive test on a disposable key (deploy/aws/prepare_anchor_writer_probe.py).",
+  "g9_guidance": "Lyra: established -> pending is signed and fail-closed but is not a substitute for the approved recovery ceremony, which begins with quarantine and worker isolation; it is not to be used for commissioned-ledger recovery. No further transition-grammar work before staging."
 }
