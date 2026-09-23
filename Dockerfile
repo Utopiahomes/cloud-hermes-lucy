@@ -15,6 +15,7 @@ COPY deploy/postgres/bootstrap_realm_cloud_v1_3.py ./deploy/postgres/bootstrap_r
 COPY deploy/postgres/migrate_realm_cloud_v1_3.py ./deploy/postgres/migrate_realm_cloud_v1_3.py
 COPY deploy/postgres/verify_private_memory_head_v1_3.py ./deploy/postgres/verify_private_memory_head_v1_3.py
 COPY deploy/postgres/recover_empty_raymond_realm_v1_3.py ./deploy/postgres/recover_empty_raymond_realm_v1_3.py
+COPY deploy/postgres/register_raymond_pilot_bundle_v1.py ./deploy/postgres/register_raymond_pilot_bundle_v1.py
 COPY deploy/postgres/commission_telegram_stage1_v1.py ./deploy/postgres/commission_telegram_stage1_v1.py
 COPY deploy/postgres/commission_realm_runtime_v1_3.py ./deploy/postgres/commission_realm_runtime_v1_3.py
 COPY deploy/postgres/commission_public_projection_v1.py ./deploy/postgres/commission_public_projection_v1.py
