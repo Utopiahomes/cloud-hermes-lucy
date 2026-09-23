@@ -867,20 +867,38 @@ the intended storage location, with a separate `lucy_hindsight` database and
 login. Utopia's gateway stays suspended. No Telegram capture or source archive
 is to be moved into Hindsight. Automatic Hindsight retention starts disabled.
 
-Local integration changes on this branch pin Hindsight API/client 0.10.1,
-configure Raymond Hermes for the bundled `local_external` provider and
-`ray-personal` bank, and add a private OpenAI-compatible proxy on the routine
-service. That proxy uses the existing `model.daily` action account and the
-approved `openai/gpt-oss-20b` OpenRouter route, with ZDR, denied data
-collection, no provider fallback, price caps, and per-call reservation.
-The new profile **must not be deployed** until the Hindsight server and proxy
-are live and their private authentication/recall boundaries pass.
+The pinned Hindsight 0.10.1 image now runs as private Render service
+`srv-daq5fj0473hc73cnh0v0` on the authorized `1c-2g` plan. It uses its own
+`lucy_hindsight` database and login on Raymond's existing PostgreSQL host.
+The private health endpoint returned 200, and an unauthenticated memory call
+was denied. Hermes is configured for the bundled `local_external` provider,
+Ray-only bank `ray-personal`, automatic recall and reflection, with automatic
+conversation retention off. The Telegram gateway still runs the earlier
+profile and has not been switched.
 
-Verification ledger for this revision: focused Hindsight proxy/profile/API
-unit tests: 33 passed locally; Ruff and strict mypy: passed. This evidence is
-invalidated by changes to the proxy, profile, API, or pinned versions. Cloud
-database provisioning, image start, Hermes `memory status`, import, recall,
-reflection, restart, correction, deletion, and Telegram delivery are **not yet
-executed**. Next action: run the short-lived private Render prerequisite job,
-provision the dedicated database and role, deploy the proxy and Hindsight
-private service, and only then switch the gateway.
+The first synthetic retain failed before any model-provider call. The routine
+login is intentionally execute-only and cannot read the old `model.daily`
+action table. Commit `4c92bd8` adds revision `0074_hindsight_model_budget`:
+two exact SECURITY DEFINER reserve/settle functions charge Hindsight inference
+against Raymond's existing daily Telegram model budget. The proxy still pins
+`openai/gpt-oss-20b`, requires ZDR and denied data collection, forbids provider
+fallback, and caps price and reservation. Revision 0074 is **not applied**;
+the routine remains on `89631a3` and the Hindsight server on `771b5f8`.
+
+Verification ledger at `4c92bd8`: 64 focused runtime-readiness, proxy,
+migration-bootstrap and private-memory-verifier tests passed locally; Ruff and
+strict mypy passed. This evidence is invalidated by changes to those files or
+dependencies. The cloud Hindsight database and private health/authentication
+checks passed. Synthetic retain, recall, reflection, restart, correction,
+deletion, approved three-memory import, Hermes status and Telegram delivery
+remain **not executed successfully**. A short-lived private probe remains at
+`crn-daq5iv7lk1mc73bsbn4g`; remove it when verification is complete.
+
+Automatic approval review rejected placing the privileged Raymond migration
+database URL into that probe's persistent Render environment. No such Render
+environment change was made. The next action is an explicitly authorized,
+short-lived migration runner with the migration credential, followed by
+revision/role-grant verification and deletion of the runner. Then deploy the
+routine, rerun the synthetic lifecycle, import the three reviewed memories,
+and switch the gateway only after those checks pass. The migration credential
+must never be written to this document or logs.
