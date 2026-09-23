@@ -787,9 +787,13 @@ async def hindsight_model_completion(
     except HindsightModelProxyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        database_cause = getattr(exc, "orig", None)
+        cause_type = (
+            f"/{type(database_cause).__name__}" if database_cause is not None else ""
+        )
         raise HTTPException(
             status_code=503,
-            detail=f"Hindsight model route unavailable: {type(exc).__name__}",
+            detail=f"Hindsight model route unavailable: {type(exc).__name__}{cause_type}",
         ) from exc
     return JSONResponse(content=result)
 
