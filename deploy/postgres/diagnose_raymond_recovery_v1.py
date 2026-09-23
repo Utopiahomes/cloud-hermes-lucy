@@ -6,7 +6,6 @@ from uuid import UUID
 import psycopg
 from sqlalchemy.engine import make_url
 
-
 JOB_ID = UUID("79f96e27-3087-5399-9297-71af75cf288d")
 CAMPAIGN_ID = UUID("c1800ec3-1158-42f0-bb0b-46a04df7a65c")
 SCOPE_ID = UUID("5ee9fc67-4c46-4416-876e-5e028bf8ae4e")
@@ -56,7 +55,8 @@ def main() -> None:
             "WHERE j.id=%s", (JOB_ID,)
         ).fetchone(), flush=True)
         print("source count:", db.execute(
-            "SELECT jsonb_array_length(source_record_ids) FROM lucy.memory_import_extraction_jobs_v1 "
+            "SELECT jsonb_array_length(source_record_ids) "
+            "FROM lucy.memory_import_extraction_jobs_v1 "
             "WHERE id=%s", (JOB_ID,)
         ).fetchone()[0], flush=True)
         print("archived source count:", db.execute(

@@ -173,3 +173,36 @@ The saved real-history pilot authorization expired at `2026-09-21T16:09:00Z`. It
 for real import. It was inspected only for authorization metadata; no conversation data was read.
 Synthetic preparation is independent of that authorization. A real pilot needs a fresh exact
 authorization after the cloud demonstration, with the existing $2 budget proposal revalidated.
+
+## Raymond early-file pilot completed (2026-09-23 UTC)
+
+Ray explicitly approved the prepared 11-conversation, 474-included-record ChatGPT pilot and
+its $2 campaign cap in this task. The exact bundle digest was
+`15b2d1f70e50920d4605862d5c6772a8e28b24003681b5101671648813312b24`, campaign
+`c1800ec3-1158-42f0-bb0b-46a04df7a65c`, scoped only to Raymond's `lucy_raymond`
+database. This supersedes the older expired-authorization note above for this exact pilot.
+
+The registered 13 batches ran through a temporary Raymond-only HTTPS intake. A deployed
+read-only count at commit `a6d02d7` found **474 active archived source records**, **32 pending
+candidate versions**, and settlements of 10 succeeded batches ($0.090930) plus 3 discarded
+batches ($0.027214): **$0.118144 total**, under the $2 cap. The discarded batches archived
+113 of the sources but produced no pending candidates; their exact jobs are final and must
+not be replayed for another provider call. Invalid model drafts were excluded from later
+batches only when their claimed quote or source failed the existing exact checks; all 32
+saved candidates retain verified source spans. The local protected review directory contains
+9 review artifacts with 32 items. No candidate has been approved or promoted to remembered
+memory, and Telegram was not enabled. Source archive is complete; memory review remains.
+
+Verification ledger: `tests/unit/test_memory_pilot_transport_runner.py` (5 passed at
+`7fdd510`), deployed Raymond diagnostic job `job-dapj46jbc2fs73atef60` (passed at
+`a6d02d7`), and protected local `pilot-tail-receipt.v1.json` plus the review artifacts
+under `C:\Users\Forti\Private\cloud-lucy-imports\chatgpt\2026-09-22-renewal`.
+The deployed count remains valid unless the Raymond database or campaign rows change;
+the local test result remains valid unless transport completion code or dependencies change.
+
+After verification, both private Raymond services were suspended, pilot executor and intake
+flags set false, and the temporary HTTPS intake plus three temporary Render cron utilities
+deleted. Capture and product ingress stayed false. The next step is human review of the
+32 pending candidates, followed by the already-designed remember/correct/forget acceptance
+checks. Any re-extraction of the three discarded batches needs a new exact campaign and
+freshly bounded authorization; their archived source records need no re-import.
