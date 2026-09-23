@@ -804,3 +804,33 @@ live Telegram memory answer has **not yet been assessed**. Ray was given an
 exact first question using the verified `Gate` search term, asking Lucy to
 distinguish explicit confirmation, suggestions, historical context, current
 uncertainty and citations. Review that reply before backfilling older memory.
+
+## Telegram lookup-format repair (2026-09-23)
+
+Ray's first `Gate` test returned raw `functions.tool_call` markup instead of a
+memory answer. Direct, synthetic OpenRouter probes showed the configured
+`openai/gpt-oss-20b` route can produce a structured lookup call and, when
+provided source context without tools, a short cited answer. These probes did
+not use Ray's actual memories. The exact failure inside Hermes has not been
+isolated, so this repair targets the visible failure at the Telegram boundary.
+
+Commit `78be7b8` makes an explicit `Look up “topic” in your memory` request
+fetch reviewed interpreted context before the model call, with its citations
+and source lineage. For that turn, request middleware omits callable tools so
+the model answers from the supplied context. The hook also replaces leaked raw
+tool-call markup with a safe error before archiving or delivery. This is a
+bounded path for explicit lookup phrasing; ordinary requests still use the
+existing tool path. It did not change the model, budget gate, provider policy,
+capture controls, or memory promotion state.
+
+Verification on `78be7b8`: 46 focused plugin tests and 21 profile/Stage 1
+tests passed; Ruff and strict mypy passed. These checks cover prefetch, tool
+omission, and the raw-markup delivery guard. Render gateway deployment
+`dep-daq481flk1mc73bn50og` reached `live` at the exact commit. A subsequent
+content-free check observed `configuration_validated`, `preflight_passed`,
+`lease_acquired`, and `gateway_started`; Utopia's gateway was suspended and
+the recall flag remained true on Raymond policy, routine, and gateway. Startup
+logs also contained `startup_failed` during rolling replacement, followed by
+the successful startup events. The live Telegram answer after this fix is
+**not yet verified**. Ask Ray to repeat the same `Gate` question and inspect
+the actual reply before treating recall as commissioned.
