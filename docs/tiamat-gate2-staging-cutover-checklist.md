@@ -179,14 +179,20 @@ installer script are thin wrappers over those tested functions and are not thems
 test. Phase B still needs its own deployment approval. No two-ceremony walk, and no placeholder
 checkpoint, is used.
 
-The ledger snapshot each recovery step checks is exclusive: after locking the gate, the step
-takes `SHARE ROW EXCLUSIVE` on every table it inspects, so a concurrent stage or ledger write
-either finishes first and is seen (the step then refuses), or waits until the step has committed.
-Two-connection tests prove both orders, and fail with the lock removed. Waiting writers include
-the release manager's staging, which takes no gate lock of its own.
+The ledger snapshot each recovery step checks is exclusive, by two invariants. Every writer of
+signed authority and ledger history locks the gate first: the release manager's staging now takes
+the gate's shared lock (without requiring it open), and activation, the runtime and the launcher
+already did. A recovery step holds the gate exclusively, so a stage or write in progress finishes
+first and is seen (the step then refuses), and a later one waits until the step has committed.
+As a backstop, the step also takes `SHARE ROW EXCLUSIVE` on the inventory and history tables it
+counts, whose absent rows a count cannot lock. Tables written only under the exclusive gate
+(checkpoints, claimants) need no table lock. Two-connection tests prove both orders, including a
+real `stage_release` paused at its insert, and fail with the lock removed. A grant cannot be
+staged before its spending partition exists (a foreign key), so grants are staged only after
+step 7.8.
 
 Tools: `deploy/postgres/tiamat_reconciliation_ledger_v1.py` (recovery login: `report`, `beacon`,
-`first-inventory`, `authorize`), `deploy/aws/prepare_tiamat_reconciliation_step_v1.py` (offline:
+`first-inventory`, `authorize`, `create-partition`), `deploy/aws/prepare_tiamat_reconciliation_step_v1.py` (offline:
 `pending`, `established`) and `deploy/aws/install_tiamat_reconciliation_step_v1.py` (verify, then
 one write through the M4 writer with strong reads before and after). Every mutating command
 previews by default and needs its exact digest confirmed.
@@ -204,7 +210,8 @@ previews by default and needs its exact digest confirmed.
    SHA-256 fingerprint are committed as `deploy/postgres/tiamat-staging-release-root-pin.json`
    (format version 1) and reviewed before this step; until Control supplies it, this step cannot
    run. `first-inventory --release-root-pin` compares the supplied key with that approved
-   fingerprint; a digest computed from the supplied key is never the authority. The operation
+   fingerprint, and its output records which pin (path, key ID, fingerprint) authenticated it; a
+   digest computed from the supplied key is never the authority. The operation
    verifies the inventory against that root and, in one
    transaction, requires the gate blocked, of this epoch and of the generation `report` read back,
    on this ledger and never reconciled (no retained checkpoint, no claimant ever issued), no prior
@@ -229,10 +236,14 @@ previews by default and needs its exact digest confirmed.
    `established` signs `continuity_established` with the identical witness bytes and that beacon,
    and writes the launcher's trust file (commit it); install through the writer.
 8. **Spending partition.** `create-partition` creates the one partition the signed grant names,
-   for its exact caller, realm and partition ID: blocked with `no_active_grant`, with no
+   for its exact caller, realm and partition ID, which the active, verified release inventory
+   must authorize as a `spending_grant` subject: blocked with `no_active_grant`, with no
    allowance, spend or concurrency. It requires the gate open at the reconciled generation with
    its checkpoint retained, and never changes an existing partition. Only the release manager's
-   activation of the signed grant (step 9) funds and unblocks it.
+   activation of the signed grant (section 9) funds and unblocks it. This is one-way: a
+   partition is ledger history, so after this step the empty-ledger checkpoint and authorization
+   refuse this ledger; if section 9 then fails in a way that needs another recovery, Phase B
+   starts again on a fresh disposable ledger.
 
 ## 8. Render: the served process, synthetic only
 

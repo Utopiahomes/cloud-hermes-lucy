@@ -44,6 +44,7 @@ class PostgresSignedAuthorityStore:
         try:
             with self._connect() as connection, connection.transaction():
                 self._set_environment(connection, inventory.environment)
+                self._share_lock_gate(connection)
                 row = connection.execute(
                     """
                     INSERT INTO tiamat.trust_inventories (
@@ -141,6 +142,7 @@ class PostgresSignedAuthorityStore:
             with self._connect() as connection, connection.transaction():
                 scope = AuthorityScope(item.environment, item.issuer, item.caller_id, item.realm)
                 self._set_scope(connection, scope)
+                self._share_lock_gate(connection)
                 row = connection.execute(
                     """
                     INSERT INTO tiamat.signed_releases (
@@ -676,6 +678,18 @@ class PostgresSignedAuthorityStore:
     @staticmethod
     def _scope_values(scope: AuthorityScope) -> tuple[str, str, str, str]:
         return scope.environment, scope.issuer, scope.caller_id, scope.realm
+
+    @staticmethod
+    def _share_lock_gate(connection: psycopg.Connection[dict[str, Any]]) -> None:
+        """Take the gate's shared lock first, without requiring it open.
+
+        Staging is allowed while dispatch is blocked, but it must still order itself behind an
+        offline recovery step holding the gate exclusively: every writer of authority or ledger
+        history then locks the gate before any table, so the recovery step's table locks can
+        never close a cycle with a stage in progress.
+        """
+
+        connection.execute("SELECT 1 FROM tiamat.share_locked_restore_gate()").fetchall()
 
     @staticmethod
     def _assert_recovery_gate_open(

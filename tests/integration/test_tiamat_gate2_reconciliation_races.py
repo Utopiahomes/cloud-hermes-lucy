@@ -53,9 +53,11 @@ def _named(url: str, name: str) -> str:
     return f"{url}{'&' if '?' in url else '?'}application_name={name}"
 
 
-def _wait_for_lock_wait(ledger: _Ledger, name: str, timeout: float = 20.0) -> None:
-    """Until the named recovery session is waiting on a lock. The observer is the same role, so
-    PostgreSQL shows it the session's wait state."""
+def _wait_for_lock_wait(
+    ledger: _Ledger, name: str, events: tuple[str, ...], timeout: float = 20.0
+) -> None:
+    """Until the named recovery session waits on one of the given lock events. The observer is
+    the same role, so PostgreSQL shows it the session's wait state."""
 
     deadline = time.monotonic() + timeout
     with psycopg.connect(ledger.roles.recovery, autocommit=True) as observer:
@@ -64,8 +66,9 @@ def _wait_for_lock_wait(ledger: _Ledger, name: str, timeout: float = 20.0) -> No
                 """
                 SELECT count(*) FROM pg_catalog.pg_stat_activity
                 WHERE application_name = %s AND wait_event_type = 'Lock'
+                  AND wait_event = ANY(%s)
                 """,
-                (name,),
+                (name, list(events)),
             ).fetchone()
             if row is not None and int(row[0]) > 0:
                 return
@@ -96,7 +99,9 @@ class _Background:
 
 
 @contextmanager
-def _paused_on(ledger: _Ledger, table: str, condition: str) -> Iterator[Callable[[], None]]:
+def _paused_on(
+    ledger: _Ledger, table: str, condition: str, event: str = "UPDATE"
+) -> Iterator[Callable[[], None]]:
     """A trigger that parks the matching write on an advisory lock this test holds. The
     operation is then mid-transaction with every lock it took; ``release()`` lets it finish."""
 
@@ -117,7 +122,7 @@ def _paused_on(ledger: _Ledger, table: str, condition: str) -> Iterator[Callable
             """
         )
         owner.execute(
-            f"CREATE TRIGGER {name} BEFORE UPDATE ON tiamat.{table} "
+            f"CREATE TRIGGER {name} BEFORE {event} ON tiamat.{table} "
             f"FOR EACH ROW EXECUTE FUNCTION tiamat.{name}()"
         )
     released = False
@@ -128,6 +133,7 @@ def _paused_on(ledger: _Ledger, table: str, condition: str) -> Iterator[Callable
             holder.execute("SELECT pg_advisory_unlock(%s)", (key,))
             released = True
 
+    release.key = key  # type: ignore[attr-defined]
     try:
         yield release
     finally:
@@ -185,7 +191,7 @@ def test_first_inventory_waits_for_an_earlier_stage_and_then_refuses(ledger: _Le
         operation = _Background(
             lambda: _first_inventory(ledger, _named(ledger.roles.recovery, name))
         )
-        _wait_for_lock_wait(ledger, name)
+        _wait_for_lock_wait(ledger, name, ("relation",))
         assert operation.thread.is_alive()
         stager.commit()
     with pytest.raises(RecoveryRejected, match="first_inventory_staged_candidate_differs"):
@@ -200,7 +206,7 @@ def test_a_stage_during_the_first_inventory_waits_until_it_commits(ledger: _Ledg
         operation = _Background(
             lambda: _first_inventory(ledger, _named(ledger.roles.recovery, name))
         )
-        _wait_for_lock_wait(ledger, name)  # parked after its checks, holding its locks
+        _wait_for_lock_wait(ledger, name, ("advisory",))  # parked after its checks
         with psycopg.connect(ledger.roles.release_manager) as stager:
             stager.execute("SET lock_timeout = '1s'")
             with pytest.raises(psycopg.errors.LockNotAvailable):
@@ -231,7 +237,7 @@ def test_authorization_waits_for_earlier_history_and_then_refuses(ledger: _Ledge
                 source_recovery_generation=1,
             )
         )
-        _wait_for_lock_wait(ledger, name)
+        _wait_for_lock_wait(ledger, name, ("relation",))
         assert operation.thread.is_alive()
         writer.commit()
     with pytest.raises(RecoveryRejected, match="recovery_ledger_financial_state_unsupported"):
@@ -256,7 +262,7 @@ def test_history_written_during_authorization_waits_until_it_commits(ledger: _Le
                 source_recovery_generation=1,
             )
         )
-        _wait_for_lock_wait(ledger, name)  # parked on the gate opening, snapshot locks held
+        _wait_for_lock_wait(ledger, name, ("advisory",))  # parked on the gate opening
         with psycopg.connect(ledger.roles.recovery) as writer:
             writer.execute("SET lock_timeout = '1s'")
             with pytest.raises(psycopg.errors.LockNotAvailable):
@@ -264,6 +270,9 @@ def test_history_written_during_authorization_waits_until_it_commits(ledger: _Le
         release()
         assert operation.join().target_recovery_generation == 2
     assert ledger.gate()[:2] == (2, False)
+    # Once the authorization has committed, the write proceeds as usual.
+    with psycopg.connect(ledger.roles.recovery) as writer:
+        _insert_partition(writer, ledger)
 
 
 def test_a_different_pre_reconciliation_block_reason_is_permitted(ledger: _Ledger) -> None:
@@ -313,17 +322,26 @@ def _partition_row(ledger: _Ledger) -> tuple[Any, ...] | None:
     return None if row is None else tuple(row)
 
 
+GRANT_SUBJECTS = [
+    ("execution_profile", "profile-reconciliation"),
+    ("privacy_policy", "policy-a"),
+    ("spending_grant", "partition-a"),
+]
+
+
 def test_the_partition_is_created_only_after_reconciliation_and_only_once(
     ledger: _Ledger,
 ) -> None:
     with pytest.raises(RecoveryRejected, match="requires_the_reconciled_generation"):
         _partition(ledger, 1)  # the gate is still blocked
-    ledger.install_first_inventory()
+    ledger.install_first_inventory(ledger.release.inventory_jws(GRANT_SUBJECTS))
     pending = ledger.pending(_report_checkpoint(ledger, target=2))
     ledger.install(pending)
     ledger.authorize(pending)
     with pytest.raises(RecoveryRejected, match="requires_the_reconciled_generation"):
         _partition(ledger, 1)  # not the generation the reviewer read back
+    with pytest.raises(RecoveryRejected, match="not_authorized_by_inventory"):
+        _partition(ledger, 2, "partition-unlisted")
     _partition(ledger, 2)
     assert _partition_row(ledger) == (True, "no_active_grant", 0, 0, 0, None)
     with pytest.raises(RecoveryRejected, match="spending_partition_exists"):
@@ -331,26 +349,29 @@ def test_the_partition_is_created_only_after_reconciliation_and_only_once(
 
 
 def test_a_signed_grant_activates_onto_the_created_partition(ledger: _Ledger) -> None:
-    subjects = [
-        ("execution_profile", "profile-reconciliation"),
-        ("spending_grant", "partition-a"),
-    ]
-    exact = ledger.release.inventory_jws(subjects)
+    exact = ledger.release.inventory_jws(GRANT_SUBJECTS)
     ledger.install_first_inventory(exact)
     pending = ledger.pending(_report_checkpoint(ledger, target=2))
     ledger.install(pending)
     ledger.authorize(pending)
     _partition(ledger, 2)
 
+    release_id = f"grant-{uuid4().hex[:8]}"
+    store = PostgresSignedAuthorityStore(ledger.roles.release_manager)
+    store.stage_release(_signed_grant(ledger, exact, release_id), RELEASE_KEY_ID)
+    store.activate_release(ledger.release.scope, "spending_grant", "partition-a", release_id)
+    assert _partition_row(ledger) == (False, None, 20_000, 0, 2, release_id)
+
+
+def _signed_grant(ledger: _Ledger, inventory_jws: bytes, release_id: str) -> Any:
     now = datetime.now(UTC)
     inventory = verify_trust_inventory(
-        exact,
+        inventory_jws,
         root_key_id=RELEASE_ROOT_KEY_ID,
         root_public_key=ledger.release.root_public_key,
         environment=ledger.environment,
     )
-    release_id = f"grant-{uuid4().hex[:8]}"
-    grant = verify_release(
+    return verify_release(
         ledger.release.release_jws(
             "spending_grant",
             "partition-a",
@@ -373,7 +394,102 @@ def test_a_signed_grant_activates_onto_the_created_partition(ledger: _Ledger) ->
         expected_realm="g2r-realm",
         now=now,
     )
+
+
+def _wait_for_advisory_waiter(ledger: _Ledger, key: int, timeout: float = 20.0) -> None:
+    """Until some session waits on the advisory lock. pg_locks shows every role's locks."""
+
+    deadline = time.monotonic() + timeout
+    with psycopg.connect(ledger.roles.owner, autocommit=True) as observer:
+        while time.monotonic() < deadline:
+            row = observer.execute(
+                """
+                SELECT count(*) FROM pg_catalog.pg_locks
+                WHERE locktype = 'advisory' AND NOT granted
+                  AND classid = %s AND objid = %s AND objsubid = 1
+                """,
+                (key >> 32, key & 0xFFFFFFFF),
+            ).fetchone()
+            if row is not None and int(row[0]) > 0:
+                return
+            time.sleep(0.05)
+    raise AssertionError("the stage never reached its pause")
+
+
+def _signed_policy(ledger: _Ledger, inventory_jws: bytes) -> Any:
+    inventory = verify_trust_inventory(
+        inventory_jws,
+        root_key_id=RELEASE_ROOT_KEY_ID,
+        root_public_key=ledger.release.root_public_key,
+        environment=ledger.environment,
+    )
+    return verify_release(
+        ledger.release.release_jws(
+            "privacy_policy",
+            "policy-a",
+            f"policy-{uuid4().hex[:8]}",
+            {
+                "policy_id": "policy-a",
+                "approved_provider_route_ids": ["route-a"],
+                "required_provider_privacy": ["zero_data_retention", "no_training"],
+                "data_collection": "denied",
+                "training": "denied",
+                "fallback_allowed": False,
+                "allowed_regions": ["us"],
+                "retention_ceiling_seconds": 0,
+                "eligibility_generation": 1,
+            },
+        ),
+        inventory=inventory,
+        expected_issuer=AUTHORITY_ISSUER,
+        expected_environment=ledger.environment,
+        expected_caller_id=ledger.release.caller_id,
+        expected_realm="g2r-realm",
+        now=datetime.now(UTC),
+    )
+
+
+@pytest.mark.parametrize("operation_name", ["first_inventory", "authorization"])
+def test_a_real_release_stage_in_progress_orders_the_recovery_step_behind_it(
+    ledger: _Ledger, operation_name: str
+) -> None:
+    """The release manager's own stage_release of a signed privacy policy is paused at its
+    insert while the recovery step starts. (A grant cannot be staged here at all: its row needs an
+    existing spending partition, which an empty ledger lacks.) Staging takes the gate's shared
+    lock first, so the step waits on the gate, never on a table the stage still has to reach, and
+    after the stage commits the step sees it and refuses."""
+
+    exact = ledger.release.inventory_jws(GRANT_SUBJECTS)
+    pending = None
+    if operation_name == "authorization":
+        ledger.install_first_inventory(exact)
+        pending = ledger.pending(_report_checkpoint(ledger, target=2))
+        ledger.install(pending)
+    policy = _signed_policy(ledger, exact)
     store = PostgresSignedAuthorityStore(ledger.roles.release_manager)
-    store.stage_release(grant, RELEASE_KEY_ID)
-    store.activate_release(ledger.release.scope, "spending_grant", "partition-a", release_id)
-    assert _partition_row(ledger) == (False, None, 20_000, 0, 2, release_id)
+    gate_before = ledger.gate()
+    name = f"g2r-op-{uuid4().hex[:8]}"
+    with _paused_on(ledger, "signed_releases", "true", "INSERT") as release:
+        stage = _Background(lambda: store.stage_release(policy, RELEASE_KEY_ID))
+        _wait_for_advisory_waiter(ledger, release.key)  # type: ignore[attr-defined]
+        if pending is None:
+            operation = _Background(
+                lambda: _first_inventory(ledger, _named(ledger.roles.recovery, name), exact)
+            )
+        else:
+            verified = pending
+            operation = _Background(
+                lambda: authorize_recovery_generation(
+                    _named(ledger.roles.recovery, name),
+                    anchor=ledger.store(verified),
+                    authorized=verified.candidate,
+                    checkpoint=verified.step.checkpoint,
+                    source_recovery_generation=1,
+                )
+            )
+        _wait_for_lock_wait(ledger, name, ("transactionid", "tuple"))
+        release()
+        stage.join()
+    with pytest.raises(RecoveryRejected, match="recovery_ledger_financial_state_unsupported"):
+        operation.join()
+    assert ledger.gate() == gate_before

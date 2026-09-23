@@ -6,7 +6,9 @@ are intended for a stopped or network-quarantined environment.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -743,11 +745,12 @@ def _lock_blocked_gate(
     if identity is None or UUID(str(identity[0])) != expected_ledger_id:
         raise RecoveryRejected("ledger_identity_differs")
     # The checks that follow read the ledger's authority and history and act on what they saw.
-    # Staging an inventory or release takes no gate lock, and a count cannot lock rows that do
-    # not exist yet, so the gate lock alone would let a concurrent write commit between the check
-    # and this transaction's commit. SHARE ROW EXCLUSIVE conflicts with every row write and with
-    # itself: it waits for any uncommitted writer to finish, then keeps every other writer out
-    # until this transaction ends. Taken after the gate, in one fixed order.
+    # Every writer of these tables takes the gate's lock first (staging its shared lock), so the
+    # gate lock above already orders them. A count cannot lock rows that do not exist yet, so as a
+    # backstop against any writer that does not, SHARE ROW EXCLUSIVE conflicts with every row
+    # write and with itself: it waits for an uncommitted writer to finish, then keeps every other
+    # writer out until this transaction ends. Tables whose writers all hold the gate row
+    # exclusively (checkpoints, claimants) need no table lock.
     connection.execute(
         "LOCK TABLE "
         + ", ".join(f"tiamat.{table}" for table in _SNAPSHOT_TABLES)
@@ -757,6 +760,26 @@ def _lock_blocked_gate(
 
 
 _SNAPSHOT_TABLES = tuple(sorted({"trust_inventories", *_FINANCIAL_HISTORY_TABLES}))
+
+
+def _inventory_authorizes_grant(
+    exact_jws: bytes, *, caller_id: str, realm: str, partition_id: str
+) -> bool:
+    try:
+        segment = exact_jws.split(b".")[1]
+        payload = json.loads(base64.urlsafe_b64decode(segment + b"=" * (-len(segment) % 4)))
+        wanted = {
+            "caller_id": caller_id,
+            "realm": realm,
+            "release_type": "spending_grant",
+            "subject_id": partition_id,
+        }
+        return any(
+            key.get("status") == "active" and wanted in key.get("authorized_scopes", [])
+            for key in payload["keys"]
+        )
+    except (IndexError, KeyError, TypeError, ValueError, AttributeError):
+        return False
 
 
 def _require_empty_financial_history(connection: psycopg.Connection[Any], environment: str) -> None:
@@ -821,6 +844,19 @@ def create_spending_partition(
         ).fetchone()
         if bound is None:
             raise RecoveryRejected("spending_partition_requires_the_reconciled_generation")
+        active = connection.execute(
+            """
+            SELECT exact_jws FROM tiamat.trust_inventories
+            WHERE environment = %s AND state = 'active'
+            """,
+            (environment,),
+        ).fetchone()
+        # The active inventory's exact bytes were verified against the pinned root when they were
+        # installed; a partition is created only for a grant subject that inventory authorizes.
+        if active is None or not _inventory_authorizes_grant(
+            bytes(active[0]), caller_id=caller_id, realm=realm, partition_id=partition_id
+        ):
+            raise RecoveryRejected("spending_partition_not_authorized_by_inventory")
         created = connection.execute(
             """
             INSERT INTO tiamat.spending_partitions (

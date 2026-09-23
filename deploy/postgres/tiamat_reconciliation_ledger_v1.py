@@ -95,7 +95,12 @@ def release_root_from_pin(
     The key's own digest is computed only to compare with that independent fingerprint.
     """
 
-    if set(pin) != {"format_version", "environment", "root_key_id", "root_public_key_sha256"}:
+    if not isinstance(pin, dict) or set(pin) != {
+        "format_version",
+        "environment",
+        "root_key_id",
+        "root_public_key_sha256",
+    }:
         raise ValueError("release root pin shape is invalid")
     if (
         pin["format_version"] != "1"
@@ -182,6 +187,11 @@ def main() -> None:
             "environment": args.environment,
             "inventory_generation": inventory.inventory_generation,
             "jws_sha256": digest,
+            "release_root_pin": {
+                "path": str(args.release_root_pin),
+                "root_key_id": args.release_root_key_id,
+                "root_public_key_sha256": hashlib.sha256(root.public_bytes_raw()).hexdigest(),
+            },
             "status": "verified_not_written",
         }
         if args.execute:
