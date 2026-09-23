@@ -490,8 +490,8 @@ three temporary utilities were deleted. The succeeded job's gitignored receipt
 is `secrets/generated/utopia-telegram-history-count-state-v3.json`. Ray chose
 not to move this earlier archive to Raymond. On 2026-09-23 he explicitly
 authorized deleting the old Utopia Telegram archive. This does not include
-Raymond's imported ChatGPT evidence or 32 protected interpretations. The exact
-non-synthetic scoped owner targets were deleted on 2026-09-23 as recorded below.
+Raymond's imported ChatGPT evidence or 32 protected interpretations. Deletion
+of the exact non-synthetic scoped owner targets is **not yet verified**.
 
 A follow-up read-only exact-target inventory at `cfac540` succeeded in a
 temporary Render job (full job ID and exact UUIDs in the gitignored receipt
@@ -530,31 +530,31 @@ turns, four scoped evidence records under two user roots. The reviewed,
 content-free packet is gitignored at
 `secrets/generated/utopia-telegram-owner-deletion-targets-v2.json`; SHA-256
 `62110370f84bf04581e07b67f3a9b0fbd0b151f4fbd206088b81aaf12ea06275`.
-The policy authority lookup for both roots passed as Render one-off job
-`job-dapvlnk9v7es73a36jig`: its exact command fails if owner identity, channel,
-action scope or record version differs, and Render reported `succeeded`.
+The initial policy authority lookup was submitted as Render one-off job
+`job-dapvlnk9v7es73a36jig`. Its `succeeded` status alone does not prove its
+command ran; see the one-off status finding below.
 
 Ray's explicit archive deletion request was used as the owner-console approval
-for a one-use manual V1.3 operator. It created fresh broker assertions with the
-reviewed packet digest, asked Utopia policy to issue one exact permit per root,
-then ran the V1.3 manifest-bound Lambda deletion workflow on the suspended
-deletion identity. The policy service was resumed only for this workflow and
-resuspended afterward. Both policy and deletion jobs for both roots succeeded;
-job IDs and permit IDs are recorded in the gitignored
-`secrets/generated/utopia-telegram-owner-deletion-execution-v2.json`. No message
-content was read. This manual operator is not a Telegram owner-broker feature
-and should not be reused for ordinary "forget" commands.
+for a one-use manual V1.3 operator. It submitted broker assertions bound to the
+reviewed packet digest and the V1.3 manifest-bound deletion workflow. The
+policy service was resumed for this attempt and resuspended afterward; the
+deletion service stayed suspended. Job IDs and intended permit IDs are recorded
+in the gitignored `secrets/generated/utopia-telegram-owner-deletion-execution-v2.json`.
+No message content was read. This manual operator is not a Telegram owner-broker
+feature and should not be reused for ordinary "forget" commands.
 
-The first separate count-only inventory after execution returned the same
-unfenced rows as before; its Render log report is therefore not accepted as
-verification. A direct, read-only one-off job on the Utopia deletion service,
-`job-dapvs6egekts73fdas6g`, checked the four exact evidence IDs, found four
-scoped deletion fences belonging to the two expected operation IDs, and checked
-both operations in a finality state with nonempty receipt digests. It exited
-successfully. A prior direct job `job-dapvrp142hec73ec0vk0` checked both root
-fences and operation finality. These checks establish operational deletion for
-the four identified records; the count-only report discrepancy remains a
-diagnostic issue, so do not cite that report as current database state.
+The separate count-only inventory after the attempt returned the same four
+unfenced owner records as before. Subsequent one-off probes on suspended
+services returned `succeeded` for two mutually exclusive database assertions,
+and a deliberately failing `python -c "import sys;sys.exit(7)"` job
+`job-daq08phsrm7s73b2alt0` also returned `succeeded`. Therefore Render's
+status for a one-off on a suspended service cannot establish command execution
+or successful exit. The deletion-service jobs and direct fence probes cited in
+the earlier checkpoint are **invalid verification evidence**. Treat the four
+owner records as still present until a job on an active identity and an
+independent inventory prove otherwise. The count-only inventory is the best
+current evidence. Resume the deletion identity for any retry; inspect prior
+permit/operation state before issuing new assertions to avoid uncertain replay.
 
 Stop Utopia capture at the bot handoff and run a fresh final sweep so new
 records do not replenish the archive. The legacy cloud-acceptance probes are
@@ -577,8 +577,14 @@ Cutover still requires a Raymond Telegram channel binding and durable authority
 activation, owner allowlist and separate gateway adapter credential, and a
 one-bot handoff. Ray's authorization to delete the old archive does not require
 migrating it to Raymond.
-The existing Utopia Stage 1 commissioning operator hardcodes Utopia identities,
-so it cannot safely commission Raymond as-is. Raymond authority writer and
-recovery coordinator are still suspended configuration shells. Do not redirect
+The Stage 1 commissioning operator now derives distinct Raymond identities at
+`3bfc559`; its focused unit tests and Ruff passed. Raymond authority writer,
+cost writer, and recovery coordinator now have isolated credentials and code at
+`3bfc559`. All three are suspended. Their one-off dependency probes and the
+private `/ready` probe ran from suspended identities, so their `succeeded`
+statuses are not accepted as execution evidence. The first Raymond Telegram
+commissioning job failed and left no principal or channel row according to the
+initial classification probe, but that probe used a suspended-service one-off
+and is itself invalid. Recheck with an active identity before retrying. Do not redirect
 the active bot to the current Raymond routine service: it would fail the
 Telegram lease/retention boundary and could interrupt replies.
