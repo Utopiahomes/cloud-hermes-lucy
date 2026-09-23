@@ -9,6 +9,7 @@ consistent GetItem and verified locally; nothing is written, signed or commissio
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -218,18 +219,51 @@ def test_c1_the_installed_head_refuses_under_current_trust(disposable: _Disposab
     trust = _trust_document()
     current: Any = json.loads(CURRENT_TRUST_PACKAGE.read_text(encoding="utf-8"))
     _seed_staging_gate(disposable, trust)
+    # The trust is current only inside its witness inventory's window, so evaluate there: the
+    # live head then verifies and refuses on continuity. The installed head does not change.
+    within_trust = _witness_not_before(current) + timedelta(minutes=1)
 
     with pytest.raises(StartupGateRejected) as refused:
         run_startup_gate(
             trust_document=current,
             recovery_database_url=disposable.recovery,
             expected_ledger_id=UUID(str(current["ledger_id"])),
-            now=datetime.now(UTC),
+            now=within_trust,
             environment_values=STAGING_STORE,
         )
 
     assert "recovery_continuity_not_established" in str(refused.value)
     assert _active_claimants(disposable) == 0
+
+    # After that window the same trust refuses even earlier; either way nothing is issued.
+    if datetime.now(UTC) > _witness_not_after(current):
+        with pytest.raises(StartupGateRejected, match="witness_inventory_rejected"):
+            run_startup_gate(
+                trust_document=current,
+                recovery_database_url=disposable.recovery,
+                expected_ledger_id=UUID(str(current["ledger_id"])),
+                now=datetime.now(UTC),
+                environment_values=STAGING_STORE,
+            )
+        assert _active_claimants(disposable) == 0
+
+
+def _witness_claims(package: Any) -> dict[str, Any]:
+    segment = base64.b64decode(package["witness_jws_b64"]).split(b".")[1]
+    claims: dict[str, Any] = json.loads(
+        base64.urlsafe_b64decode(segment + b"=" * (-len(segment) % 4))
+    )
+    return claims
+
+
+def _witness_not_before(package: Any) -> datetime:
+    value = str(_witness_claims(package)["not_before"])
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def _witness_not_after(package: Any) -> datetime:
+    value = str(_witness_claims(package)["not_after"])
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
 def test_c2_an_unreachable_anchor_store_refuses(disposable: _Disposable) -> None:

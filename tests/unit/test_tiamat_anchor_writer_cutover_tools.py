@@ -61,7 +61,8 @@ def prepared(tmp_path: Path) -> tuple[dict[str, Any], Path]:
         FINAL_ROOTS.read_bytes(),
         tmp_path,
         final_roots_sha256=FINAL_ROOTS_SHA256,
-        now=NOW,
+        # The handler's writer checks the witness at the real clock, so sign at the real clock.
+        now=datetime.now(UTC),
     )
     return report, tmp_path
 
