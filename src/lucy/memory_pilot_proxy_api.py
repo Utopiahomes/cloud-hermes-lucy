@@ -144,4 +144,9 @@ def _private_post(
         with build_opener(_RejectRedirects()).open(request, timeout=timeout_seconds) as response:
             return bytes(response.read(10_000_001))
     except (HTTPError, URLError, TimeoutError) as exc:
+        print(
+            "private pilot proxy request unavailable: "
+            f"{type(exc).__name__}/{exc.code if isinstance(exc, HTTPError) else 'network'}",
+            flush=True,
+        )
         raise MemoryPilotProxyUnavailable("private pilot request failed") from exc

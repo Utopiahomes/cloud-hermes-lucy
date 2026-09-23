@@ -149,8 +149,18 @@ def create_memory_pilot_execution_app(
                 review_artifact=result.review_artifact,
             )
         except (MemoryPilotTransportUnavailable, ValidationError, ValueError) as exc:
+            print(
+                "private pilot admission rejected: "
+                f"{type(exc).__name__}/{type(exc.__cause__).__name__ if exc.__cause__ else 'none'}",
+                flush=True,
+            )
             raise HTTPException(status_code=403, detail="pilot batch unavailable") from exc
         except (PermissionError, RuntimeError) as exc:
+            print(
+                "private pilot execution unavailable: "
+                f"{type(exc).__name__}/{type(exc.__cause__).__name__ if exc.__cause__ else 'none'}",
+                flush=True,
+            )
             raise HTTPException(status_code=503, detail="pilot execution unavailable") from exc
 
     return app
