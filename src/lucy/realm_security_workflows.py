@@ -1134,9 +1134,9 @@ class RealmPolicyClient(Protocol):
         self, operation_id: UUID
     ) -> DeletionTargetManifestV2: ...
 
-    def issue_grant(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
+    def issue_grant_v2(self, operation_id: UUID) -> SensitiveExecutionGrantV2: ...
 
-    def attest_receipt(self, receipt: ExecutorReceiptV2) -> str: ...
+    def attest_receipt_v2(self, receipt: ExecutorReceiptV2) -> str: ...
 
 
 class RealmPolicyClientV3(Protocol):
@@ -1172,11 +1172,17 @@ class HttpRealmPolicyClient:
         )
         return SensitiveExecutionGrantV2.model_validate(payload)
 
+    def issue_grant_v2(self, operation_id: UUID) -> SensitiveExecutionGrantV2:
+        payload = self._post(
+            f"/internal/v3/security/operations/{operation_id}/grant-v2", {}
+        )
+        return SensitiveExecutionGrantV2.model_validate(payload)
+
     def prepare_deletion_manifest(
         self, operation_id: UUID
     ) -> DeletionTargetManifestV2:
         payload = self._post(
-            f"/internal/v3/security/operations/{operation_id}/deletion-manifest", {}
+            f"/internal/v3/security/operations/{operation_id}/deletion-manifest-v2", {}
         )
         return DeletionTargetManifestV2.model_validate(payload)
 
@@ -1191,6 +1197,16 @@ class HttpRealmPolicyClient:
     def attest_receipt(self, receipt: ExecutorReceiptV2) -> str:
         payload = self._post(
             f"/internal/v3/security/operations/{receipt.operation_id}/receipt-attestation",
+            receipt.model_dump(mode="json"),
+        )
+        digest = payload.get("receipt_digest") if isinstance(payload, dict) else None
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise RealmWorkflowUnavailable("realm policy response is invalid")
+        return digest
+
+    def attest_receipt_v2(self, receipt: ExecutorReceiptV2) -> str:
+        payload = self._post(
+            f"/internal/v3/security/operations/{receipt.operation_id}/receipt-attestation-v2",
             receipt.model_dump(mode="json"),
         )
         digest = payload.get("receipt_digest") if isinstance(payload, dict) else None
@@ -1265,7 +1281,7 @@ class RealmRetrievalCoordinator:
         if status.state != "CLAIMED":
             raise RealmWorkflowUnavailable("retrieval operation state is unavailable")
         frozen = self._workflow.freeze_retrieval(claim.operation_id)
-        grant = self._policy.issue_grant(claim.operation_id)
+        grant = self._policy.issue_grant_v2(claim.operation_id)
         result = self._executor.invoke_retrieval(
             RetrievalExecutorInvocationV2(
                 permit=permit,
@@ -1273,7 +1289,7 @@ class RealmRetrievalCoordinator:
                 package=frozen.package,
             )
         )
-        self._policy.attest_receipt(result.receipt)
+        self._policy.attest_receipt_v2(result.receipt)
         reconciled = self._workflow.reconcile(
             claim.operation_id, SensitiveActionV2.EVIDENCE_RETRIEVE
         )
@@ -1334,7 +1350,7 @@ class RealmDeletionCoordinator:
             or manifest.root_evidence_id != permit.resource_selector.object_id
         ):
             raise RealmWorkflowUnavailable("deletion manifest differs from permit")
-        grant = self._policy.issue_grant(claim.operation_id)
+        grant = self._policy.issue_grant_v2(claim.operation_id)
         result = self._executor.invoke_deletion(
             DeletionExecutorInvocationV2(
                 permit=permit,
@@ -1342,7 +1358,7 @@ class RealmDeletionCoordinator:
                 manifest=manifest,
             )
         )
-        self._policy.attest_receipt(result.receipt)
+        self._policy.attest_receipt_v2(result.receipt)
         reconciled = self._workflow.reconcile(
             claim.operation_id, SensitiveActionV2.EVIDENCE_DELETE
         )

@@ -57,6 +57,7 @@ from lucy.contracts.security_v1_2 import (
     VerificationKeyV1,
 )
 from lucy.contracts.security_v1_3 import (
+    DeletionTargetManifestV2,
     DeletionTargetManifestV3,
     Ed25519V13Signer,
     ExecutionBindingV1,
@@ -125,7 +126,9 @@ from lucy.realm_security_workflows import (
     RealmDeletionCoordinatorV3,
     RealmDeletionWorkflowResultV1,
     RealmLambdaExecutorInvoker,
+    RealmPolicyDeletionService,
     RealmPolicyDeletionServiceV3,
+    RealmPolicyGrantService,
     RealmPolicyGrantServiceV3,
     RealmRetrievalCoordinator,
     RealmRetrievalWorkflowResultV1,
@@ -445,6 +448,41 @@ def _realm_policy_services() -> tuple[
             signer=signer,
             verifier=verifier,
         ),
+        VerifiedRealmPolicyAdapter(
+            store,
+            verifier=V13ContractVerifier(
+                _v13_verification_keys("LUCY_V13_RECEIPT_TRUST_STORE_JSON")
+            ),
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _realm_policy_services_v2() -> tuple[
+    RealmPolicyGrantService,
+    RealmPolicyDeletionService,
+    VerifiedRealmPolicyAdapter,
+]:
+    try:
+        private_seed = base64.b64decode(
+            _required_environment("LUCY_V13_POLICY_SIGNING_PRIVATE_KEY_B64"),
+            validate=True,
+        )
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_seed)
+    except ValueError as exc:
+        raise ValueError("v1.3 policy signing key is invalid") from exc
+    store = PostgresRealmPolicyStore(_ready_sessions())
+    signer = Ed25519V13Signer(
+        private_key,
+        key_id=_required_environment("LUCY_V13_POLICY_KEY_ID"),
+        purpose=V13SigningKeyPurpose.POLICY_NOTARY,
+    )
+    verifier = V13ContractVerifier(
+        _v13_verification_keys("LUCY_V13_POLICY_TRUST_STORE_JSON")
+    )
+    return (
+        RealmPolicyGrantService(store, signer=signer, verifier=verifier),
+        RealmPolicyDeletionService(store, signer=signer, verifier=verifier),
         VerifiedRealmPolicyAdapter(
             store,
             verifier=V13ContractVerifier(
@@ -1445,6 +1483,68 @@ def grant_sensitive_operation_v3(
         return grants.issue_grant(operation_id)
     except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
         raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/grant-v2",
+    tags=["internal"],
+    response_model=SensitiveExecutionGrantV2,
+)
+def grant_sensitive_operation_v2(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> SensitiveExecutionGrantV2:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        grants, _deletions, _receipts = _realm_policy_services_v2()
+        return grants.issue_grant(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for grant") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/deletion-manifest-v2",
+    tags=["internal"],
+    response_model=DeletionTargetManifestV2,
+)
+def prepare_deletion_manifest_v2_compat(
+    operation_id: UUID,
+    authorization: str | None = Header(default=None),
+) -> DeletionTargetManifestV2:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    try:
+        _grants, deletions, _receipts = _realm_policy_services_v2()
+        return deletions.prepare_manifest(operation_id)
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="operation not eligible for deletion") from exc
+
+
+@app.post(
+    "/internal/v3/security/operations/{operation_id}/receipt-attestation-v2",
+    tags=["internal"],
+)
+def attest_executor_receipt_v2_compat(
+    operation_id: UUID,
+    receipt: ExecutorReceiptV2,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_mode("policy")
+    if security_baseline_from_environment() != "v1.3":
+        raise HTTPException(status_code=404, detail="endpoint unavailable")
+    _authorize_policy_gateway(authorization)
+    if receipt.operation_id != operation_id:
+        raise HTTPException(status_code=400, detail="operation identity mismatch")
+    try:
+        _grants, _deletions, receipts = _realm_policy_services_v2()
+        return {"receipt_digest": receipts.attest_receipt(receipt)}
+    except (PermissionError, ValueError, RealmWorkflowUnavailable) as exc:
+        raise HTTPException(status_code=403, detail="executor receipt not trusted") from exc
 
 
 @app.post(

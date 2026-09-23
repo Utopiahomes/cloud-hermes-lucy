@@ -929,12 +929,12 @@ def test_deletion_coordinator_executes_manifest_grant_receipt_then_reconciles() 
             events.append("manifest")
             return manifest
 
-        def issue_grant(self, operation_id: UUID) -> Any:
+        def issue_grant_v2(self, operation_id: UUID) -> Any:
             assert operation_id == permit.operation_id
             events.append("grant")
             return grant
 
-        def attest_receipt(self, candidate: object) -> str:
+        def attest_receipt_v2(self, candidate: object) -> str:
             assert candidate is receipt
             events.append("attest")
             return "e" * 64

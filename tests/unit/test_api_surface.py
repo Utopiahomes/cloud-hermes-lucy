@@ -58,6 +58,7 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
             "/internal/v2/security/operations/{operation_id}/receipt-attestation",
         ),
             ("POST", "/internal/v3/security/operations/{operation_id}/grant"),
+            ("POST", "/internal/v3/security/operations/{operation_id}/grant-v2"),
             ("POST", "/internal/v3/security/memory-outcomes/recovery-grant"),
         (
             "POST",
@@ -65,7 +66,15 @@ def test_internal_surface_is_an_exact_reviewed_allowlist() -> None:
         ),
         (
             "POST",
+            "/internal/v3/security/operations/{operation_id}/deletion-manifest-v2",
+        ),
+        (
+            "POST",
             "/internal/v3/security/operations/{operation_id}/receipt-attestation",
+        ),
+        (
+            "POST",
+            "/internal/v3/security/operations/{operation_id}/receipt-attestation-v2",
         ),
     }
 
