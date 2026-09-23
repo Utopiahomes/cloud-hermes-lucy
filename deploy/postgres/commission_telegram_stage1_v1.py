@@ -153,6 +153,7 @@ def _post(url: str, token: str) -> dict[str, Any]:
 
 def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
     now = datetime.now(UTC)
+    expected_admission = "ready" if config.realm_slug == "raymond" else "quarantined"
     with psycopg.connect(_conninfo(config.migration_url)) as connection:
         connection.execute("SET LOCAL lock_timeout='10s'")
         connection.execute("SET LOCAL statement_timeout='120s'")
@@ -181,7 +182,7 @@ def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
         expected_boundary = (
             "lucy_migration",
             EXPECTED_REVISION,
-            "quarantined",
+            expected_admission,
             True,
             True,
             True,
@@ -283,6 +284,7 @@ def _provision_and_stage(config: Configuration) -> tuple[UUID, bool]:
 
 
 def commission(config: Configuration) -> dict[str, Any]:
+    expected_admission = "ready" if config.realm_slug == "raymond" else "quarantined"
     event_id, already_durable = _provision_and_stage(config)
     if not already_durable:
         writer: dict[str, Any] | None
@@ -320,7 +322,7 @@ def commission(config: Configuration) -> dict[str, Any]:
             "JOIN lucy.authority_recovery_outbox_v1 o ON o.event_id=%s WHERE c.id=%s",
             (event_id, config.channel_binding_id),
         ).fetchone()
-    if verified != (True, 2, True, "quarantined", True):
+    if verified != (True, 2, True, expected_admission, True):
         raise BootstrapError("durable Telegram activation verification failed")
     return {
         "contract": "lucy.telegram.private.stage1.commissioning.v1",
@@ -328,7 +330,7 @@ def commission(config: Configuration) -> dict[str, Any]:
         "channel_active": True,
         "generation": 2,
         "authority_durable": True,
-        "admission_state": "quarantined",
+        "admission_state": expected_admission,
         "capture_enabled": False,
     }
 

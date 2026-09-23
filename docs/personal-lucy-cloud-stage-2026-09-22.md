@@ -588,3 +588,53 @@ initial classification probe, but that probe used a suspended-service one-off
 and is itself invalid. Recheck with an active identity before retrying. Do not redirect
 the active bot to the current Raymond routine service: it would fail the
 Telegram lease/retention boundary and could interrupt replies.
+
+## Utopia owner archive deletion verified (2026-09-23)
+
+This section supersedes the earlier pending-deletion checkpoint above. The
+quoted `python -c "..."` Render one-off format was a no-op; an unquoted encoded
+command was proven with deliberately failing and passing exit codes. A corrected
+probe then found the Utopia policy and sensitive-workflow database passwords
+were stale. The passwords were restored to the values already configured on the
+three suspended Utopia sensitive services, and their logins were checked. No
+credential was printed or committed.
+
+An independent administrator job established the pre-deletion state: the exact
+four reviewed scoped evidence records existed, with zero deletion fences and
+zero permits from the no-op attempt. Utopia's database was at revision
+`0068_workspaces_service_auth`; the old policy/deletion image accepted only an
+earlier revision. The two sensitive services were deployed with compatible code
+while controlled and resuspended. The first V2 permit reached `CLAIMED`, but
+its deletion failed while the policy listener was starting; after the listener
+became reachable, the newer policy route rejected the older V2 operation. That
+permit expired without a fence or receipt and was not replayed into a new
+operation.
+
+Commit `a77d968` restores explicit V2 policy manifest, grant and receipt routes
+beside the V3 routes. Forty-eight focused unit tests, Ruff and strict mypy
+passed. Both sensitive services were deployed at that commit and kept
+suspended outside the bounded deletion operations. Four new exact V1.3 deletion
+permits were issued against packet SHA-256
+`62110370f84bf04581e07b67f3a9b0fbd0b151f4fbd206088b81aaf12ea06275`:
+two user records in `utopia-telegram-owner-deletion-execution-v5.json` and two
+separately rooted assistant records in `...-v6.json` (both gitignored). The
+policy service was active only during those jobs and is suspended again. The
+deletion service remained suspended between one-off jobs.
+
+The independent administrator job `job-daq16ao473hc73e4nkhg` verified all four
+exact evidence IDs have deletion fences. All four corresponding operations are
+`FINALITY_PENDING` with nonempty executor receipt digests. This establishes
+inaccessibility through the scoped evidence boundary and key-destruction
+receipts; finality verification is pending. The four PostgreSQL metadata rows
+remain for audit/recovery state. The temporary administrator utility was
+deleted. The 16 older legacy records are synthetic `cloud-acceptance-` probes
+and outside Ray's private-history deletion request. No message content was
+read. Because Utopia's current Telegram bot still captures turns, run one final
+content-free sweep when moving it to Raymond so new turns do not replenish the
+archive.
+
+Current next action: diagnose the failed Raymond Telegram Stage 1 commissioning
+job with a fresh corrected command and exact read-only database classification;
+then stage the Raymond channel, recovery dependencies and bot credential. Do
+not route real Telegram traffic through Raymond's shared OpenRouter key: Ray
+approved that key for synthetic testing only.
