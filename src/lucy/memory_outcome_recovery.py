@@ -115,9 +115,17 @@ class PostgresMemoryOutcomePolicyStore:
                     },
                 ).scalar_one()
         except DBAPIError as exc:
+            primary = getattr(getattr(exc.orig, "diag", None), "message_primary", "")
+            if primary not in {
+                "memory outcome recovery unavailable",
+                "memory outcome source is ineligible",
+                "memory outcome recovery conflict",
+            }:
+                primary = "other"
             print(
                 "private memory policy admission database rejection: "
-                f"{type(exc.orig).__name__}/{getattr(exc.orig, 'sqlstate', 'unknown')}",
+                f"{type(exc.orig).__name__}/{getattr(exc.orig, 'sqlstate', 'unknown')}"
+                f"/{primary}",
                 flush=True,
             )
             raise MemoryOutcomeUnavailable("outcome policy admission unavailable") from exc
