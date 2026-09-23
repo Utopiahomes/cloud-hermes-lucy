@@ -96,11 +96,32 @@ class _TransportCompletion:
             output = parse_memory_extraction_output(outcome.output)
             validation_phase = "materialize"
             plaintext = {item.source_record_id: item.content for item in self._batch.records}
+            permitted = frozenset(self._batch.dispatch.source_record_ids)
+            valid_drafts = tuple(
+                draft
+                for draft in output.candidates
+                if all(
+                    source.source_record_id in permitted
+                    and source.source_record_id in self._evidence
+                    and (
+                        content := plaintext.get(source.source_record_id)
+                    ) is not None
+                    and content.encode("utf-8").count(source.exact_quote.encode("utf-8")) == 1
+                    for source in draft.sources
+                )
+            )
+            if len(valid_drafts) != len(output.candidates):
+                print(
+                    "private pilot invalid drafts excluded: "
+                    f"{len(output.candidates) - len(valid_drafts)}",
+                    flush=True,
+                )
+            output = output.model_copy(update={"candidates": valid_drafts})
             candidates = materialize_verified_pending_candidates(
                 output,
                 manifest=self._manifest,
                 plaintext_by_source_record_id=plaintext,
-                permitted_source_record_ids=frozenset(self._batch.dispatch.source_record_ids),
+                permitted_source_record_ids=permitted,
                 evidence_by_source_record_id=self._evidence,
                 extraction_job_id=self._batch.dispatch.extraction_job_id,
             )

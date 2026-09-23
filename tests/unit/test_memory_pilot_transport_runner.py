@@ -279,6 +279,46 @@ def test_verified_transport_executes_and_replays_without_second_provider_call() 
     assert "Ray selected" not in serialized_status
 
 
+def test_transport_keeps_exactly_quoted_candidates_when_another_draft_is_invalid() -> None:
+    prepared, manifest, _build, authorization = _prepared()
+    batch = prepared.batches[0]
+    dependencies = Dependencies(manifest, authorization)
+    valid = MemoryExtractionOutputV1.model_validate_json(
+        dependencies.infer(manifest=manifest, dispatch=batch.dispatch).output
+    ).candidates[0]
+    invalid = valid.model_copy(
+        update={
+            "sources": (
+                ExtractedSourceQuoteV1(
+                    source_record_id=valid.sources[0].source_record_id,
+                    exact_quote="paraphrased, absent quote",
+                ),
+            )
+        }
+    )
+    dependencies.infer = lambda **kwargs: DeterministicFakeMemoryImportProvider(
+        MemoryExtractionOutputV1(candidates=(invalid, valid))
+    ).infer(**kwargs)
+    executor = VerifiedMemoryPilotBatchExecutor(
+        admission=dependencies,
+        archive=dependencies,
+        accounting=dependencies,
+        eligibility=dependencies,
+        provider=dependencies,
+        outcomes=dependencies,
+        outcome_recovery=dependencies,
+        candidate_store=dependencies,
+        now=lambda: NOW,
+    )
+
+    result = executor.execute(batch, capability_token=b"c" * 32)
+
+    assert result.receipt.state == "succeeded"
+    assert result.receipt.candidate_count == 1
+    assert result.review_artifact is not None
+    assert len(result.review_artifact.bundle.items) == 1
+
+
 def test_partial_archive_retry_reuses_first_record_and_calls_provider_once() -> None:
     prepared, manifest, _build, authorization = _prepared()
     batch = prepared.batches[0]
