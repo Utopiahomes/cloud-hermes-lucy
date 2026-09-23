@@ -26,7 +26,9 @@ def main() -> int:
         or not url.password
     ):
         raise RuntimeError("Utopia database boundary changed")
-    engine = create_engine(url.render_as_string(hide_password=False))
+    engine = create_engine(
+        url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)
+    )
     with engine.connect() as connection:
         database, login = connection.execute(
             text("SELECT current_database(),session_user")
