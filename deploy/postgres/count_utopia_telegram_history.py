@@ -96,12 +96,16 @@ def main() -> int:
         scoped_targets = connection.execute(text("""
             SELECT e.id::text AS evidence_id, e.status,
                    e.created_at::date::text AS created_date,
+                   p.record_version,
                    p.evidence_id IS NOT NULL AS has_payload,
                    w.wrapped_key_ref::text AS wrapped_key_ref,
                    f.evidence_id IS NOT NULL AS deletion_fenced,
                    o.state AS deletion_operation_state,
                    i.source_conversation_id LIKE 'cloud-acceptance-%%' AS acceptance_probe,
                    i.source_conversation_id LIKE 'synthetic-%%' AS synthetic_session,
+                   CASE WHEN ct.user_evidence_id = e.id THEN 'user'
+                        WHEN ct.assistant_evidence_id = e.id THEN 'assistant'
+                        ELSE 'uncommitted' END AS turn_role,
                    EXISTS (
                        SELECT 1 FROM lucy.scoped_archive_intents_v1 live
                        JOIN lucy.scoped_evidence_records_v2 live_e
@@ -118,6 +122,8 @@ def main() -> int:
               LEFT JOIN lucy.scoped_evidence_deletion_fences_v2 f
                 ON f.evidence_id = e.id
               LEFT JOIN lucy.sensitive_operations_v2 o ON o.id = f.operation_id
+              LEFT JOIN lucy.scoped_conversation_turn_commits_v1 ct
+                ON ct.user_evidence_id = e.id OR ct.assistant_evidence_id = e.id
              WHERE e.content_classification = 'owner_conversation'
              ORDER BY e.id
         """)).mappings().all()
