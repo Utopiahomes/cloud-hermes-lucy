@@ -77,6 +77,39 @@ def main() -> int:
                AND e.source_conversation_id LIKE 'telegram:%'
              ORDER BY e.id
         """)).mappings().all()
+        scoped = connection.execute(text("""
+            SELECT count(*) AS owner_conversation_evidence,
+                   count(*) FILTER (WHERE p.evidence_id IS NOT NULL) AS payloads,
+                   count(*) FILTER (WHERE w.evidence_id IS NOT NULL) AS current_wrappers,
+                   count(*) FILTER (WHERE f.evidence_id IS NOT NULL) AS deletion_fences
+              FROM lucy.scoped_evidence_records_v2 e
+              LEFT JOIN lucy.scoped_evidence_payloads_v2 p ON p.evidence_id = e.id
+              LEFT JOIN lucy.scoped_evidence_wrappers_v2 w
+                ON w.evidence_id = e.id AND w.current
+              LEFT JOIN lucy.scoped_evidence_deletion_fences_v2 f
+                ON f.evidence_id = e.id
+             WHERE e.content_classification = 'owner_conversation'
+        """)).mappings().one()
+        scoped_targets = connection.execute(text("""
+            SELECT e.id::text AS evidence_id, e.status,
+                   p.evidence_id IS NOT NULL AS has_payload,
+                   w.wrapped_key_ref::text AS wrapped_key_ref,
+                   f.evidence_id IS NOT NULL AS deletion_fenced
+              FROM lucy.scoped_evidence_records_v2 e
+              LEFT JOIN lucy.scoped_evidence_payloads_v2 p ON p.evidence_id = e.id
+              LEFT JOIN lucy.scoped_evidence_wrappers_v2 w
+                ON w.evidence_id = e.id AND w.current
+              LEFT JOIN lucy.scoped_evidence_deletion_fences_v2 f
+                ON f.evidence_id = e.id
+             WHERE e.content_classification = 'owner_conversation'
+             ORDER BY e.id
+        """)).mappings().all()
+        scoped_receipts = connection.execute(text("""
+            SELECT count(*) AS receipts,
+                   count(*) FILTER (WHERE capture_enabled) AS retained_receipts
+              FROM lucy.scoped_capture_receipts_v1
+             WHERE platform = 'telegram'
+        """)).mappings().one()
     print(json.dumps({
         "status": "passed",
         "database": database,
@@ -84,6 +117,9 @@ def main() -> int:
         "captures": dict(captures),
         "evidence": dict(evidence),
         "targets": [dict(row) for row in targets],
+        "scoped": dict(scoped),
+        "scoped_targets": [dict(row) for row in scoped_targets],
+        "scoped_receipts": dict(scoped_receipts),
         "content_read": False,
     }, sort_keys=True))
     return 0
