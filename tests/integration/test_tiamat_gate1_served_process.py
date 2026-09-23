@@ -8,6 +8,7 @@ retired shutdown that the next process starts after. The transport is synthetic 
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -28,6 +29,11 @@ from lucy.shared_execution.recovery_anchor import (
     VerifiedAnchorTransition,
 )
 from lucy.shared_execution.served_app import ServedConfiguration, build_served_app
+from lucy.shared_execution.served_startup import ServedStartupRefused
+from lucy.shared_execution.startup_attestation import (
+    LedgerRecoveryCheckpointSource,
+    StartupAttestationIssuer,
+)
 from tests.integration.conftest import DisposableRoles
 from tests.integration.test_tiamat_gate1_served_api import (
     DIGEST_KEY,
@@ -229,3 +235,41 @@ def test_a_refresh_that_finds_authority_withdrawn_closes_the_process(
     # Closing the latch also blocked the gate, so the next process cannot start without recovery.
     assert _gate_state(process_env)[0] is True
     _unblock(process_env)
+
+
+def test_a_consume_only_process_serves_only_on_a_claimant_the_launcher_issued(
+    signed_process: tuple[_Environment, SyntheticReleaseTrust],
+) -> None:
+    """The deployed shape: the server never holds the recovery credential.
+
+    With no claimant waiting it refuses to start rather than making one. Once the separate
+    launcher, which does hold the recovery credential, has issued one, the server consumes it.
+    """
+
+    env, trust = signed_process
+    private_key = Ed25519PrivateKey.generate()
+    anchor = _anchor(env)
+    configuration = replace(
+        _configuration(env, trust, anchor, private_key), recovery_database_url=None
+    )
+
+    refused = build_served_app(configuration)
+    with (
+        pytest.raises(ServedStartupRefused, match="startup_claimant_required"),
+        TestClient(refused.app),
+    ):
+        pass
+    assert refused.process.runtime is None
+
+    StartupAttestationIssuer(
+        anchor=anchor,
+        identity=_identity(env),
+        recovery_database_url=env.recovery,
+        checkpoint_source=LedgerRecoveryCheckpointSource(env.recovery),
+    ).issue(now=datetime.now(UTC))
+    served = build_served_app(configuration)
+    raw = body()
+    with TestClient(served.app) as client:
+        assert not served.runtime.launcher_invoked
+        response = client.post(PATH, content=raw, headers=headers(private_key, raw, key=uuid4()))
+    assert response.status_code == 200, response.text

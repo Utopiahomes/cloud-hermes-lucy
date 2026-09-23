@@ -569,3 +569,20 @@ def test_the_writer_starts_only_on_the_reviewed_roots(world: Any) -> None:
     assert writer_from_environment(_environment(roots), client=ConditionalTable()) is not None
     with pytest.raises(ValueError, match="configuration is invalid"):
         writer_from_environment(_environment(roots, digest="0" * 64), client=ConditionalTable())
+
+
+def test_a_misconfigured_writer_says_so_and_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(anchor_writer_lambda, "_writer", None)
+    for name, value in _environment("{}", digest="0" * 64).items():
+        monkeypatch.setenv(name, value)
+    answer = anchor_writer_lambda.handler(
+        {
+            "anchor_key": "x",
+            "transition_jws_b64": "",
+            "witness_jws_b64": "",
+            "inventory_jws_b64": "",
+        },
+        None,
+    )
+    assert answer == {"status": "refused", "reason": "recovery_anchor_writer_misconfigured"}
+    assert anchor_writer_lambda._writer is None

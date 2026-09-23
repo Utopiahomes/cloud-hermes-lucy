@@ -50,11 +50,16 @@ def start_serving(
     *,
     anchor: ExternalRecoveryAnchor,
     identity: RecoveryAnchorIdentity,
-    issuer: StartupAttestationIssuer,
+    issuer: StartupAttestationIssuer | None,
     ledger: PostgresExecutionLedger,
     clock: Callable[[], datetime],
 ) -> ServedRuntime:
-    """Read authority, obtain a claimant if one is needed, and consume exactly one."""
+    """Read authority, obtain a claimant if one is needed, and consume exactly one.
+
+    Without an issuer the process is consume-only: the launcher runs separately, holding the
+    recovery credential a serving process must never hold, and a process that finds no claimant
+    waiting refuses to start rather than making one.
+    """
 
     try:
         transition = anchor.read(identity.key)
@@ -66,7 +71,9 @@ def start_serving(
     launcher_invoked = False
     try:
         generation = ledger.consume_startup_attestation(transition.exact_sha256)
-    except DispatchBlocked:
+    except DispatchBlocked as exc:
+        if issuer is None:
+            raise ServedStartupRefused("startup_claimant_required") from exc
         launcher_invoked = True
         try:
             issuer.issue(now=clock())

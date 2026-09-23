@@ -70,7 +70,9 @@ class ServedConfiguration:
     anchor: ExternalRecoveryAnchor
     anchor_identity: RecoveryAnchorIdentity
     runtime_database_url: str
-    recovery_database_url: str
+    # Only for a process that is also its own launcher, as the disposable proofs are. A deployed
+    # serving process leaves it unset and consumes a claimant the separate launcher issued.
+    recovery_database_url: str | None
     recovery_generation: int
     scope: LedgerScope
     workload: WorkloadIdentity
@@ -181,13 +183,17 @@ def build_served_app(
         runtime = start_serving(
             anchor=configuration.anchor,
             identity=configuration.anchor_identity,
-            issuer=StartupAttestationIssuer(
-                anchor=configuration.anchor,
-                identity=configuration.anchor_identity,
-                recovery_database_url=configuration.recovery_database_url,
-                checkpoint_source=LedgerRecoveryCheckpointSource(
-                    configuration.recovery_database_url
-                ),
+            issuer=(
+                None
+                if configuration.recovery_database_url is None
+                else StartupAttestationIssuer(
+                    anchor=configuration.anchor,
+                    identity=configuration.anchor_identity,
+                    recovery_database_url=configuration.recovery_database_url,
+                    checkpoint_source=LedgerRecoveryCheckpointSource(
+                        configuration.recovery_database_url
+                    ),
+                )
             ),
             ledger=ledger,
             clock=clock,

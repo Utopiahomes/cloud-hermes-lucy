@@ -75,7 +75,12 @@ def handler(event: Any, _context: Any) -> dict[str, Any]:
     try:
         request = _request(event)
         if _writer is None:
-            _writer = writer_from_environment()
+            try:
+                _writer = writer_from_environment()
+            except ValueError:
+                # The deployed roots or table settings are not the reviewed ones: say so, since
+                # this is the one refusal an operator fixes in configuration, not in a request.
+                return {"status": "refused", "reason": "recovery_anchor_writer_misconfigured"}
         result = _writer.write(request)
     except AnchorWriteRefused as exc:
         return {"status": "refused", "reason": str(exc)}
