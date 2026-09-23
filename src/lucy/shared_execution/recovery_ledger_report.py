@@ -183,3 +183,172 @@ def empty_ledger_checkpoint(
         },
         identity=identity,
     )
+
+
+_READBACK_TABLES = (
+    "restore_gate",
+    "ledger_identity",
+    "trust_inventories",
+    "signed_releases",
+    "release_heads",
+    "spending_partitions",
+    "grant_releases",
+    "execution_records",
+    "execution_idempotency_aliases",
+    "financial_events",
+    "route_rate_quarantines",
+    "jti_replay",
+    "startup_attestations",
+    "recovery_checkpoints",
+)
+_GATE_COLUMNS = (
+    "storage_epoch",
+    "recovery_generation",
+    "coordinator_generation",
+    "dispatch_blocked",
+    "block_reason",
+    "verified_at",
+    "anchor_floor_version",
+    "anchor_floor_sha256",
+)
+
+
+def read_ledger_schema_readback(database_url: str, *, environment: str) -> dict[str, object]:
+    """A read-only readback that adapts to whatever schema revision the ledger is at.
+
+    ``read_ledger_recovery_state`` assumes the current schema. A ledger provisioned earlier (the
+    commissioned staging ledger was last recorded at 0006) may lack tables and columns it reads,
+    so this consults the catalog first and reads only what exists and what the login may read:
+    the migration revision, each table's presence and this login's privileges on it, the gate's
+    existing columns, per-environment counts, the inventories, and the continuity beacon if its
+    functions are callable. Nothing is written; the output is content-free.
+    """
+
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        connection.execute("SET TRANSACTION READ ONLY")
+        login = _one(connection, "SELECT current_user::text")
+        present = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'tiamat'"
+            ).fetchall()
+        }
+        revision = None
+        if "alembic_version" in present and _may(connection, "alembic_version", "SELECT"):
+            revision = _one(connection, "SELECT version_num FROM tiamat.alembic_version")
+        tables: dict[str, object] = {}
+        for table in _READBACK_TABLES:
+            if table not in present:
+                tables[table] = {"present": False}
+                continue
+            entry: dict[str, object] = {
+                "present": True,
+                "privileges": {
+                    privilege.lower(): _may(connection, table, privilege)
+                    for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE")
+                },
+            }
+            if (
+                table != "ledger_identity"
+                and _may(connection, table, "SELECT")
+                and "environment" in _columns(connection, table)
+            ):
+                entry["environment_rows"] = int(
+                    _one(
+                        connection,
+                        f"SELECT count(*) FROM tiamat.{table} WHERE environment = %s",  # noqa: S608
+                        (environment,),
+                    )
+                )
+            tables[table] = entry
+        readback: dict[str, object] = {
+            "environment": environment,
+            "login": login,
+            "schema_revision": revision,
+            "tables": tables,
+        }
+        if "ledger_identity" in present and _may(connection, "ledger_identity", "SELECT"):
+            readback["ledger_id"] = str(
+                _one(connection, "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton")
+            )
+        if "restore_gate" in present and _may(connection, "restore_gate", "SELECT"):
+            available = [c for c in _GATE_COLUMNS if c in _columns(connection, "restore_gate")]
+            row = connection.execute(
+                f"SELECT {', '.join(available)} FROM tiamat.restore_gate "  # noqa: S608
+                "WHERE environment = %s",
+                (environment,),
+            ).fetchone()
+            readback["gate"] = (
+                None
+                if row is None
+                else {
+                    column: (
+                        value if isinstance(value, bool | int) or value is None else str(value)
+                    )
+                    for column, value in zip(available, row, strict=True)
+                }
+            )
+            readback["gate_columns_missing"] = [c for c in _GATE_COLUMNS if c not in available]
+        if "trust_inventories" in present and _may(connection, "trust_inventories", "SELECT"):
+            readback["trust_inventories"] = [
+                {"inventory_generation": int(r[0]), "state": str(r[1]), "jws_sha256": str(r[2])}
+                for r in connection.execute(
+                    """
+                    SELECT inventory_generation, state, jws_sha256 FROM tiamat.trust_inventories
+                    WHERE environment = %s ORDER BY inventory_generation
+                    """,
+                    (environment,),
+                ).fetchall()
+            ]
+        callable_beacon = all(
+            _one(connection, "SELECT pg_catalog.has_function_privilege(%s, 'EXECUTE')", (name,))
+            for name in (
+                "pg_catalog.pg_control_system()",
+                "pg_catalog.pg_control_checkpoint()",
+                "pg_catalog.pg_current_wal_flush_lsn()",
+            )
+        )
+        if callable_beacon:
+            beacon = connection.execute(
+                """
+                SELECT (pg_catalog.pg_control_system()).system_identifier::text,
+                       (pg_catalog.pg_control_checkpoint()).timeline_id::bigint,
+                       pg_catalog.pg_current_wal_flush_lsn()::text
+                """
+            ).fetchone()
+            if beacon is not None:
+                readback["beacon"] = {
+                    "system_identifier": str(beacon[0]),
+                    "timeline_id": int(beacon[1]),
+                    "flushed_wal_lsn": str(beacon[2]),
+                }
+        readback["beacon_callable"] = callable_beacon
+        return readback
+
+
+def _one(connection: psycopg.Connection[Any], query: str, params: tuple[object, ...] = ()) -> Any:
+    row = connection.execute(query, params).fetchone()
+    return None if row is None else row[0]
+
+
+def _may(connection: psycopg.Connection[Any], table: str, privilege: str) -> bool:
+    return bool(
+        _one(
+            connection,
+            "SELECT pg_catalog.has_table_privilege(%s, %s)",
+            (f"tiamat.{table}", privilege),
+        )
+    )
+
+
+def _columns(connection: psycopg.Connection[Any], table: str) -> set[str]:
+    return {
+        str(row[0])
+        for row in connection.execute(
+            """
+            SELECT attname FROM pg_catalog.pg_attribute
+            WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped
+            """,
+            (f"tiamat.{table}",),
+        ).fetchall()
+    }

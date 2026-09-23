@@ -128,6 +128,8 @@ def disposable_roles() -> DisposableRoles:
             "tiamat.release_heads TO tiamat_recovery"
         )
         owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
+        # As deployed: the template's all-tables grant covers the migration revision table.
+        owner.execute("GRANT SELECT ON tiamat.alembic_version TO tiamat_recovery")
         owner.execute("GRANT SELECT ON tiamat.restore_gate TO tiamat_runtime")
         owner.execute(
             f"GRANT SELECT, INSERT, UPDATE, DELETE ON {EXECUTION_TABLES} "

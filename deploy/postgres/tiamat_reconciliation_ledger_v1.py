@@ -2,6 +2,10 @@
 
 Reads ``TIAMAT_RECOVERY_DATABASE_URL``; it must never be given to a serving process.
 
+- ``readback``: read-only and schema-tolerant: the migration revision, which tables and gate
+  columns exist, this login's privileges, per-environment counts, inventories and the beacon.
+  Safe on a ledger at any schema revision; run it first on any ledger not provisioned by this
+  checklist.
 - ``report``: read-only, content-free state (gate, identity, inventories, retained checkpoints,
   history counts, continuity beacon). With ``--checkpoint-generation`` it also emits the
   empty-ledger checkpoint for that generation, and refuses a ledger with any history.
@@ -46,6 +50,7 @@ from lucy.shared_execution.recovery_anchor_reconciliation import verify_reconcil
 from lucy.shared_execution.recovery_ledger_report import (
     empty_ledger_checkpoint,
     read_ledger_recovery_state,
+    read_ledger_schema_readback,
 )
 from lucy.shared_execution.signed_releases import verify_trust_inventory
 
@@ -117,6 +122,7 @@ def release_root_from_pin(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    readback = commands.add_parser("readback")
     report = commands.add_parser("report")
     report.add_argument("--checkpoint-generation", type=int)
     commands.add_parser("beacon")
@@ -151,13 +157,15 @@ def main() -> None:
     partition.add_argument("--partition-id", required=True)
     partition.add_argument("--execute", action="store_true")
     partition.add_argument("--confirm-partition-id")
-    for command in (report, commands.choices["beacon"], first, authorize, partition):
+    for command in (readback, report, commands.choices["beacon"], first, authorize, partition):
         command.add_argument("--environment", required=True)
     args = parser.parse_args()
     url = _database_url()
     output: dict[str, object]
 
-    if args.command == "report":
+    if args.command == "readback":
+        output = read_ledger_schema_readback(url, environment=args.environment)
+    elif args.command == "report":
         state = read_ledger_recovery_state(url, environment=args.environment)
         output = state.as_dict()
         if args.checkpoint_generation is not None:

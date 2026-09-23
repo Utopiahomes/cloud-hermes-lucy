@@ -885,3 +885,34 @@ def test_the_commissioned_shape_reconciles_from_an_expired_successor_head(
     ).issue(now=datetime.now(UTC))
     assert receipt.anchor_transition_version == 4
     assert receipt.anchor_transition_sha256 == established.candidate.exact_sha256
+
+
+def test_the_schema_tolerant_readback_reads_what_exists_and_fails_nothing(
+    ledger: _Ledger,
+) -> None:
+    from lucy.shared_execution.recovery_ledger_report import read_ledger_schema_readback
+
+    ledger.install_first_inventory()
+    readback = read_ledger_schema_readback(ledger.roles.recovery, environment=ledger.environment)
+    assert readback["login"] == "tiamat_recovery"
+    assert readback["schema_revision"] == "0017_revocation_generation"
+    assert readback["ledger_id"] == str(ledger.identity.ledger_id)
+    gate = readback["gate"]
+    assert isinstance(gate, dict)
+    assert (gate["recovery_generation"], gate["dispatch_blocked"]) == (1, True)
+    assert readback["gate_columns_missing"] == []
+    tables = readback["tables"]
+    assert isinstance(tables, dict)
+    assert tables["trust_inventories"]["environment_rows"] == 1
+    assert tables["recovery_checkpoints"]["privileges"]["select"] is True
+    assert readback["beacon_callable"] is True and "beacon" in readback
+
+    # A login without most grants still gets a readback: what it may not read is reported as
+    # such rather than failing the transaction.
+    limited = read_ledger_schema_readback(ledger.roles.runtime, environment=ledger.environment)
+    assert limited["login"] == "tiamat_runtime"
+    limited_tables = limited["tables"]
+    assert isinstance(limited_tables, dict)
+    assert limited_tables["recovery_checkpoints"]["privileges"]["select"] is False
+    assert "environment_rows" not in limited_tables["recovery_checkpoints"]
+    assert "ledger_id" not in limited

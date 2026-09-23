@@ -46,6 +46,7 @@ COPY deploy/postgres/render_recovery_roles_v1_3.py ./deploy/postgres/render_reco
 COPY deploy/postgres/initialize_tiamat_ledger_v1.py ./deploy/postgres/initialize_tiamat_ledger_v1.py
 COPY deploy/postgres/verify_tiamat_render_capabilities_v1.py ./deploy/postgres/verify_tiamat_render_capabilities_v1.py
 COPY deploy/postgres/probe_tiamat_p1_v1.py ./deploy/postgres/probe_tiamat_p1_v1.py
+COPY deploy/postgres/tiamat_reconciliation_ledger_v1.py ./deploy/postgres/tiamat_reconciliation_ledger_v1.py
 COPY deploy/postgres/render_tiamat_role_template_v1.py ./deploy/postgres/render_tiamat_role_template_v1.py
 COPY deploy/postgres/bootstrap_tiamat_staging_v1.py ./deploy/postgres/bootstrap_tiamat_staging_v1.py
 COPY deploy/postgres/bootstrap_tiamat_staging_hold_v1.py ./deploy/postgres/bootstrap_tiamat_staging_hold_v1.py
