@@ -1,0 +1,61 @@
+{
+  "evidence_type": "tiamat_gate2_proof2_disposable_bootstrap",
+  "date_utc": "2026-09-23",
+  "scope": "New isolated staging resources and blocked disposable ledger only; no AWS mutation, signed authority, provider dispatch, commissioned ledger, or commissioned anchor item",
+  "source_commit": "cadaa43fecd5e95862743661540a37ae0d8167ee",
+  "render": {
+    "environment_id": "evm-dal82elg1s2s73ei84qg",
+    "region": "virginia",
+    "database": {
+      "id": "dpg-daq5nfbncjis73apcsb0-a",
+      "name": "tiamat-g2p2-ledger",
+      "database_name": "tiamat_g2p2",
+      "owner_name": "tiamat_g2p2_owner",
+      "postgres_version": "16",
+      "plan": "0.1c-256mb",
+      "disk_size_gb": 1,
+      "high_availability": false,
+      "disk_autoscaling": false,
+      "status_at_readback": "available",
+      "external_ip_allowlist_after_bootstrap": []
+    },
+    "private_services": [
+      {"name": "tiamat-g2p2-bootstrap", "id": "srv-daq5nn0473hc73cohdk0", "plan": "0.5c-512mb", "suspended": true},
+      {"name": "tiamat-g2p2-recovery", "id": "srv-daq5p1jncjis73apipfg", "plan": "0.5c-512mb", "suspended": true},
+      {"name": "tiamat-g2p2-served", "id": "srv-daq5pvrncjis73aplsgg", "plan": "0.5c-512mb", "suspended": true},
+      {"name": "tiamat-g2p2-release-manager", "id": "srv-daq5q8vlot8c73ff5m80", "plan": "0.5c-512mb", "suspended": true}
+    ],
+    "service_startup": "All four Docker Commands were set and read back as the disabled health-only uvicorn app; CLI --start-command was ignored for Docker runtime. Initial default-image startup failed safely without database credentials before suspension. Auto-deploy is off."
+  },
+  "ledger": {
+    "environment": "staging",
+    "ledger_id": "4ad24649-8467-42be-bc12-8155b101b590",
+    "storage_epoch": "16d346b1-ea47-4f21-80c4-9103530366ac",
+    "recovery_generation": 1,
+    "migration_head": "0017_revocation_generation",
+    "release_inventory": {"state": "not_installed"},
+    "release_heads": [],
+    "settlement_position": [],
+    "dispatch_enabled": false,
+    "d1_role_finalization": "passed"
+  },
+  "checks_newly_run": [
+    "Disposable owner connection returned exact database and owner with TLS enabled",
+    "Bootstrap to 0006 verified runtime and recovery logins over TLS",
+    "Owner migration chain completed through 0017",
+    "Recovery login initialized blocked day-zero checkpoint",
+    "Owner D1 finalizer completed against exact ledger identity",
+    "Resource-specific temporary /32 external allowlist was removed and read back empty",
+    "All four private services were read back suspended; health-only Docker Command was verified in each dashboard setting"
+  ],
+  "not_yet_executed": [
+    "Hosted capability and full reconciliation readback after finalization",
+    "AWS OIDC roles and shared-writer root mapping",
+    "Offline signed recovery or RELEASE packages for this ledger",
+    "DynamoDB anchor writes",
+    "Launcher claimant and synthetic served request",
+    "Restart and idempotent replay"
+  ],
+  "current_blocker": "The local AWS SDK had no authorized credentials at the 2026-09-23 identity check; AWS live-state review and mutation require an authenticated AWS session.",
+  "secrets_recorded": false
+}

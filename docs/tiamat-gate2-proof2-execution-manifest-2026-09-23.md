@@ -1,6 +1,14 @@
 # Gate 2 Proof 2 — proposed execution manifest
 
-Status: **prepared for resource review, not approved or executed**. The proof is one hosted synthetic request and one restart on a new disposable Tiamat ledger. No commissioned-ledger access, commissioned-anchor item write, real provider key, public traffic or DNS change is in scope. Control decision and cost review: `tiamat-gate2-proof2-control-decisions-2026-09-23.md` and `tiamat-gate2-proof2-hosted-deployment-review-2026-09-23.md`.
+Status: **resource creation and blocked-ledger bootstrap executed 2026-09-23; AWS/release/dispatch phases not executed**. Ray explicitly authorized IAM changes, signing, anchor writes and synthetic dispatch for this bounded proof. The proof is one hosted synthetic request and one restart on a new disposable Tiamat ledger. No commissioned-ledger access, commissioned-anchor item write, real provider key, public traffic or DNS change is in scope. Control decision and cost review: `tiamat-gate2-proof2-control-decisions-2026-09-23.md` and `tiamat-gate2-proof2-hosted-deployment-review-2026-09-23.md`. Resource/bootstrap evidence: `evidence/tiamat-gate2-proof2-disposable-bootstrap-2026-09-23.json`.
+
+## Current checkpoint
+
+The disposable database is `dpg-daq5nfbncjis73apcsb0-a`, with immutable ledger ID `4ad24649-8467-42be-bc12-8155b101b590` and storage epoch `16d346b1-ea47-4f21-80c4-9103530366ac`. It is PostgreSQL 16 on `0.1c-256mb`, 1 GB, Virginia, no HA or autoscaling, and its external IP allowlist is empty. All four Proof 2 private services exist from pushed commit `cadaa43fecd5e95862743661540a37ae0d8167ee`, are manually suspended, and have the disabled health-only Docker command. IDs: bootstrap `srv-daq5nn0473hc73cohdk0`, recovery `srv-daq5p1jncjis73apipfg`, served `srv-daq5pvrncjis73aplsgg`, release manager `srv-daq5q8vlot8c73ff5m80`.
+
+The disposable ledger passed TLS/identity probing, bootstrap through `0006`, owner migrations through `0017`, day-zero blocked initialization, and D1 role finalization. Bootstrap and recovery passwords were transient and were not retained; rotate and deliver new role-specific credentials directly into the appropriate service-secret boundary before their use. A temporary `/32` allowlist entry for the verified operator IP was removed after bootstrap. The blocked ledger has no anchor or RELEASE inventory; no signing, AWS write, provider dispatch, or commissioned-ledger operation occurred in this increment.
+
+The next step is an AWS authentication/identity check, then exact OIDC-policy and shared-writer change-set review against these IDs and this ledger. The local AWS SDK reported no credentials on 2026-09-23. Do not attempt the shared-writer mutation without verifying the current commissioned mapping and head first. Keep all Proof 2 services suspended until their individual ceremony steps.
 
 ## Creation-only phase
 
