@@ -206,3 +206,197 @@ deleted. Capture and product ingress stayed false. The next step is human review
 32 pending candidates, followed by the already-designed remember/correct/forget acceptance
 checks. Any re-extraction of the three discarded batches needs a new exact campaign and
 freshly bounded authorization; their archived source records need no re-import.
+
+## Pending-memory interpretation review (2026-09-22 local)
+
+Ray accepted the evolving-interpretation architecture as a working baseline and chose to
+test the 32 pending pilot candidates before applying it to other ingested material. The
+protected pilot directory now contains `candidate-recall-prototype-v0.1.md`, derived from
+the v0.2 contextual review, and `candidate-recall-dry-run-v0.1.md`. The compact prototype
+has 32 dated entries and primary evidence links; exact neighboring-turn references were
+added for the decisions and endorsements that depend on them. A read-only local digest and
+structure check passed against the authorized export, and eight nuanced question/answer
+examples were reviewed as expected behavior. This was a **human dry run**, not a test of
+deployed Lucy's retrieval or revision behavior. No candidate was approved or promoted,
+the Raymond services were not changed, and no provider call was made.
+
+Next, run the same cases through a local retrieval prototype with controlled corrections,
+then assess all 32 before broader interpretation backfill. Keep the three views derived
+from one versioned record, and retain source and neighboring-turn links. Do not treat the
+compact review artifact as live memory or the dry run as runtime acceptance.
+
+## Offline recall probe completed (2026-09-22 local)
+
+The protected pilot directory now also contains `candidate-recall-local-probe-v0.4.json`
+and `candidate-recall-local-test-v0.1.md`. A deterministic local prototype indexed the
+32 compact pending interpretations with their primary evidence IDs. One independently
+phrased query for each candidate found the intended item in the top three 32/32 times
+and first 28/32 times. All eight nuanced review queries retrieved their expected
+item or pair within the specified window. Three **hypothetical** correction scenarios
+created new in-memory versions while preserving prior wording, source links and all
+five independent assessment dimensions; unchanged dimensions stayed unchanged.
+
+This is smoke-test evidence for retrieval and revision data handling, **not** an
+end-to-end Lucy answer, citation, current-status or forgetting test. The four first-rank
+misses involved related concepts (Gate/Magician tags, Lucy/Lyra origin dates,
+SC Consulting site/Wix advice, and LLC manager/equity proposals). The next required
+behavioral check should resolve such related hits by question context and produce
+cited answers under explicit historical/current and correction scenarios. The 32
+candidates remain pending; no Render service, provider, Telegram route or live memory
+was changed. Broader interpretation backfill remains deferred until that behavioral
+check and candidate review.
+
+## Local answer/citation preparation (2026-09-23 local)
+
+The protected pilot directory now contains `candidate-answer-and-revision-check-v0.2.md`.
+Thirteen question-sensitive answer targets were written against the pending compact
+interpretations. The local top-three retrieval set included every selected item, and
+all 27 primary/neighbor citations (20 distinct turns) in the examples were verified
+against the authorized source manifest; none was outside the 474 imported records.
+The examples include the four earlier first-rank ambiguities. Three isolated,
+**hypothetical** corrections passed an explicit current-versus-historical version
+selection check: current questions selected version 2, dated historical questions
+selected version 1, and original source IDs were preserved. The hypothetical claims
+are not Ray statements.
+
+This is a local target/evidence check, not Lucy-generated output or deployed behavior.
+The 32 candidates remain pending and both Raymond services remain unchanged. The
+shared OpenRouter billing key was authorized for synthetic demonstration only; this
+check sent no personal history to it. A true model answer test on these 32 requires
+an explicitly authorized personal-history model route and a local shadow path that
+does not promote candidates or enable Telegram.
+
+The exact local shadow packet is prepared at
+`candidate-shadow-answer-packet-v0.1.json` (SHA-256
+`5b472e45298baa7f25c842bf4dcf6812edf7d2fe81fcf077372ec8cda712eea2`):
+13 questions, selected exact excerpts, maximum 350 output tokens per call and
+$0.25 total spend. Its runner dry-run passed with no credential read or network call.
+The model route is the pilot's `google/gemini-3.1-flash-lite`, with ZDR,
+data-collection denial and no fallback requested. At preparation time, the live
+call awaited Ray's decision to extend shared-key use beyond synthetic data; that
+exact approval and execution are recorded below.
+
+## First shadow answer test completed (2026-09-23 local)
+
+Ray approved the **exact** 13-question v0.1 shadow test using the shared OpenRouter
+key for this real-history evaluation. It ran all 13 calls; the protected receipt is
+`candidate-shadow-answer-receipt-v0.1.json`, with estimated spend **$0.005459**
+against the $0.25 ceiling. No candidates were approved/promoted, no Telegram or
+Render services changed, and no hypothetical correction was sent as a Ray fact.
+The strict human review is in `candidate-shadow-answer-evaluation-v0.1.md`:
+3 clean answers, 3 partial and 7 failed. The failures include treating a past tag
+as current, promoting an assistant LLC recommendation to a fact, overstating draft
+data rights, and losing revenue details or Ray's uncertainty because the first
+packet supplied excerpts that were too narrow. Several long citation IDs were
+truncated or shortened in model output.
+
+A corrected packet was then prepared at
+`candidate-shadow-answer-packet-v0.3.json` (SHA-256
+`36918d1c8ae3c97f063feee608068bf699094f28f9f2bd4bf34f5dffc325cac9`).
+It supplies the compact interpretation as a reviewer summary, broader exact turns
+for the missing evidence, and short `[E1]` citations mapped locally to full source
+IDs. Its 13-call, 500-output-token, $0.25 runner dry-run passed without reading a
+credential or making a network call. The v0.1 approval was consumed by the first
+test; Ray's separate approval and the v0.3 execution are recorded below. Keep
+the 32 candidates pending until answer quality and human candidate review pass.
+
+## Corrected shadow answer test completed (2026-09-23 local)
+
+Ray explicitly approved the corrected v0.3 real-history packet using the shared
+OpenRouter key under a new $0.25 cap. All 13 calls completed. The protected receipt
+is `candidate-shadow-answer-receipt-v0.2.json`; estimated spend was **$0.004087**
+for this run and **$0.009546** across both runs. The mechanical short-citation
+check found valid mapped labels in 13/13 answers; its corrected report is
+`candidate-shadow-answer-citation-check-v0.3.json`. Human semantic review is in
+`candidate-shadow-answer-evaluation-v0.2.md`: **8 pass, 2 partial, 3 fail**
+against the same strict targets.
+
+The corrected evidence package resolved the omitted 80/3/12/5 figures and Ray's
+Philodelphio uncertainty. Remaining failures concern the scope of a short tag
+confirmation, the assistant origin of an 85% equity proposal, and whether Ray
+or Lucy stated Lucy's exact origin date. The next local implementation should
+encode confirmation scope, proposer identity and exact-date attribution as
+structured fields in the one versioned interpretation, then test answer behavior.
+No candidates were promoted and no service, database or Telegram route changed.
+Do not backfill the other ingested material from these results alone.
+
+## Structured interpretation baseline prepared (2026-09-23 local)
+
+The 32 pending candidates now have a protected, local structured baseline in
+`candidate-structured-interpretations-v0.1.json` and a human-readable review at
+`candidate-structured-interpretations-review-v0.3.md`. The baseline has one
+version per candidate, linked exact excerpts from 37 source turns in the 474-record
+authorized import, and independent support, counterevidence, owner-endorsement,
+present-applicability, and remembering-value assessments. All 32 are explicitly
+`not_checked` for current applicability. The model distinguishes source speech act,
+proposer, owner confirmation scope, and exact-date speaker/source. The Gate dual-tag
+item is marked ambiguous, the May 21 Lucy date assistant-stated, and the 85% equity
+structure an unconfirmed assistant recommendation. Ray's owner-authored revised
+economics turn remains separate from the equity recommendation.
+
+`src/lucy/memory_interpretation.py` defines a validated versioned record and an
+answer-context view; `tests/unit/test_memory_interpretation.py` checks history/current
+recall, confirmation, attribution, revision history, and evidence integrity. Six
+focused unit tests passed; Ruff and strict mypy passed for the new module. The local
+protected baseline checker validated 32 distinct candidate IDs, 37 included source
+IDs, one ambiguous and three partial confirmations, and the three earlier failure
+cases. This is local preparation only; no candidate was promoted and no deployed
+service or Telegram route changed.
+
+A third 13-question shadow packet is prepared at
+`candidate-shadow-answer-packet-v0.4.json` (SHA-256
+`61ef3b56f875f742f24651026beffded1d2c1d07df70bc456b4bfab70ec0513b`).
+It feeds the new structured fields and 28 exact evidence references into the same
+historical questions, with at most 13 calls, 500 output tokens per call, a $0.25
+total ceiling, the prior `google/gemini-3.1-flash-lite` route and ZDR/data-collection
+denial/no-fallback policy. Packet and one-shot runner dry-runs passed: zero network
+calls and no credential read. The earlier one-time authorizations were consumed;
+Ray's separate v0.4 approval and execution are recorded below. Keep all candidates
+pending until human review. Do not backfill other ingested material from these
+local checks alone.
+
+## Structured shadow answer test completed (2026-09-23 local)
+
+Ray approved the exact v0.4 real-history packet above for a one-time provider test.
+All 13 calls completed; `candidate-shadow-answer-receipt-v0.3.json` records estimated
+spend **$0.00468250** against the $0.25 cap. Estimated total across all three runs
+is **$0.01422850**. The mechanical short-citation report is
+`candidate-shadow-answer-citation-check-v0.4.json`: valid mapped source labels in
+13/13 answers. Human semantic review in `candidate-shadow-answer-evaluation-v0.3.md`
+finds **12 pass, 1 partial, 0 fail** against the established targets. The structured
+fields fixed all three prior strict failures: Gate confirmation scope, assistant
+origin of the 85% recommendation, and assistant attribution for Lucy's exact May 21
+date. The remaining partial is temporal wording: a historical Philodelphio answer
+said Ray “has not settled,” implying today's state from a past exchange.
+
+The one-time v0.4 provider authorization is consumed. The 32 candidate versions
+remain pending, and the other ingested records have not been reinterpreted. No
+promotion, production database, Render service, or Telegram change was made. The
+next decision is Ray's review of the protected 32-item v0.3 document; a focused
+temporal-language refinement can be folded into subsequent answer work without
+another broad shadow rerun unless an actual deployment gate requires it.
+
+## Reviewed batch promotion in progress (2026-09-23 local)
+
+Ray authorized moving the reviewed 32-item batch into Personal Lucy's private memory.
+The existing extracted candidates cannot be promoted as-is: all 32 are marked
+`current`, and every original claim object differs from the reviewed historical
+interpretation. The local, protected proposal
+`candidate-interpreted-promotion-proposal-v0.1.json` instead contains 32 immutable
+candidate version-2 projections. Each keeps the original candidate identity and
+source provenance, adds reviewed neighboring source links, stores the five separate
+assessment dimensions and attribution/confirmation fields as bounded structured
+JSON, and is marked `historical` / `attributed_interpretation`. It has 52 source
+links, maximum object length 2,002 characters, and proposal SHA-256
+`fc2085b497de87d8da997159c2416cb1411e1f33b91007c0d4ea7558901fc36c`.
+This is a local proposal, **not yet staged, approved, or promoted**.
+
+The Philodelphio temporal boundary is explicit in the answer-context contract.
+Seven focused interpretation/projection unit tests, Ruff, and strict mypy pass.
+The one-time cloud operator `promote_raymond_interpretations_v1.py` has a staged
+routine-login phase and a single-transaction policy-login approval/promotion and
+protected-recall verification phase. Its exact proposal decoder passed locally
+with no database or provider call. Fresh Render GET checks found both Raymond
+services still suspended, auto-deploy off, capture/product/pilot flags false, and
+the expected distinct `lucy_raymond` policy/routine logins. The operator has not
+run yet. No Telegram or service activation is planned for this batch.
