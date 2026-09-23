@@ -4,7 +4,7 @@ Status: **prepared for resource review, not approved or executed**. The proof is
 
 ## Creation-only phase
 
-Create the following in `cloud-lucy / management-contract-staging`, Virginia, from one immutable **pushed** `codex/management-contract-v1` revision selected at the execution review. Auto-deploy off, one instance each, no real provider credentials, and no AWS role or database secrets until the later boundary review. Record the observed dashboard price before confirmation.
+Create the following in `cloud-lucy / management-contract-staging`, Virginia, from one immutable **pushed** `codex/management-contract-v1` revision selected at the execution review. Auto-deploy off, one instance each, no real provider credentials, and no AWS role or database secrets until the later boundary review. An initial Render deployment may start automatically when a service is created: use only the existing disabled `/healthz` identity workload as its start command, read back the actual deployed commit, and suspend it promptly. Record the observed dashboard price before confirmation.
 
 | Proposed name | Type/plan | Initial behavior | Credential allowed when separately commissioned |
 |---|---|---|---|
@@ -13,6 +13,8 @@ Create the following in `cloud-lucy / management-contract-staging`, Virginia, fr
 | `tiamat-g2p2-recovery` | private service, `0.5c-512mb` | Suspended/inert; one-off M4 installer, recovery, launcher jobs only | `TIAMAT_RECOVERY_DATABASE_URL`; exact-key AWS reader plus M4 alias invoke role; public trust package; never owner or runtime URL |
 | `tiamat-g2p2-served` | private service, `0.5c-512mb` | Suspended/inert; later `uvicorn --factory lucy.shared_execution.served_environment:create_app_from_environment --host 0.0.0.0 --port $PORT --workers 1` | `TIAMAT_RUNTIME_DATABASE_URL`, exact-key AWS read role, approved public trust, workload verification keys, idempotency digest key; no recovery, owner, release-manager or provider credential |
 | `tiamat-g2p2-release-manager` | private service, `0.5c-512mb` | Suspended/inert; one-off `tiamat_release_runner_v1.py` jobs only | `TIAMAT_RELEASE_MANAGER_DATABASE_URL` and exact pre-signed public JWS files; no AWS, owner, recovery or private signing key |
+
+The creation request must specify PostgreSQL 16 explicitly (Render's current default is newer), 1 GB fixed disk and no high availability. Its initial external allowlist may be permissive; immediately set the **new database's** allowlist to empty with the resource-specific update and verify it, leaving workspace/environment rules and other databases untouched. Never print connection URLs in the evidence.
 
 The shared image explicitly includes the D1 finalizer, M4 reconciliation installer, launcher, release runner and committed staging RELEASE-root pin. The offline recovery-signing and RELEASE-signing private files stay outside the image and Render. A generated Render service ID is the OIDC trust subject; therefore those IDs must be captured after creation and **before** the separate IAM/shared-writer change review.
 
