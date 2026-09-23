@@ -115,6 +115,11 @@ class PostgresMemoryOutcomePolicyStore:
                     },
                 ).scalar_one()
         except DBAPIError as exc:
+            print(
+                "private memory policy admission database rejection: "
+                f"{type(exc.orig).__name__}/{getattr(exc.orig, 'sqlstate', 'unknown')}",
+                flush=True,
+            )
             raise MemoryOutcomeUnavailable("outcome policy admission unavailable") from exc
         return MemoryOutcomeGrantAdmissionV1.model_validate(value)
 
