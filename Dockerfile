@@ -18,6 +18,7 @@ COPY deploy/postgres/recover_empty_raymond_realm_v1_3.py ./deploy/postgres/recov
 COPY deploy/postgres/register_raymond_pilot_bundle_v1.py ./deploy/postgres/register_raymond_pilot_bundle_v1.py
 COPY deploy/postgres/authorize_raymond_pilot_campaign_v1.py ./deploy/postgres/authorize_raymond_pilot_campaign_v1.py
 COPY deploy/postgres/promote_raymond_interpretations_v1.py ./deploy/postgres/promote_raymond_interpretations_v1.py
+COPY deploy/postgres/check_raymond_interpreted_answer_context.py ./deploy/postgres/check_raymond_interpreted_answer_context.py
 COPY deploy/postgres/register_raymond_pilot_transport_v1.py ./deploy/postgres/register_raymond_pilot_transport_v1.py
 COPY deploy/postgres/grant_raymond_pilot_eligibility_v1.py ./deploy/postgres/grant_raymond_pilot_eligibility_v1.py
 COPY deploy/postgres/diagnose_raymond_recovery_v1.py ./deploy/postgres/diagnose_raymond_recovery_v1.py
