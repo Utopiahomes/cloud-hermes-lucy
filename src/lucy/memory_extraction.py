@@ -202,7 +202,13 @@ class MemoryExtractionCoordinator:
                     dispatch=dispatch,
                     reservation_id=reservation.reservation_id,
                 )
-            except Exception:
+            except Exception as exc:
+                cause_name = type(exc.__cause__).__name__ if exc.__cause__ else "none"
+                print(
+                    "private memory outcome recovery unavailable: "
+                    f"{type(exc).__name__}/{cause_name}",
+                    flush=True,
+                )
                 outcome = None
             if outcome is None:
                 return MemoryExtractionResultV1(
