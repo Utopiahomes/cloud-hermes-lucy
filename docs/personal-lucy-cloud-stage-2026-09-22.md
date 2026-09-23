@@ -430,3 +430,41 @@ correction to Ray's real memories was invented merely to test that path. A later
 real correction should create a new version from new evidence while retaining the
 historical source and the earlier interpretation. Broader interpretation backfill
 remains separate from this 32-item pilot.
+
+## Cited interpretation context verified (2026-09-23 cloud)
+
+`src/lucy/interpreted_recall.py` now converts a reviewed protected claim into a
+bounded answer context with explicit speech act, proposer, confirmation scope,
+five independent assessments, current-applicability boundary, exact-date speaker,
+and citations tied to the claim's evidence UUIDs. It rejects a missing or extra
+source link, a mismatched exact-date speaker, an unprotected claim, and a claim
+outside the reviewed version-2 historical interpretation shape. This is an
+internal policy-side function; it does not itself authenticate a Telegram user.
+
+The exact protected 32-item proposal passed a local aggregate check: 32 contexts
+and 52 mapped citations. Eleven focused interpretation/recall tests, Ruff and
+strict mypy passed at commit `4d9b92d`. The first temporary cloud check built but
+failed; inspection found that `Dockerfile` did not copy its operator module.
+The utility was deleted. After that packaging fix at `7eac357`, the new one-time policy-login job
+`job-dapuhjnlk1mc73cv70a0` succeeded. Its program checked all 32 recalled
+interpretations, temporal boundaries and 52 citation links against the exact
+promoted proposal. It made zero provider or Telegram calls; normal protected
+recall access audits were written. The temporary utility was deleted. Fresh
+Render GET checks confirmed both Raymond policy and routine services remain
+suspended with disabled ingress/capture and neither temporary utility exists.
+The gitignored receipts are
+`secrets/generated/raymond-interpreted-context-check-state-v1.json` (failed
+packaging attempt) and `...-state-v2.json` (succeeded).
+
+This validates the policy-side database-to-answer-context path, not a live
+Telegram answer. The active Telegram gateway remains on Utopia, and the Raymond
+services have no Telegram bot credential or owner-event route for protected
+recall. The existing generic `/v1/memory/lookup` reads the older ordinary
+projection and must not be used to expose Raymond's protected content. Next,
+resolve whether Ray wants a separate Personal Lucy bot or an exact cutover of
+the active bot, then bind authenticated owner events to this policy-side recall,
+perform a synthetic deny/allow check, and activate only that reviewed route.
+This evidence is invalidated by changes to the 32 promoted claims, campaign
+source revisions, protected recall contract, interpreter, or policy database
+identity. The citation mapper assumes source revision 1 for this pilot; future
+mixed-revision imports need an explicit source-ID map.
