@@ -1,0 +1,200 @@
+"""Recovery-login operations on one Tiamat ledger for the reconciliation ceremony.
+
+Reads ``TIAMAT_RECOVERY_DATABASE_URL``; it must never be given to a serving process.
+
+- ``report``: read-only, content-free state (gate, identity, inventories, retained checkpoints,
+  history counts, continuity beacon). With ``--checkpoint-generation`` it also emits the
+  empty-ledger checkpoint for that generation, and refuses a ledger with any history.
+- ``beacon``: read-only; the continuity beacon bound to the checkpoint retained for the gate's
+  current, open generation, for signing ``continuity_established``.
+- ``first-inventory``: the one-time install of the first RELEASE trust inventory while dispatch
+  stays blocked. Previews by default; ``--execute`` needs ``--confirm-jws-sha256``.
+- ``authorize``: Draft 0.5 section 7 step 6. Strong-reads the external anchor and requires its
+  head to be exactly the verified pending step, then authorizes the generation jump. Previews by
+  default; ``--execute`` needs the target generation and checkpoint digest confirmed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import UUID
+
+import psycopg
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from lucy.shared_execution.recovery import (
+    authorize_recovery_generation,
+    install_first_release_inventory,
+)
+from lucy.shared_execution.recovery_anchor import PostgresContinuityBeaconReader
+from lucy.shared_execution.recovery_anchor_dynamodb import (
+    dynamodb_recovery_anchor_from_environment,
+)
+from lucy.shared_execution.recovery_anchor_reconciliation import verify_reconciliation_package
+from lucy.shared_execution.recovery_ledger_report import (
+    empty_ledger_checkpoint,
+    read_ledger_recovery_state,
+)
+from lucy.shared_execution.signed_releases import verify_trust_inventory
+
+
+def _database_url() -> str:
+    value = os.environ.get("TIAMAT_RECOVERY_DATABASE_URL", "")
+    if not value:
+        raise ValueError("TIAMAT_RECOVERY_DATABASE_URL is required")
+    return value
+
+
+def bound_checkpoint_beacon(database_url: str, *, environment: str) -> dict[str, object]:
+    """The beacon for the checkpoint retained at the gate's current generation, once open."""
+
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        connection.execute("SET TRANSACTION READ ONLY")
+        row = connection.execute(
+            """
+            SELECT gate.dispatch_blocked, bound.checkpoint_sha256
+            FROM tiamat.restore_gate AS gate
+            LEFT JOIN tiamat.recovery_checkpoints AS bound
+              ON bound.environment = gate.environment
+             AND bound.recovery_generation = gate.recovery_generation
+            WHERE gate.environment = %s
+            """,
+            (environment,),
+        ).fetchone()
+    if row is None or row[1] is None:
+        raise ValueError("no checkpoint is bound at the gate's current generation")
+    if bool(row[0]):
+        raise ValueError("the gate is blocked: the checkpoint is not authorized")
+    beacon = PostgresContinuityBeaconReader(database_url).read(checkpoint_digest=str(row[1]))
+    return {
+        "system_identifier": beacon.system_identifier,
+        "timeline_id": beacon.timeline_id,
+        "flushed_wal_lsn": beacon.flushed_wal_lsn,
+        "checkpoint_digest": beacon.checkpoint_digest,
+    }
+
+
+def _release_root(args: argparse.Namespace) -> Ed25519PublicKey:
+    raw = base64.b64decode(args.release_root_public_key_b64, validate=True)
+    if hashlib.sha256(raw).hexdigest() != args.release_root_public_key_sha256:
+        raise ValueError("release root public key does not match its pin")
+    return Ed25519PublicKey.from_public_bytes(raw)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    report = commands.add_parser("report")
+    report.add_argument("--checkpoint-generation", type=int)
+    commands.add_parser("beacon")
+    first = commands.add_parser("first-inventory")
+    first.add_argument("--expected-ledger-id", type=UUID, required=True)
+    first.add_argument("--expected-storage-epoch", type=UUID, required=True)
+    first.add_argument("--inventory-jws-file", type=Path, required=True)
+    first.add_argument("--release-root-key-id", required=True)
+    first.add_argument("--release-root-public-key-b64", required=True)
+    first.add_argument("--release-root-public-key-sha256", required=True)
+    first.add_argument("--execute", action="store_true")
+    first.add_argument("--confirm-jws-sha256")
+    authorize = commands.add_parser("authorize")
+    authorize.add_argument("--pending-package", type=Path, required=True)
+    authorize.add_argument("--expected-root-public-sha256", required=True)
+    authorize.add_argument("--source-recovery-generation", type=int, required=True)
+    authorize.add_argument("--execute", action="store_true")
+    authorize.add_argument("--confirm-target-generation", type=int)
+    authorize.add_argument("--confirm-checkpoint-sha256")
+    for command in (report, commands.choices["beacon"], first, authorize):
+        command.add_argument("--environment", required=True)
+    args = parser.parse_args()
+    url = _database_url()
+    output: dict[str, object]
+
+    if args.command == "report":
+        state = read_ledger_recovery_state(url, environment=args.environment)
+        output = state.as_dict()
+        if args.checkpoint_generation is not None:
+            checkpoint = empty_ledger_checkpoint(
+                state, target_recovery_generation=args.checkpoint_generation
+            )
+            output["checkpoint"] = checkpoint.object
+            output["checkpoint_sha256"] = checkpoint.checkpoint_sha256
+    elif args.command == "beacon":
+        output = bound_checkpoint_beacon(url, environment=args.environment)
+    elif args.command == "first-inventory":
+        exact = args.inventory_jws_file.read_bytes()
+        root = _release_root(args)
+        inventory = verify_trust_inventory(
+            exact,
+            root_key_id=args.release_root_key_id,
+            root_public_key=root,
+            environment=args.environment,
+        )
+        digest = hashlib.sha256(exact).hexdigest()
+        output = {
+            "environment": args.environment,
+            "inventory_generation": inventory.inventory_generation,
+            "jws_sha256": digest,
+            "status": "verified_not_written",
+        }
+        if args.execute:
+            if args.confirm_jws_sha256 != digest:
+                raise ValueError("--confirm-jws-sha256 must match the verified inventory")
+            installed = install_first_release_inventory(
+                url,
+                environment=args.environment,
+                expected_ledger_id=args.expected_ledger_id,
+                expected_storage_epoch=args.expected_storage_epoch,
+                exact_jws=exact,
+                release_root_key_id=args.release_root_key_id,
+                release_root_public_key=root,
+            )
+            output["status"] = "installed_dispatch_still_blocked"
+            output["activation_recovery_generation"] = installed.activation_recovery_generation
+    else:
+        verified = verify_reconciliation_package(
+            json.loads(args.pending_package.read_text(encoding="utf-8")),
+            now=datetime.now(UTC).replace(microsecond=0),
+            expected_root_public_sha256=args.expected_root_public_sha256,
+            expected_ceremony="recovery_pending",
+        )
+        if verified.step.identity.environment != args.environment:
+            raise ValueError("the pending package names another environment")
+        target = verified.candidate.witness.recovery_generation
+        output = {
+            "environment": args.environment,
+            "source_recovery_generation": args.source_recovery_generation,
+            "target_recovery_generation": target,
+            "checkpoint_sha256": verified.step.checkpoint.checkpoint_sha256,
+            "pending_transition_sha256": verified.candidate.exact_sha256,
+            "status": "verified_not_written",
+        }
+        if args.execute:
+            if (
+                args.confirm_target_generation != target
+                or args.confirm_checkpoint_sha256 != verified.step.checkpoint.checkpoint_sha256
+            ):
+                raise ValueError("confirm the verified target generation and checkpoint digest")
+            head = dynamodb_recovery_anchor_from_environment(verified.decoder()).read(
+                verified.step.identity.key
+            )
+            if head.exact_sha256 != verified.candidate.exact_sha256:
+                raise ValueError("the external anchor head is not the verified pending step")
+            authorized = authorize_recovery_generation(
+                url,
+                authorized=verified.candidate,
+                checkpoint=verified.step.checkpoint,
+                source_recovery_generation=args.source_recovery_generation,
+            )
+            output["status"] = "authorized_gate_open_pending_continuity"
+            output["anchor_floor_version"] = authorized.anchor_floor.transition_version
+    print(json.dumps(output, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

@@ -6,19 +6,27 @@ are intended for a stopped or network-quarantined environment.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 import psycopg
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from psycopg.types.json import Jsonb
 
 from lucy.shared_execution.recovery_anchor import (
     RecoveryAnchorRejected,
+    VerifiedAnchorTransition,
     require_monotonic_anchor_floor,
 )
-from lucy.shared_execution.recovery_checkpoint import RecoveryCheckpoint
+from lucy.shared_execution.recovery_checkpoint import (
+    RecoveryCheckpoint,
+    RecoveryCheckpointRejected,
+    construct_recovery_checkpoint,
+)
+from lucy.shared_execution.signed_releases import SignedReleaseRejected, verify_trust_inventory
 
 
 class RecoveryRejected(RuntimeError):
@@ -430,3 +438,291 @@ def authorize_reconciled_state(
                 """,
                 (next_recovery_generation, environment),
             )
+
+
+# The ledger's financial and signed-release history. Recovery Draft 0.5 section 4 defines the
+# settlement projection only for an empty history until populated projections are specified and
+# tested, so both operations below require every one of these to be empty for the environment.
+_FINANCIAL_HISTORY_TABLES = (
+    "spending_partitions",
+    "grant_releases",
+    "execution_records",
+    "execution_idempotency_aliases",
+    "financial_events",
+    "route_rate_quarantines",
+    "signed_releases",
+    "release_heads",
+)
+
+
+@dataclass(frozen=True)
+class FirstReleaseInventory:
+    environment: str
+    inventory_generation: int
+    jws_sha256: str
+    activation_recovery_generation: int
+
+
+def install_first_release_inventory(
+    database_url: str,
+    *,
+    environment: str,
+    expected_ledger_id: UUID,
+    expected_storage_epoch: UUID,
+    exact_jws: bytes,
+    release_root_key_id: str,
+    release_root_public_key: Ed25519PublicKey,
+) -> FirstReleaseInventory:
+    """Install the first RELEASE trust inventory of a blocked, never-reconciled ledger.
+
+    Draft 0.5 section 4: reconciliation must first replace the day-zero ``not_installed`` sentinel
+    with a separately verified installed RELEASE trust inventory, and activation otherwise needs
+    an open gate. This is that one-time step, not a general exception to the blocked-gate rule:
+
+    - the exact bytes verify against the pinned release root as generation 1 with no predecessor;
+    - in one transaction, the gate is locked and must be blocked, of this epoch, on this ledger,
+      and never reconciled (no retained checkpoint);
+    - no inventory has ever been active, and the only staged one, if any, is these exact bytes;
+    - the ledger's financial and release history is empty;
+    - the inventory is activated, stamped with the gate's current generation, and dispatch stays
+      blocked. Any failure rolls back the whole operation.
+    """
+
+    try:
+        inventory = verify_trust_inventory(
+            exact_jws,
+            root_key_id=release_root_key_id,
+            root_public_key=release_root_public_key,
+            environment=environment,
+        )
+    except SignedReleaseRejected as exc:
+        raise RecoveryRejected("first_inventory_not_verified") from exc
+    if inventory.inventory_generation != 1 or inventory.previous_inventory_digest is not None:
+        raise RecoveryRejected("first_inventory_not_generation_one")
+    jws_sha256 = hashlib.sha256(exact_jws).hexdigest()
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        gate = _lock_blocked_gate(
+            connection,
+            environment=environment,
+            expected_ledger_id=expected_ledger_id,
+            expected_storage_epoch=expected_storage_epoch,
+        )
+        retained = connection.execute(
+            "SELECT count(*) FROM tiamat.recovery_checkpoints WHERE environment = %s",
+            (environment,),
+        ).fetchone()
+        if retained is None or int(retained[0]) != 0:
+            raise RecoveryRejected("first_inventory_ledger_already_reconciled")
+        rows = connection.execute(
+            """
+            SELECT inventory_generation, state, jws_sha256, exact_jws
+            FROM tiamat.trust_inventories
+            WHERE environment = %s
+            FOR UPDATE
+            """,
+            (environment,),
+        ).fetchall()
+        for generation, state, digest, stored in rows:
+            if state != "staged":
+                raise RecoveryRejected("first_inventory_prior_inventory_activated")
+            if int(generation) != 1 or str(digest) != jws_sha256 or bytes(stored) != exact_jws:
+                raise RecoveryRejected("first_inventory_staged_candidate_differs")
+        _require_empty_financial_history(connection, environment)
+        if not rows:
+            connection.execute(
+                """
+                INSERT INTO tiamat.trust_inventories (
+                    environment, inventory_generation, exact_jws, jws_sha256,
+                    previous_inventory_digest, root_key_id, state
+                ) VALUES (%s, 1, %s, %s, NULL, %s, 'staged')
+                """,
+                (environment, exact_jws, jws_sha256, inventory.root_key_id),
+            )
+        connection.execute(
+            """
+            UPDATE tiamat.trust_inventories
+            SET state = 'active', activated_at = clock_timestamp(),
+                activation_recovery_generation = %s
+            WHERE environment = %s AND inventory_generation = 1 AND state = 'staged'
+            """,
+            (gate.recovery_generation, environment),
+        )
+        return FirstReleaseInventory(
+            environment=environment,
+            inventory_generation=1,
+            jws_sha256=jws_sha256,
+            activation_recovery_generation=gate.recovery_generation,
+        )
+
+
+@dataclass(frozen=True)
+class AuthorizedRecovery:
+    environment: str
+    source_recovery_generation: int
+    target_recovery_generation: int
+    checkpoint_sha256: str
+    anchor_floor: AnchorFloorRecord
+
+
+def authorize_recovery_generation(
+    database_url: str,
+    *,
+    authorized: VerifiedAnchorTransition,
+    checkpoint: RecoveryCheckpoint,
+    source_recovery_generation: int,
+) -> AuthorizedRecovery:
+    """Draft 0.5 section 7 step 6: authorize an externally authorized generation jump.
+
+    ``authorized`` is the exact-byte verified ``recovery_pending`` head now installed on the
+    external anchor. Its reconciled witness names the target generation and all three checkpoint
+    digests; ``source_recovery_generation`` is the database generation the reviewer observed.
+    The target must equal the witness's generation and exceed the source; there is no ``+ 1``
+    rule. In one transaction the gate is locked and checked, the checkpoint is verified against the
+    actual ledger and bound immutably, authority is restamped, the anchor floor advances to the
+    pending transition and the gate opens at the target generation.
+
+    Content verification covers only the empty-ledger projection: an installed inventory equal to
+    the ledger's single active one, no release heads and no settlement positions, over a ledger
+    with no financial or release history. A populated ledger is refused until its projection is
+    specified and tested. Opening the gate grants no serving authority by itself: the launcher
+    also needs ``continuity_established`` with a beacon, installed after this commits.
+    """
+
+    witness = authorized.witness
+    identity = witness.identity
+    if authorized.continuity != "recovery_pending" or authorized.beacon is not None:
+        raise RecoveryRejected("recovery_authorization_requires_pending_anchor")
+    if witness.status != "reconciled" or witness.witness_revision != 1:
+        raise RecoveryRejected("recovery_authorization_requires_reconciled_witness")
+    target = witness.recovery_generation
+    if source_recovery_generation < 1 or target <= source_recovery_generation:
+        raise RecoveryRejected("recovery_generation_must_advance")
+    try:
+        recomputed = construct_recovery_checkpoint(dict(checkpoint.object), identity=identity)
+    except RecoveryCheckpointRejected as exc:
+        raise RecoveryRejected("recovery_checkpoint_invalid") from exc
+    if (
+        recomputed != checkpoint
+        or recomputed.object["recovery_generation"] != target
+        or recomputed.checkpoint_sha256 != witness.checkpoint_digest
+        or recomputed.release_heads_sha256 != witness.release_heads_sha256
+        or recomputed.settlement_position_sha256 != witness.checkpoint_settlement_position_sha256
+    ):
+        raise RecoveryRejected("recovery_checkpoint_differs_from_witness")
+    if not recomputed.release_inventory_installed:
+        raise RecoveryRejected("recovery_checkpoint_inventory_not_installed")
+    if recomputed.object["release_heads"] != []:
+        raise RecoveryRejected("recovery_checkpoint_release_heads_unsupported")
+    if recomputed.object["settlement_position"] != []:
+        raise RecoveryRejected("recovery_checkpoint_settlement_projection_unsupported")
+    inventory = recomputed.object["release_inventory"]
+    assert isinstance(inventory, dict)
+    floor = AnchorFloorRecord(authorized.transition_version, authorized.exact_sha256)
+    with psycopg.connect(database_url) as connection, connection.transaction():
+        gate = _lock_blocked_gate(
+            connection,
+            environment=identity.environment,
+            expected_ledger_id=identity.ledger_id,
+            expected_storage_epoch=identity.storage_epoch,
+        )
+        if gate.recovery_generation != source_recovery_generation:
+            raise RecoveryRejected("recovery_source_generation_differs")
+        _record_anchor_floor(connection, environment=identity.environment, anchor_floor=floor)
+        active = connection.execute(
+            """
+            SELECT inventory_generation, jws_sha256
+            FROM tiamat.trust_inventories
+            WHERE environment = %s AND state = 'active'
+            FOR UPDATE
+            """,
+            (identity.environment,),
+        ).fetchall()
+        if len(active) != 1 or (int(active[0][0]), str(active[0][1])) != (
+            inventory["generation"],
+            inventory["jws_sha256"],
+        ):
+            raise RecoveryRejected("recovery_checkpoint_inventory_differs_from_ledger")
+        _require_empty_financial_history(connection, identity.environment)
+        _bind_recovery_checkpoint(
+            connection,
+            environment=identity.environment,
+            identity_ledger_id=identity.ledger_id,
+            storage_epoch=identity.storage_epoch,
+            recovery_generation=target,
+            checkpoint=recomputed,
+        )
+        connection.execute(
+            """
+            UPDATE tiamat.trust_inventories
+            SET activation_recovery_generation = %s
+            WHERE environment = %s AND state = 'active'
+            """,
+            (target, identity.environment),
+        )
+        connection.execute(
+            """
+            UPDATE tiamat.restore_gate
+            SET recovery_generation = %s,
+                coordinator_generation = coordinator_generation + 1,
+                dispatch_blocked = false,
+                block_reason = NULL,
+                verified_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE environment = %s
+            """,
+            (target, identity.environment),
+        )
+    return AuthorizedRecovery(
+        environment=identity.environment,
+        source_recovery_generation=source_recovery_generation,
+        target_recovery_generation=target,
+        checkpoint_sha256=recomputed.checkpoint_sha256,
+        anchor_floor=floor,
+    )
+
+
+@dataclass(frozen=True)
+class _LockedGate:
+    recovery_generation: int
+
+
+def _lock_blocked_gate(
+    connection: psycopg.Connection[Any],
+    *,
+    environment: str,
+    expected_ledger_id: UUID,
+    expected_storage_epoch: UUID,
+) -> _LockedGate:
+    """Lock the gate first, as every gate writer does, then check the ledger's identity."""
+
+    gate = connection.execute(
+        """
+        SELECT storage_epoch, recovery_generation, dispatch_blocked
+        FROM tiamat.restore_gate
+        WHERE environment = %s
+        FOR UPDATE
+        """,
+        (environment,),
+    ).fetchone()
+    if gate is None:
+        raise RecoveryRejected("restore_gate_not_initialized")
+    if UUID(str(gate[0])) != expected_storage_epoch:
+        raise RecoveryRejected("restore_gate_epoch_differs")
+    if not bool(gate[2]):
+        raise RecoveryRejected("restore_gate_not_blocked")
+    identity = connection.execute(
+        "SELECT ledger_id FROM tiamat.ledger_identity WHERE singleton"
+    ).fetchone()
+    if identity is None or UUID(str(identity[0])) != expected_ledger_id:
+        raise RecoveryRejected("ledger_identity_differs")
+    return _LockedGate(recovery_generation=int(gate[1]))
+
+
+def _require_empty_financial_history(connection: psycopg.Connection[Any], environment: str) -> None:
+    for table in _FINANCIAL_HISTORY_TABLES:
+        row = connection.execute(
+            f"SELECT count(*) FROM tiamat.{table} WHERE environment = %s",  # noqa: S608
+            (environment,),
+        ).fetchone()
+        if row is None or int(row[0]) != 0:
+            raise RecoveryRejected("recovery_ledger_financial_state_unsupported")

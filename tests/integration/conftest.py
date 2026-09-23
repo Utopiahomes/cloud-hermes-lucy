@@ -119,10 +119,14 @@ def disposable_roles() -> DisposableRoles:
         owner.execute(
             "GRANT SELECT, INSERT, UPDATE ON tiamat.startup_attestations TO tiamat_recovery"
         )
-        owner.execute(
-            "GRANT SELECT, INSERT ON tiamat.recovery_checkpoints TO tiamat_recovery"
-        )
+        owner.execute("GRANT SELECT, INSERT ON tiamat.recovery_checkpoints TO tiamat_recovery")
         owner.execute("GRANT SELECT, INSERT, UPDATE ON tiamat.restore_gate TO tiamat_recovery")
+        # As deployed (the role template grants the recovery login every table): the offline
+        # first-inventory install and recovery authorization read and write signed authority.
+        owner.execute(
+            "GRANT SELECT, INSERT, UPDATE ON tiamat.trust_inventories, tiamat.signed_releases, "
+            "tiamat.release_heads TO tiamat_recovery"
+        )
         owner.execute("GRANT SELECT ON tiamat.ledger_identity TO tiamat_recovery")
         owner.execute("GRANT SELECT ON tiamat.restore_gate TO tiamat_runtime")
         owner.execute(
@@ -135,8 +139,7 @@ def disposable_roles() -> DisposableRoles:
     # release manager, as the D1 finalizer does when that role exists.
     with psycopg.connect(recovery_url, autocommit=True) as recovery:
         recovery.execute(
-            "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() "
-            "TO tiamat_release_manager"
+            "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() TO tiamat_release_manager"
         )
     return DisposableRoles(
         owner=owner_url,
@@ -173,12 +176,8 @@ def _own_share_locked_gate_reader(owner: psycopg.Connection[tuple[object, ...]])
                 "the gate reader is recovery-owned without runtime execution", pytrace=False
             )
         return
-    owner.execute(
-        "GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() TO tiamat_runtime"
-    )
-    owner.execute(
-        "GRANT EXECUTE ON FUNCTION tiamat.retire_coordinator(bigint) TO tiamat_runtime"
-    )
+    owner.execute("GRANT EXECUTE ON FUNCTION tiamat.share_locked_restore_gate() TO tiamat_runtime")
+    owner.execute("GRANT EXECUTE ON FUNCTION tiamat.retire_coordinator(bigint) TO tiamat_runtime")
     owner_name = sql.Identifier(str(current[0]))
     owner.execute(sql.SQL("GRANT tiamat_recovery TO {} WITH SET TRUE").format(owner_name))
     owner.execute("GRANT CREATE ON SCHEMA tiamat TO tiamat_recovery")

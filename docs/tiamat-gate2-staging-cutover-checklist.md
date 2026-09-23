@@ -13,10 +13,9 @@ Account `429870640638`, region `us-east-1`. Every step records its evidence in
 The two phases are approved separately:
 
 - **Phase A (steps 1–6): the writer and the boundary.** AWS only. No database is touched.
-- **Phase B (steps 7–9): the disposable ledger.** Blocked until the disposable ledger can reach
-  `continuity_established` (step 7). Signed-configuration activation belongs here, not in Phase
-  A: activation refuses a blocked gate (`recovery_gate_blocked`), and the commissioned ledger's
-  gate stays blocked.
+- **Phase B (steps 7–9): the disposable ledger.** Its own approval. Signed-configuration
+  activation belongs here, not in Phase A: activation refuses a blocked gate
+  (`recovery_gate_blocked`), and the commissioned ledger's gate stays blocked.
 
 ## 0. Preconditions
 
@@ -165,31 +164,46 @@ The probe items stay in the table, inert: no ledger reads their keys and nothing
 
 **Phase A ends here.** The commissioned ledger's anchor record, database and gate are unchanged.
 
-# Phase B — the disposable ledger (blocked)
+# Phase B — the disposable ledger (not yet approved)
 
-**Open, and blocking staging sign-off.** The served process dispatches only under an anchor whose
-continuity is `continuity_established` for its own ledger, and signed configuration can be
-activated only while that ledger's gate is open. The commissioned ledger stays quarantined and
-blocked, so Phase B runs entirely on a disposable ledger. The remaining local work is the
-ceremony that gets there: the offline builders today sign only quarantined transitions, and no
-operator tool yet runs `authorize_reconciled_state`, the only operation that opens a ledger's
-gate. It is the same ceremony Gate 2 then runs for real reconciliation. Phase B comes back for its
-own approval once that exists.
+The served process dispatches only under an anchor whose continuity is `continuity_established`
+for its own ledger. The commissioned ledger stays quarantined and blocked, so Phase B runs
+entirely on a disposable ledger, through the single truthful ceremony of Draft 0.5 section 7 with
+the empty-ledger checkpoint projection. The tooling exists and is proven on the disposable test
+database (`tests/integration/test_tiamat_gate2_reconciliation.py`); Phase B still needs its own
+deployment approval. No two-ceremony walk, and no placeholder checkpoint, is used.
+
+Tools: `deploy/postgres/tiamat_reconciliation_ledger_v1.py` (recovery login: `report`, `beacon`,
+`first-inventory`, `authorize`), `deploy/aws/prepare_tiamat_reconciliation_step_v1.py` (offline:
+`pending`, `established`) and `deploy/aws/install_tiamat_reconciliation_step_v1.py` (verify, then
+one write through the M4 writer with strong reads before and after). Every mutating command
+previews by default and needs its exact digest confirmed.
 
 ## 7. The disposable ledger reaches established continuity
 
-- A separate disposable Postgres ledger, provisioned from `deploy/postgres/tiamat_roles.sql.example`
-  including the release-manager grants (staging and projection on `grant_releases` and
-  `spending_partitions`). The commissioned staging database is not changed; its grant fix is
-  applied later, with reconciliation.
-- A disposable staging identity with its own throwaway root, added to `WriterRootsJson` as a
-  further reviewed version, verified as in step 6, and a committed trust file for it.
-- Through the writer: quarantined bootstrap, then `recovery_pending`, then
-  `continuity_established`.
-- With the disposable ledger's recovery credential, `authorize_reconciled_state`
-  (`src/lucy/shared_execution/recovery.py`), bound to the established anchor as its floor and to
-  the retained checkpoint. It is the only operation that clears `dispatch_blocked`; until it runs,
-  the launcher refuses (`startup_restore_gate_not_authorized`), and so does consumption.
+1. **Ledger.** A separate disposable Postgres ledger, migrated to head, with roles from
+   `deploy/postgres/tiamat_roles.sql.example`; `initialize_environment` at recovery generation 1,
+   blocked. The commissioned staging database is not changed.
+2. **Anchor bootstrap.** A disposable identity with its own throwaway root, added to
+   `WriterRootsJson` as a further reviewed version (verified as in step 6); its version-one
+   quarantined bootstrap installed through the writer.
+3. **First release inventory, dispatch still blocked.** Control signs the generation-1 RELEASE
+   trust inventory. `first-inventory` verifies it against the pinned release root and, in one
+   transaction, requires the gate blocked, of this epoch, on this ledger and never reconciled, no
+   prior activated inventory (a staged copy of the same bytes is allowed), and an empty financial
+   and release history; it activates the inventory and leaves dispatch blocked. One time only.
+4. **Checkpoint.** `report --checkpoint-generation 2`: the empty-ledger checkpoint — the installed
+   inventory, no release heads, no settlement positions. It refuses a ledger with any history.
+5. **Pending.** Offline `pending` signs a reconciled witness for generation 2 under a successor
+   witness inventory, and the `recovery_pending` transition; install through the writer.
+6. **Authorize (the gate opens, no serving authority yet).** `authorize` strong-reads the anchor
+   (its head must be exactly the pending step) and, in one transaction: target generation equal to
+   the witness's and above the ledger's; all three checkpoint digests equal the witness's; the
+   installed inventory equal to the ledger's single active one; no history; checkpoint bound
+   immutably; anchor floor advanced to the pending transition; gate open at generation 2.
+7. **Established.** `beacon` reads the continuity beacon for the checkpoint now bound; offline
+   `established` signs `continuity_established` with the identical witness bytes and that beacon,
+   and writes the launcher's trust file (commit it); install through the writer.
 
 ## 8. Render: the served process, synthetic only
 
@@ -198,26 +212,37 @@ A serving process that never holds the recovery credential:
 - start command: `uvicorn --factory lucy.shared_execution.served_environment:create_app_from_environment --host 0.0.0.0 --port $PORT --workers 1`;
 - environment: every variable `served_environment.py` requires, with
   `TIAMAT_PROVIDER_TRANSPORT=synthetic`, `TIAMAT_EXPECTED_ENVIRONMENT` and `TIAMAT_EXPECTED_LEDGER_ID`
-  pinned to the disposable ledger independently of the trust file,
+  pinned to the disposable ledger independently of the trust file, `TIAMAT_RECOVERY_GENERATION=2`,
   `TIAMAT_RUNTIME_DATABASE_ROLE=tiamat_runtime`, and **no** `TIAMAT_RECOVERY_DATABASE_URL`. Its
   presence refuses startup, and the process also checks the runtime URL's `current_user`, so a
   recovery credential in the runtime slot refuses too;
 - the launcher (`deploy/postgres/issue_tiamat_startup_attestation_v1.py`) runs separately, with
-  the disposable ledger's recovery credential, immediately before the service starts, against the
-  gate step 7 opened. Startup consumes its claimant; consumption requires the gate open and does
-  not open it.
+  the disposable ledger's recovery credential and the step 7 trust file, immediately before the
+  service starts. Startup consumes its claimant.
+
+The step 7 witness and its inventory are valid for at most 24 hours; steps 7.5 to 9 run inside
+that window. Renewal is not part of this checklist.
 
 ## 9. Signed configuration (Control), then one synthetic request
 
-With the disposable ledger's gate open (step 7) and the service started, Control stages and activates, through the release
-manager, the staging trust inventory and the signed profile, privacy policy and spending grant for
-the served profile. Then one synthetic request through the signed configuration returns 200 with
-the signed profile release, makes one synthetic provider call, and leaves the settled receipt in
-the disposable ledger.
+With the gate open and the service started, Control stages and activates, through the release
+manager, the signed profile, privacy policy and spending grant for the served profile; Draft 0.5
+section 4 allows release activation to advance from the checkpoint. Open: activating the grant
+projects it onto a spending partition and grant row that only test helpers create today; that
+seeding needs its own reviewed operator step before Phase B. Then one synthetic request
+through the signed configuration returns 200 with the signed profile release, makes one synthetic
+provider call, and leaves the settled receipt in the disposable ledger.
 
-Do not restart the served process during the test. After activation the ledger's release heads
-differ from those its anchored checkpoint recorded; how a restart then re-attests is part of the
-reconciliation work, not established here.
+The launcher compares the anchored witness with the retained checkpoint, not with the ledger's
+current heads, so a restart after activation is expected to re-attest within the witness's
+validity. That is not yet tested; record one restart as evidence.
+
+## Commissioned ledger (not part of this checklist)
+
+Reconciling the commissioned ledger is the final Gate 2 proof. It uses the same tools with a
+generation jump (its anchor is quarantined at generation 2, so its witness must be at least 3),
+but nothing touches it until its actual database state and current external anchor are read back
+and reviewed. No anchor reset and no two-ceremony walk.
 
 ## Rollback — fail closed
 
