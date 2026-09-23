@@ -488,8 +488,31 @@ complete or portable. The first two count jobs failed before reading counts;
 the second exposed the bundled psycopg-driver mismatch, which was fixed. All
 three temporary utilities were deleted. The succeeded job's gitignored receipt
 is `secrets/generated/utopia-telegram-history-count-state-v3.json`. Ray chose
-to leave this earlier archive in Utopia for eventual deletion, not move it to
-Raymond. No deletion is authorized or performed by the cutover preparation.
+not to move this earlier archive to Raymond. On 2026-09-23 he explicitly
+authorized deleting the old Utopia Telegram archive. This does not include
+Raymond's imported ChatGPT evidence or 32 protected interpretations. Deletion
+has not yet been performed.
+
+A follow-up read-only exact-target inventory at `cfac540` succeeded in a
+temporary Render job (full job ID and exact UUIDs in the gitignored receipt
+`secrets/generated/utopia-telegram-deletion-inventory-state-v2.json`); its
+utility was deleted. It found 16 Telegram evidence records: 10 already
+tombstoned without payloads and six with encrypted payloads, all linked to
+recorded Telegram turns. There were no payload/tombstone coverage anomalies.
+No message content was read. The first utility attempt stopped at a
+short-vs-full commit check before running any database job; it was deleted.
+
+Utopia's policy and deletion services are suspended. The legacy `/owner/v1`
+single-evidence deletion endpoint is deliberately unavailable in production
+(`_require_legacy_sensitive_api_allowed`); the V1.3 `/owner/v3` endpoint is
+for scoped evidence, whereas these six records are in the older
+`lucy.evidence`/`lucy.evidence_payloads` archive. Direct SQL deletion would
+leave wrapped encryption keys and recovery copies and is not a valid completion.
+The next deletion step is a narrowly scoped production operator for these six
+legacy records that destroys each wrapped key and applies the existing
+deletion/tombstone/derived-state rules, followed by an exact zero-live-payload
+check. Finish the one-bot Raymond cutover or otherwise stop Utopia capture
+before the final sweep so new records do not replenish the old archive.
 
 The new, default-disabled `/v1/memory/interpreted-lookup` route in Raymond's
 routine identity calls a separate policy-only protected-recall endpoint over
@@ -505,11 +528,12 @@ strict mypy passed locally. Neither long-running service has been deployed or
 resumed with this route, and the Utopia bot continues its existing behavior.
 
 Cutover still requires a Raymond Telegram channel binding and durable authority
-activation, owner allowlist and separate gateway adapter credential, a one-bot
-handoff, and a decision on whether Raymond archiving must be ready at cutover.
+activation, owner allowlist and separate gateway adapter credential, and a
+one-bot handoff. Ray's authorization to delete the old archive does not require
+migrating it to Raymond.
 The existing Utopia Stage 1 commissioning operator hardcodes Utopia identities,
 so it cannot safely commission Raymond as-is. Raymond authority writer and
 recovery coordinator are still suspended configuration shells. Do not redirect
 the active bot to the current Raymond routine service: it would fail the
-Telegram lease/retention boundary and could interrupt replies. Keep the former
-archive in Utopia until a separately authorized deletion workflow completes.
+Telegram lease/retention boundary and could interrupt replies. Retain the old
+archive only until the authorized, key-destroying deletion completes.
