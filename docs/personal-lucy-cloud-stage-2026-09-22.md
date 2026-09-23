@@ -741,3 +741,31 @@ evidence/ledger entries have **not yet been verified**. The next action is for
 Ray to send a short message to the existing bot, then check the reply and
 content-free Raymond capture/budget metadata. Do not claim the provider reply
 path is proven before that exchange. Keep Utopia's gateway suspended.
+
+## First owner Telegram exchange verified (2026-09-23)
+
+Ray reported receiving a reply from the existing bot. A fresh read-only cloud
+check found Utopia's gateway suspended and Raymond's gateway and routine live.
+Content-free Raymond administrator audit
+`secrets/generated/raymond-first-telegram-turn-v2.json` (gitignored) verified
+one `SENT` Telegram event with an outbound message ID, one `SUCCEEDED` model
+operation, one active Raymond gateway lease, and a $1/day budget account with
+117 microusd spent and zero reserved. The Raymond database identity was
+`lucy_raymond` at revision `0073_memory_candidate_correction`. It found one
+enabled capture receipt, two owner archive intents (one user, one assistant),
+and one committed turn. The gateway's allowlisted retention events independently
+reported completed archive requests for both roles. No message content was
+read. The temporary audit utilities were deleted.
+
+The initial audit filtered archive IDs for a `telegram:` prefix and therefore
+reported zero intents/commits; that filter did not match the Hermes session ID
+format. A second total-count audit verified the archive. This was an audit
+query error, not an archive failure. Telegram's read-only `getMe` returned bot
+display name `UtopiaLucy` and username `UtopiaLucy_bot`; this is the same bot
+Ray chose to move. Ray confirmed that “Utopia Lucy replied” referred only to
+the Telegram name, not to the reply's persona or content. The moved bot's
+display name was changed through Telegram `setMyName` to `Personal Lucy` and
+verified by `getMe` under the same bot ID. Its username remains
+`@UtopiaLucy_bot`; changing that handle requires a separate Telegram
+identity-management step. Routing, provider reply, retention and display name
+are now verified.
