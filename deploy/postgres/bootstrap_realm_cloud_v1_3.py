@@ -72,8 +72,9 @@ EXPECTED_SOURCE_REVISIONS = {
     "0071_memory_import_job_replay",
     "0072_memory_pilot_auth_context",
     "0073_memory_candidate_correction",
+    "0074_hindsight_model_budget",
 }
-EXPECTED_REVISION = "0073_memory_candidate_correction"
+EXPECTED_REVISION = "0074_hindsight_model_budget"
 AUTHORIZATION = "security-v1.3-private-quarantined"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
 _LUCY_DATABASE = re.compile(r"lucy(?:_[a-z0-9]+)*\Z")

@@ -20,6 +20,7 @@ PUBLIC_CONVERSATION_SCHEMA_REVISION = "0057_public_conversation"
 WORKSPACES_SCHEMA_REVISION = "0068_workspaces_service_auth"
 PRIVATE_MEMORY_SCHEMA_REVISION = "0072_memory_pilot_auth_context"
 MEMORY_CORRECTION_SCHEMA_REVISION = "0073_memory_candidate_correction"
+HINDSIGHT_BUDGET_SCHEMA_REVISION = "0074_hindsight_model_budget"
 V13_RECOVERY_SCHEMA_REVISIONS = frozenset(
     {
         R1_SCHEMA_REVISION,
@@ -29,6 +30,7 @@ V13_RECOVERY_SCHEMA_REVISIONS = frozenset(
         WORKSPACES_SCHEMA_REVISION,
         PRIVATE_MEMORY_SCHEMA_REVISION,
         MEMORY_CORRECTION_SCHEMA_REVISION,
+        HINDSIGHT_BUDGET_SCHEMA_REVISION,
     }
 )
 SERVICE_ROLES = {
@@ -137,6 +139,7 @@ class ServiceReadiness:
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
                         MEMORY_CORRECTION_SCHEMA_REVISION,
+                        HINDSIGHT_BUDGET_SCHEMA_REVISION,
                     }
                 elif os.getenv("LUCY_TELEGRAM_STAGE") == "2":
                     expected_revisions = {
@@ -146,6 +149,7 @@ class ServiceReadiness:
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
                         MEMORY_CORRECTION_SCHEMA_REVISION,
+                        HINDSIGHT_BUDGET_SCHEMA_REVISION,
                     }
                     # The bridge release must remain healthy before and after
                     # the additive private-memory and public-conversation migrations.
@@ -158,6 +162,7 @@ class ServiceReadiness:
                         WORKSPACES_SCHEMA_REVISION,
                         PRIVATE_MEMORY_SCHEMA_REVISION,
                         MEMORY_CORRECTION_SCHEMA_REVISION,
+                        HINDSIGHT_BUDGET_SCHEMA_REVISION,
                     }
             if len(revisions) != 1 or revisions[0] not in expected_revisions:
                 raise ReadinessError("database schema is not the reviewed revision")
@@ -437,6 +442,11 @@ class ServiceReadiness:
             required_functions["routine"] += (
                 "lucy.set_and_accept_scoped_capture_turn_v1(text,text,boolean,text)",
                 "lucy.commit_capturable_scoped_turn_v1(uuid,uuid)",
+            )
+        if self._mode == "routine" and os.getenv("LUCY_HINDSIGHT_MODEL_PROXY_TOKEN"):
+            required_functions["routine"] += (
+                "lucy.begin_hindsight_model_operation_v1(uuid)",
+                "lucy.settle_hindsight_model_operation_v1(uuid,bigint,boolean)",
             )
         for function in required_functions.get(self._mode, ()):
             if not session.scalar(

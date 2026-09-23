@@ -1,6 +1,4 @@
 import json
-from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,16 +56,29 @@ def test_private_model_route_rejects_missing_hindsight_credential(
 def test_model_call_reserves_then_settles(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
 
-    class FakeService:
-        def __init__(self, _sessions: object) -> None:
+    class FakeResult:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def scalar_one(self) -> object:
+            return self.value
+
+    class FakeSession:
+        def execute(self, query: object, params: dict[str, object]) -> FakeResult:
+            operation = "begin" if "begin_hindsight" in str(query) else "settle"
+            calls.append((operation, params))
+            return FakeResult({"execute": True})
+
+    class FakeTransaction:
+        def __enter__(self) -> FakeSession:
+            return FakeSession()
+
+        def __exit__(self, *_args: object) -> None:
             pass
 
-        def begin(self, request: object) -> SimpleNamespace:
-            calls.append(("begin", request))
-            return SimpleNamespace(action_id=uuid4(), status="executing", execute=True)
-
-        def settle(self, settlement: object) -> None:
-            calls.append(("settle", settlement))
+    class FakeSessions:
+        def begin(self) -> FakeTransaction:
+            return FakeTransaction()
 
     class FakeResponse:
         def __enter__(self) -> "FakeResponse":
@@ -88,10 +99,9 @@ def test_model_call_reserves_then_settles(monkeypatch: pytest.MonkeyPatch) -> No
         return FakeResponse()
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key")
-    monkeypatch.setattr("lucy.hindsight_model_proxy.ModelExecutionService", FakeService)
     monkeypatch.setattr("lucy.hindsight_model_proxy.urlopen", fake_urlopen)
-    result = complete(_request(), object())  # type: ignore[arg-type]
+    result = complete(_request(), FakeSessions())  # type: ignore[arg-type]
     assert result["choices"][0]["message"]["content"] == "ok"
     assert [call[0] for call in calls] == ["begin", "upstream", "settle"]
-    assert calls[2][1].actual_microusd == 120
-    assert calls[2][1].succeeded is True
+    assert calls[2][1]["actual"] == 120
+    assert calls[2][1]["succeeded"] is True

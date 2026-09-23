@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
 
-from lucy.readiness import MEMORY_CORRECTION_SCHEMA_REVISION
+from lucy.readiness import HINDSIGHT_BUDGET_SCHEMA_REVISION
 
 AUTHORIZATION = "private-memory-head-read-only-v1.3"
 _PRIVATE_RENDER_HOST = re.compile(r"dpg-[a-z0-9-]+-a\Z")
@@ -86,7 +86,7 @@ def _check_sql(check: str) -> tuple[str, Mapping[str, object]]:
     if check == "revision":
         return (
             "SELECT (SELECT version_num FROM public.alembic_version) = :expected",
-            {"expected": MEMORY_CORRECTION_SCHEMA_REVISION},
+            {"expected": HINDSIGHT_BUDGET_SCHEMA_REVISION},
         )
     if check == "runtime_admission":
         return (

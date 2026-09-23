@@ -9,16 +9,10 @@ from typing import Any
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from lucy.model_execution import (
-    MODEL,
-    RESERVATION_MICROUSD,
-    ModelExecutionBegin,
-    ModelExecutionService,
-    ModelExecutionSettlement,
-    ModelUsage,
-)
+from lucy.model_execution import MODEL, RESERVATION_MICROUSD
 
 _UPSTREAM = "https://openrouter.ai/api/v1/chat/completions"
 _MAX_REQUEST_BYTES = 80_000
@@ -99,18 +93,14 @@ def complete(body: bytes, sessions: sessionmaker[Session]) -> dict[str, Any]:
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         raise HindsightModelProxyError("provider_key_missing")
-    service = ModelExecutionService(sessions)
-    request_id = uuid4().hex
-    begin = service.begin(ModelExecutionBegin(
-        idempotency_key=f"hermes-model:hindsight:{request_id}",
-        model="openai/gpt-oss-20b",
-        reservation_microusd=5000,
-        session_id="hindsight",
-        api_request_id=request_id,
-    ))
-    if begin.status != "executing" or not begin.execute:
+    action_id = uuid4()
+    with sessions.begin() as session:
+        begin = session.execute(
+            text("SELECT lucy.begin_hindsight_model_operation_v1(:action_id)"),
+            {"action_id": action_id},
+        ).scalar_one()
+    if not begin.get("execute"):
         raise HindsightModelProxyError("budget_unavailable")
-    usage = ModelUsage()
     succeeded = False
     actual = RESERVATION_MICROUSD
     try:
@@ -136,17 +126,12 @@ def complete(body: bytes, sessions: sessionmaker[Session]) -> dict[str, Any]:
         provider_usage = result.get("usage")
         actual = _cost(provider_usage)
         assert isinstance(provider_usage, dict)
-        usage = ModelUsage(
-            input_tokens=provider_usage.get("prompt_tokens"),
-            output_tokens=provider_usage.get("completion_tokens"),
-            provider_cost_microusd=actual,
-        )
         succeeded = True
         return result
     finally:
-        service.settle(ModelExecutionSettlement(
-            action_id=begin.action_id,
-            actual_microusd=actual,
-            succeeded=succeeded,
-            usage=usage,
-        ))
+        with sessions.begin() as session:
+            session.execute(
+                text("SELECT lucy.settle_hindsight_model_operation_v1("
+                     ":action_id,:actual,:succeeded)"),
+                {"action_id": action_id, "actual": actual, "succeeded": succeeded},
+            ).scalar_one()
