@@ -102,6 +102,7 @@ GRANT EXECUTE ON FUNCTION
   lucy.read_memory_pilot_transport_admission_v1(text,uuid),
   lucy.admit_memory_pilot_transport_v1(text,uuid,text,bigint,uuid,text),
   lucy.register_memory_import_evidence_v1(uuid,text,jsonb,jsonb),
+  lucy.require_memory_import_sources_v1(uuid,text,jsonb),
   lucy.search_governed_scoped_memory_v1(text,integer),
   lucy.reserve_memory_import_attempt_v1(uuid,text,bigint),
   lucy.settle_memory_import_attempt_v1(uuid,bigint,text),

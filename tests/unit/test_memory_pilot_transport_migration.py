@@ -35,6 +35,7 @@ def test_transport_migration_separates_operator_registration_and_runtime_admissi
     for function in (
         "read_memory_pilot_transport_admission_v1(text,uuid)",
         "admit_memory_pilot_transport_v1(text,uuid,text,bigint,uuid,text)",
+        "require_memory_import_sources_v1(uuid,text,jsonb)",
     ):
         assert function in routine
         assert function not in policy
