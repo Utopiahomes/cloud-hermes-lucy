@@ -1,4 +1,6 @@
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +10,7 @@ from lucy.hindsight_model_proxy import (
     HindsightModelProxyError,
     _bounded_request,
     _cost,
+    _upstream_failure,
     complete,
 )
 
@@ -40,6 +43,20 @@ def test_provider_cost_must_fit_reservation() -> None:
         _cost({"cost": 0.006})
     with pytest.raises(HindsightModelProxyError):
         _cost({"prompt_tokens": 10})
+
+
+def test_upstream_rate_limit_diagnostic_excludes_raw_message() -> None:
+    error = HTTPError(
+        "https://openrouter.ai/api/v1/chat/completions", 429, "rate limited",
+        {"Retry-After": "90"},
+        BytesIO(json.dumps({"error": {
+            "message": "Provider quota exceeded for synthetic private payload",
+            "metadata": {"provider_name": "Example-Provider"},
+        }}).encode()),
+    )
+    assert _upstream_failure(error) == (
+        "upstream_http_429_quota_Example-Provider_retry_90"
+    )
 
 
 def test_private_model_route_rejects_missing_hindsight_credential(

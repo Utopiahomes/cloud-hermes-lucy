@@ -31,6 +31,39 @@ class HindsightModelProxyError(RuntimeError):
     pass
 
 
+def _upstream_failure(error: HTTPError) -> str:
+    """Return only bounded, non-content diagnostics from an upstream HTTP error."""
+    status = error.code
+    if status != 429:
+        return f"upstream_http_{status}"
+    try:
+        body = json.loads(error.read(2_001))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        body = None
+    message = ""
+    provider = "unknown"
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        detail = body["error"]
+        if isinstance(detail.get("message"), str):
+            message = detail["message"].lower()
+        metadata = detail.get("metadata")
+        if isinstance(metadata, dict) and isinstance(metadata.get("provider_name"), str):
+            candidate = metadata["provider_name"]
+            if (candidate.isascii() and candidate.replace("-", "").isalnum()
+                    and len(candidate) <= 40):
+                provider = candidate
+    reason = "rate_limit"
+    if "credit" in message or "balance" in message:
+        reason = "credits"
+    elif "quota" in message or "daily" in message:
+        reason = "quota"
+    elif "provider" in message and "available" in message:
+        reason = "provider_unavailable"
+    retry = error.headers.get("Retry-After", "") if error.headers else ""
+    retry_seconds = retry if retry.isdecimal() and len(retry) <= 4 else "unspecified"
+    return f"upstream_http_429_{reason}_{provider}_retry_{retry_seconds}"
+
+
 def _bounded_request(body: bytes) -> dict[str, Any]:
     if len(body) > _MAX_REQUEST_BYTES:
         raise HindsightModelProxyError("request_size")
@@ -121,7 +154,7 @@ def complete(body: bytes, sessions: sessionmaker[Session]) -> dict[str, Any]:
             with urlopen(upstream, timeout=90) as response:  # noqa: S310 - fixed upstream URL
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            raise HindsightModelProxyError(f"upstream_http_{exc.code}") from exc
+            raise HindsightModelProxyError(_upstream_failure(exc)) from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise HindsightModelProxyError("response_size")
         result = json.loads(raw)
