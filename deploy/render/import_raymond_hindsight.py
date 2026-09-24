@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from hashlib import sha256
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid5
 
@@ -68,10 +70,18 @@ def _retain(item: dict[str, object], key: str) -> dict[str, object]:
         data=wire, method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    with urlopen(request, timeout=180) as response:  # noqa: S310 - exact private URL
-        if response.status != 200:
-            raise RuntimeError("Hindsight retain did not complete")
-        result = json.load(response)
+    for attempt in range(4):
+        try:
+            with urlopen(request, timeout=180) as response:  # noqa: S310 - exact private URL
+                if response.status != 200:
+                    raise RuntimeError("Hindsight retain did not complete")
+                result = json.load(response)
+            break
+        except HTTPError as exc:
+            if exc.code != 500 or attempt == 3:
+                raise RuntimeError(f"Hindsight retain failed: HTTP {exc.code}") from None
+            print(f"HINDSIGHT_IMPORT_RETRY:{attempt + 1}", flush=True)
+            time.sleep(15 * (attempt + 1))
     if not isinstance(result, dict) or result.get("success") is not True:
         raise RuntimeError("Hindsight retain result differs")
     return result
