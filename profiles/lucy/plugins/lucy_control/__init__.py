@@ -225,24 +225,26 @@ def _hindsight_recall_context(query: str) -> str | None:
                     source_ids = [value]
             if not source_ids:
                 continue
-            content = entry["text"]
-            if kind == "reviewed" and isinstance(document_id, str):
-                try:
-                    document_request = Request(
-                        f"{HINDSIGHT_PRIVATE_URL}/v1/default/banks/{HINDSIGHT_BANK}/"
-                        f"documents/{quote(document_id, safe='')}",
-                        headers={"Authorization": f"Bearer {key}"},
-                    )
-                    with urlopen(document_request, timeout=8) as document_response:
-                        document_wire = document_response.read(20_001)
-                    if len(document_wire) <= 20_000:
-                        document = json.loads(document_wire)
-                        if (isinstance(document, dict)
-                                and document.get("id") == document_id
-                                and isinstance(document.get("original_text"), str)):
-                            content = document["original_text"]
-                except Exception:
-                    pass  # A cited recall fact remains usable if expansion fails.
+            if not isinstance(document_id, str):
+                continue
+            try:
+                document_request = Request(
+                    f"{HINDSIGHT_PRIVATE_URL}/v1/default/banks/{HINDSIGHT_BANK}/"
+                    f"documents/{quote(document_id, safe='')}",
+                    headers={"Authorization": f"Bearer {key}"},
+                )
+                with urlopen(document_request, timeout=8) as document_response:
+                    document_wire = document_response.read(20_001)
+                if len(document_wire) > 20_000:
+                    continue
+                document = json.loads(document_wire)
+                if (not isinstance(document, dict)
+                        or document.get("id") != document_id
+                        or not isinstance(document.get("original_text"), str)):
+                    continue
+            except Exception:
+                continue  # Never serve a fact whose source document cannot be checked.
+            content = document["original_text"] if kind == "reviewed" else entry["text"]
             record = {
                 "kind": kind,
                 "text": content,
@@ -722,6 +724,17 @@ def _pre_llm_call(
             f"evidence_id {archive_result['evidence_id']}. Propose only genuinely "
             "durable memories from it; proposals require human approval."
         )
+        if re.search(
+            r"\b(?:please|i request|i want you to)\b.{0,100}\b(?:forget|delete|correct)\b",
+            user_message, flags=re.IGNORECASE | re.DOTALL,
+        ):
+            context += (
+                "\nRay made a memory correction or forgetting request in this "
+                "captured message. Acknowledge receipt and say the request is "
+                "pending operator action. The archive capture is not a completed "
+                "correction or deletion, and Hindsight has not been changed by "
+                "this Telegram turn. Do not claim the request was never made."
+            )
         if os.getenv("LUCY_HINDSIGHT_ENABLED") == "true":
             recalled = _hindsight_recall_context(user_message)
             if recalled:

@@ -956,6 +956,9 @@ def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
              "source": "lucy_governed_reviewed_interpretation",
              "source_record_ids": '["review-source-2"]'}},
         {"text": "Uncited derived thought", "metadata": {}},
+        {"text": "Deleted marker WILLOW", "document_id": "deleted-1",
+         "metadata": {"source": "approved_chatgpt_export",
+                      "source_record_id": "deleted-source"}},
     ]
 
     def open_recall(request: Any, *, timeout: int) -> io.BytesIO:
@@ -966,6 +969,8 @@ def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
             return io.BytesIO(json.dumps({"results": rows}).encode())
         assert timeout == 8
         document_id = request.full_url.rsplit("/", 1)[-1]
+        if document_id == "deleted-1":
+            raise HTTPError(request.full_url, 404, "deleted", {}, None)
         return io.BytesIO(json.dumps({
             "id": document_id,
             "original_text": "Reviewed historical interpretation.\n"
@@ -984,10 +989,13 @@ def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
     assert "Guardian Locked was only proposed" in context
     assert "review-source-2" in context
     assert "Uncited derived thought" not in context
+    assert "Deleted marker WILLOW" not in context
     assert seen == [
         "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/memories/recall",
         "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/review-1",
         "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/review-2",
+        "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/raw-1",
+        "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/deleted-1",
     ]
 
 
@@ -1012,6 +1020,13 @@ def test_hindsight_telegram_prefetch_injects_citations_and_skips_tools(
     assert result is not None
     assert "source-1" in result["context"]
     assert "what was only proposed or ambiguous" in result["context"]
+    pending = plugin._pre_llm_call(
+        user_message="Please forget the synthetic Iris amber-lamp memory.",
+        session_id="forget-session", turn_id="forget-turn", platform="telegram",
+    )
+    assert pending is not None
+    assert "pending operator action" in pending["context"]
+    assert "Do not claim the request was never made" in pending["context"]
     bounded = plugin._request_middleware({
         "messages": [], "tools": [{"type": "function"}], "tool_choice": "auto",
     })["request"]
