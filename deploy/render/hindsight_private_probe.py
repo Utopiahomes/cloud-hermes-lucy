@@ -99,10 +99,10 @@ def main() -> None:
             "present_applicability": any(word in answer for word in
                                          ("current", "today", "present")),
         }
-        if not all(flags.values()):
-            raise RuntimeError("default reflection lost required nuance")
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, **flags},
                                              sort_keys=True))
+        if not all(flags.values()):
+            raise RuntimeError("default reflection lost required nuance")
         return
     if phase == "nuance_diagnostic":
         for label, query in (
