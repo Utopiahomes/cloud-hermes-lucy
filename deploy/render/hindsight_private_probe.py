@@ -58,13 +58,13 @@ def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
         "clear_synthetic", "reviewed_three", "reviewed_full", "backfill_inventory",
-        "nuance_diagnostic",
+        "nuance_diagnostic", "nuance_default",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
             "health|synthetic|reflect_only|correct_delete|after_restart|"
             "clear_synthetic|reviewed_three|reviewed_full|backfill_inventory|"
-            "nuance_diagnostic"
+            "nuance_diagnostic|nuance_default"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -77,6 +77,32 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "nuance_default":
+        code, result = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
+            "query": "What did Ray historically confirm about Trial Gate and "
+            "The Magician's Universal Aid tag? Explain whether Guardian Locked "
+            "was confirmed as The Gate's second tag and whether these old "
+            "choices are known to apply today.",
+            "budget": "low", "max_tokens": 700,
+        })
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"default nuance reflection failed: HTTP {code}")
+        answer = str(result.get("text", "")).lower()
+        flags = {
+            "trial_gate": "trial gate" in answer,
+            "universal_aid": "universal aid" in answer,
+            "guardian_locked": "guardian locked" in answer,
+            "uncertainty": any(word in answer for word in
+                               ("ambiguous", "unresolved", "unclear",
+                                "not confirmed")),
+            "present_applicability": any(word in answer for word in
+                                         ("current", "today", "present")),
+        }
+        if not all(flags.values()):
+            raise RuntimeError("default reflection lost required nuance")
+        print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, **flags},
+                                             sort_keys=True))
         return
     if phase == "nuance_diagnostic":
         for label, query in (
