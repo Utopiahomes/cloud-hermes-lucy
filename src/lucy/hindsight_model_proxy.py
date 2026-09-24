@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any
 from urllib.error import HTTPError
@@ -150,11 +151,19 @@ def complete(body: bytes, sessions: sessionmaker[Session]) -> dict[str, Any]:
                 "X-Title": "Lucy governed Hindsight inference",
             },
         )
-        try:
-            with urlopen(upstream, timeout=90) as response:  # noqa: S310 - fixed upstream URL
-                raw = response.read(_MAX_RESPONSE_BYTES + 1)
-        except HTTPError as exc:
-            raise HindsightModelProxyError(_upstream_failure(exc)) from exc
+        for attempt in range(3):
+            try:
+                with urlopen(upstream, timeout=90) as response:  # noqa: S310 - fixed upstream URL
+                    raw = response.read(_MAX_RESPONSE_BYTES + 1)
+                break
+            except HTTPError as exc:
+                if exc.code == 429 and attempt < 2:
+                    retry = exc.headers.get("Retry-After", "") if exc.headers else ""
+                    delay = min(max(int(retry), 1), 5) if retry.isdecimal() else 2
+                    exc.close()
+                    time.sleep(delay)
+                    continue
+                raise HindsightModelProxyError(_upstream_failure(exc)) from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise HindsightModelProxyError("response_size")
         result = json.loads(raw)
