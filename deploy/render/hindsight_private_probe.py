@@ -87,7 +87,7 @@ def main() -> None:
         if not all(part in recalled for part in ("iris", "copper", "notebook")):
             raise RuntimeError("synthetic fact was not recalled")
         reflected_code, reflected = _request(
-            "POST", _memory_path("/reflect"),
+            "POST", f"/v1/default/banks/{BANK}/reflect",
             {"query": "Where is Iris's synthetic copper notebook after the cabinet moved?"},
         )
         if reflected_code != 200 or not isinstance(reflected, dict):
