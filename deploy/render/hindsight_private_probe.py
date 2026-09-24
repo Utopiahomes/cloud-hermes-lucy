@@ -57,12 +57,12 @@ def _recall_text(result: object) -> str:
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
-        "clear_synthetic", "reviewed_three", "backfill_inventory",
+        "clear_synthetic", "reviewed_three", "reviewed_full", "backfill_inventory",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
             "health|synthetic|reflect_only|correct_delete|after_restart|"
-            "clear_synthetic|reviewed_three|backfill_inventory"
+            "clear_synthetic|reviewed_three|reviewed_full|backfill_inventory"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -95,6 +95,29 @@ def main() -> None:
                            for i in ids),
             "chatgpt_document_ids": sorted(i for i in ids if isinstance(i, str)
                                            and i.startswith("lucy-chatgpt:")),
+        }))
+        return
+    if phase == "reviewed_full":
+        code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"reviewed full inventory failed: HTTP {code}")
+        entries = next((result[key] for key in ("documents", "items", "results")
+                        if isinstance(result.get(key), list)), None)
+        if entries is None:
+            raise RuntimeError("reviewed full inventory shape differs")
+        ids = [entry.get("id", entry.get("document_id")) for entry in entries
+               if isinstance(entry, dict)]
+        reviewed = sum(isinstance(i, str) and i.startswith("lucy-reviewed:") for i in ids)
+        chatgpt = sum(isinstance(i, str) and i.startswith("lucy-chatgpt:") for i in ids)
+        if (result.get("total", len(ids)) != 64 or reviewed != 32 or chatgpt != 32):
+            raise RuntimeError("reviewed full inventory differs")
+        recalled = _recall_text(_recall("What did Ray confirm about Trial Gate and "
+                                        "The Magician's Universal Aid tag?"))
+        if "trial gate" not in recalled or "universal aid" not in recalled:
+            raise RuntimeError("reviewed Gate/Magician recall is unavailable")
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "reviewed": reviewed, "chatgpt": chatgpt,
+            "gate_and_magician_recalled": True,
         }))
         return
     if phase == "reviewed_three":
