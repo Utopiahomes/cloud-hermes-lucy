@@ -56,10 +56,11 @@ def _recall_text(result: object) -> str:
 
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
-        "health", "synthetic", "reflect_only", "after_restart"
+        "health", "synthetic", "reflect_only", "correct_delete", "after_restart"
     }:
         raise SystemExit(
-            "usage: hindsight_private_probe.py health|synthetic|reflect_only|after_restart"
+            "usage: hindsight_private_probe.py "
+            "health|synthetic|reflect_only|correct_delete|after_restart"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -85,7 +86,23 @@ def main() -> None:
             raise RuntimeError("synthetic reflection omitted the related memories")
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "reflected": True}))
         return
-    if phase == "synthetic":
+    if phase in {"synthetic", "correct_delete"}:
+        if phase == "synthetic":
+            _retain_and_reflect()
+        _correct_and_delete()
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "health": True, "unauthorized_denied": True,
+            "corrected_recalled": True, "deleted_document_absent": True,
+        }, sort_keys=True))
+        return
+    recovered = _recall_text(_recall("Which cabinet contains Iris's synthetic copper notebook?"))
+    if "east" not in recovered:
+        raise RuntimeError("synthetic memory not recalled after restart")
+    print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase,
+                                           "recalled_after_restart": True}))
+
+
+def _retain_and_reflect() -> None:
         items = [
             {"content": "Synthetic probe: Iris filed a copper notebook in the west cabinet.",
              "document_id": DOC_A, "context": "synthetic memory lifecycle test",
@@ -111,6 +128,7 @@ def main() -> None:
         reflection_text = str(reflected.get("text", "")).lower()
         if not all(part in reflection_text for part in ("iris", "notebook")):
             raise RuntimeError("synthetic reflection omitted the related memories")
+def _correct_and_delete() -> None:
         correction = {
             "content": "Synthetic correction: Iris filed the copper notebook in the east cabinet, "
                        "not the west cabinet.",
@@ -133,17 +151,6 @@ def main() -> None:
         deleted_code, _ = _request("GET", f"/v1/default/banks/{BANK}/documents/{DOC_B}")
         if deleted_code != 404:
             raise RuntimeError("deleted synthetic document remains readable")
-        print("HINDSIGHT_PROBE:" + json.dumps({
-            "phase": phase, "health": True, "unauthorized_denied": True,
-            "recalled": True, "reflected": True,
-            "corrected_recalled": True, "deleted_document_absent": True,
-        }, sort_keys=True))
-        return
-    recovered = _recall_text(_recall("Which cabinet contains Iris's synthetic copper notebook?"))
-    if "east" not in recovered:
-        raise RuntimeError("synthetic memory not recalled after restart")
-    print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase,
-                                           "recalled_after_restart": True}))
 
 
 if __name__ == "__main__":
