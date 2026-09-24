@@ -1000,6 +1000,20 @@ def test_hindsight_telegram_prefetch_injects_citations_and_skips_tools(
     assert "tools" not in bounded
 
 
+def test_hindsight_gateway_strips_tools_without_turn_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_HINDSIGHT_ENABLED", "true")
+    request = {"messages": [], "tools": [{"type": "function"}],
+               "tool_choice": "auto", "parallel_tool_calls": True}
+    bounded = Context().run(plugin._request_middleware, request)["request"]
+    assert "tools" not in bounded
+    assert "tool_choice" not in bounded
+    assert "parallel_tool_calls" not in bounded
+
+
 def test_raw_tool_markup_is_replaced_before_archive_and_delivery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1015,13 +1029,19 @@ def test_raw_tool_markup_is_replaced_before_archive_and_delivery(
         "turn_id": "turn-markup", "capture_enabled": True,
         "active": True, "proposal_keys": {},
     }
-    delivered = plugin._transform_llm_output(
-        response_text='<|channel|>commentary to=functions.tool_call {"name":"lucy_memory_lookup"}',
-        session_id="session-markup", turn_id="turn-markup", platform="telegram",
-    )
-    assert delivered is not None and "could not complete" in delivered
-    assert archived == [delivered]
-    assert "tool_call" not in delivered
+    for raw_markup in (
+        '<|channel|>commentary to=functions.tool_call {"name":"lucy_memory_lookup"}',
+        '<|start|>assistant<|channel|>commentary to=hermes-recall code'
+        '<|message|>{"query":"Gate"}<|call|>',
+    ):
+        plugin._SESSION_TURN["session-markup"]["active"] = True
+        delivered = plugin._transform_llm_output(
+            response_text=raw_markup,
+            session_id="session-markup", turn_id="turn-markup", platform="telegram",
+        )
+        assert delivered is not None and "could not complete" in delivered
+        assert "<|" not in delivered
+    assert archived == [delivered, delivered]
 
 
 def test_memory_lookup_fails_closed_on_invalid_companion_response(
