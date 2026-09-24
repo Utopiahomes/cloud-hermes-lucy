@@ -55,8 +55,12 @@ def _recall_text(result: object) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in {"health", "synthetic", "after_restart"}:
-        raise SystemExit("usage: hindsight_private_probe.py health|synthetic|after_restart")
+    if len(sys.argv) != 2 or sys.argv[1] not in {
+        "health", "synthetic", "reflect_only", "after_restart"
+    }:
+        raise SystemExit(
+            "usage: hindsight_private_probe.py health|synthetic|reflect_only|after_restart"
+        )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
     if status != 200:
@@ -68,6 +72,18 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "reflect_only":
+        code, result = _request(
+            "POST", f"/v1/default/banks/{BANK}/reflect",
+            {"query": "Where is Iris's synthetic copper notebook after the cabinet moved?"},
+        )
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"synthetic reflection failed: HTTP {code}")
+        answer = str(result.get("text", "")).lower()
+        if not all(part in answer for part in ("iris", "notebook", "blue")):
+            raise RuntimeError("synthetic reflection omitted the related memories")
+        print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "reflected": True}))
         return
     if phase == "synthetic":
         items = [
