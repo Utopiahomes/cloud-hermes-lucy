@@ -106,6 +106,27 @@ def main() -> None:
                 "historical": sum("historical" in fact for fact in facts),
                 "source_id": sum("source record id" in fact for fact in facts),
             }, sort_keys=True))
+        code, result = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
+            "query": "What did Ray historically confirm about Trial Gate and "
+            "The Magician's Universal Aid tag? Explain whether Guardian Locked "
+            "was confirmed as The Gate's second tag and whether these old "
+            "choices are known to apply today.",
+            "budget": "low",
+        })
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError("nuance reflection unavailable")
+        answer = str(result.get("text", "")).lower()
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "query": "reflection",
+            "trial_gate": "trial gate" in answer,
+            "universal_aid": "universal aid" in answer,
+            "guardian_locked": "guardian locked" in answer,
+            "uncertainty": any(word in answer for word in
+                               ("ambiguous", "unresolved", "unclear",
+                                "not confirmed")),
+            "present_applicability": any(word in answer for word in
+                                         ("current", "today", "present")),
+        }, sort_keys=True))
         return
     if phase == "backfill_inventory":
         code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
