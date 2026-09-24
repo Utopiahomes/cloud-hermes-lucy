@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import Counter
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -58,13 +59,13 @@ def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
         "clear_synthetic", "reviewed_three", "reviewed_full", "backfill_inventory",
-        "nuance_diagnostic", "nuance_default",
+        "nuance_diagnostic", "nuance_default", "nuance_metadata",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
             "health|synthetic|reflect_only|correct_delete|after_restart|"
             "clear_synthetic|reviewed_three|reviewed_full|backfill_inventory|"
-            "nuance_diagnostic|nuance_default"
+            "nuance_diagnostic|nuance_default|nuance_metadata"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -77,6 +78,36 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "nuance_metadata":
+        code, result = _request("POST", _memory_path("/recall"), {
+            "query": "What did I actually confirm about Trial Gate and The Magician's Universal Aid tag, and what remains uncertain?",
+            "budget": "low", "max_tokens": 3500,
+            "types": ["observation", "world", "experience"],
+        })
+        if code != 200 or not isinstance(result, dict) or not isinstance(result.get("results"), list):
+            raise RuntimeError("nuance metadata recall unavailable")
+        rows = [row for row in result["results"] if isinstance(row, dict)]
+        sources = Counter(str((row.get("metadata") or {}).get("source", "missing")) for row in rows)
+        reviewed = [
+            {"position": index,
+             "trial_gate": "trial gate" in str(row.get("text", "")).lower(),
+             "universal_aid": "universal aid" in str(row.get("text", "")).lower(),
+             "guardian_locked": "guardian locked" in str(row.get("text", "")).lower(),
+             "uncertainty": any(word in str(row.get("text", "")).lower() for word in
+                                ("ambiguous", "unclear", "not confirmed", "unresolved")),
+             "document_id_present": bool(row.get("document_id")),
+             "source_ids_present": bool((row.get("metadata") or {}).get("source_record_ids")),
+             "metadata_keys": sorted((row.get("metadata") or {}).keys())}
+            for index, row in enumerate(rows)
+            if (row.get("metadata") or {}).get("source") == "lucy_governed_reviewed_interpretation"
+        ]
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "facts": len(rows), "source_counts": sources,
+            "reviewed": reviewed,
+            "result_keys": sorted(result.keys()),
+            "sample_keys": sorted(rows[0].keys()) if rows else [],
+        }, sort_keys=True))
         return
     if phase == "nuance_default":
         code, result = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
