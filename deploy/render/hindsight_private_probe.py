@@ -57,12 +57,12 @@ def _recall_text(result: object) -> str:
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
-        "clear_synthetic", "reviewed_three",
+        "clear_synthetic", "reviewed_three", "backfill_inventory",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
             "health|synthetic|reflect_only|correct_delete|after_restart|"
-            "clear_synthetic|reviewed_three"
+            "clear_synthetic|reviewed_three|backfill_inventory"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -75,6 +75,25 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "backfill_inventory":
+        code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"backfill inventory failed: HTTP {code}")
+        entries = next((result[key] for key in ("documents", "items", "results")
+                        if isinstance(result.get(key), list)), None)
+        if entries is None:
+            raise RuntimeError("backfill inventory shape differs")
+        ids = [entry.get("id", entry.get("document_id")) for entry in entries
+               if isinstance(entry, dict)]
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase,
+            "total": result.get("total", len(ids)),
+            "reviewed": sum(isinstance(i, str) and i.startswith("lucy-reviewed:")
+                            for i in ids),
+            "chatgpt": sum(isinstance(i, str) and i.startswith("lucy-chatgpt:")
+                           for i in ids),
+        }))
         return
     if phase == "reviewed_three":
         code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
