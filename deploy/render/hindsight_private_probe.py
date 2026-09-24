@@ -112,6 +112,9 @@ def main() -> None:
             "was confirmed as The Gate's second tag and whether these old "
             "choices are known to apply today.",
             "budget": "low",
+            "max_tokens": 700,
+            "reflect_search_observations_max_tokens": 2500,
+            "reflect_search_observations_include_entities": False,
         })
         if code != 200 or not isinstance(result, dict):
             raise RuntimeError("nuance reflection unavailable")
