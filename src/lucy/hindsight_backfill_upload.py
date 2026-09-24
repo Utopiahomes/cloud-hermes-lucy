@@ -57,6 +57,7 @@ def upload(
     *, intake_root: Path, zip_path: Path, inventory_path: Path,
     fingerprint_key_path: Path, token_path: Path, receipt_dir: Path,
     endpoint: str, maximum_batches: int,
+    confirmed_document_ids_path: Path | None = None,
 ) -> tuple[int, int]:
     if (not endpoint.startswith("https://") or not endpoint.endswith(
         ".onrender.com/v1/raymond/hindsight/backfill"
@@ -82,6 +83,15 @@ def upload(
         raise ValueError("backfill capability token unavailable")
     receipts = _inside(receipt_dir, root)
     receipts.mkdir(parents=True, exist_ok=True)
+    confirmed_ids: frozenset[str] = frozenset()
+    if confirmed_document_ids_path is not None:
+        value = json.loads(_inside(confirmed_document_ids_path, root).read_text())
+        if (not isinstance(value, list) or not all(
+            isinstance(item, str) and item.startswith("lucy-chatgpt:")
+            and len(item) == len("lucy-chatgpt:") + 64 for item in value
+        ) or len(value) != len(set(value))):
+            raise ValueError("confirmed Hindsight document inventory differs")
+        confirmed_ids = frozenset(value)
     raw = load_bounded_chatgpt_conversations(archive, intake_root=root)
     conversations = tuple(
         _quarantine_credential_like_messages(_parse_conversation(value))
@@ -106,7 +116,8 @@ def upload(
                            "processed_count": len(items)}:
                 raise ValueError("existing backfill receipt differs")
             continue
-        processed = _upload(endpoint, token, body)
+        already_retained = len(items) == 1 and items[0]["document_id"] in confirmed_ids
+        processed = 1 if already_retained else _upload(endpoint, token, body)
         if processed != len(items):
             raise RuntimeError("backfill count differs")
         receipt = {"batch_index": index, "digest": digest,
@@ -114,9 +125,11 @@ def upload(
         temporary = receipt_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
         temporary.replace(receipt_path)
-        uploaded_batches += 1
-        uploaded_records += processed
-        print(f"BACKFILL_BATCH:{index}:{processed}", flush=True)
+        if not already_retained:
+            uploaded_batches += 1
+            uploaded_records += processed
+        print(f"BACKFILL_BATCH:{index}:{processed}:"
+              f"{'reconciled' if already_retained else 'uploaded'}", flush=True)
         if uploaded_batches >= maximum_batches:
             break
     return uploaded_batches, uploaded_records
@@ -129,6 +142,7 @@ def main() -> None:
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--maximum-batches", type=int, default=1)
+    parser.add_argument("--confirmed-document-ids-path", type=Path)
     args = parser.parse_args()
     batches, records = upload(
         intake_root=args.intake_root, zip_path=args.zip_path,
@@ -136,6 +150,7 @@ def main() -> None:
         fingerprint_key_path=args.fingerprint_key_path,
         token_path=args.token_path, receipt_dir=args.receipt_dir,
         endpoint=args.endpoint, maximum_batches=args.maximum_batches,
+        confirmed_document_ids_path=args.confirmed_document_ids_path,
     )
     print(json.dumps({"uploaded_batches": batches, "uploaded_records": records}))
 

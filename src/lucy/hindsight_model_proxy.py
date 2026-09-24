@@ -99,7 +99,7 @@ def _bounded_request(body: bytes) -> dict[str, Any]:
     parsed["provider"] = {
         "zdr": True,
         "data_collection": "deny",
-        "sort": "price",
+        "sort": "throughput",
         "require_parameters": True,
         "allow_fallbacks": False,
         "max_price": {"prompt": 0.10, "completion": 0.50},
