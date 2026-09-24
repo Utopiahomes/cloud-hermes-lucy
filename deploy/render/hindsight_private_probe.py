@@ -56,11 +56,12 @@ def _recall_text(result: object) -> str:
 
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
-        "health", "synthetic", "reflect_only", "correct_delete", "after_restart"
+        "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
+        "clear_synthetic",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
-            "health|synthetic|reflect_only|correct_delete|after_restart"
+            "health|synthetic|reflect_only|correct_delete|after_restart|clear_synthetic"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -73,6 +74,27 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "clear_synthetic":
+        code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"synthetic bank inventory failed: HTTP {code}")
+        entries = next((result[key] for key in ("documents", "items", "results")
+                        if isinstance(result.get(key), list)), None)
+        if entries is None:
+            raise RuntimeError("synthetic bank inventory shape differs")
+        identifiers = {entry.get("id", entry.get("document_id"))
+                       for entry in entries if isinstance(entry, dict)}
+        if (len(entries) != len(identifiers)
+                or result.get("total", len(entries)) != len(entries)
+                or identifiers - {DOC_A, DOC_B}):
+            raise RuntimeError("synthetic bank contains unexpected documents")
+        deleted, _ = _request("DELETE", f"/v1/default/banks/{BANK}")
+        if deleted not in {200, 204}:
+            raise RuntimeError(f"synthetic bank cleanup failed: HTTP {deleted}")
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "synthetic_documents_removed": len(identifiers),
+        }))
         return
     if phase == "reflect_only":
         code, result = _request(
