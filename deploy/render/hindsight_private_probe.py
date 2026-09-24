@@ -385,7 +385,10 @@ def _gate1_lifecycle() -> None:
         if "willow" not in before or "cobalt" not in before:
             raise RuntimeError("Gate 1 synthetic sources were not both recalled")
         code, _ = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
-            "query": "Connect Iris's amber lamp location with its project name."
+            "query": "Connect Iris's amber lamp location with its project name.",
+            "budget": "low", "max_tokens": 400,
+            "reflect_search_observations_max_tokens": 2500,
+            "reflect_search_observations_include_entities": False,
         })
         if code != 200:
             raise RuntimeError(f"Gate 1 synthetic reflection failed: HTTP {code}")
@@ -411,7 +414,10 @@ def _gate1_lifecycle() -> None:
         if "maple" not in after or "willow" in after or "cobalt" in after:
             raise RuntimeError("stale or deleted Gate 1 fact remains in recall")
         code, reflected = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
-            "query": "Where is Iris's amber lamp and what is its project name?"
+            "query": "Where is Iris's amber lamp and what is its project name?",
+            "budget": "low", "max_tokens": 400,
+            "reflect_search_observations_max_tokens": 2500,
+            "reflect_search_observations_include_entities": False,
         })
         if code != 200 or not isinstance(reflected, dict):
             raise RuntimeError(f"Gate 1 post-delete reflection failed: HTTP {code}")
