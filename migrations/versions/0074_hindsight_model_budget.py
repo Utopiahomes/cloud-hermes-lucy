@@ -40,7 +40,7 @@ def upgrade() -> None:
           v_account lucy.telegram_budget_accounts_v1%ROWTYPE;
         BEGIN
           SELECT * INTO v_binding FROM lucy.realm_service_bindings_v1
-            WHERE session_login=session_user AND active AND service_role='realm_routine'
+            WHERE session_login=session_user AND active AND service_role='realm_evidence'
               AND allowed_actions @> '["memory.read"]'::jsonb;
           IF NOT FOUND OR p_action_id IS NULL THEN
             RAISE EXCEPTION 'Hindsight model operation unavailable'; END IF;
@@ -87,7 +87,7 @@ def upgrade() -> None:
           IF NOT FOUND OR NOT EXISTS (
             SELECT 1 FROM lucy.realm_service_bindings_v1 b
             WHERE b.id=v_operation.service_binding_id AND b.session_login=session_user
-              AND b.active AND b.service_role='realm_routine'
+              AND b.active AND b.service_role='realm_evidence'
           ) OR p_actual_microusd IS NULL OR p_actual_microusd NOT BETWEEN 0 AND 5000
              OR p_succeeded IS NULL THEN
             RAISE EXCEPTION 'Hindsight model settlement unavailable'; END IF;

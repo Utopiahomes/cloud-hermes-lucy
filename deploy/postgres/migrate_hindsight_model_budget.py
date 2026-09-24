@@ -36,7 +36,7 @@ def main() -> None:
             "JOIN lucy.telegram_budget_accounts_v1 a "
             "ON a.security_realm_id=s.security_realm_id "
             "WHERE b.session_login='lucy_raymond_routine' AND b.active "
-            "AND b.service_role='realm_routine'"
+            "AND b.service_role='realm_evidence'"
         ).fetchone()
         if binding != (1,):
             raise RuntimeError("Raymond routine budget binding unavailable")
