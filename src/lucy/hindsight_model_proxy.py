@@ -6,6 +6,7 @@ import json
 import os
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -116,8 +117,11 @@ def complete(body: bytes, sessions: sessionmaker[Session]) -> dict[str, Any]:
                 "X-Title": "Lucy governed Hindsight inference",
             },
         )
-        with urlopen(upstream, timeout=90) as response:  # noqa: S310 - fixed upstream URL
-            raw = response.read(_MAX_RESPONSE_BYTES + 1)
+        try:
+            with urlopen(upstream, timeout=90) as response:  # noqa: S310 - fixed upstream URL
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+        except HTTPError as exc:
+            raise HindsightModelProxyError(f"upstream_http_{exc.code}") from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise HindsightModelProxyError("response_size")
         result = json.loads(raw)
