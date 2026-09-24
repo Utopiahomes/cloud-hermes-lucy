@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -19,6 +20,23 @@ from lucy.model_execution import (
 
 def main() -> None:
     sessions = create_session_factory(os.environ["LUCY_DATABASE_URL"])
+    if len(sys.argv) == 2 and sys.argv[1] == "status":
+        with sessions() as session:
+            row = session.execute(text(
+                "SELECT (SELECT version_num FROM public.alembic_version),"
+                "to_regprocedure('lucy.begin_hindsight_model_operation_v1(uuid)') "
+                "IS NOT NULL,"
+                "CASE WHEN to_regprocedure('lucy.begin_hindsight_model_operation_v1(uuid)') "
+                "IS NULL THEN false ELSE has_function_privilege(session_user,"
+                "'lucy.begin_hindsight_model_operation_v1(uuid)','EXECUTE') END,"
+                "has_table_privilege(session_user,"
+                "'lucy.telegram_budget_accounts_v1','SELECT')"
+            )).one()
+        print("HINDSIGHT_BUDGET_STATUS:" + json.dumps({
+            "revision": row[0], "function_exists": row[1],
+            "routine_can_execute": row[2], "direct_budget_access": row[3],
+        }), flush=True)
+        return
     with sessions() as session:
         row = session.execute(text(
             "SELECT current_user, "
