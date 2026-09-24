@@ -25,6 +25,10 @@ _RETENTION_CODES = {
     "archive_http_error",
     "assistant_delivery_blocked",
     "post_hook_skipped_blocked_delivery",
+    "hindsight_prefetch_ready",
+    "hindsight_prefetch_unavailable",
+    "hindsight_tools_removed",
+    "assistant_protocol_markup_blocked",
 }
 _SAFE_ERROR_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,80}\Z")
 _SAFE_RETENTION_REASONS = {

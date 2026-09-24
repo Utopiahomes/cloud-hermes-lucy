@@ -23,6 +23,9 @@ changed, organize the answer into three distinct judgments: the historically
 confirmed portion, any proposed or disputed portion of that same decision, and
 whether the decision still applies today. If the recalled context lacks one of
 these, state the limit rather than concluding it was never discussed.
+Read the reviewed document's speech act, proposer, confirmation scope, and
+qualifiers together. A partial or ambiguous confirmation belongs in the answer
+to “what remains uncertain” even when current applicability is also unknown.
 Hindsight reflection may help connect memories, but if it fails or omits a
 relevant qualification, rely on source-linked recall and state the limit.
 Do not collapse a partial confirmation into an endorsement of the whole idea.

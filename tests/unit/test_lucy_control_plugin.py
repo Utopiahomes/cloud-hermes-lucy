@@ -951,14 +951,29 @@ def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
          "document_id": "review-2", "metadata": {
              "source": "lucy_governed_reviewed_interpretation",
              "source_record_ids": '["review-source-2"]'}},
+        {"text": "Guardian Locked appears again in another extracted fact.",
+         "document_id": "review-2", "metadata": {
+             "source": "lucy_governed_reviewed_interpretation",
+             "source_record_ids": '["review-source-2"]'}},
         {"text": "Uncited derived thought", "metadata": {}},
     ]
 
     def open_recall(request: Any, *, timeout: int) -> io.BytesIO:
         seen.append(request.full_url)
-        assert timeout == 30
         assert request.get_header("Authorization") == "Bearer synthetic-key"
-        return io.BytesIO(json.dumps({"results": rows}).encode())
+        if request.full_url.endswith("/memories/recall"):
+            assert timeout == 30
+            return io.BytesIO(json.dumps({"results": rows}).encode())
+        assert timeout == 8
+        document_id = request.full_url.rsplit("/", 1)[-1]
+        return io.BytesIO(json.dumps({
+            "id": document_id,
+            "original_text": "Reviewed historical interpretation.\n"
+                             + ("Ray confirmation scope: ambiguous. Guardian "
+                                "Locked was only proposed."
+                                if document_id == "review-2" else
+                                "Ray confirmed only the minimum Trial Gate tag."),
+        }).encode())
 
     monkeypatch.setattr(plugin, "urlopen", open_recall)
     context = plugin._hindsight_recall_context(
@@ -966,11 +981,14 @@ def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
     )
     assert context is not None
     assert context.index("review-source-1") < context.index("raw-source")
-    assert "Guardian Locked was proposed" in context
+    assert "Guardian Locked was only proposed" in context
     assert "review-source-2" in context
     assert "Uncited derived thought" not in context
-    assert seen == ["http://raymond-hindsight-api:8888/v1/default/banks/"
-                    "ray-personal/memories/recall"]
+    assert seen == [
+        "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/memories/recall",
+        "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/review-1",
+        "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/documents/review-2",
+    ]
 
 
 def test_hindsight_telegram_prefetch_injects_citations_and_skips_tools(

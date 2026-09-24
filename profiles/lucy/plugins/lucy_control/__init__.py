@@ -14,7 +14,7 @@ from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
@@ -201,9 +201,16 @@ def _hindsight_recall_context(query: str) -> str | None:
         elif source == "approved_chatgpt_export":
             historical.append(entry)
     lines: list[str] = []
-    for kind, entries, limit in (("reviewed", reviewed, 16),
-                                 ("historical", historical, 8)):
-        for entry in entries[:limit]:
+    seen_documents: set[str] = set()
+    for kind, entries, limit in (("reviewed", reviewed, 8),
+                                 ("historical", historical, 3)):
+        selected = 0
+        for entry in entries:
+            document_id = entry.get("document_id")
+            if kind == "reviewed" and isinstance(document_id, str):
+                if document_id in seen_documents:
+                    continue
+                seen_documents.add(document_id)
             metadata = entry["metadata"]
             source_ids: list[str] = []
             if kind == "reviewed":
@@ -218,15 +225,40 @@ def _hindsight_recall_context(query: str) -> str | None:
                     source_ids = [value]
             if not source_ids:
                 continue
-            line = json.dumps({
+            content = entry["text"]
+            if kind == "reviewed" and isinstance(document_id, str):
+                try:
+                    document_request = Request(
+                        f"{HINDSIGHT_PRIVATE_URL}/v1/default/banks/{HINDSIGHT_BANK}/"
+                        f"documents/{quote(document_id, safe='')}",
+                        headers={"Authorization": f"Bearer {key}"},
+                    )
+                    with urlopen(document_request, timeout=8) as document_response:
+                        document_wire = document_response.read(20_001)
+                    if len(document_wire) <= 20_000:
+                        document = json.loads(document_wire)
+                        if (isinstance(document, dict)
+                                and document.get("id") == document_id
+                                and isinstance(document.get("original_text"), str)):
+                            content = document["original_text"]
+                except Exception:
+                    pass  # A cited recall fact remains usable if expansion fails.
+            record = {
                 "kind": kind,
-                "text": entry["text"],
+                "text": content,
                 "source_record_ids": source_ids,
-                "document_id": entry.get("document_id"),
-            }, ensure_ascii=False, separators=(",", ":"))
-            if sum(map(len, lines)) + len(line) > 12_000:
-                break
+                "document_id": document_id,
+            }
+            line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            if sum(map(len, lines)) + len(line) > 10_000:
+                record["text"] = entry["text"]
+                line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                if sum(map(len, lines)) + len(line) > 10_000:
+                    break
             lines.append(line)
+            selected += 1
+            if selected >= limit:
+                break
     return "\n".join(lines) if lines else None
 
 
