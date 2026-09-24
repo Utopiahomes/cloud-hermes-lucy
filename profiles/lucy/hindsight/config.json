@@ -4,12 +4,13 @@
   "bank_mission": "Answer from source-linked memories. Distinguish Ray's explicit confirmations from assistant suggestions, preserve historical context, and say when present applicability is unverified.",
   "bank_retain_mission": "Extract historically scoped facts without turning suggestions into Ray's beliefs. Keep correction and source attribution visible.",
   "memory_mode": "hybrid",
+  "recall_budget": "low",
   "auto_recall": true,
   "recall_sync": true,
   "recall_indicator": false,
   "recall_types": "observation,world,experience",
   "auto_retain": false,
   "retain_indicator": false,
-  "recall_max_tokens": 1800,
+  "recall_max_tokens": 3500,
   "recall_max_input_chars": 800
 }
