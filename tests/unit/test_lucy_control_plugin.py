@@ -1026,7 +1026,7 @@ def test_hindsight_telegram_prefetch_injects_citations_and_skips_tools(
     )
     assert pending is not None
     assert "pending operator action" in pending["context"]
-    assert "Do not claim the request was never made" in pending["context"]
+    assert "ask Ray to authorize it again" in pending["context"]
     bounded = plugin._request_middleware({
         "messages": [], "tools": [{"type": "function"}], "tool_choice": "auto",
     })["request"]

@@ -733,7 +733,8 @@ def _pre_llm_call(
                 "captured message. Acknowledge receipt and say the request is "
                 "pending operator action. The archive capture is not a completed "
                 "correction or deletion, and Hindsight has not been changed by "
-                "this Telegram turn. Do not claim the request was never made."
+                "this Telegram turn. Do not claim the request was never made "
+                "or ask Ray to authorize it again; his request already stands."
             )
         if os.getenv("LUCY_HINDSIGHT_ENABLED") == "true":
             recalled = _hindsight_recall_context(user_message)
