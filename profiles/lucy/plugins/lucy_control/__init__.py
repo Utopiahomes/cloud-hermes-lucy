@@ -1249,16 +1249,17 @@ def _execution_middleware(
 
 
 def register(ctx: Any) -> None:
-    ctx.register_tool(
-        name="lucy_memory_lookup",
-        toolset="lucy_memory",
-        schema=MEMORY_LOOKUP_SCHEMA,
-        handler=_memory_lookup,
-        requires_env=["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"],
-        description=MEMORY_LOOKUP_SCHEMA["description"],
-        emoji="🔎",
-    )
     telegram_stage = os.getenv("LUCY_TELEGRAM_STAGE")
+    if not (telegram_stage == "2" and os.getenv("LUCY_HINDSIGHT_ENABLED") == "true"):
+        ctx.register_tool(
+            name="lucy_memory_lookup",
+            toolset="lucy_memory",
+            schema=MEMORY_LOOKUP_SCHEMA,
+            handler=_memory_lookup,
+            requires_env=["LUCY_COMPANION_URL", "LUCY_ADAPTER_TOKEN"],
+            description=MEMORY_LOOKUP_SCHEMA["description"],
+            emoji="🔎",
+        )
     if telegram_stage == "1":
         # Stage 1 is deliberately read-only: no transcript capture, raw evidence
         # retrieval, memory proposal, or session-end persistence hook is exposed.

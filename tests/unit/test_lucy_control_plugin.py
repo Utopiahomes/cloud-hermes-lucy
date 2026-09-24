@@ -380,6 +380,24 @@ def test_stage2_registers_capture_hooks_but_no_sensitive_tools_or_fallback_write
     ]
 
 
+def test_stage2_hindsight_hides_old_lookup_but_keeps_capture_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_HINDSIGHT_ENABLED", "true")
+    plugin = _load_plugin()
+    tools: list[dict[str, Any]] = []
+    hooks: list[str] = []
+    ctx = SimpleNamespace(
+        register_middleware=lambda _kind, _callback: None,
+        register_hook=lambda kind, _callback: hooks.append(kind),
+        register_tool=lambda **kwargs: tools.append(kwargs),
+    )
+    plugin.register(ctx)
+    assert tools == []
+    assert hooks == ["pre_llm_call", "transform_llm_output", "on_session_end"]
+
+
 def test_stage2_forget_phrase_never_calls_sensitive_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
