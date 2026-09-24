@@ -58,11 +58,13 @@ def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
         "clear_synthetic", "reviewed_three", "reviewed_full", "backfill_inventory",
+        "nuance_diagnostic",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
             "health|synthetic|reflect_only|correct_delete|after_restart|"
-            "clear_synthetic|reviewed_three|reviewed_full|backfill_inventory"
+            "clear_synthetic|reviewed_three|reviewed_full|backfill_inventory|"
+            "nuance_diagnostic"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -75,6 +77,35 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "nuance_diagnostic":
+        for label, query in (
+            ("combined", "What did I actually confirm about Trial Gate and "
+             "The Magician's Universal Aid tag, and what remains uncertain?"),
+            ("second_tag", "What was the status of Guardian Locked as The "
+             "Gate's second tag? Was Ray's confirmation ambiguous?"),
+        ):
+            code, result = _request("POST", _memory_path("/recall"), {
+                "query": query, "budget": "low", "max_tokens": 3500,
+                "types": ["observation", "world", "experience"],
+            })
+            if code != 200 or not isinstance(result, dict) or not isinstance(
+                result.get("results"), list
+            ):
+                raise RuntimeError("nuance recall unavailable")
+            facts = [str(entry.get("text", "")).lower()
+                     for entry in result["results"] if isinstance(entry, dict)]
+            print("HINDSIGHT_PROBE:" + json.dumps({
+                "phase": phase, "query": label, "facts": len(facts),
+                "trial_gate": sum("trial gate" in fact for fact in facts),
+                "universal_aid": sum("universal aid" in fact for fact in facts),
+                "guardian_locked": sum("guardian locked" in fact for fact in facts),
+                "uncertainty": sum(any(word in fact for word in
+                                       ("ambiguous", "unresolved", "unclear",
+                                        "not confirmed")) for fact in facts),
+                "historical": sum("historical" in fact for fact in facts),
+                "source_id": sum("source record id" in fact for fact in facts),
+            }, sort_keys=True))
         return
     if phase == "backfill_inventory":
         code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
