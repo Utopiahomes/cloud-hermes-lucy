@@ -7,6 +7,7 @@ import os
 import sys
 from collections import Counter
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 BANK = "ray-personal"
@@ -413,21 +414,18 @@ def _gate1_lifecycle() -> None:
         after = _recall_text(_recall("Where is Iris's amber lamp and what is its project name?"))
         if "maple" not in after or "willow" in after or "cobalt" in after:
             raise RuntimeError("stale or deleted Gate 1 fact remains in recall")
-        code, reflected = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
-            "query": "Where is Iris's amber lamp and what is its project name?",
-            "budget": "low", "max_tokens": 400,
-            "reflect_search_observations_max_tokens": 2500,
-            "reflect_search_observations_include_entities": False,
-        })
-        if code != 200 or not isinstance(reflected, dict):
-            raise RuntimeError(f"Gate 1 post-delete reflection failed: HTTP {code}")
-        answer = str(reflected.get("text", "")).lower()
-        if "willow" in answer or "cobalt" in answer:
-            raise RuntimeError("stale or deleted Gate 1 content remains in reflection")
+        for marker in ("WILLOW", "COBALT"):
+            code, memories = _request(
+                "GET", f"{path}/list?state=valid&q={quote(marker)}&limit=100"
+            )
+            if code != 200 or not isinstance(memories, dict):
+                raise RuntimeError(f"Gate 1 derived-memory audit failed: HTTP {code}")
+            if memories.get("total") != 0 or memories.get("items") != []:
+                raise RuntimeError("stale or deleted Gate 1 memory remains active")
         print("HINDSIGHT_PROBE:" + json.dumps({
             "phase": "gate1_lifecycle", "corrected_document": True,
             "deleted_document": True, "derived_recall_clean": True,
-            "derived_reflection_clean": True,
+            "active_derived_memories_clean": True,
         }, sort_keys=True), flush=True)
     finally:
         for document_id in (GATE_DOC_A, GATE_DOC_B):
