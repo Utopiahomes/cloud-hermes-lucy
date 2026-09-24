@@ -57,11 +57,12 @@ def _recall_text(result: object) -> str:
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
-        "clear_synthetic",
+        "clear_synthetic", "reviewed_three",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
-            "health|synthetic|reflect_only|correct_delete|after_restart|clear_synthetic"
+            "health|synthetic|reflect_only|correct_delete|after_restart|"
+            "clear_synthetic|reviewed_three"
         )
     phase = sys.argv[1]
     status, _ = _request("GET", "/health", authorized=False)
@@ -74,6 +75,32 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "reviewed_three":
+        code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
+        if code != 200 or not isinstance(result, dict):
+            raise RuntimeError(f"reviewed document inventory failed: HTTP {code}")
+        entries = next((result[key] for key in ("documents", "items", "results")
+                        if isinstance(result.get(key), list)), None)
+        if entries is None:
+            raise RuntimeError("reviewed document inventory shape differs")
+        expected = {
+            "lucy-reviewed:9263c5f6-1cfe-581c-b038-96abcea82384:v2",
+            "lucy-reviewed:a2f5788d-a662-5186-a65e-18e19c58d0c1:v2",
+            "lucy-reviewed:c8618f70-7d75-5afd-becb-67e7c400f5e3:v2",
+        }
+        ids = {entry.get("id", entry.get("document_id"))
+               for entry in entries if isinstance(entry, dict)}
+        if ids != expected or result.get("total", len(entries)) != 3:
+            raise RuntimeError("reviewed document inventory differs")
+        recalled = _recall_text(_recall("What did Ray say about Trial Gate and "
+                                         "Universal Aid as the Magician's tag?"))
+        if "trial gate" not in recalled or "universal aid" not in recalled:
+            raise RuntimeError("reviewed Gate and Magician memories were not both recalled")
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": phase, "document_count": 3,
+            "gate_and_magician_recalled": True,
+        }))
         return
     if phase == "clear_synthetic":
         code, result = _request("GET", f"/v1/default/banks/{BANK}/documents?limit=100")
