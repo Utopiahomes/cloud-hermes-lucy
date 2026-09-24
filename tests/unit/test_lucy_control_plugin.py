@@ -932,6 +932,74 @@ def test_explicit_telegram_lookup_prefetches_reviewed_context(
     assert "parallel_tool_calls" not in bounded
 
 
+def test_hindsight_recall_preserves_reviewed_nuance_and_source_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("HINDSIGHT_API_URL", "http://raymond-hindsight-api:8888")
+    monkeypatch.setenv("HINDSIGHT_API_KEY", "synthetic-key")
+    seen: list[str] = []
+    rows = [
+        {"text": "An assistant proposed a second tag as confirmed.",
+         "document_id": "raw-1", "metadata": {"source": "approved_chatgpt_export",
+                                                 "source_record_id": "raw-source"}},
+        {"text": "Ray confirmed Trial Gate only as the minimum tag.",
+         "document_id": "review-1", "metadata": {
+             "source": "lucy_governed_reviewed_interpretation",
+             "source_record_ids": '["review-source-1"]'}},
+        {"text": "Guardian Locked was proposed; Ray's confirmation was ambiguous.",
+         "document_id": "review-2", "metadata": {
+             "source": "lucy_governed_reviewed_interpretation",
+             "source_record_ids": '["review-source-2"]'}},
+        {"text": "Uncited derived thought", "metadata": {}},
+    ]
+
+    def open_recall(request: Any, *, timeout: int) -> io.BytesIO:
+        seen.append(request.full_url)
+        assert timeout == 30
+        assert request.get_header("Authorization") == "Bearer synthetic-key"
+        return io.BytesIO(json.dumps({"results": rows}).encode())
+
+    monkeypatch.setattr(plugin, "urlopen", open_recall)
+    context = plugin._hindsight_recall_context(
+        "What did Ray confirm about Gate?"
+    )
+    assert context is not None
+    assert context.index("review-source-1") < context.index("raw-source")
+    assert "Guardian Locked was proposed" in context
+    assert "review-source-2" in context
+    assert "Uncited derived thought" not in context
+    assert seen == ["http://raymond-hindsight-api:8888/v1/default/banks/"
+                    "ray-personal/memories/recall"]
+
+
+def test_hindsight_telegram_prefetch_injects_citations_and_skips_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _load_plugin()
+    monkeypatch.setenv("LUCY_TELEGRAM_STAGE", "2")
+    monkeypatch.setenv("LUCY_HINDSIGHT_ENABLED", "true")
+    monkeypatch.setattr(plugin, "_accept_turn", lambda *_args: True)
+    monkeypatch.setattr(plugin, "_archive_conversation_message", lambda **_kwargs: {
+        "archived": True, "evidence_id": "11111111-1111-4111-8111-111111111111"
+    })
+    monkeypatch.setattr(plugin, "_hindsight_recall_context", lambda _query: (
+        '{"kind":"reviewed","text":"A proposal remained ambiguous",'
+        '"source_record_ids":["source-1"]}'
+    ))
+    result = plugin._pre_llm_call(
+        user_message="What did I confirm?", session_id="hindsight-session",
+        turn_id="hindsight-turn", platform="telegram",
+    )
+    assert result is not None
+    assert "source-1" in result["context"]
+    assert "what was only proposed or ambiguous" in result["context"]
+    bounded = plugin._request_middleware({
+        "messages": [], "tools": [{"type": "function"}], "tool_choice": "auto",
+    })["request"]
+    assert "tools" not in bounded
+
+
 def test_raw_tool_markup_is_replaced_before_archive_and_delivery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

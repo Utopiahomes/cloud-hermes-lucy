@@ -5,7 +5,7 @@
   "bank_retain_mission": "Extract historically scoped facts without turning suggestions into Ray's beliefs. Keep correction and source attribution visible.",
   "memory_mode": "hybrid",
   "recall_budget": "low",
-  "auto_recall": true,
+  "auto_recall": false,
   "recall_sync": true,
   "recall_indicator": false,
   "recall_types": "observation,world,experience",

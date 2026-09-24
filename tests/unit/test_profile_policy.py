@@ -101,7 +101,7 @@ def test_profile_bounds_primary_and_automatic_auxiliary_calls() -> None:
     hindsight = json.loads((PROFILE_ROOT / "hindsight" / "config.json").read_text())
     assert hindsight["mode"] == "local_external"
     assert hindsight["bank_id"] == "ray-personal"
-    assert hindsight["auto_recall"] is True
+    assert hindsight["auto_recall"] is False  # source-linked recall is supplied by lucy_control
     assert hindsight["auto_retain"] is False
     assert hindsight["memory_mode"] == "hybrid"
     assert config["curator"] == {"enabled": False, "backup": {"enabled": False}}
