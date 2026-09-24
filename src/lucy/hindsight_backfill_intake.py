@@ -19,6 +19,8 @@ from lucy.contracts.canonical import canonical_json_bytes
 
 _HINDSIGHT_URL = "http://raymond-hindsight-api:8888/v1/default/banks/ray-personal/memories"
 _CONTEXT = "Dated source evidence from Ray's approved ChatGPT export"
+_REVIEW_CONTEXT = "Ray's reviewed Personal Lucy historical interpretation pilot"
+_REVIEW_PROPOSAL = "fc2085b497de87d8da997159c2416cb1411e1f33b91007c0d4ea7558901fc36c"
 _MAX_BODY = 1_000_000
 
 
@@ -71,6 +73,68 @@ class BackfillBatch(BaseModel):
         return self
 
 
+class ReviewedMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: Literal["lucy_governed_reviewed_interpretation"]
+    candidate_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    candidate_version: Literal["2"]
+    object_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_record_ids: str
+    source_evidence_ids: str
+    campaign_id: str
+    proposal_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def source_links(self) -> ReviewedMetadata:
+        try:
+            records = json.loads(self.source_record_ids)
+            evidence = json.loads(self.source_evidence_ids)
+        except json.JSONDecodeError as exc:
+            raise ValueError("reviewed source links invalid") from exc
+        if (self.proposal_sha256 != _REVIEW_PROPOSAL
+                or not isinstance(records, list) or not isinstance(evidence, list)
+                or not records or len(records) != len(evidence)
+                or not all(isinstance(value, str) and value for value in records + evidence)):
+            raise ValueError("reviewed source links invalid")
+        return self
+
+
+class ReviewedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_id: str
+    content: str = Field(min_length=1, max_length=70_000)
+    context: str
+    update_mode: Literal["replace"]
+    metadata: ReviewedMetadata
+    timestamp: str | None = None
+
+    @model_validator(mode="after")
+    def exact_document(self) -> ReviewedItem:
+        if (self.document_id != f"lucy-reviewed:{self.metadata.candidate_id}:v2"
+                or self.context != _REVIEW_CONTEXT):
+            raise ValueError("reviewed document identity differs")
+        return self
+
+
+class ReviewedBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    proposal_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    items: tuple[ReviewedItem, ...] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def distinct_candidates(self) -> ReviewedBatch:
+        ids = [item.metadata.candidate_id for item in self.items]
+        if (self.proposal_sha256 != _REVIEW_PROPOSAL
+                or len(ids) != len(set(ids))
+                or any(item.metadata.proposal_sha256 != self.proposal_sha256
+                       for item in self.items)):
+            raise ValueError("duplicate reviewed candidate")
+        return self
+
+
 def create_app(
     *, bearer_token: str, hindsight_key: str, archive_commitment: str,
 ) -> FastAPI:
@@ -109,12 +173,42 @@ def create_app(
             raise HTTPException(status_code=503, detail="Hindsight retain incomplete")
         return {"accepted": True, "processed_count": len(batch.items)}
 
+    @app.post("/v1/raymond/hindsight/reviewed")
+    async def retain_reviewed(
+        request: Request, authorization: str | None = Header(default=None),
+    ) -> dict[str, int | bool]:
+        if authorization is None or not secrets.compare_digest(
+            authorization, f"Bearer {bearer_token}"
+        ):
+            raise HTTPException(status_code=401, detail="reviewed capability required")
+        body = await request.body()
+        if len(body) > _MAX_BODY:
+            raise HTTPException(status_code=413, detail="reviewed batch too large")
+        try:
+            batch = ReviewedBatch.model_validate_json(body)
+            if canonical_json_bytes(batch) != body:
+                raise ValueError("reviewed packet differs")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid reviewed batch") from exc
+        try:
+            result = await run_in_threadpool(_forward_items, batch.items, hindsight_key)
+        except (HTTPError, URLError, TimeoutError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="Hindsight retain unavailable") from exc
+        if not isinstance(result, dict) or result.get("success") is not True:
+            raise HTTPException(status_code=503, detail="Hindsight retain incomplete")
+        return {"accepted": True, "processed_count": len(batch.items)}
+
     return app
 
 
 def _forward(batch: BackfillBatch, hindsight_key: str) -> object:
+    return _forward_items(batch.items, hindsight_key)
+
+
+def _forward_items(items: tuple[BackfillItem, ...] | tuple[ReviewedItem, ...],
+                   hindsight_key: str) -> object:
     wire = json.dumps({
-        "items": [item.model_dump(exclude_none=True) for item in batch.items],
+        "items": [item.model_dump(exclude_none=True) for item in items],
         "async": False,
     }, separators=(",", ":")).encode()
     outgoing = UrlRequest(
