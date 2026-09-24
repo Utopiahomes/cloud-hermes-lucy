@@ -12,7 +12,7 @@ Cloud Hermes Lucy is an early-stage venture. Prioritize proving the product and 
 - Prefer simple architecture and basic security controls. Defer advanced hardening, elaborate recovery ceremonies, speculative scaling, and architectural polish until real usage or a concrete failure justifies them.
 - Report briefly what works, what was actually checked, and significant known limitations. Do not turn every uncertainty into another gate or overstate product maturity.
 
-This replaces the earlier default of extensive prelaunch assurance for early builds. It does not disable sandbox or permission controls, authorize unrelated actions, waive an explicit production or personal-data activation decision, or bypass an enforced CI, hook, hosting, or branch-protection check.
+This replaces the earlier default of extensive prelaunch assurance for early builds. It does not disable sandbox or permission controls, authorize unrelated actions, waive an explicit production or personal-data activation decision, waive an explicit task-specific product requirement or release gate, or bypass an enforced CI, hook, hosting, or branch-protection check.
 
 ## Execution defaults
 
