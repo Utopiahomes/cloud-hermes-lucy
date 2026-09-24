@@ -35,6 +35,35 @@ def _load_launcher() -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("available", [True, False])
+def test_hindsight_preflight_checks_actual_hermes_memory_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, available: bool,
+) -> None:
+    launcher = _load_launcher()
+    calls: list[list[str]] = []
+    events: list[str] = []
+
+    def run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(command)
+        status = "Status:    available" if available else "Status:    not available"
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(f"Provider:  hindsight\nPlugin:    installed\n{status}\n").encode(),
+        )
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    monkeypatch.setattr(launcher, "_event", events.append)
+    env = {"LUCY_HINDSIGHT_ENABLED": "true"}
+    if available:
+        launcher._preflight(env, tmp_path)
+        assert events[-1] == "hindsight_status_passed"
+    else:
+        with pytest.raises(RuntimeError, match="hindsight_status_failed"):
+            launcher._preflight(env, tmp_path)
+        assert events[-1] == "hindsight_status_failed"
+    assert calls[-1][-2:] == ["memory", "status"]
+
+
 def test_managed_home_prepares_only_ephemeral_hermes_runtime_directories(
     tmp_path: Path,
 ) -> None:

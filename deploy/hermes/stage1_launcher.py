@@ -167,6 +167,25 @@ def _preflight(environment: dict[str, str], scratch: Path) -> None:
             _event(f"{label}_failed")
             raise RuntimeError(f"{label}_failed")
         _event(f"{label}_passed")
+    if environment.get("LUCY_HINDSIGHT_ENABLED") == "true":
+        result = subprocess.run(  # noqa: S603 - immutable pinned Hermes command
+            ["/opt/hermes/.venv/bin/hermes", "memory", "status"],
+            env=environment,
+            cwd=scratch,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        )
+        output = result.stdout.decode("utf-8", errors="replace")
+        if (result.returncode != 0
+                or not re.search(r"Provider:\s+hindsight\b", output)
+                or not re.search(r"Plugin:\s+installed", output)
+                or not re.search(r"Status:\s+available", output)):
+            _event("hindsight_status_failed")
+            raise RuntimeError("hindsight_status_failed")
+        _event("hindsight_status_passed")
 
 
 def main() -> int:
