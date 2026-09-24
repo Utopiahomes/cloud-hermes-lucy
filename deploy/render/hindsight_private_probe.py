@@ -12,6 +12,8 @@ from urllib.request import Request, urlopen
 BANK = "ray-personal"
 DOC_A = "lucy-synthetic-hindsight-probe-a"
 DOC_B = "lucy-synthetic-hindsight-probe-b"
+GATE_DOC_A = "lucy-synthetic-gate1-correction"
+GATE_DOC_B = "lucy-synthetic-gate1-deletion"
 
 
 def _request(method: str, path: str, body: object | None = None,
@@ -60,6 +62,7 @@ def main() -> None:
         "health", "synthetic", "reflect_only", "correct_delete", "after_restart",
         "clear_synthetic", "reviewed_three", "reviewed_full", "backfill_inventory",
         "nuance_diagnostic", "nuance_default", "nuance_metadata",
+        "gate1_lifecycle",
     }:
         raise SystemExit(
             "usage: hindsight_private_probe.py "
@@ -78,6 +81,9 @@ def main() -> None:
     if phase == "health":
         print("HINDSIGHT_PROBE:" + json.dumps({"phase": phase, "health": True,
                                                "unauthorized_denied": True}))
+        return
+    if phase == "gate1_lifecycle":
+        _gate1_lifecycle()
         return
     if phase == "nuance_metadata":
         code, result = _request("POST", _memory_path("/recall"), {
@@ -356,6 +362,70 @@ def _correct_and_delete() -> None:
         deleted_code, _ = _request("GET", f"/v1/default/banks/{BANK}/documents/{DOC_B}")
         if deleted_code != 404:
             raise RuntimeError("deleted synthetic document remains readable")
+
+
+def _gate1_lifecycle() -> None:
+    """Exercise source replacement, deletion, and derived recall in the live bank."""
+    path = _memory_path()
+    documents = (
+        (GATE_DOC_A, "Synthetic gate test: Iris put the amber lamp in locker WILLOW."),
+        (GATE_DOC_B, "Synthetic gate test: Iris named the amber lamp project COBALT."),
+    )
+    try:
+        for document_id, content in documents:
+            code, result = _request("POST", path, {"items": [{
+                "document_id": document_id, "content": content,
+                "context": "disposable Gate 1 lifecycle evidence",
+                "update_mode": "replace",
+                "metadata": {"source": "synthetic_gate1", "source_record_id": document_id},
+            }], "async": False})
+            if code != 200 or not isinstance(result, dict) or result.get("success") is not True:
+                raise RuntimeError(f"Gate 1 synthetic retain failed: HTTP {code}")
+        before = _recall_text(_recall("Where is Iris's amber lamp and what is its project name?"))
+        if "willow" not in before or "cobalt" not in before:
+            raise RuntimeError("Gate 1 synthetic sources were not both recalled")
+        code, _ = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
+            "query": "Connect Iris's amber lamp location with its project name."
+        })
+        if code != 200:
+            raise RuntimeError(f"Gate 1 synthetic reflection failed: HTTP {code}")
+        code, result = _request("POST", path, {"items": [{
+            "document_id": GATE_DOC_A,
+            "content": "Synthetic gate test correction: Iris put the amber lamp in locker MAPLE.",
+            "context": "disposable Gate 1 corrected evidence",
+            "update_mode": "replace",
+            "metadata": {"source": "synthetic_gate1", "source_record_id": GATE_DOC_A},
+        }], "async": False})
+        if code != 200 or not isinstance(result, dict) or result.get("success") is not True:
+            raise RuntimeError(f"Gate 1 synthetic correction failed: HTTP {code}")
+        code, _ = _request("DELETE", f"/v1/default/banks/{BANK}/documents/{GATE_DOC_B}")
+        if code not in {200, 204}:
+            raise RuntimeError(f"Gate 1 synthetic deletion failed: HTTP {code}")
+        code, document = _request("GET", f"/v1/default/banks/{BANK}/documents/{GATE_DOC_A}")
+        if code != 200 or "MAPLE" not in str(document) or "WILLOW" in str(document):
+            raise RuntimeError("corrected Gate 1 source document differs")
+        code, _ = _request("GET", f"/v1/default/banks/{BANK}/documents/{GATE_DOC_B}")
+        if code != 404:
+            raise RuntimeError("deleted Gate 1 source document remains readable")
+        after = _recall_text(_recall("Where is Iris's amber lamp and what is its project name?"))
+        if "maple" not in after or "willow" in after or "cobalt" in after:
+            raise RuntimeError("stale or deleted Gate 1 fact remains in recall")
+        code, reflected = _request("POST", f"/v1/default/banks/{BANK}/reflect", {
+            "query": "Where is Iris's amber lamp and what is its project name?"
+        })
+        if code != 200 or not isinstance(reflected, dict):
+            raise RuntimeError(f"Gate 1 post-delete reflection failed: HTTP {code}")
+        answer = str(reflected.get("text", "")).lower()
+        if "willow" in answer or "cobalt" in answer:
+            raise RuntimeError("stale or deleted Gate 1 content remains in reflection")
+        print("HINDSIGHT_PROBE:" + json.dumps({
+            "phase": "gate1_lifecycle", "corrected_document": True,
+            "deleted_document": True, "derived_recall_clean": True,
+            "derived_reflection_clean": True,
+        }, sort_keys=True), flush=True)
+    finally:
+        for document_id in (GATE_DOC_A, GATE_DOC_B):
+            _request("DELETE", f"/v1/default/banks/{BANK}/documents/{document_id}")
 
 
 if __name__ == "__main__":
