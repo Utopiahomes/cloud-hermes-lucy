@@ -83,6 +83,8 @@ def upload(
         raise ValueError("backfill capability token unavailable")
     receipts = _inside(receipt_dir, root)
     receipts.mkdir(parents=True, exist_ok=True)
+    failures = receipts.parent / "failures"
+    failures.mkdir(parents=True, exist_ok=True)
     confirmed_ids: frozenset[str] = frozenset()
     if confirmed_document_ids_path is not None:
         value = json.loads(_inside(confirmed_document_ids_path, root).read_text())
@@ -100,6 +102,7 @@ def upload(
     messages = eligible_messages(conversations)
     uploaded_batches = 0
     uploaded_records = 0
+    consecutive_failures = 0
     for index, items in enumerate(bounded_items(
         messages, archive_commitment=inventory.archive_commitment,
     ), start=1):
@@ -110,16 +113,39 @@ def upload(
         body = canonical_json_bytes(batch)
         digest = sha256(body).hexdigest()
         receipt_path = receipts / f"batch-{index:05d}.json"
+        failure_path = failures / f"batch-{index:05d}.json"
         if receipt_path.exists():
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             if receipt != {"batch_index": index, "digest": digest,
                            "processed_count": len(items)}:
                 raise ValueError("existing backfill receipt differs")
             continue
+        if failure_path.exists():
+            failure = json.loads(failure_path.read_text(encoding="utf-8"))
+            if failure != {"batch_index": index, "digest": digest,
+                           "document_ids": [item["document_id"] for item in items],
+                           "reason": "intake_unavailable"}:
+                raise ValueError("existing backfill failure differs")
+            continue
         already_retained = len(items) == 1 and items[0]["document_id"] in confirmed_ids
-        processed = 1 if already_retained else _upload(endpoint, token, body)
+        try:
+            processed = 1 if already_retained else _upload(endpoint, token, body)
+        except RuntimeError:
+            failure = {"batch_index": index, "digest": digest,
+                       "document_ids": [item["document_id"] for item in items],
+                       "reason": "intake_unavailable"}
+            temporary = failure_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(failure, sort_keys=True) + "\n",
+                                 encoding="utf-8")
+            temporary.replace(failure_path)
+            consecutive_failures += 1
+            print(f"BACKFILL_BATCH:{index}:failed", flush=True)
+            if consecutive_failures >= 3:
+                raise RuntimeError("three consecutive backfill batches failed") from None
+            continue
         if processed != len(items):
             raise RuntimeError("backfill count differs")
+        consecutive_failures = 0
         receipt = {"batch_index": index, "digest": digest,
                    "processed_count": processed}
         temporary = receipt_path.with_suffix(".tmp")
