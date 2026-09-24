@@ -93,6 +93,8 @@ def main() -> None:
                             for i in ids),
             "chatgpt": sum(isinstance(i, str) and i.startswith("lucy-chatgpt:")
                            for i in ids),
+            "chatgpt_document_ids": sorted(i for i in ids if isinstance(i, str)
+                                           and i.startswith("lucy-chatgpt:")),
         }))
         return
     if phase == "reviewed_three":

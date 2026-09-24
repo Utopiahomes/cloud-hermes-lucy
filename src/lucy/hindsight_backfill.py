@@ -84,7 +84,7 @@ def bounded_items(
     messages: Iterable[LocalChatGPTMessageV1],
     *,
     archive_commitment: str,
-    maximum_items: int = 12,
+    maximum_items: int = 1,
     maximum_content_bytes: int = 100_000,
 ) -> Iterator[tuple[dict[str, Any], ...]]:
     """Pack stable documents into small Hindsight retain requests."""
